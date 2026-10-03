@@ -5,6 +5,7 @@ async function workspace(page: Page, directories: (route: Route, path: string) =
   const created: Record<string, unknown>[] = []
   const requested: string[] = []
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const url = new URL(route.request().url())
     if (url.pathname.endsWith('/software')) return route.fulfill({ json: healthySoftware() })
     if (url.pathname.endsWith('/directories')) {

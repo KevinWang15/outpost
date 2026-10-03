@@ -15,6 +15,7 @@ async function fixture(page: Page, options: { newer?: boolean; fail?: boolean } 
   const checks: unknown[] = []
   let reads = 0
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/targets') return route.fulfill({ json: [target] })
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware(['tmux', 'dtach']) })

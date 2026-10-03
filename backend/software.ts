@@ -139,14 +139,14 @@ export interface SoftwareService {
   ): Promise<number | null>
 }
 export class SoftwareClient implements SoftwareService {
-  constructor(private env = process.env) {}
+  constructor(private env = process.env, private requireAccountIdentity = false) {}
   async inspect(
     target: Target,
     signal?: AbortSignal,
   ): Promise<Omit<SoftwareReport, 'installation'>> {
     const marker = `OUTPOST_SOFTWARE_${randomUUID()}`
     const { code, stdout, stderr } = await runCommand(
-      transportFor(target).script(),
+      transportFor(target, this.requireAccountIdentity).script(),
       inspectionScript(target, marker),
       { env: this.env, signal, timeoutMs: 45_000 },
     )
@@ -216,7 +216,7 @@ export class SoftwareClient implements SoftwareService {
     signal: AbortSignal,
   ) {
     return (
-      await runCommand(transportFor(target).script(), script, {
+      await runCommand(transportFor(target, this.requireAccountIdentity).script(), script, {
         env: this.env,
         signal,
         onOutput,

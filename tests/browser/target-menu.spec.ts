@@ -12,6 +12,7 @@ async function setup(page: Page, remove?: (route: Route) => Promise<void>) {
   const reads: Record<string, number> = { alpha: 0, beta: 0 }
   const writes: string[] = []
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     const method = route.request().method()
     if (method !== 'GET') writes.push(`${method} ${path}`)

@@ -10,6 +10,8 @@ import { api } from './api'
 import { Modal } from './ui'
 import ToolPicker from './ToolPicker'
 import BackendPicker from './BackendPicker'
+import { useAuth } from './useAuth'
+import AccountSshKey from './AccountSshKey'
 
 export default function TargetForm({
   onSave,
@@ -18,6 +20,7 @@ export default function TargetForm({
   onSave: (input: TargetInput) => Promise<void>
   onClose: () => void
 }) {
+  const hosted = useAuth().mode === 'hosted'
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false)
   const [kind, setKind] = useState<'ssh' | 'local'>('ssh')
@@ -70,7 +73,7 @@ export default function TargetForm({
   return (
     <Modal
       title="Add a target"
-      subtitle="Run sessions on this computer or connect a dev machine over SSH."
+      subtitle={hosted ? 'Connect a development server using your account’s SSH key.' : 'Run sessions on this computer or connect a dev machine over SSH.'}
       onClose={onClose}
     >
       <form onSubmit={submit}>
@@ -82,9 +85,9 @@ export default function TargetForm({
               onChange={(event) => setKind(event.target.value as 'ssh' | 'local')}
             >
               <option value="ssh">SSH — remote dev machine</option>
-              <option value="local" disabled={!environment?.supported}>
+              {!hosted && <option value="local" disabled={!environment?.supported}>
                 Local — this computer
-              </option>
+              </option>}
             </select>
           </label>
           <label>
@@ -101,7 +104,7 @@ export default function TargetForm({
         {kind === 'ssh' ? (
           <>
             <label>
-              Host or SSH alias
+              {hosted ? 'Host' : 'Host or SSH alias'}
               <input
                 name="host"
                 required
@@ -121,20 +124,19 @@ export default function TargetForm({
                   type="number"
                   min="1"
                   max="65535"
-                  placeholder="From SSH config / 22"
+                  placeholder={hosted ? '22' : 'From SSH config / 22'}
                 />
               </label>
             </div>
             <label>
-              Identity file <span>optional</span>
+              {hosted ? 'Your terminal’s identity file' : 'Identity file'} <span>optional</span>
               <input
                 name="identityFile"
                 placeholder="~/.ssh/id_ed25519"
                 spellCheck={false}
               />
               <small>
-                Local key path. Windows paths are supported; ~/ uses each
-                computer’s home directory.
+                {hosted ? 'Optional key path on your computer, used in connection commands. Outpost connects using your account key below.' : 'Local key path. Windows paths are supported; ~/ uses each computer’s home directory.'}
               </small>
             </label>
           </>
@@ -161,13 +163,14 @@ export default function TargetForm({
             )}
           </>
         )}
+        {hosted && <AccountSshKey />}
         <BackendPicker value={backends} onChange={setBackends} />
         <ToolPicker value={tools} onChange={setTools} />
         <div className="form-note">
           <Link />
           <p>
             {kind === 'ssh'
-              ? 'Uses your SSH config and agent.'
+              ? hosted ? 'Uses your account’s Outpost SSH key.' : 'Uses your SSH config and agent.'
               : 'Uses your local account.'}{' '}
             Adding an instance saves its settings and checks required software.
             Install missing software from its detail page after reviewing the

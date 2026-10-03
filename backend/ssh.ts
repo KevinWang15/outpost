@@ -4,6 +4,7 @@ import type { SshTarget, TerminalShell } from '../shared/session-manager'
 import type { Command } from './process'
 import type { SessionTransport } from './transport'
 import { loginScriptShell, quote } from './shell'
+import { managedSshIdentity } from './account-ssh'
 
 const expandHome = (value: string) => /^~[/\\]/.test(value) ? join(homedir(), value.slice(2)) : value
 
@@ -12,7 +13,13 @@ export function sshArgs(target: SshTarget, interactive = false) {
     '-o', 'ServerAliveCountMax=3', '-o', 'StrictHostKeyChecking=accept-new']
   if (!interactive) args.push('-o', 'BatchMode=yes')
   if (target.port) args.push('-p', String(target.port))
-  if (target.identityFile) args.push('-i', interactive ? target.identityFile : expandHome(target.identityFile))
+  const identity = !interactive && managedSshIdentity(target)
+  if (identity) {
+    const knownHosts = identity.knownHostsFile.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%')
+    args.push('-F', 'none', '-o', 'IdentityAgent=none', '-o', 'IdentitiesOnly=yes',
+      '-o', 'ForwardAgent=no', '-o', 'PasswordAuthentication=no', '-o', 'KbdInteractiveAuthentication=no',
+      '-o', `UserKnownHostsFile="${knownHosts}"`, '-o', 'GlobalKnownHostsFile=none', '-i', identity.identityFile)
+  } else if (target.identityFile) args.push('-i', interactive ? target.identityFile : expandHome(target.identityFile))
   args.push('-l', 'root', '--', target.host)
   return args
 }

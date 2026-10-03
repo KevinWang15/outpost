@@ -3,6 +3,7 @@ import type { Connection, Session } from '../shared/session-manager'
 import type { DesktopTerminal } from '../shared/terminals'
 import { api } from './api'
 import { terminalPreferences } from './terminals'
+import { useAuth } from './useAuth'
 
 export type ConnectionMode = 'launch' | 'options'
 export interface PendingConnection { sessionId: string; mode: ConnectionMode }
@@ -13,6 +14,7 @@ export function useSessionConnection(
   onReady: (session: Session, connection: Connection) => void,
   onError: (message: string) => void,
 ) {
+  const hosted = useAuth().mode === 'hosted'
   const [connecting, setConnecting] = useState<PendingConnection | null>(null)
   const [notice, setNotice] = useState<{ id: number; message: string; tone: 'success' | 'warning' } | null>(null)
   const noticeId = useRef(0)
@@ -36,7 +38,7 @@ export function useSessionConnection(
     setConnecting({ sessionId: session.id, mode })
     onError('')
     try {
-      if (mode === 'launch') {
+      if (mode === 'launch' && !hosted) {
         try {
           const terminal = await api<DesktopTerminal>(
             `/targets/${targetId}/sessions/${session.id}/launch`, 'POST', { preferences: terminalPreferences() }, controller.signal,

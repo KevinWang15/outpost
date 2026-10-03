@@ -6,6 +6,7 @@ import { healthySoftware } from './software-fixture'
 async function workspace(page: Page) {
   const writes: string[] = []
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/environment') return route.fulfill({ json: { platform: 'linux', supported: true, usesWsl: false } })
     if (path === '/api/targets') {

@@ -65,7 +65,7 @@ export interface SessionImageInput { data: string; mediaType: typeof imageMediaT
 export interface SessionImage { path: string; reference: string; injected: boolean }
 export interface DirectorySuggestions { directories: string[]; truncated: boolean }
 export type TerminalShell = 'bash' | 'powershell' | 'cmd'
-export interface Connection { commands: Partial<Record<TerminalShell, string>>; expiresAt: string; desktop: import('./terminals').DesktopAvailability }
+export interface Connection { commands: Partial<Record<TerminalShell, string>>; expiresAt: string; desktop: import('./terminals').DesktopAvailability; hosted?: boolean }
 export type SoftwareId = CodingTool | SessionBackend | 'bash' | 'python3' | 'lsof'
 export const softwareLabels: Record<SoftwareId, string> = { ...codingToolLabels, tmux: 'tmux', dtach: 'dtach', bash: 'Bash', python3: 'Python 3', lsof: 'lsof' }
 export function requiredSoftware(target: TargetRequirements, platform: ExecutionEnvironment['platform']): SoftwareId[] {

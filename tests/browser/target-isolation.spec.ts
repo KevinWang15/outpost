@@ -13,6 +13,7 @@ test('creating a session after leaving its target cannot overwrite another targe
   let pending: Route | undefined
   const reads: string[] = []
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware() })
     if (path === '/api/targets') return route.fulfill({ json: targets })
@@ -45,6 +46,7 @@ test('leaving a target cancels its pending connection dialog', async ({ page }) 
   let pending: Route | undefined, cancelled = false
   page.on('requestfailed', request => { if (request.url().endsWith('/connect')) cancelled = true })
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware() })
     if (path === '/api/targets') return route.fulfill({ json: targets })
@@ -65,6 +67,7 @@ test('leaving a target cancels its pending connection dialog', async ({ page }) 
 test('a late session creation cannot discard a newer draft on the same target', async ({ page }) => {
   let pending: Route | undefined
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/targets') return route.fulfill({ json: targets })
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware() })
@@ -94,6 +97,7 @@ for (const stage of ['launch', 'fallback'] as const) test(`leaving a target canc
   const endpoint = stage === 'launch' ? '/launch' : '/connect'
   page.on('requestfailed', request => { if (request.url().endsWith(endpoint)) cancelled = true })
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/targets') return route.fulfill({ json: targets })
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware() })
@@ -119,6 +123,7 @@ test('late software check errors never appear in another target workspace', asyn
   let alpha: Route | undefined
   let alphaChecks = 0
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/targets') return route.fulfill({ json: targets })
     if (path === '/api/targets/alpha/software') {
@@ -143,6 +148,7 @@ test('a late target creation preserves the current navigation and a newly opened
   let pending: Route | undefined
   const added = { ...targets[0], id: 'gamma', name: 'gamma', host: 'gamma' }
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/environment') return route.fulfill({ json: { platform: 'linux', supported: true, usesWsl: false } })
     if (path === '/api/targets' && route.request().method() === 'POST') { pending = route; return }
@@ -178,6 +184,7 @@ test('connecting another session cancels the previous request and keeps the late
   const entries = ['first', 'second'].map(id => ({ ...sessions('alpha').sessions[0], id, name: `${id} work` }))
   page.on('requestfailed', request => { if (request.url().endsWith('/first/connect')) cancelled = true })
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/targets') return route.fulfill({ json: targets })
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware() })
@@ -205,6 +212,7 @@ for (const destination of ['session', 'finder', 'requirements', 'image', 'remove
     let pending: Route | undefined, cancelled = false
     page.on('requestfailed', request => { if (request.url().endsWith('/connect')) cancelled = true })
     await page.route('**/api/**', async route => {
+      if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
       const path = new URL(route.request().url()).pathname
       if (path === '/api/targets') return route.fulfill({ json: targets })
       if (path === '/api/environment') return route.fulfill({ json: { platform: 'linux', supported: true, usesWsl: false } })
@@ -257,6 +265,7 @@ test('opening a session draft cancels the direct-launch fallback and its notific
   let pending: Route | undefined, cancelled = false
   page.on('requestfailed', request => { if (request.url().endsWith('/connect')) cancelled = true })
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/targets') return route.fulfill({ json: targets })
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware() })

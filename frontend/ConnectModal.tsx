@@ -129,7 +129,7 @@ export default function ConnectModal({
       <p className="terminal-help" id="terminal-help">
         Choices are ordered by OS, then recommendation. Selecting an app saves your preference for {terminalOSLabels[selected.os]}.
       </p>
-      <div className="desktop-launch">
+      {!connection.hosted && <div className="desktop-launch">
         {available ? <>
           <button className="button primary" onClick={launch} disabled={launching}>
             <Terminal />
@@ -148,10 +148,10 @@ export default function ConnectModal({
         <p>Direct Connect uses your saved preference for the Outpost computer’s OS, then falls back to an available terminal.</p>
         {launched && <p role="status">{launched}</p>}
         {launchError && <p role="alert" className="error">{launchError}</p>}
-      </div>
+      </div>}
       <div className="manual-connection">
         <strong>Use an existing terminal</strong>
-        <p>Open {selected.name} and paste this command. {kind === 'local' ? 'Run it on the Outpost computer.' : 'You can connect from your own computer, including through an SSH tunnel to Outpost.'}</p>
+        <p>Open {selected.name} and paste this command. {connection.hosted ? 'Your computer needs its own SSH access to this server. Signing out expires this command.' : kind === 'local' ? 'Run it on the Outpost computer.' : 'You can connect from your own computer, including through an SSH tunnel to Outpost.'}</p>
         {localCompatible && shellChoices.some(shell => connection.commands[shell]) && <label className="terminal-choice">
           Shell for copy command
           <select value={shell} onChange={event => { setCopyShell(event.target.value as TerminalShell); setCopied(false); setCopyError(false) }}>

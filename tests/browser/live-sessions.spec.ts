@@ -29,6 +29,7 @@ test('every target click, manual refresh, and reload reads live without browser 
     }
   })
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware([path.includes('beta') || path.includes('dtach') ? 'dtach' : 'tmux']) })
     if (path === '/api/targets') return route.fulfill({ json: targets })
@@ -59,6 +60,7 @@ test('a new click supersedes a pending read and ignores its older response', asy
   let reads = 0
   let delayed: Route | undefined
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     if (new URL(route.request().url()).pathname.endsWith('/software')) return route.fulfill({ json: healthySoftware(['dtach']) })
     if (new URL(route.request().url()).pathname === '/api/targets') return route.fulfill({ json: targets })
     if (++reads === 2) { delayed = route; return }
@@ -81,6 +83,7 @@ test('a new click supersedes a pending read and ignores its older response', asy
 test('a failed live refresh shows an error instead of a previous session list', async ({ page }) => {
   let reads = 0
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     if (new URL(route.request().url()).pathname.endsWith('/software')) return route.fulfill({ json: healthySoftware(['dtach']) })
     if (new URL(route.request().url()).pathname === '/api/targets') return route.fulfill({ json: targets })
     if (++reads === 2) return route.fulfill({ status: 502, json: { message: 'Target is unreachable' } })

@@ -16,6 +16,7 @@ async function fixture(page: Page, missing: SoftwareId[] = [], options: { backen
   let failure = false, checkFailure = false, keepRunning = false
   const paths: string[] = []
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname, method = route.request().method()
     paths.push(path)
     if (path === '/api/targets') return route.fulfill({ json: [current] })

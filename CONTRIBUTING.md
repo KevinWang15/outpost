@@ -3,7 +3,8 @@
 ## Local setup
 
 Use Node.js 24+, npm 11+, Git, and Python 3.9+ for the runtime tests. Install an
-OpenSSH client when working with SSH targets. The application needs no database.
+OpenSSH client when working with SSH targets. Hosted accounts use Node's built-in
+SQLite; no separate database service is needed.
 
 ```sh
 npm ci
@@ -20,6 +21,12 @@ Use `OUTPOST_DATA_DIR` for a separate development store. Keep API and frontend
 listeners on loopback. See [SECURITY.md](SECURITY.md) for private vulnerability
 reporting and the supported security boundaries.
 
+The default hosted mode has signup, verification, and password recovery. Without
+mail credentials, development shows simulated email links in the UI. Use
+`OUTPOST_MODE=local` for the original personal workspace and local targets.
+Tests inject mail stubs and temporary account databases; never use real mail
+credentials or production SSH keys in fixtures.
+
 ## Validation
 
 ```sh
@@ -28,8 +35,10 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-`check` runs lint, type checks, a production build, and unit tests. Browser tests
-mock the API. Platform and transport tests have additional prerequisites:
+`check` runs lint, type checks, a production build, and unit tests. Existing
+workspace browser tests mock the API; account tests start the real backend with
+temporary users and mock target services. Build before running those browser
+tests so `dist/client` is available. Platform and transport tests have additional prerequisites:
 
 | Command | Prerequisites |
 | --- | --- |

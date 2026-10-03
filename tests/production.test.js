@@ -17,7 +17,7 @@ test('relocated production bundle serves the UI and target API without source fi
   await copyFile(join(project, 'package.json'), join(release, 'package.json'))
   await symlink(join(project, 'node_modules'), join(release, 'node_modules'), 'junction')
   const child = spawn(process.execPath, [join(release, 'dist/server/server.js')], {
-    cwd: root, env: { ...process.env, PORT: '0', HOST: '127.0.0.1', OUTPOST_DATA_DIR: join(root, 'state') }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: root, env: { ...process.env, OUTPOST_MODE: 'local', PORT: '0', HOST: '127.0.0.1', OUTPOST_DATA_DIR: join(root, 'state') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let output = ''
   child.stdout.on('data', chunk => { output += chunk })

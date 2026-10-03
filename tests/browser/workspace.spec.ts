@@ -14,6 +14,7 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
   let targets: Target[] = []
   const sessions: Session[] = []
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     const method = route.request().method()
     let result: unknown
@@ -130,6 +131,7 @@ test('software check failures remain visible and can be retried', async ({ page 
   let attempts = 0
   const target = { backends: ['dtach'], tools: ['codex'], id: 'retry', name: 'Retry server', kind: 'ssh', host: 'dev-alias', createdAt: new Date().toISOString() }
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/software')) {
       if (++attempts === 1) return route.fulfill({ status: 502, json: { message: 'SSH authentication failed. Load your key into ssh-agent.' } })

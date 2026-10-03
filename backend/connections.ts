@@ -3,11 +3,15 @@ import { Ajv } from 'ajv'
 import { AppError } from './errors'
 
 type ConnectionShell = 'bash' | 'powershell'
-interface Ticket { targetId: string; sessionId: string; shell: ConnectionShell; expires: number }
+interface Ticket { targetId: string; sessionId: string; shell: ConnectionShell; expires: number; userId?: string; authSessionId?: string }
 const id = { type: 'string', minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001f\\u007f]+$' }
 const validTicket = new Ajv({ coerceTypes: false, useDefaults: false, removeAdditional: false }).compile<Ticket>({
   type: 'object', additionalProperties: false, required: ['targetId', 'sessionId', 'shell', 'expires'],
-  properties: { targetId: id, sessionId: id, shell: { enum: ['bash', 'powershell'] }, expires: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } },
+  dependencies: { userId: ['authSessionId'], authSessionId: ['userId'] },
+  properties: { targetId: id, sessionId: id, shell: { enum: ['bash', 'powershell'] }, expires: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    userId: { type: 'string', pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' },
+    authSessionId: { type: 'string', pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' },
+  },
 })
 
 // Tickets carry only identity, shell, and expiry. Each download reads current target settings.
@@ -18,13 +22,13 @@ export class ConnectionTickets {
     const payload = Buffer.from(JSON.stringify(ticket)).toString('base64url')
     return `${payload}.${this.sign(payload)}`
   }
-  issue(targetId: string, sessionId: string) {
+  issue(targetId: string, sessionId: string, owner?: { userId: string; authSessionId: string }) {
     const expires = Date.now() + 15 * 60_000
     return {
       expiresAt: new Date(expires).toISOString(),
       tokens: {
-        bash: this.encode({ targetId, sessionId, expires, shell: 'bash' }),
-        powershell: this.encode({ targetId, sessionId, expires, shell: 'powershell' }),
+        bash: this.encode({ targetId, sessionId, expires, shell: 'bash', ...owner }),
+        powershell: this.encode({ targetId, sessionId, expires, shell: 'powershell', ...owner }),
       },
     }
   }

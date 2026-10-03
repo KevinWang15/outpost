@@ -5,6 +5,7 @@ import { healthySoftware } from './software-fixture'
 
 async function connect(page: Page) {
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/environment') return route.fulfill({ json: { platform: 'linux', supported: true, usesWsl: false } })
     if (path === '/api/targets') return route.fulfill({ json: [{ id: 'keys', kind: 'ssh', name: 'Keys', host: 'dev.example.com', backends: ['tmux'], tools: ['codex'], createdAt: '2026-09-30T00:00:00Z' }] })

@@ -1,11 +1,14 @@
 import { useEffect, useReducer, useState } from 'react'
-import { Circle, LoaderCircle, Monitor, Network, Plus, Server, Terminal } from 'lucide-react'
+import { Circle, LoaderCircle, LogOut, Monitor, Network, Plus, Server, Terminal, UserRound } from 'lucide-react'
 import type { Target, TargetInput } from '../shared/session-manager'
 import { api } from './api'
 import TargetForm from './TargetForm'
 import TargetWorkspace from './TargetWorkspace'
 import TargetNavigationItem from './TargetNavigationItem'
 import { Modal } from './ui'
+import { useAuth } from './useAuth'
+import AccountSettings from './AccountSettings'
+import AccountSshKey from './AccountSshKey'
 
 function updateTargetUrl(id: string) {
   const url = new URL(window.location.href)
@@ -65,6 +68,10 @@ function workspaceReducer(state: Workspace, action: WorkspaceAction): Workspace 
 }
 
 export default function App() {
+  const { mode, user, signOut } = useAuth()
+  const hosted = mode === 'hosted'
+  const [accountOpen, setAccountOpen] = useState(false), [signingOut, setSigningOut] = useState(false)
+  const [accountError, setAccountError] = useState('')
   const [workspace, dispatch] = useReducer(workspaceReducer, {
     targets: [], selectedId: '', visit: 0, dialog: null, nextDraft: 0,
   })
@@ -126,7 +133,7 @@ export default function App() {
           </span>
         </a>
         <div className="workspace-label">
-          <Circle className="status-indicator" size={6} fill="currentColor" strokeWidth={0} aria-hidden="true" /> LOCAL WORKSPACE{' '}
+          <Circle className="status-indicator" size={6} fill="currentColor" strokeWidth={0} aria-hidden="true" /> {hosted ? 'YOUR WORKSPACE' : 'LOCAL WORKSPACE'}{' '}
           <span className="version">v0.1</span>
         </div>
         <div className="sidebar-section">
@@ -173,7 +180,7 @@ export default function App() {
             Your work keeps going.
           </p>
           <div>
-            <Circle className="status-indicator green" size={6} fill="currentColor" strokeWidth={0} aria-hidden="true" /> Local & agentless SSH
+            <Circle className="status-indicator green" size={6} fill="currentColor" strokeWidth={0} aria-hidden="true" /> {hosted ? 'Your servers · Agentless SSH' : 'Local & agentless SSH'}
           </div>
         </div>
       </aside>
@@ -185,11 +192,15 @@ export default function App() {
             <span className="slash">/</span>
             <strong>{selected?.name ?? 'Overview'}</strong>
           </div>
-          <span className="local-badge">
+          {hosted ? <div className="account-controls">
+            <button className="button secondary" onClick={() => setAccountOpen(true)} title={user?.email}><UserRound /><span>{user?.name}</span><span className="sr-only"> — Your account</span></button>
+            <button className="icon-button" aria-label="Sign out" title="Sign out" disabled={signingOut} onClick={async () => { setSigningOut(true); setAccountError(''); try { await signOut() } catch (problem) { setAccountError((problem as Error).message) } finally { setSigningOut(false) } }}><LogOut /></button>
+          </div> : <span className="local-badge">
             <Circle className="status-indicator green" size={6} fill="currentColor" strokeWidth={0} aria-hidden="true" /> Local manager
-          </span>
+          </span>}
         </header>
         <main>
+          {accountError && <div className="error-banner" role="alert">{accountError}</div>}
           {loading ? (
             <div className="empty-state">
               <LoaderCircle className="loading-spinner" size={22} />
@@ -219,7 +230,7 @@ export default function App() {
                 <span className="eyebrow">A TERMINAL YOU CAN COME BACK TO</span>
                 <h2>Your next session starts here.</h2>
                 <p>
-                  Add this computer or an SSH target,
+                  {hosted ? 'Connect your development server over SSH,' : 'Add this computer or an SSH target,'}
                   <br />
                   choose a coding tool, and name your session.
                 </p>
@@ -230,15 +241,16 @@ export default function App() {
                   <Plus /> Add your first target
                 </button>
                 <span className="welcome-footnote">
-                  Local or SSH · No custom agent · Your own terminal
+                  {hosted ? 'SSH · No custom agent · Your own terminal' : 'Local or SSH · No custom agent · Your own terminal'}
                 </span>
               </section>
+              {hosted && <AccountSshKey />}
               <div className="steps">
                 {[
                   [
                     '01',
                     'Connect a machine',
-                    'Use this computer or SSH to your dev server.',
+                    hosted ? 'Authorize your key, then add your dev server.' : 'Use this computer or SSH to your dev server.',
                   ],
                   [
                     '02',
@@ -263,7 +275,7 @@ export default function App() {
             <TargetWorkspace
               key={`${selected.id}:${targetVisit}`}
               target={selected}
-              externalDialogOpen={dialog !== null}
+              externalDialogOpen={dialog !== null || accountOpen}
               onUpdate={(target) => dispatch({ type: 'updated', target })}
             />
           )}
@@ -276,6 +288,7 @@ export default function App() {
       {dialog?.kind === 'add' && (
         <TargetForm key={dialog.id} onSave={input => addTarget(input, dialog.id)} onClose={() => dispatch({ type: 'close-dialog' })} />
       )}
+      {accountOpen && <AccountSettings onClose={() => setAccountOpen(false)} />}
       {dialog?.kind === 'remove' && (
         <Modal title={`Remove ${dialog.target.name}?`}
           subtitle="This only removes the connection from this manager. Sessions and running coding tools stay on the target."

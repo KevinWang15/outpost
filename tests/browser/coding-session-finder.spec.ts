@@ -13,6 +13,7 @@ async function workspace(page: Page, search: (route: Route) => Promise<unknown>,
   const sessions: Session[] = []
   const writes: unknown[] = []
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/environment') return route.fulfill({ json: { platform: 'linux', supported: true, usesWsl: false } })
     if (path === '/api/targets') return route.fulfill({ json: [{ id: 'coding', kind: 'ssh', name: 'Development', host: 'dev.example.com', tools, backends: ['tmux', 'dtach'], createdAt: '2026-09-30T00:00:00Z' }] })

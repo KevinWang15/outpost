@@ -11,11 +11,52 @@ import test from 'node:test'
 import { createApp } from '../backend/app.ts'
 import { TargetStore } from '../backend/store.ts'
 import { connectScript } from '../backend/sessions.ts'
+import { Accounts } from '../backend/accounts.ts'
 import { expectedKeyboardInput, normalizeKeyboardControls } from './fixtures/keyboard.js'
 
 const execute = promisify(execFile)
 const fixtures = fileURLToPath(new URL('./fixtures/', import.meta.url))
 const docker = async (...args) => (await execute('docker', args, { timeout: 300_000, maxBuffer: 4_000_000 })).stdout.trim()
+
+test('hosted accounts connect only with their own SSH key, including when a target names another manager key', { timeout: 360_000 }, async t => {
+  const temporary = await mkdtemp(join(tmpdir(), 'outpost-account-ssh-'))
+  let container, app, accounts
+  t.after(async () => {
+    if (app) await app.close()
+    else accounts?.close()
+    if (container) await docker('rm', '-f', container)
+    await rm(temporary, { recursive: true, force: true })
+  })
+  accounts = await Accounts.open({ directory: join(temporary, "state with 'quote'"), publicUrl: 'http://127.0.0.1:5173', production: false, mailer: null })
+  function member(email) {
+    const user = accounts.store.create(email, 'Dev', 'unused test hash')
+    const verified = accounts.store.consumeToken(accounts.store.issueToken(user.id, 'verify', 10000), 'verify')
+    return { user: verified, cookie: `outpost_session=${accounts.store.issueSession(verified).token}` }
+  }
+  const alice = member('alice@example.com'), bob = member('bob@example.com')
+  await accounts.keys.publicKey(alice.user.id)
+  await accounts.keys.publicKey(bob.user.id)
+  await docker('build', '-t', 'outpost-ssh-test:local', fixtures)
+  container = await docker('run', '-d', '--rm', '-p', '127.0.0.1::22', 'outpost-ssh-test:local')
+  await docker('cp', `${accounts.keys.paths(alice.user.id).identityFile}.pub`, `${container}:/root/.ssh/authorized_keys`)
+  await docker('exec', container, 'chown', '0:0', '/root/.ssh/authorized_keys')
+  await docker('exec', container, 'chmod', '600', '/root/.ssh/authorized_keys')
+  const port = Number((await docker('port', container, '22')).split(':').at(-1))
+  app = await createApp({ accounts })
+  const request = (method, url, payload, cookie) => app.inject({ method, url, payload, headers: { 'x-outpost-request': '1', cookie } })
+  const input = { name: 'Server', kind: 'ssh', host: '127.0.0.1', port, backends: ['tmux'], tools: ['codex'], identityFile: accounts.keys.paths(alice.user.id).identityFile }
+  const a = (await request('POST', '/api/targets', input, alice.cookie)).json()
+  const b = (await request('POST', '/api/targets', input, bob.cookie)).json()
+  const success = await request('GET', `/api/targets/${a.id}/software`, undefined, alice.cookie)
+  assert.equal(success.statusCode, 200, success.body)
+  assert.equal(success.json().environment.username, 'root')
+  const denied = await request('GET', `/api/targets/${b.id}/software`, undefined, bob.cookie)
+  assert.ok(denied.statusCode >= 400, 'a target cannot borrow another account’s manager SSH identity')
+  await docker('cp', `${accounts.keys.paths(bob.user.id).identityFile}.pub`, `${container}:/tmp/bob-key.pub`)
+  await docker('exec', container, 'sh', '-c', 'cat /tmp/bob-key.pub >> /root/.ssh/authorized_keys')
+  const authorized = await request('GET', `/api/targets/${b.id}/software`, undefined, bob.cookie)
+  assert.equal(authorized.statusCode, 200, authorized.body)
+})
 
 const shells = process.env.OUTPOST_PWSH ? ['bash', 'powershell'] : ['bash']
 for (const shell of shells) for (const backend of ['dtach', 'tmux']) test(`real SSH + ${backend} + ${shell}: software installation, registry, terminal persistence, repaint, and termination`, { timeout: 360_000 }, async t => {

@@ -44,9 +44,9 @@ export interface SessionService {
 }
 
 export class SessionClient implements SessionService {
-  constructor(private env = process.env) {}
+  constructor(private env = process.env, private requireAccountIdentity = false) {}
   private async run<T>(target: Target, request: SessionRequest, signal?: AbortSignal) {
-    const transport = transportFor(target)
+    const transport = transportFor(target, this.requireAccountIdentity)
     const operation = `${supportingPath}; exec ${pythonCommand({ ...request, context: transport.context })}`
     const script = `set -eu\n${operation}\n`
     return runProtocol<T>(transport.script(), script, { signal, env: this.env })
@@ -72,7 +72,7 @@ export class SessionClient implements SessionService {
     const bytes = Buffer.from(data, 'base64')
     if (bytes.length > maxImageBytes) throw new AppError('Images are limited to 16 MB.', 413)
     if (bytes.toString('base64') !== data) throw new AppError('Invalid image data', 400)
-    const transport = transportFor(target)
+    const transport = transportFor(target, this.requireAccountIdentity)
     const operation = `${supportingPath}; exec ${pythonCommand({ action: 'paste-image', id, extension, context: transport.context })}`
     // The image rides the script's stdin as a heredoc: the request payload
     // passed as an argument is limited to a fraction of ARG_MAX.

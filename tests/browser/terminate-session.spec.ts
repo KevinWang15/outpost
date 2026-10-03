@@ -16,6 +16,7 @@ for (const status of ['attached', 'detached'] as const) {
       backend: 'dtach', tool: 'codex', lastConnectedAt: '2026-09-29T00:00:00Z', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'detached', socketPath: '/root/.outpost/sockets/other.sock',
     }]
     await page.route('**/api/**', async route => {
+      if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
       const path = new URL(route.request().url()).pathname
       if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware(['dtach']) })
       if (path === '/api/targets') return route.fulfill({ json: [{
@@ -63,6 +64,7 @@ test('Escape respects a pending termination instead of hiding its confirmation',
   let pending: Route | undefined
   let stopped = false
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/targets') return route.fulfill({ json: [{
       id: 'target', name: 'Development', tools: ['codex'], kind: 'ssh', host: 'dev', backends: ['dtach'], createdAt: '2026-09-29T00:00:00Z',

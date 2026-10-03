@@ -18,10 +18,11 @@ Outpost keeps those sessions organized and accessible. Choose a server, create a
 - **See which agent needs you.** Activity indicators distinguish working, idle, and finished turns waiting for your input. Checking a finished turn clears its notice.
 - **Get required software ready.** See what is installed, identify what is missing, and automatically install required software from the manager.
 - **Keep your servers agentless.** There is no extra manager service to keep running on each dev server. Tool adapters leave room to add custom AI harnesses as your workflow grows.
+- **Give each user a workspace.** Sign up, verify your email, and connect your own servers with an account-specific SSH key. Profile settings and password recovery are built in.
 
 Explore the [promo project](promo-v2/README.md) for the film's editable sources, screenshots, and rebuild instructions. Generated audio and movies are kept outside Git.
 
-Built with React, Vite, SCSS, Fastify, and TypeScript. No database is required. See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
+Built with React, Vite, SCSS, Fastify, and TypeScript. Hosted accounts use Node's built-in SQLite; no database service is required. See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Run
 
@@ -40,7 +41,7 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. The API runs on `127.0.0.1:3000`, proxied through Vite. Alternatively:
+Open **http://127.0.0.1:5173**. The API runs on `127.0.0.1:3000`, proxied through Vite. The default **hosted** mode opens the sign-in page. Create an account and verify your email; without mail credentials, a local development email link appears in the UI. Alternatively:
 
 ```sh
 npm run build
@@ -48,11 +49,42 @@ npm start
 # Open http://127.0.0.1:3000
 ```
 
-Run one manager process per local data directory. `OUTPOST_DATA_DIR` overrides the default local configuration directory. `.env.example` documents the settings. `HOST` and `VITE_HOST` accept only `127.0.0.1`, `::1`, or `localhost`; the API also rejects non-loopback peers. This is a personal local tool with access to your SSH identity, not a multi-user network service.
+Run one manager process per data directory. `OUTPOST_DATA_DIR` overrides `~/.outpost`; `.env.example` documents the settings. Development, Vite, and local mode require loopback listeners. Hosted production can accept remote users after configuring HTTPS and email as described below.
 
-When upgrading an existing installation, set `OUTPOST_DATA_DIR` to your current manager configuration directory to retain target settings and signing keys. Execution hosts now store sessions under `~/.outpost`. Stop existing sessions before moving their state into that directory, then reconnect from Outpost to restart them with the current socket layout and tmux session names. Existing coding-tool conversation histories remain available to search and link.
+For the original personal workspace, set `OUTPOST_MODE=local` in `.env`. This mode has no login and supports local targets and desktop terminal launching. Existing top-level target settings stay in local mode; hosted accounts start with separate target lists.
 
-If the app itself runs on another machine, forward its web port to the **same** port on your computer, e.g. `ssh -L 3000:127.0.0.1:3000 manager-machine`, then open `http://127.0.0.1:3000`. For SSH targets, the generated attach command executes SSH on the computer where you paste it, which must also have SSH access to the dev machine. Use consistent SSH aliases on both computers. Leave the identity field empty to use each SSH client’s configuration, or use `~/.ssh/key` to resolve against the home directory on each computer. Explicit absolute paths must exist on both; Windows paths such as `C:\Users\Dev\.ssh\id_ed25519` are also accepted. Windows and WSL have separate SSH configurations and home directories.
+## Accounts and hosted setup
+
+1. **Create an account.** Enter your name, email, and a password of at least 8 characters. Verify the link in your inbox to sign in. Verification links last 24 hours; sign-in can resend them.
+2. **Authorize your Outpost key.** Copy your public key from the welcome page or **Your account** and add it to `/root/.ssh/authorized_keys` on your dev server. The manager uses this account's Ed25519 key, with separate known-host records. It does not use a shared SSH agent, manager identity file, or SSH aliases.
+3. **Add an SSH target.** Enter a hostname/IP and port (default 22), select tools and backends, and manage sessions as usual. Hosted accounts support SSH targets; local execution and desktop launching are available in local mode.
+4. **Connect from your terminal.** Connect opens a command to paste on your own computer. That computer also needs its own SSH access to the server. The optional identity file in a hosted target applies only to this client command.
+
+**Your account** lets you change your name and password. **Forgot password?** sends a single-use reset link that lasts one hour. Resetting or changing a password signs out all devices and expires their connection commands. Signing out expires commands issued by that login. Coding sessions keep running on their servers.
+
+For a public installation, build the app and configure `.env` using this template:
+
+```dotenv
+OUTPOST_MODE=hosted
+NODE_ENV=production
+PUBLIC_APP_URL=https://outpost.example.com
+HOST=127.0.0.1
+PORT=3000
+OUTPOST_DATA_DIR=/var/lib/outpost
+ENGAGE_LAB_USERNAME=your-engagelab-username
+ENGAGE_LAB_API_KEY=your-engagelab-api-key
+ENGAGE_LAB_FROM_EMAIL="Outpost <no-reply@example.com>"
+# Optional, if the proxy runs on the same machine:
+OUTPOST_TRUST_PROXY=127.0.0.1,::1
+```
+
+Run `npm run build && npm start` behind an HTTPS reverse proxy that preserves the public Host header. `PUBLIC_APP_URL` must be an origin, without a path. Production refuses to start without HTTPS or verification email delivery. Email uses EngageLab; credentials belong in the server environment. Trust only your actual proxy addresses for client IP rate limits. Development email simulation is limited to loopback and is disabled in production.
+
+Back up the entire data directory while the manager is stopped: `accounts.sqlite` contains users, token hashes, login sessions, and the signing secret; `users/<id>/` contains target settings, the account's private SSH key, public key, and known-host file. Keep this state private and persistent across restarts. Per-user target ownership is checked on every API operation. Users authorized for the same remote root account share that server's sessions and conversation history according to its SSH permissions.
+
+When upgrading an existing local installation, set `OUTPOST_MODE=local` and `OUTPOST_DATA_DIR` to your current manager configuration directory to retain target settings and signing keys. Execution hosts now store sessions under `~/.outpost`. Stop existing sessions before moving their state into that directory, then reconnect from Outpost to restart them with the current socket layout and tmux session names. Existing coding-tool conversation histories remain available to search and link.
+
+For local mode on another machine, forward its web port to the **same** port on your computer, e.g. `ssh -L 3000:127.0.0.1:3000 manager-machine`, then open `http://127.0.0.1:3000`. For SSH targets, the generated attach command executes SSH on the computer where you paste it, which must also have SSH access to the dev machine. Use consistent SSH aliases on both computers. Leave the identity field empty to use each SSH client’s configuration, or use `~/.ssh/key` to resolve against the home directory on each computer. Explicit absolute paths must exist on both; Windows paths such as `C:\Users\Dev\.ssh\id_ed25519` are also accepted. Windows and WSL have separate SSH configurations and home directories.
 
 ## Screenshots
 
@@ -85,6 +117,8 @@ The capture script starts the Vite frontend and Fastify API with mock services a
 
 ## Local and SSH targets
 
+Local targets and desktop launch require `OUTPOST_MODE=local`. Hosted users connect SSH targets with account keys.
+
 | Target | Where commands run | User | Connection shells |
 | --- | --- | --- | --- |
 | SSH | Remote Linux dev machine | SSH root | Bash, PowerShell, cmd |
@@ -97,7 +131,7 @@ Installations run only after submitting a reviewed script, as the target's execu
 
 ## Workflow
 
-1. **Add a target.** Select **SSH** or **Local**, name it, and choose **tmux** (screen restoration and scrollback), **dtach** (minimal persistence), or both, alongside one or more required coding tools. Adding saves settings without installing software. SSH targets take your hostname/IP or SSH alias; `dev.example.com` is an example hostname. Port and identity file are optional; blank fields preserve SSH config defaults. SSH uses root and supports your keys/agent. Local targets need no host or key; on Windows you can select a WSL distribution.
+1. **Add a target.** Select **SSH** or **Local**, name it, and choose **tmux** (screen restoration and scrollback), **dtach** (minimal persistence), or both, alongside one or more required coding tools. Adding saves settings without installing software. SSH targets take a hostname/IP; local mode also supports SSH aliases and your existing SSH config/agent. Port and identity file are optional. Hosted management uses the account key and port 22 by default; its identity file field applies only to your terminal. SSH uses root. Local targets need no host or key; on Windows you can select a WSL distribution.
 2. **Check Required Software.** The detail page runs a fresh shell inspection through SSH or locally. It checks Bash, Python 3.9+, all selected backends (dtach 0.9+), selected coding tools, and `lsof` when macOS dtach is selected. The panel collapses with an **All good** tick when all requirements pass; expand it to see executable paths and versions. Missing or broken requirements expand the panel with warnings. **Auto install** opens a syntax-highlighted, editable POSIX shell script. **Run installation** executes the exact submitted text and streams stdout/stderr into the modal. Closing the modal triggers a fresh software check and session-list fetch. **Configure required software** changes backend and coding-tool selections for new sessions and immediately rechecks requirements. SSH accepts new host keys on first use and rejects changed keys.
 3. **Create a named session.** Choose an installed backend and coding tool from the configured selections, then an absolute root directory on the target or `~/path`. A missing backend or its dependencies does not prevent using another healthy backend. The root directory field discovers matching directories live on the selected target as you type, including `~/` paths. Use ↑/↓ and Enter, click a suggestion, or press Tab to complete a single match. Existing directories are required unless you check **Create the directory if it doesn’t exist**; you can always type a new path manually. Names are unique per backend on each execution host. The chosen tool, backend, manager UUID, native coding CLI session ID, storage directory, and stable socket path are stored in the target registry. Creation allocates the conversation identity without submitting a prompt; the interactive coding process starts on Connect. The session list shows the native ID and a tmux or dtach badge beside each name; both backends appear together.
 4. **Connect.** Click **Connect** to detect the Outpost computer's OS and open your preferred available terminal, or the recommended fallback. The adjacent **…** button opens connection options: choose a terminal app, launch it on the Outpost computer, or copy a command into an existing window. Apps are grouped by OS with your OS first, then ordered by recommendation; every supported app is shown, even if it cannot be launched on the manager. Local sessions put the Outpost computer's OS first. Your terminal app preference is saved separately for each OS in the browser. The copy-command shell selector matches the shell in your existing tab. If every automatic launch fails, a toast explains the failure and options open automatically. Bash uses `curl … | bash` and reopens the actual terminal device for reading and writing. PowerShell downloads the script with `Invoke-RestMethod` and preserves console handles. SSH requests a remote PTY with `ssh -tt`; local commands attach directly or through WSL. Reattachment uses the existing process; restarting a stopped session uses its saved tool choice. No PowerShell execution-policy changes are needed.
@@ -243,7 +277,13 @@ The UI imports named [Lucide React](https://lucide.dev/guide/react) components d
 
 The interface uses a light theme with white surfaces, slate text, and blue actions. Shared color and font tokens in `frontend/style.scss` also style the installation editor; activity and software states use blue, green, amber, and red. Native font stacks work without external font downloads. Responsive layouts keep session controls and dialog actions reachable on smaller screens, and honor reduced-motion preferences.
 
-The local API rejects foreign browser origins, requires a custom header on writes, and validates Host to reject DNS rebinding. Connection scripts require HMAC-signed links and are never cached or included in request logs. SSH config, known-host validation, and SSH authentication still apply to the terminal connection.
+The API rejects foreign browser origins, requires a custom header on writes, and validates Host to reject DNS rebinding. Hosted routes check verified cookie sessions and account ownership; local routes retain loopback restrictions. Connection scripts require HMAC-signed links and are never cached or included in request logs. SSH config, known-host validation, and SSH authentication still apply to the terminal connection.
+
+`accounts.ts` owns account routes, email delivery, cookies, and request limits;
+`account-store.ts` persists users and hashed tokens in SQLite. `account-ssh.ts`
+supplies private account keys and target stores. `AuthGate` checks the server's
+mode and session before mounting a workspace, clears it on logout or expiry,
+and synchronizes account changes across browser tabs.
 
 ## Checks
 
@@ -263,7 +303,7 @@ The software suite starts an Alpine SSH container with Bash, Python, and backend
 
 Coding-session tests cover all three native formats, tool output, Unicode, literal shell punctuation, fresh reads, custom storage directories, duplicate links, partial records, bounded results, and absence of conversation text in saved manager data. Attachment tests check expanded session selectors and ensure Bash arguments are evaluated once. Real SSH tests exercise the finder on disposable servers and verify native IDs across termination and restart. `test:coding` additionally checks installed vendor binaries in isolated homes: Codex and Kimi allocate and cold-resume without a model turn; subsequent vendor turns use loopback Responses, Chat Completions, and Anthropic fixtures. Completion, acknowledgement, and provider-error states are checked against all three binaries. Missing binaries are skipped locally; CI pins the native versions listed above and requires all three. Activity tests also cover stale completion checks, acknowledgement during a turn, delayed Claude transcript writes, partial and rewritten transcripts, bounded reads, input/focus events, terminal-reply filtering, and same-process reattachment with both persistence backends.
 
-The lifecycle SSH tests build disposable Debian servers without either backend installed and run the full lifecycle for both tmux and dtach. They verify installation of only the chosen backend, editable backend requirements, mixed-backend lists shared by same-host entries, attachment after deselecting a backend, isolation from personal tmux configuration, concurrent registry writes, shell quoting, terminal hangup, explicit detach, same-PID reattachment and automatic same-size repaint, manager restart, concurrent connections, stale socket recovery, termination of attached and detached sessions (including a TERM-resistant child), isolation from other sessions, remote rediscovery, and preservation of all three coding tool executables. They verify mixed Codex/Kimi/Claude records, the executable actually launched, reattachment and restart with the saved tool, Kimi and Claude startup without Codex present, and a clear error if a selected tool is missing. They also reproduce Kimi installed in `/root/.kimi-code/bin` with PATH set behind a `.bashrc` interactive guard, checking PATH precedence, inherited variables, reattachment, and restart. They also check live directory discovery, tilde paths, symlinks, hidden directories, result limits, literal spaces and shell punctuation, and operation without a session registry. Browser and API tests cover completion, request cancellation, stale responses, and lookup failures. They use interactive heartbeat fixtures in place of the coding tools, so they need no provider credentials and make no model requests. Set `OUTPOST_REAL_CODEX_BINARY` to a Linux Codex executable to additionally check repainting against the real Codex welcome screen inside the container, using its standalone `--no-daemon` mode without credentials or model calls. It never connects to the example IP. Browser tests mock the API; the separate SSH test exercises the real backend and downloaded terminal commands. Set `OUTPOST_PWSH` to a PowerShell executable (for example `pwsh`) to also exercise the full SSH lifecycle from PowerShell on Linux. CI enables this and separately verifies downloaded commands and native argument handling on Windows PowerShell 5.1, PowerShell 7, and cmd.exe. The Windows checks use SSH and WSL argument-capture fixtures; interactive persistence tests run against real SSH on Linux.
+The lifecycle SSH tests build disposable Debian servers without either backend installed and run the full lifecycle for both tmux and dtach. They verify installation of only the chosen backend, editable backend requirements, mixed-backend lists shared by same-host entries, attachment after deselecting a backend, isolation from personal tmux configuration, concurrent registry writes, shell quoting, terminal hangup, explicit detach, same-PID reattachment and automatic same-size repaint, manager restart, concurrent connections, stale socket recovery, termination of attached and detached sessions (including a TERM-resistant child), isolation from other sessions, remote rediscovery, and preservation of all three coding tool executables. They verify mixed Codex/Kimi/Claude records, the executable actually launched, reattachment and restart with the saved tool, Kimi and Claude startup without Codex present, and a clear error if a selected tool is missing. They also reproduce Kimi installed in `/root/.kimi-code/bin` with PATH set behind a `.bashrc` interactive guard, checking PATH precedence, inherited variables, reattachment, and restart. They also check live directory discovery, tilde paths, symlinks, hidden directories, result limits, literal spaces and shell punctuation, and operation without a session registry. Browser and API tests cover completion, request cancellation, stale responses, and lookup failures. They use interactive heartbeat fixtures in place of the coding tools, so they need no provider credentials and make no model requests. Set `OUTPOST_REAL_CODEX_BINARY` to a Linux Codex executable to additionally check repainting against the real Codex welcome screen inside the container, using its standalone `--no-daemon` mode without credentials or model calls. It never connects to the example IP. Workspace browser tests mock the API. Account browser tests exercise the real backend with temporary users and mock SSH services; SSH integration tests verify account key isolation against a disposable server and exercise downloaded terminal commands. Set `OUTPOST_PWSH` to a PowerShell executable (for example `pwsh`) to also exercise the full SSH lifecycle from PowerShell on Linux. CI enables this and separately verifies downloaded commands and native argument handling on Windows PowerShell 5.1, PowerShell 7, and cmd.exe. The Windows checks use SSH and WSL argument-capture fixtures; interactive persistence tests run against real SSH on Linux.
 
 Native local tests run on Linux and macOS in temporary homes. They cover all three tools, both backends, live path/session discovery, manager restart, repeat software checks, re-adding targets, terminal closure, same-process reattachment, termination of resistant children, mixed-backend lists, backend requirement changes, session isolation, and rejection of the wrong local user/home. They assert that SSH is never invoked. Windows CI validates WSL argument passing in PowerShell 5.1/7; it does not run a full WSL distribution lifecycle.
 
@@ -274,6 +314,24 @@ GitHub Actions runs the dependency audit, build, unit, Docker, browser, native c
 ## API
 
 All mutation requests require `X-OUTPOST-Request: 1`; JSON bodies use `Content-Type: application/json`.
+
+Hosted target and account endpoints require a verified `outpost_session`
+cookie. Connection downloads use short-lived signed tickets tied to that login.
+Authentication routes are available without a login; account changes require it.
+
+| Method | Account endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/auth/session` | Current mode and safe user profile, or `user: null` |
+| POST | `/api/auth/signup` | Create `{name, email, password}` and email verification link |
+| POST | `/api/auth/verify-email` | Consume `{token}` and sign in |
+| POST | `/api/auth/resend-verification` | Send a new link for `{email}` |
+| POST | `/api/auth/login` | Sign in with `{email, password}` |
+| POST | `/api/auth/logout` | Revoke the current login and clear its cookie |
+| POST | `/api/auth/forgot-password` | Send a reset link for `{email}` |
+| POST | `/api/auth/reset-password` | Consume `{token, password}` and revoke all logins |
+| GET | `/api/account/ssh-key` | Account's public key and fingerprint |
+| PATCH | `/api/account/profile` | Save `{name}` |
+| POST | `/api/account/password` | Change `{currentPassword, password}` and revoke all logins |
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |

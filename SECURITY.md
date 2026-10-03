@@ -18,18 +18,38 @@ will be listed here when tagged releases are published.
 
 ## Security boundaries
 
-Outpost is a personal manager accessed through loopback or an SSH localhost
-tunnel. The API, development server, and preview server reject public listener
-addresses. API requests must come from a loopback peer; a localhost Host header
-does not authorize a remote peer. Network hosting and shared-user deployments
-are outside the supported configuration.
+Hosted mode requires verified accounts for target and account APIs. Targets,
+private Ed25519 SSH keys, and known-host files belong to individual accounts.
+Manager SSH connections disable shared configuration and agents and use only
+that account's key. Hosted users cannot execute commands on the manager through
+local targets or desktop launching. Authorize account keys only on servers the
+account owner should control: SSH currently runs as root. Users granted access
+to the same remote root account share that server's sessions and conversation
+history according to its SSH permissions.
+
+Production requires an HTTPS `PUBLIC_APP_URL` and configured verification email
+delivery. Run the built app behind an HTTPS reverse proxy. Host and Origin must
+match the configured address; writes require a custom header. Trust forwarding
+headers only from explicitly configured proxy addresses. Development email
+simulation, local mode, Vite, and preview remain loopback-only.
+
+Passwords use salted scrypt. Login cookies are HttpOnly, SameSite=Lax, Secure
+over HTTPS, and expire after 30 days. Only token hashes are stored. Verification
+links expire after 24 hours, reset links after one hour; both are single use.
+Password changes and resets revoke every login session and connection ticket.
+Logout revokes its session and its tickets. Rate limits bound account attempts.
+
+`OUTPOST_MODE=local` preserves the personal workflow without accounts. Its API
+requires a loopback peer, including when accessed through an SSH localhost
+tunnel. A localhost Host header does not authorize a remote peer.
 
 Commands run as the manager's account for local targets and as root for SSH
 targets. Reviewed installation scripts deliberately execute shell commands.
 Coding tools retain their own authentication, approval, and sandbox settings.
 
-Target settings and connection-signing keys are stored in `~/.outpost` on the
-manager. Session registries and activity checkpoints stay on the execution
+Account data, target settings, SSH keys, and connection-signing keys are stored
+in `~/.outpost` on the manager. Protect and back up this directory as credentials;
+run one manager process per directory. Session registries and activity checkpoints stay on the execution
 host. Conversation search returns bounded metadata and excerpts to the open
 dialog; it does not copy entire history files to the manager.
 

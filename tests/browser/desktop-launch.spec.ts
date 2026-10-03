@@ -14,6 +14,7 @@ async function workspace(page: Page, terminal: DesktopTerminal | null, launch: (
   const connections: string[] = []
   const inputs: DesktopLaunchInput[] = []
   await page.route('**/api/**', async route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware([path.includes('beta') || path.includes('dtach') ? 'dtach' : 'tmux']) })
     if (path.endsWith('/launch')) {

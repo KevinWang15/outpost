@@ -6,6 +6,7 @@ test('environment input rejects invalid and duplicate names without submitting, 
 }) => {
   const created: Record<string, unknown>[] = []
   await page.route('**/api/**', async (route) => {
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
     if (path === '/api/environment')
       return route.fulfill({

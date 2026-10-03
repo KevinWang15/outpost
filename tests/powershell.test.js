@@ -8,6 +8,7 @@ import { promisify } from 'node:util'
 import { inflateSync } from 'node:zlib'
 import test from 'node:test'
 import { createApp } from '../backend/app.ts'
+import { connectScript } from '../backend/sessions.ts'
 import { terminalScript } from '../backend/terminal.ts'
 import { LocalTransport } from '../backend/local.ts'
 import { TargetStore } from '../backend/store.ts'
@@ -15,6 +16,17 @@ import { TargetStore } from '../backend/store.ts'
 const execute = promisify(execFile)
 const windows = process.platform === 'win32'
 const runtimes = windows ? ['powershell.exe', 'pwsh.exe'] : process.env.OUTPOST_PWSH ? [process.env.OUTPOST_PWSH] : []
+
+test('SSH attachment payload stays within its Windows command-line budget without a PowerShell runtime', () => {
+  const target = { kind: 'ssh', id: 'target', name: 'Payload fixture', host: 'dev-alias', port: 2222,
+    tools: ['codex', 'claude', 'kimi'], backends: ['tmux', 'dtach'], identityFile: '~/keys/space & é', createdAt: '2026-10-03T00:00:00Z' }
+  const script = connectScript(target, '12345678-1234-4123-8123-123456789012', 'powershell')
+  const encoded = script.match(/FromBase64String\('([A-Za-z0-9+/=]+)'\)/)[1]
+  const command = JSON.parse(Buffer.from(encoded, 'base64').toString())
+  assert.equal(command.executable, 'ssh')
+  const length = command.args.at(-1).length
+  assert.ok(length < 20_000, `SSH attachment is ${length} characters; its budget is 20,000`)
+})
 
 test('PowerShell downloads preserve native SSH arguments, home paths, output, and errors', { skip: !runtimes.length && 'Set OUTPOST_PWSH to test PowerShell on Unix', timeout: 60_000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-powershell-'))

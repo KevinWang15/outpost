@@ -16,11 +16,16 @@ const modules = [
   ['outpost_claude_adapter', './coding_adapters/claude.py'],
   ['outpost_kimi_adapter', './coding_adapters/kimi.py'],
 ].map(([name, path]) => [name, readFileSync(new URL(path, import.meta.url), 'utf8')])
-// An array of strings is also a Python list literal. Serialize once to avoid
-// expanding every source escape again inside a second JSON string.
 const runtime = readFileSync(new URL('./session-runtime.py', import.meta.url), 'utf8')
+function sourceLiteral(source: string) {
+  // Raw Python strings preserve source escapes and compress better alongside
+  // the unescaped runtime. Fall back when neither delimiter is safe.
+  const delimiter = ["'''", '"""'].find(value => !source.includes(value))
+  return delimiter && source.endsWith('\n') ? `r${delimiter}${source}${delimiter}` : JSON.stringify(source)
+}
 function encodeProgram(sources: string[][]) {
-  const program = `import sys, types\nfor name, source in ${JSON.stringify(sources)}:\n    module = types.ModuleType(name)\n    sys.modules[name] = module\n    exec(compile(source, name, 'exec'), module.__dict__)\n${runtime}`
+  const modules = `[${sources.map(([name, source]) => `[${JSON.stringify(name)},${sourceLiteral(source)}]`).join(',')}]`
+  const program = `import sys, types\nfor name, source in ${modules}:\n    module = types.ModuleType(name)\n    sys.modules[name] = module\n    exec(compile(source, name, 'exec'), module.__dict__)\n${runtime}`
   return deflateSync(program, { level: 9 }).toString('base64')
 }
 const managementProgram = encodeProgram(modules)

@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { ArrowRight, Circle, Ellipsis, ImagePlus, LoaderCircle, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import type { Session } from '../shared/session-manager'
 import { codingToolLabels } from '../shared/session-manager'
 import type { ConnectionMode, PendingConnection } from './useSessionConnection'
 import SessionActivityBadge from './SessionActivityBadge'
+import { useAuth } from './useAuth'
 
 const statusLabel: Record<Session['status'], string> = {
   idle: 'Ready',
@@ -23,7 +25,7 @@ function relativeDate(value: string) {
 }
 export default function SessionList({
   sessions, error, refreshing, canCreate, connecting,
-  checking, onCheck, onRefresh, onCreate, onConnect, onImage, onConfirm,
+  checking, onCheck, onRefresh, onCreate, onConnect, onWebTerminal, onImage, onConfirm,
 }: {
   sessions: Session[]
   error: string
@@ -35,10 +37,12 @@ export default function SessionList({
   onRefresh: () => void
   onCreate: () => void
   onConnect: (session: Session, mode: ConnectionMode) => void
+  onWebTerminal?: (session: Session) => void
   onImage: (session: Session) => void
   onConfirm: (session: Session, action: 'delete' | 'terminate') => void
 }) {
   const [search, setSearch] = useState('')
+  const { mode } = useAuth()
   const filtered = sessions.filter(session =>
     `${session.name} ${session.rootDir} ${session.backend} ${codingToolLabels[session.tool]} ${session.cliSessionId}`
       .toLowerCase().includes(search.toLowerCase()),
@@ -130,7 +134,7 @@ export default function SessionList({
                 <div className="connect-button" role="group" aria-label={`Connect to ${session.name}`}>
                   <button
                     className="button connect"
-                    title="Open your preferred available terminal on the computer running Outpost"
+                    title={mode === 'hosted' ? 'Prepare a connection command for your own terminal' : 'Open your preferred available terminal on the computer running Outpost'}
                     disabled={connecting?.sessionId === session.id}
                     onClick={() => onConnect(session, 'launch')}
                   >
@@ -141,16 +145,28 @@ export default function SessionList({
                       ? <LoaderCircle size={15} className="loading-spinner" aria-hidden="true" />
                       : <ArrowRight size={15} aria-hidden="true" />}
                   </button>
-                  <button
-                    className="button connect connect-options"
-                    title="Connection options"
-                    aria-label={`Connection options for ${session.name}`}
-                    aria-haspopup="dialog"
-                    disabled={connecting?.sessionId === session.id}
-                    onClick={() => onConnect(session, 'options')}
-                  >
-                    <Ellipsis size={17} aria-hidden="true" />
-                  </button>
+                  <DropdownMenu.Root modal={false}>
+                    <DropdownMenu.Trigger asChild>
+                      <button
+                        className="button connect connect-options"
+                        title="Connection options"
+                        aria-label={`Connection options for ${session.name}`}
+                        disabled={connecting?.sessionId === session.id}
+                      >
+                        <Ellipsis size={17} aria-hidden="true" />
+                      </button>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content className="target-menu" align="end" sideOffset={6} collisionPadding={12}>
+                        <DropdownMenu.Item className="target-menu-item" onSelect={() => onConnect(session, 'options')}>
+                          <SquareTerminal size={16} /> Connection options
+                        </DropdownMenu.Item>
+                        {onWebTerminal && <DropdownMenu.Item className="target-menu-item" onSelect={() => onWebTerminal(session)}>
+                          <SquareTerminal size={16} /> Launch with web terminal
+                        </DropdownMenu.Item>}
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
                 </div>
                 {['attached', 'detached'].includes(session.status) ? (
                   <button className="icon-button terminate-button" title={`Terminate ${session.name}`}

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import Fastify, { LogController, type FastifyRequest } from 'fastify'
 import staticFiles from '@fastify/static'
 import cookies from '@fastify/cookie'
+import websocket from '@fastify/websocket'
 import type { CodingSessionSearchInput, Target, TargetInput, TargetRequirements, SessionInput, SessionImageInput, SoftwareId } from '../shared/session-manager'
 import { terminalApps, type DesktopLaunchInput } from '../shared/terminals'
 import { AppError } from './errors'
@@ -18,12 +19,14 @@ import { ConnectionTickets } from './connections'
 import { withRequestSignal } from './request'
 import { isLoopbackAddress } from '../shared/loopback'
 import { Accounts } from './accounts'
+import { TerminalKeys } from './terminal-keys'
+import { WebTerminals, type TerminalOwner } from './web-terminals'
 
 type Params = { targetId: string; sessionId: string }
 const loopback = (host: string) => ['localhost', '127.0.0.1', '[::1]'].includes(host)
 
 export async function createApp(options: {
-  frontendRoot?: string; logger?: boolean; store?: TargetStore; service?: SessionService; desktop?: DesktopService; software?: SoftwareService; accounts?: Accounts; trustProxy?: string[]
+  frontendRoot?: string; logger?: boolean; store?: TargetStore; service?: SessionService; desktop?: DesktopService; software?: SoftwareService; accounts?: Accounts; trustProxy?: string[]; terminalKeys?: TerminalKeys; terminalGraceMs?: number
 } = {}) {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -34,6 +37,7 @@ export async function createApp(options: {
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, useDefaults: false } },
   })
   await app.register(cookies)
+  await app.register(websocket, { options: { maxPayload: 32 * 1024, perMessageDeflate: false } })
   app.decorateRequest('account', null)
   const accounts = options.accounts
   const store = options.store ?? new TargetStore()
@@ -53,6 +57,10 @@ export async function createApp(options: {
     return context
   }
   const workspace = (request: FastifyRequest) => accounts ? userWorkspace(request.account!.user.id) : { store, targets }
+  const terminalOwner = (request: FastifyRequest): TerminalOwner => accounts ? { userId: request.account!.user.id, authSessionId: request.account!.id } : { userId: 'local', authSessionId: 'local' }
+  const terminalKeys = options.terminalKeys ?? new TerminalKeys(accounts?.store.directory ?? store.directory, accounts?.production ?? false)
+  const webTerminals = new WebTerminals(terminalKeys, owner => !accounts || Boolean(accounts.store.ticketSession(owner.userId, owner.authSessionId)), options.terminalGraceMs)
+  app.addHook('preClose', async () => { webTerminals.close() })
   app.addHook('preClose', () => installations.close())
   const tickets = new ConnectionTickets(accounts ? accounts.store.secret() : await store.secret())
   if (accounts) {
@@ -80,7 +88,7 @@ export async function createApp(options: {
     reply.header('X-Content-Type-Options', 'nosniff')
     reply.header('Referrer-Policy', 'no-referrer')
     reply.header('X-Frame-Options', 'DENY')
-    if (accounts?.production) reply.header('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+    if (accounts?.production) reply.header('Content-Security-Policy', `default-src 'self'; connect-src 'self' ${accounts.publicUrl.origin.replace('https:', 'wss:')}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`)
     const path = request.routeOptions.url ?? request.url.split('?')[0]
     if (accounts && path.startsWith('/api/') && !path.startsWith('/api/auth/') && !path.startsWith('/api/connect/')) accounts.authenticate(request)
   })
@@ -142,7 +150,12 @@ export async function createApp(options: {
     return reply.type('application/x-ndjson; charset=utf-8').send(installations.events(request.params.targetId, request.params.installationId))
   })
   app.delete<{ Params: Params }>('/api/targets/:targetId', async (request, reply) => {
-    await workspace(request).targets.remove(request.params.targetId)
+    const owner = terminalOwner(request)
+    await webTerminals.exclusive(owner, request.params.targetId, async () => {
+      await workspace(request).targets.remove(request.params.targetId)
+      webTerminals.closeTarget(owner, request.params.targetId)
+      await terminalKeys.remove(owner.userId, request.params.targetId)
+    })
     return reply.code(204).send()
   })
   app.get<{ Params: Params }>('/api/targets/:targetId/sessions', async (request, reply) =>
@@ -173,11 +186,77 @@ export async function createApp(options: {
     return reply.code(201).send(await service.create(target, request.body))
   })
   app.delete<{ Params: Params }>('/api/targets/:targetId/sessions/:sessionId', async (request, reply) => {
-    await service.remove(await workspace(request).store.get(request.params.targetId), request.params.sessionId)
+    const owner = terminalOwner(request)
+    await webTerminals.exclusive(owner, request.params.targetId, async () => {
+      await service.remove(await workspace(request).store.get(request.params.targetId), request.params.sessionId)
+      webTerminals.closeTarget(owner, request.params.targetId, request.params.sessionId)
+    })
     return reply.code(204).send()
   })
-  app.post<{ Params: Params }>('/api/targets/:targetId/sessions/:sessionId/terminate', async request =>
-    service.terminate(await workspace(request).store.get(request.params.targetId), request.params.sessionId))
+  app.post<{ Params: Params }>('/api/targets/:targetId/sessions/:sessionId/terminate', async request => {
+    const owner = terminalOwner(request)
+    return webTerminals.exclusive(owner, request.params.targetId, async () => {
+      const session = await service.terminate(await workspace(request).store.get(request.params.targetId), request.params.sessionId)
+      webTerminals.closeTarget(owner, request.params.targetId, request.params.sessionId)
+      return session
+    })
+  })
+  const sshTarget = async (request: FastifyRequest<{ Params: Params }>) => {
+    const target = await workspace(request).store.get(request.params.targetId)
+    if (target.kind !== 'ssh') throw new AppError('Web terminals are available for SSH targets.', 400)
+    return target
+  }
+  app.get<{ Params: Params }>('/api/targets/:targetId/terminal-key', async request => {
+    await sshTarget(request)
+    return terminalKeys.status(terminalOwner(request).userId, request.params.targetId)
+  })
+  app.put<{ Params: Params; Body: { privateKey: string; passphrase?: string } }>('/api/targets/:targetId/terminal-key', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['privateKey'], properties: {
+      privateKey: { type: 'string', minLength: 1, maxLength: 64 * 1024 }, passphrase: { type: 'string', maxLength: 1024 },
+    } } },
+  }, async request => {
+    const owner = terminalOwner(request)
+    return webTerminals.exclusive(owner, request.params.targetId, async () => {
+      await sshTarget(request)
+      const key = await terminalKeys.upload(owner.userId, request.params.targetId, request.body.privateKey, request.body.passphrase)
+      webTerminals.closeTarget(owner, request.params.targetId)
+      return { encryptionAvailable: true, key }
+    })
+  })
+  app.delete<{ Params: Params }>('/api/targets/:targetId/terminal-key', async (request, reply) => {
+    const owner = terminalOwner(request)
+    await webTerminals.exclusive(owner, request.params.targetId, async () => {
+      await sshTarget(request)
+      webTerminals.closeTarget(owner, request.params.targetId)
+      await terminalKeys.remove(owner.userId, request.params.targetId)
+    })
+    return reply.code(204).send()
+  })
+  app.post<{ Params: Params; Body: { cols: number; rows: number } }>('/api/targets/:targetId/sessions/:sessionId/web-terminal', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['cols', 'rows'], properties: {
+      cols: { type: 'integer', minimum: 20, maximum: 300 }, rows: { type: 'integer', minimum: 5, maximum: 120 },
+    } } },
+  }, async request => {
+    const owner = terminalOwner(request)
+    return webTerminals.exclusive(owner, request.params.targetId, async () => {
+      const target = await sshTarget(request)
+      await service.get(target, request.params.sessionId)
+      return webTerminals.start(owner, target, request.params.sessionId, request.body.cols, request.body.rows)
+    })
+  })
+  app.delete<{ Params: { terminalId: string } }>('/api/web-terminals/:terminalId', async (request, reply) => {
+    webTerminals.disconnect(terminalOwner(request), request.params.terminalId)
+    return reply.code(204).send()
+  })
+  app.get<{ Params: { terminalId: string } }>('/api/web-terminals/:terminalId/socket', {
+    websocket: true,
+    preValidation: async request => {
+      if (!request.headers.origin) throw new AppError('A browser origin is required.', 403)
+      // The global origin guard validates hosted origins; local mode also requires the exact host/port.
+      if (!accounts && new URL(request.headers.origin).host !== request.headers.host) throw new AppError('Cross-origin terminal connections are not allowed.', 403)
+      webTerminals.get(terminalOwner(request), request.params.terminalId)
+    },
+  }, (socket, request) => webTerminals.attach(terminalOwner(request), request.params.terminalId, socket))
   app.post<{ Params: Params; Body: { completionId: string } }>('/api/targets/:targetId/sessions/:sessionId/acknowledge', {
     schema: { body: {
       type: 'object', additionalProperties: false, required: ['completionId'],

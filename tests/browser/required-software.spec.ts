@@ -179,6 +179,7 @@ test('both backends can be configured, changed live, and selected per session wi
   await expect(choice.locator('option')).toHaveText(['dtach'])
   await page.getByRole('button', { name: 'Close dialog' }).click()
   await page.locator('.session-row').filter({ has: page.locator('.session-backend-badge.tmux') }).getByRole('button', { name: /^Connection options for / }).click()
+  await page.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('Session backend: tmux')
   await page.getByRole('button', { name: 'Done', exact: true }).click()
   await page.reload()

@@ -84,6 +84,7 @@ test('target drafts survive padding clicks, backdrop clicks, and Escape until ex
 test('connection options also require an explicit close and retain the chosen shell after backdrop clicks and Escape', async ({ page }) => {
   await workspace(page)
   await page.getByRole('button', { name: 'Connection options for Work', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Connect to Work' })
   await dialog.getByRole('combobox', { name: 'Terminal app' }).selectOption('windows-terminal')
   const shell = dialog.getByRole('combobox', { name: 'Shell for copy command' })

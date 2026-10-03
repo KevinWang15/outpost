@@ -94,6 +94,7 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
   await expect(page.locator('.session-backend-badge')).toHaveText(backend)
   await expect(page.locator('.session-identity small')).toContainText(toolLabel)
   await page.getByRole('button', { name: /^Connection options for / }).click()
+  await page.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
   const terminal = page.getByRole('combobox', { name: 'Shell for copy command' })
   await expect(terminal).toHaveValue(backend === 'tmux' ? 'powershell' : 'bash')
   await page.getByRole('combobox', { name: 'Terminal app' }).selectOption('windows-terminal')
@@ -111,6 +112,7 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
   await page.getByRole('button', { name: 'Done', exact: true }).click()
   await page.reload()
   await page.getByRole('button', { name: /^Connection options for / }).click()
+  await page.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
   // This browser's native OS remains the default; favorites are saved per OS.
   await page.getByRole('combobox', { name: 'Terminal app' }).selectOption('windows-terminal')
   await expect(terminal).toHaveValue('powershell')

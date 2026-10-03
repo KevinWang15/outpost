@@ -39,6 +39,26 @@ links expire after 24 hours, reset links after one hour; both are single use.
 Password changes and resets revoke every login session and connection ticket.
 Logout revokes its session and its tickets. Rate limits bound account attempts.
 
+Web terminals are explicitly launched from the session menu. Uploaded private
+keys are scoped to an account and target, normalized after bounded parsing in a
+worker, and encrypted with AES-256-GCM authenticated against that ownership.
+Upload passphrases are discarded after decryption. Files are mode 0600 in a
+0700 directory; metadata APIs never return key material. Production requires a
+32-byte base64 `OUTPOST_TERMINAL_ENCRYPTION_KEY` held separately from the data
+directory. Protect and back up both. A trusted backend operator can access keys
+in memory; encryption does not protect against a compromised running server.
+
+SSH host keys are checked against account management known-host records and
+pinned for web connections on first use. Changed keys fail closed. WebSocket
+upgrades require the permitted browser Origin and a verified login; terminal
+IDs are scoped to the originating login and are not bearer credentials. Login
+revocation is checked on input and every second. Key replacement/removal and
+target deletion close corresponding terminals. Terminal output is held only
+in bounded memory; reconnect restores a screen snapshot, not an unbounded log.
+Input, output backpressure, uploads and concurrent terminal counts are bounded.
+Disconnected attachments expire after 10 minutes. Closing an attachment does
+not terminate the remote tmux/dtach session.
+
 `OUTPOST_MODE=local` preserves the personal workflow without accounts. Its API
 requires a loopback peer, including when accessed through an SSH localhost
 tunnel. A localhost Host header does not authorize a remote peer.

@@ -64,6 +64,7 @@ for (const platform of ['linux', 'darwin', 'win32']) test(`${platform}: add a lo
   await page.getByRole('option', { name: '~/projects/local/' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Create session', exact: true }).click()
   await page.getByRole('button', { name: /^Connection options for / }).click()
+  await page.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
   await expect(page.getByRole('combobox', { name: 'Terminal app' })).toHaveValue(terminal.id)
   await expect(page.getByRole('combobox', { name: 'Shell for copy command' })).toHaveValue(usesWsl ? 'powershell' : 'bash')
   await expect(page.getByRole('dialog')).toContainText('Choose a terminal on the computer running Outpost')

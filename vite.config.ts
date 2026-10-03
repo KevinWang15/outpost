@@ -15,7 +15,7 @@ export default defineConfig({
   server: {
     host: loopbackHost(process.env.VITE_HOST, 'VITE_HOST'),
     proxy: {
-      '/api': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:3000',
+      '/api': { target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:3000', ws: true },
       '/health': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:3000',
     },
   },

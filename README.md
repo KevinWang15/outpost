@@ -62,6 +62,26 @@ For the original personal workspace, set `OUTPOST_MODE=local` in `.env`. This mo
 
 **Your account** lets you change your name and password. **Forgot password?** sends a single-use reset link that lasts one hour. Resetting or changing a password signs out all devices and expires their connection commands. Signing out expires commands issued by that login. Coding sessions keep running on their servers.
 
+### Web terminal on phones
+
+Open a session’s **…** menu and choose **Launch with web terminal**. On first use, upload or paste an SSH private key authorized for root on that target, and enter its passphrase if encrypted. Outpost saves the key encrypted for your account and this target. **Manage key** lets you replace or remove it. The regular **Connect** workflow continues to use your own terminal; browsing the workspace or uploading a key does not launch a web terminal.
+
+The terminal supports touch input, a text/paste field, Ctrl, Esc, Tab, arrows, Ctrl+C, Enter, and Shift+Enter. Outpost holds the SSH PTY for 10 minutes after a network drop and restores its screen on reconnect. Closing the dialog detaches immediately. Signing out, resetting your password, removing the target, or replacing/removing its uploaded key closes affected web terminals. Remote tmux/dtach coding sessions continue running; terminating a session still stops it. Up to four web terminals can be held per account, with one viewer per terminal. Web terminals currently support SSH targets with a direct hostname/IP and port, rather than SSH configuration aliases, jump hosts, or local targets.
+
+For production, set `OUTPOST_TERMINAL_ENCRYPTION_KEY` to a stable 32-byte base64 value (`openssl rand -base64 32`). Store and back it up separately from the data directory. Uploads remain disabled until this is configured. Ed25519, RSA, and ECDSA private keys are accepted, up to 64 KiB; a passphrase unlocks an encrypted upload once and is discarded. The normalized key is encrypted using AES-256-GCM, and APIs return only fingerprints and upload metadata. The SSH host key must match any existing account known-host record; otherwise it is pinned on first web connection, and subsequent changes are rejected. Only upload keys to an Outpost installation you trust: its backend must decrypt them in memory to connect.
+
+Your reverse proxy must forward WebSocket upgrades for `/api/web-terminals/*/socket`. With nginx, include these directives in the existing HTTPS `location /` that proxies to Outpost:
+
+```nginx
+proxy_http_version 1.1;
+proxy_set_header Host $http_host;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+proxy_read_timeout 75s;
+```
+
+Use one backend process per data directory. Held web terminals and their bounded screen buffers are in memory, so a backend restart requires launching the web terminal again; the remote coding session persists. Development/local mode generates a persistent `terminal-keys/development-master-key` with mode 0600. Production uses the separately configured encryption key; back up `terminal-keys/` and that key to retain uploads.
+
 For a public installation, build the app and configure `.env` using this template:
 
 ```dotenv

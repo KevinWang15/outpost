@@ -24,10 +24,13 @@ export function sessionLaunchOptions(input: SessionInput): SessionLaunchOptions 
 }
 
 export const supportedShells = (target: Target) => transportFor(target).shells
+export function sessionAttachOperation(target: Target, id: string) {
+  return `${supportingPath}; exec ${pythonCommand({ action: 'attach', id, context: transportFor(target).context })}`
+}
 export function connectScript(target: Target, id: string, shell: 'bash' | 'powershell') {
   const transport = transportFor(target)
   if (!transport.shells.includes(shell)) throw new AppError('This terminal shell is not supported for this local target', 400)
-  const operation = `${supportingPath}; exec ${pythonCommand({ action: 'attach', id, context: transport.context })}`
+  const operation = sessionAttachOperation(target, id)
   return terminalScript(transport.attach(operation), shell)
 }
 

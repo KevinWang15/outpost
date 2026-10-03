@@ -39,6 +39,7 @@ async function workspace(page: Page, terminal: DesktopTerminal | null, launch: (
 
 async function openOptions(page: Page) {
   await page.getByRole('button', { name: 'Connection options for Desktop session', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
 }
 
 test('Connect directly launches once without preparing commands or opening a modal', async ({ page }) => {
@@ -81,6 +82,7 @@ test('ellipsis opens options with the keyboard, puts terminal selection and laun
   const options = page.getByRole('button', { name: 'Connection options for Desktop session', exact: true })
   await options.focus()
   await options.press('Enter')
+  await page.getByRole('menuitem', { name: 'Connection options', exact: true }).press('Enter')
   const dialog = page.getByRole('dialog')
   const launch = dialog.getByRole('button', { name: 'Launch terminal', exact: true })
   await expect(launch).toBeVisible()

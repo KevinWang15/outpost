@@ -16,6 +16,7 @@ async function connect(page: Page) {
   })
   await page.goto('/')
   await page.getByRole('button', { name: /^Connection options for / }).click()
+  await page.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
 }
 
 test.describe('Windows Terminal keyboard help', () => {

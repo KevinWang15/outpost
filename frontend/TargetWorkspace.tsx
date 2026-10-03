@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import { Circle, Plus, Search, Terminal, X } from 'lucide-react'
 import type {
   Connection,
@@ -20,12 +20,14 @@ import RequiredSoftware from './RequiredSoftware'
 import CodingSessionFinder from './CodingSessionFinder'
 import SessionList from './SessionList'
 import { useSessionConnection, type ConnectionMode } from './useSessionConnection'
+const WebTerminalModal = lazy(() => import('./WebTerminalModal'))
 
 type WorkspaceDialog =
   | { kind: 'session'; id: number; conversation: CodingSessionMatch | null }
   | { kind: 'finder' }
   | { kind: 'connection'; session: Session; data: Connection }
   | { kind: 'image'; session: Session }
+  | { kind: 'web-terminal'; session: Session }
   | { kind: 'confirm'; session: Session; action: 'delete' | 'terminate' }
 
 export default function TargetWorkspace({
@@ -196,6 +198,7 @@ export default function TargetWorkspace({
         checking={checking} onCheck={session => void checkSession(session)}
         onRefresh={() => void refresh()} onCreate={() => openSessionForm()}
         onConnect={connect} onImage={session => openDialog({ kind: 'image', session })}
+        onWebTerminal={target.kind === 'ssh' ? session => openDialog({ kind: 'web-terminal', session }) : undefined}
         onConfirm={(session, action) => openDialog({ kind: 'confirm', session, action })} />
       <div className="bottom-note">
         <Terminal />
@@ -223,6 +226,9 @@ export default function TargetWorkspace({
       {dialog?.kind === 'image' && (
         <ImageAttach targetId={target.id} session={dialog.session} onClose={() => setDialog(null)} />
       )}
+      {dialog?.kind === 'web-terminal' && <Suspense fallback={<Modal title="Web terminal" subtitle="Loading terminal…" onClose={() => setDialog(null)}><p role="status">Loading…</p></Modal>}>
+        <WebTerminalModal target={target} session={dialog.session} onClose={() => { setDialog(null); void refresh() }} />
+      </Suspense>}
       {dialog?.kind === 'confirm' && (
         <Modal
           title={`${dialog.action === 'terminate' ? 'Terminate' : 'Remove'} ${dialog.session.name} (${dialog.session.backend})?`}

@@ -23,11 +23,12 @@ try:
         result = process.call('thread/resume', {'threadId': session_id, 'cwd': cwd})
         assert result['thread']['id'] == session_id
         if turn:
-            process.call('turn/start', {'threadId': session_id, 'input': [{'type': 'text', 'text': 'NATIVE_USER_SEARCH_FIXTURE', 'text_elements': []}]})
+            started = process.call('turn/start', {'threadId': session_id, 'input': [{'type': 'text', 'text': 'NATIVE_USER_SEARCH_FIXTURE', 'text_elements': []}]})['turn']
             while time.monotonic() < process.deadline:
                 thread = process.call('thread/read', {'threadId': session_id, 'includeTurns': True})['thread']
-                if thread['turns'] and thread['turns'][-1]['status'] != 'inProgress':
-                    assert thread['turns'][-1]['status'] == 'completed', thread['turns'][-1]['status']
+                current = next((item for item in thread['turns'] if item['id'] == started['id']), None)
+                if current is not None and current['status'] != 'inProgress':
+                    assert current['status'] == 'completed', current['status']
                     break
                 time.sleep(0.05)
             else:

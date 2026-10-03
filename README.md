@@ -4,6 +4,10 @@
 
 One workspace for **Codex, Claude Code, and Kimi** sessions across your local computer and remote development servers.
 
+**Watch the three-minute overview:**
+
+https://github.com/user-attachments/assets/cd7c1fc0-613a-4670-92c5-39d41a36f4cf
+
 AI agents are becoming part of everyday coding: building features, reviewing changes, and exploring ideas. That work often spans several dev servers, each with its own projects and environments. Connecting from a laptop over ordinary SSH can be fragile: a dropped connection can interrupt an agent tied to the terminal, clipboard features do not carry over as expected, and pasting a design image becomes awkward. As conversations spread across machines, it gets harder to remember where each piece of work is running.
 
 Outpost keeps those sessions organized and accessible. Choose a server, create a named session, select your coding tool and project directory, and connect. Your remote agents run independently of the computer you use to reach them. Close the terminal or your laptop, and they keep running while the dev server stays on. Return from the same computer or another one and reconnect to the same session. Manage several servers and multiple sessions on each, with local sessions in the same workspace too.

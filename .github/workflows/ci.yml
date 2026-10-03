@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run check
+        env:
+          OUTPOST_PWSH: pwsh
+      - run: npm run test:integration
+        env:
+          OUTPOST_PWSH: pwsh
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth xterm tmux dtach
+      - run: npm run test:local
+      - run: npm run test:desktop
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
+
+  native-coding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CODEX_VERSION: '0.159.2'
+      CLAUDE_VERSION: '2.1.284'
+      KIMI_VERSION: '2.1.1'
+      OUTPOST_REQUIRE_CODING_TOOLS: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tmux python3
+      - name: Install pinned native coding tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/outpost-coding-tools" --no-audit --no-fund "@openai/codex@$CODEX_VERSION" "@anthropic-ai/claude-code@$CLAUDE_VERSION"
+          echo "$RUNNER_TEMP/outpost-coding-tools/node_modules/.bin" >> "$GITHUB_PATH"
+          curl -fsSL https://code.kimi.com/kimi-code/install.sh -o "$RUNNER_TEMP/outpost-kimi-install.sh"
+          KIMI_INSTALL_DIR="$RUNNER_TEMP/outpost-kimi" KIMI_CODE_HOME="$RUNNER_TEMP/outpost-kimi-home" KIMI_NO_MODIFY_PATH=1 bash "$RUNNER_TEMP/outpost-kimi-install.sh"
+          echo "$RUNNER_TEMP/outpost-kimi/bin" >> "$GITHUB_PATH"
+      - name: Verify tool versions and native protocols
+        run: |
+          codex --version
+          claude --version
+          kimi --version
+          npm run test:coding
+
+  windows-terminals:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: node --import tsx --test tests/process.test.js tests/powershell.test.js tests/desktop.test.js tests/local.test.js tests/windows-ssh.test.js
+        env:
+          OUTPOST_DESKTOP_NATIVE: '1'
+
+  macos-local:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: node --import tsx --test tests/process.test.js tests/desktop.test.js
+      - run: brew install tmux dtach
+      - run: npm run test:local
+      - run: node --import tsx --test tests/desktop.integration.js

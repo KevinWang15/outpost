@@ -1,0 +1,52 @@
+{
+  "protocol": "Chrome DevTools Protocol / Page.captureScreenshot",
+  "stack": "Vite frontend + Fastify API",
+  "mockData": true,
+  "captureTime": "2026-10-03T09:30:00.000Z",
+  "screenshots": [
+    {
+      "file": "banner.png",
+      "width": 1600,
+      "height": 560,
+      "sha256": "beb02be8c196618f676fe2b773b0c417a444c3f45d577e1bd29ab079200cd834"
+    },
+    {
+      "file": "dashboard-concept.png",
+      "width": 720,
+      "height": 420,
+      "sha256": "0c92fd0d02e9aba254ce09d39ccc0801f65bb0285c6f14c571720766d23b8824"
+    },
+    {
+      "file": "workspace.png",
+      "width": 1440,
+      "height": 1163,
+      "sha256": "36dfac0479599056d8881d5c5f38ef874add8bc09275f28075b860230be0b17b"
+    },
+    {
+      "file": "create-session.png",
+      "width": 800,
+      "height": 694,
+      "sha256": "b7c69574ded0dd9226e70a42c706f50346e7b57353b2aaf641fd191ed7d50504"
+    },
+    {
+      "file": "conversation-search.png",
+      "width": 800,
+      "height": 825,
+      "sha256": "981dab9ea216bb2a0b5d8eeafa5fe0a8f02309ae911e450c1ee18ca441a4d571"
+    },
+    {
+      "file": "image-attachment.png",
+      "width": 800,
+      "height": 674,
+      "sha256": "321c0d17e70fe5a67619b46c52f9c50dc279573076fc870f5dd8c7c83ab1f9fa"
+    }
+  ],
+  "requests": [
+    "GET /api/targets",
+    "GET /api/targets/readme-atlas/directories",
+    "GET /api/targets/readme-atlas/sessions",
+    "GET /api/targets/readme-atlas/software",
+    "POST /api/targets/readme-atlas/coding-sessions/search",
+    "POST /api/targets/readme-atlas/sessions/readme-dashboard/image"
+  ]
+}

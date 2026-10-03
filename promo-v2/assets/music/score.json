@@ -1,0 +1,136 @@
+{
+ "provider": "ElevenLabs Music",
+ "model": "music_v1",
+ "songId": "KKRmbcXe6GB30MjQAUz5",
+ "fingerprint": "991c55c97c6bd5fa656a9fa88b9bca73adbf3001d2daac98e54fd09bd2c02ebf",
+ "plan": {
+  "positive_global_styles": [
+   "modern minimal electronic",
+   "tech product launch film score",
+   "clean polished production",
+   "108 bpm",
+   "D major",
+   "instrumental",
+   "warm and optimistic"
+  ],
+  "negative_global_styles": [
+   "vocals",
+   "lyrics",
+   "heavy metal",
+   "dubstep",
+   "lo-fi hiss",
+   "cinematic trailer braams"
+  ],
+  "sections": [
+   {
+    "section_name": "Intro",
+    "positive_local_styles": [
+     "sparse felt piano and soft analog pluck arpeggio",
+     "warm pad swell",
+     "curious and hopeful",
+     "very gentle, no drums"
+    ],
+    "negative_local_styles": [
+     "no vocals",
+     "no singing",
+     "no lyrics",
+     "no harsh distortion",
+     "no aggressive drops"
+    ],
+    "duration_ms": 16100,
+    "lines": []
+   },
+   {
+    "section_name": "Tension",
+    "positive_local_styles": [
+     "same motif in a minor colour",
+     "muted pulsing bass",
+     "subtle ticking hi-hat",
+     "restrained, slightly unsettled"
+    ],
+    "negative_local_styles": [
+     "no vocals",
+     "no singing",
+     "no lyrics",
+     "no harsh distortion",
+     "no aggressive drops"
+    ],
+    "duration_ms": 18900,
+    "lines": []
+   },
+   {
+    "section_name": "Lift",
+    "positive_local_styles": [
+     "bright major lift",
+     "kick and claps enter softly",
+     "rising synth arpeggio",
+     "optimistic resolution"
+    ],
+    "negative_local_styles": [
+     "no vocals",
+     "no singing",
+     "no lyrics",
+     "no harsh distortion",
+     "no aggressive drops"
+    ],
+    "duration_ms": 14433,
+    "lines": []
+   },
+   {
+    "section_name": "Groove A",
+    "positive_local_styles": [
+     "steady mid-tempo electronic groove",
+     "warm rounded bass",
+     "light shuffled hats",
+     "airy plucks",
+     "unobtrusive background bed for voice-over"
+    ],
+    "negative_local_styles": [
+     "no vocals",
+     "no singing",
+     "no lyrics",
+     "no harsh distortion",
+     "no aggressive drops"
+    ],
+    "duration_ms": 68500,
+    "lines": []
+   },
+   {
+    "section_name": "Groove B",
+    "positive_local_styles": [
+     "groove continues with small variation",
+     "gentle marimba-like plucks",
+     "light percussion",
+     "consistent energy, voice-over friendly"
+    ],
+    "negative_local_styles": [
+     "no vocals",
+     "no singing",
+     "no lyrics",
+     "no harsh distortion",
+     "no aggressive drops"
+    ],
+    "duration_ms": 33000,
+    "lines": []
+   },
+   {
+    "section_name": "Resolve",
+    "positive_local_styles": [
+     "broad warm pads",
+     "groove thins out",
+     "confident uplifting ending",
+     "final chord rings out and fades to silence"
+    ],
+    "negative_local_styles": [
+     "no vocals",
+     "no singing",
+     "no lyrics",
+     "no harsh distortion",
+     "no aggressive drops"
+    ],
+    "duration_ms": 30000,
+    "lines": []
+   }
+  ]
+ }
+}

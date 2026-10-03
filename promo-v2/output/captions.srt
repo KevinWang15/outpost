@@ -1,0 +1,299 @@
+1
+00:00:00,550 --> 00:00:03,569
+AI agents have become part of how we code.
+
+2
+00:00:03,569 --> 00:00:05,287
+We use Codex, Claude Code,
+
+3
+00:00:05,287 --> 00:00:07,052
+and Kimi to build features,
+
+4
+00:00:07,052 --> 00:00:09,525
+review changes, and explore ideas.
+
+5
+00:00:09,525 --> 00:00:10,604
+And more and more,
+
+6
+00:00:10,604 --> 00:00:13,437
+that work runs on remote development servers.
+
+7
+00:00:13,437 --> 00:00:15,693
+Usually, more than one.
+
+8
+00:00:16,650 --> 00:00:19,947
+But working over SSH comes with a few rough edges.
+
+9
+00:00:19,947 --> 00:00:21,248
+When your connection drops,
+
+10
+00:00:21,248 --> 00:00:23,964
+the agent in that terminal can stop with it.
+
+11
+00:00:23,964 --> 00:00:25,915
+Pasting a screenshot into a remote
+
+12
+00:00:25,915 --> 00:00:28,017
+terminal doesn't really work.
+
+13
+00:00:28,017 --> 00:00:29,305
+And once sessions are spread
+
+14
+00:00:29,305 --> 00:00:30,559
+across several servers,
+
+15
+00:00:30,559 --> 00:00:34,394
+it gets hard to remember what's running where.
+
+16
+00:00:35,550 --> 00:00:37,930
+Meet Outpost, the AI session manager
+
+17
+00:00:37,930 --> 00:00:39,346
+that brings it all together.
+
+18
+00:00:39,346 --> 00:00:40,844
+Your agents run on your servers,
+
+19
+00:00:40,844 --> 00:00:42,470
+and they stay there.
+
+20
+00:00:42,470 --> 00:00:44,269
+From your laptop, or your desktop,
+
+21
+00:00:44,269 --> 00:00:45,511
+you see every session,
+
+22
+00:00:45,511 --> 00:00:48,510
+on every server, in one place.
+
+23
+00:00:49,983 --> 00:00:52,247
+Starting a session takes just a moment.
+
+24
+00:00:52,247 --> 00:00:54,720
+Pick a server, give the session a name,
+
+25
+00:00:54,720 --> 00:00:56,531
+and choose your agent.
+
+26
+00:00:56,531 --> 00:00:58,307
+Then point it at a project folder,
+
+27
+00:00:58,307 --> 00:01:00,653
+with suggestions as you type.
+
+28
+00:01:00,653 --> 00:01:03,183
+If the agent isn't installed on that server yet,
+
+29
+00:01:03,183 --> 00:01:06,008
+the manager can install it for you.
+
+30
+00:01:07,483 --> 00:01:08,540
+Click Connect,
+
+31
+00:01:08,540 --> 00:01:10,687
+and a terminal opens on your computer,
+
+32
+00:01:10,687 --> 00:01:12,510
+already attached to the session.
+
+33
+00:01:12,510 --> 00:01:14,809
+You see exactly what the agent is doing,
+
+34
+00:01:14,809 --> 00:01:17,549
+and you can pick up the conversation right away.
+
+35
+00:01:17,549 --> 00:01:19,813
+It's like remote desktop, built for coding,
+
+36
+00:01:19,813 --> 00:01:23,183
+with no graphical desktop needed on the server.
+
+37
+00:01:24,450 --> 00:01:26,609
+Because the session lives on the server,
+
+38
+00:01:26,609 --> 00:01:29,187
+your connection is just a window into it.
+
+39
+00:01:29,187 --> 00:01:32,182
+Close your laptop, or lose your Wi-Fi,
+
+40
+00:01:32,182 --> 00:01:34,051
+and the agent keeps working.
+
+41
+00:01:34,051 --> 00:01:36,756
+Later, reconnect from the same computer,
+
+42
+00:01:36,756 --> 00:01:37,836
+or a different one,
+
+43
+00:01:37,836 --> 00:01:41,032
+and you're right back where you left off.
+
+44
+00:01:42,483 --> 00:01:45,687
+Need to show the agent a screenshot or a design?
+
+45
+00:01:45,687 --> 00:01:47,452
+Paste the image into the manager,
+
+46
+00:01:47,452 --> 00:01:49,344
+and send it to the session.
+
+47
+00:01:49,344 --> 00:01:51,643
+It lands right in the agent's prompt,
+
+48
+00:01:51,643 --> 00:01:53,934
+ready for your next instruction.
+
+49
+00:01:54,186 --> 00:01:57,208
+No more fighting a remote clipboard.
+
+50
+00:01:58,483 --> 00:02:00,968
+Looking for an earlier conversation?
+
+51
+00:02:00,968 --> 00:02:03,359
+Search a server by topic, phrase,
+
+52
+00:02:03,359 --> 00:02:06,970
+or error message, and reopen the session you need.
+
+53
+00:02:06,970 --> 00:02:09,687
+The search runs on the server itself.
+
+54
+00:02:09,687 --> 00:02:11,115
+Your history stays there,
+
+55
+00:02:11,115 --> 00:02:14,044
+and only the matching snippets come back.
+
+56
+00:02:15,317 --> 00:02:16,966
+With several agents running at once,
+
+57
+00:02:16,966 --> 00:02:19,601
+the manager shows you where you are needed.
+
+58
+00:02:19,601 --> 00:02:21,656
+You can see which agents are working,
+
+59
+00:02:21,656 --> 00:02:22,678
+which are idle,
+
+60
+00:02:22,678 --> 00:02:23,653
+and which have finished a
+
+61
+00:02:23,653 --> 00:02:25,986
+turn and are waiting for you.
+
+62
+00:02:25,986 --> 00:02:27,658
+Check in, and the notice clears,
+
+63
+00:02:27,658 --> 00:02:30,227
+so you can move on to the next one.
+
+64
+00:02:31,483 --> 00:02:33,236
+And your servers stay simple.
+
+65
+00:02:33,236 --> 00:02:35,581
+They're agentless, with no extra manager
+
+66
+00:02:35,581 --> 00:02:37,520
+service to keep running on them.
+
+67
+00:02:37,520 --> 00:02:39,494
+The design also leaves room to grow,
+
+68
+00:02:39,494 --> 00:02:41,410
+including support for custom AI
+
+69
+00:02:41,410 --> 00:02:44,675
+harnesses as your workflow evolves.
+
+70
+00:02:45,950 --> 00:02:47,599
+Whichever computer you sit down at,
+
+71
+00:02:47,599 --> 00:02:48,922
+your agents and conversations
+
+72
+00:02:48,922 --> 00:02:50,942
+are right where you left them.
+
+73
+00:02:50,942 --> 00:02:54,367
+Outpost, the AI session manager.
+
+74
+00:02:54,367 --> 00:02:55,679
+Keep the session.
+
+75
+00:02:55,679 --> 00:02:57,424
+Keep your flow.

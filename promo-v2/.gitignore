@@ -1,0 +1,4 @@
+/node_modules/
+/output/*
+!/output/captions.srt
+!/output/poster.png

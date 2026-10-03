@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Example dashboard design</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f8fafc; color: #17253b; font-family: Arial, sans-serif; }
+    main { width: 720px; height: 420px; padding: 30px; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 25px; }
+    header img { width: 36px; height: 36px; }
+    h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.4px; }
+    .subtitle { margin: 0; color: #64748b; font-size: 12px; }
+    .cards { display: flex; gap: 14px; }
+    .cards article { flex: 1; padding: 18px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; font-size: 12px; }
+    strong { display: block; margin: 10px 0; color: #2563eb; font-size: 29px; }
+    small { color: #64748b; font-size: 11px; }
+    .chart { margin-top: 17px; padding: 17px 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; }
+    .chart p { margin: 0 0 15px; color: #475569; font-size: 12px; }
+    .bars { display: flex; align-items: end; gap: 19px; height: 93px; }
+    .bars span { flex: 1; height: var(--height); border-radius: 5px 5px 0 0; background: #dbeafe; }
+    .bars span:last-child { background: #2563eb; }
+  </style>
+</head>
+<body>
+  <main>
+    <header><img src="/outpost.svg" alt="" /><div><h1>Project overview</h1><p class="subtitle">Dashboard concept · current sprint</p></div></header>
+    <div class="cards"><article>Milestone progress<strong>80%</strong><small>Ready for review</small></article><article>Tasks completed<strong>24</strong><small>Across three projects</small></article><article>Next milestone<strong>Launch</strong><small>Bring it all together</small></article></div>
+    <div class="chart"><p>Progress this week</p><div class="bars"><span style="--height: 25%"></span><span style="--height: 42%"></span><span style="--height: 36%"></span><span style="--height: 60%"></span><span style="--height: 70%"></span><span style="--height: 84%"></span><span style="--height: 100%"></span></div></div>
+  </main>
+</body>
+</html>

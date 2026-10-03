@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Outpost README banner</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #17253b; font-family: Arial, sans-serif; }
+    main { position: relative; display: flex; align-items: center; gap: 80px; width: 1600px; height: 560px; overflow: hidden; padding: 62px 78px; background: #f7faff; }
+    main::before { position: absolute; inset: 0; background: radial-gradient(ellipse at 90% 18%, #cffafe80, transparent 55%), linear-gradient(90deg, transparent 60%, #eff6ff); content: ''; }
+    main::after { position: absolute; inset: 0; background-image: linear-gradient(#cbd5e125 1px, transparent 1px), linear-gradient(90deg, #cbd5e125 1px, transparent 1px); background-size: 36px 36px; mask-image: linear-gradient(90deg, transparent 45%, #000); content: ''; }
+    .copy, .illustration { position: relative; z-index: 1; }
+    .copy { flex: 1; }
+    .brand { display: flex; align-items: center; gap: 22px; }
+    .brand img { width: 86px; height: 86px; }
+    h1 { margin: 0; font-size: 66px; font-weight: 700; letter-spacing: -3px; line-height: 1; }
+    .eyebrow { margin: 11px 0 0; color: #64748b; font-size: 15px; font-weight: 600; letter-spacing: 2.8px; }
+    h2 { margin: 36px 0 18px; font-size: 47px; font-weight: 600; letter-spacing: -1.8px; line-height: 1.2; }
+    .description { margin: 0; color: #52657e; font-size: 23px; line-height: 1.65; }
+    .tools { display: flex; gap: 12px; margin-top: 30px; }
+    .tools span { padding: 9px 16px; border: 1px solid #d6e2ef; border-radius: 9px; background: #ffffffb3; color: #475569; font-size: 17px; }
+    .illustration { flex: 0 0 528px; padding-top: 8px; }
+    .caption { margin: 0 0 19px 21px; color: #64748b; font-size: 13px; font-weight: 600; letter-spacing: 2px; }
+    .session { display: flex; align-items: center; gap: 17px; margin-bottom: 15px; padding: 21px 24px; border: 1px solid #d7e4f0; border-radius: 16px; background: #ffffffee; box-shadow: 0 10px 24px #17253b07; }
+    .session:nth-of-type(2) { transform: translateX(18px); }
+    .session:nth-of-type(3) { transform: translateX(36px); }
+    .terminal { display: grid; place-items: center; flex-shrink: 0; width: 49px; height: 49px; border: 1px solid #dbeafe; border-radius: 12px; background: #eff6ff; color: #2563eb; font: 25px Consolas, monospace; }
+    .session strong { display: block; margin-bottom: 7px; font-size: 18px; }
+    .session small { color: #64748b; font-size: 14px; }
+    .state { margin-left: auto; padding: 7px 10px; border-radius: 7px; background: #eff6ff; color: #2563eb; font-size: 12px; white-space: nowrap; }
+    .state.finished { background: #fffbeb; color: #a16207; }
+    .state.idle { background: #f1f5f9; color: #64748b; }
+    .footer { display: flex; align-items: center; gap: 10px; margin: 21px 0 0 58px; color: #52657e; font-size: 15px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #0891b2; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="copy">
+      <div class="brand">
+        <img src="/outpost.svg" alt="Outpost logo" />
+        <div><h1>Outpost</h1><p class="eyebrow">AI SESSION MANAGER</p></div>
+      </div>
+      <h2>Keep the session.<br />Keep your flow.</h2>
+      <p class="description">Your coding agents. Your development servers.<br />One place to pick up where you left off.</p>
+      <div class="tools"><span>Codex</span><span>Claude Code</span><span>Kimi</span></div>
+    </div>
+    <div class="illustration" aria-label="Coding sessions across local and remote targets">
+      <p class="caption">ONE WORKSPACE. EVERY SESSION.</p>
+      <div class="session"><span class="terminal">›_</span><div><strong>Build the dashboard</strong><small>Codex · Atlas development</small></div><span class="state">Working</span></div>
+      <div class="session"><span class="terminal">›_</span><div><strong>Review the API</strong><small>Claude Code · Research lab</small></div><span class="state finished">Turn finished</span></div>
+      <div class="session"><span class="terminal">›_</span><div><strong>Explore the next idea</strong><small>Kimi · This computer</small></div><span class="state idle">Idle</span></div>
+      <p class="footer"><span class="dot"></span>Local machines + remote development servers</p>
+    </div>
+  </main>
+</body>
+</html>

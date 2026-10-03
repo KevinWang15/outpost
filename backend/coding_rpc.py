@@ -31,9 +31,7 @@ class JsonRpcProcess:
         except (BrokenPipeError, OSError) as error:
             raise ValueError('Coding CLI exited during session initialization. Check its configuration and login.') from error
 
-    def call(self, method, params):
-        self.sequence += 1
-        self.send({'jsonrpc': '2.0', 'id': self.sequence, 'method': method, 'params': params})
+    def receive(self):
         while time.monotonic() < self.deadline:
             if b'\n' not in self.buffer:
                 if not self.selector.select(min(1, max(0, self.deadline - time.monotonic()))):
@@ -44,26 +42,39 @@ class JsonRpcProcess:
                 self.buffer += chunk
                 if len(self.buffer) > 1024 * 1024:
                     raise ValueError('Coding CLI protocol response exceeded the size limit')
-            while b'\n' in self.buffer:
-                line, self.buffer = self.buffer.split(b'\n', 1)
-                try:
-                    message = json.loads(line)
-                except (ValueError, UnicodeError, RecursionError) as error:
-                    raise ValueError('Coding CLI returned an invalid protocol response') from error
-                if not isinstance(message, dict):
-                    raise ValueError('Coding CLI returned an invalid protocol response')
-                if message.get('id') == self.sequence and ('result' in message or 'error' in message):
-                    if 'error' in message:
-                        error = message['error']
-                        if not isinstance(error, dict) or not isinstance(error.get('message'), str):
-                            raise ValueError('Coding CLI returned an invalid protocol error')
-                        raise ValueError('Coding CLI initialization failed: ' + error['message'][:280])
-                    if not isinstance(message['result'], dict):
-                        raise ValueError('Coding CLI returned an invalid protocol result')
-                    return message['result']
-                if 'id' in message and 'method' in message:
-                    self.send({'jsonrpc': '2.0', 'id': message['id'], 'error': {'code': -32601, 'message': 'No interactive client during initialization'}})
+                if b'\n' not in self.buffer:
+                    continue
+            line, self.buffer = self.buffer.split(b'\n', 1)
+            try:
+                message = json.loads(line)
+            except (ValueError, UnicodeError, RecursionError) as error:
+                raise ValueError('Coding CLI returned an invalid protocol response') from error
+            if not isinstance(message, dict):
+                raise ValueError('Coding CLI returned an invalid protocol response')
+            return message
         raise ValueError('Coding CLI session initialization timed out. Check its configuration and login.')
+
+    def notification(self, message):
+        """Override to observe notifications while waiting for an RPC response."""
+
+    def call(self, method, params):
+        self.sequence += 1
+        self.send({'jsonrpc': '2.0', 'id': self.sequence, 'method': method, 'params': params})
+        while True:
+            message = self.receive()
+            if message.get('id') == self.sequence and ('result' in message or 'error' in message):
+                if 'error' in message:
+                    error = message['error']
+                    if not isinstance(error, dict) or not isinstance(error.get('message'), str):
+                        raise ValueError('Coding CLI returned an invalid protocol error')
+                    raise ValueError('Coding CLI initialization failed: ' + error['message'][:280])
+                if not isinstance(message['result'], dict):
+                    raise ValueError('Coding CLI returned an invalid protocol result')
+                return message['result']
+            if 'id' in message and 'method' in message:
+                self.send({'jsonrpc': '2.0', 'id': message['id'], 'error': {'code': -32601, 'message': 'No interactive client during initialization'}})
+            elif 'method' in message:
+                self.notification(message)
 
     def close(self):
         self.selector.close()

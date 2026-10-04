@@ -133,7 +133,7 @@ export default function App() {
           </span>
         </a>
         <div className="workspace-label">
-          <Circle className="status-indicator" size={6} fill="currentColor" strokeWidth={0} aria-hidden="true" /> {hosted ? 'YOUR WORKSPACE' : 'LOCAL WORKSPACE'}{' '}
+          <Circle className="status-indicator" size={6} fill="currentColor" strokeWidth={0} aria-hidden="true" /> {hosted ? 'HOSTED WORKSPACE' : 'LOCAL WORKSPACE'}{' '}
           <span className="version">v0.1</span>
         </div>
         <div className="sidebar-section">
@@ -193,9 +193,10 @@ export default function App() {
             <strong>{selected?.name ?? 'Overview'}</strong>
           </div>
           {hosted ? <div className="account-controls">
+            <span className="mode-badge" title="Hosted mode: accounts and server SSH connections">Hosted service</span>
             <button className="button secondary" onClick={() => setAccountOpen(true)} title={user?.email}><UserRound /><span>{user?.name}</span><span className="sr-only"> — Your account</span></button>
             <button className="icon-button" aria-label="Sign out" title="Sign out" disabled={signingOut} onClick={async () => { setSigningOut(true); setAccountError(''); try { await signOut() } catch (problem) { setAccountError((problem as Error).message) } finally { setSigningOut(false) } }}><LogOut /></button>
-          </div> : <span className="local-badge">
+          </div> : <span className="mode-badge local-badge" title="Local mode: personal workspace and desktop terminal launch">
             <Circle className="status-indicator green" size={6} fill="currentColor" strokeWidth={0} aria-hidden="true" /> Local manager
           </span>}
         </header>
@@ -241,7 +242,7 @@ export default function App() {
                   <Plus /> Add your first target
                 </button>
                 <span className="welcome-footnote">
-                  {hosted ? 'SSH · No custom agent · Your own terminal' : 'Local or SSH · No custom agent · Your own terminal'}
+                  {hosted ? 'Server SSH · Web terminal · Phone access' : 'Local or SSH · One-click desktop terminal'}
                 </span>
               </section>
               {hosted && <AccountSshKey />}
@@ -250,7 +251,7 @@ export default function App() {
                   [
                     '01',
                     'Connect a machine',
-                    hosted ? 'Authorize your key, then add your dev server.' : 'Use this computer or SSH to your dev server.',
+                    hosted ? 'Authorize your Outpost key so the service can manage your dev server.' : 'Use this computer or SSH to your dev server.',
                   ],
                   [
                     '02',
@@ -260,7 +261,7 @@ export default function App() {
                   [
                     '03',
                     'Leave. Come back. Continue.',
-                    'Close your terminal while your coding tool keeps running.',
+                    hosted ? 'Open a web terminal from the session menu, even on your phone.' : 'Close your terminal while your coding tool keeps running.',
                   ],
                 ].map(([number, title, description]) => (
                   <div key={number}>

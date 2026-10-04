@@ -5,14 +5,16 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
+import { createServer } from 'node:http'
 import { setTimeout as delay } from 'node:timers/promises'
 import ssh2 from 'ssh2'
-import { WebSocket } from 'ws'
+import { WebSocket, WebSocketServer } from 'ws'
 import { TerminalKeys } from '../backend/terminal-keys.ts'
 import { createApp } from '../backend/app.ts'
 import { Accounts } from '../backend/accounts.ts'
 import { TargetStore } from '../backend/store.ts'
 import { webSshFixture } from './fixtures/web-ssh.ts'
+import { WebTerminals } from '../backend/web-terminals.ts'
 
 async function until(predicate) { for (let i = 0; i < 100; i++) { if (predicate()) return; await delay(30) }; assert.fail('condition timed out') }
 async function connect(origin, id, cookie, extra = {}) {
@@ -181,6 +183,43 @@ test('real SSH web terminal: explicit launch, private credentials, origin/auth c
   assert.equal((await request('DELETE', `/api/web-terminals/${expiring.id}`, undefined, newCookie)).statusCode, 404, 'unattached terminals expire')
   await request('DELETE', `/api/targets/${target.id}`, undefined, newCookie)
   assert.equal((await new TerminalKeys(directory).status(alice.user.id, target.id)).key, null, 'target removal deletes uploaded key')
+})
+
+for (const stderr of [false, true]) test(`screen snapshots preserve SSH ${stderr ? 'stderr' : 'stdout'} arriving during replay`, { timeout: 10000 }, async t => {
+  const ssh = await webSshFixture(), owner = { userId: 'alice', authSessionId: 'session' }
+  const terminals = new WebTerminals({ read: async () => ({ privateKey: ssh.key }), knownHostKeys: async () => [], verifyHost: async () => true })
+  const server = createServer(), sockets = new WebSocketServer({ server })
+  let viewer, release
+  t.after(async () => {
+    release?.(true); viewer?.terminate(); terminals.close()
+    await new Promise(resolve => sockets.close(resolve))
+    await new Promise(resolve => server.close(resolve)); await ssh.close()
+  })
+  const target = { id: 'target', name: 'SSH', kind: 'ssh', host: '127.0.0.1', port: ssh.port, backends: ['tmux'], tools: ['codex'] }
+  const info = await terminals.start(owner, target, 'test', 80, 24), entry = terminals.get(owner, info.id)
+  await new Promise(resolve => entry.screen.write('', resolve))
+  // Hold the real terminal parser to reproduce a busy screen during reconnect.
+  const parsing = new Promise(resolve => entry.screen.parser.registerCsiHandler({ prefix: '?', final: 'h' }, () => {
+    resolve(); return new Promise(done => { release = done })
+  }))
+  ssh.output('\x1b[?9001h'); await parsing
+  const pending = entry.pending
+  sockets.on('connection', socket => terminals.attach(owner, info.id, socket))
+  server.listen(0, '127.0.0.1'); await once(server, 'listening')
+  viewer = new WebSocket(`ws://127.0.0.1:${server.address().port}`)
+  let screen = ''
+  viewer.on('message', (data, binary) => {
+    const text = binary ? data.toString() : JSON.parse(data).data
+    if (text !== undefined) { screen += text; viewer.send(JSON.stringify({ type: 'ack', bytes: binary ? data.length : Buffer.byteLength(text) })) }
+  })
+  await once(viewer, 'open')
+  const marker = 'OUTPUT_DURING_SCREEN_REPLAY'
+  ssh.output(`\r\n${marker}\r\n`, stderr)
+  // Wait until the bytes are queued behind the snapshot, or SSH is paused until
+  // that snapshot is sent. Both paths exercise the same arrival ordering.
+  await until(() => entry.pending > pending || (stderr ? entry.channel.stderr : entry.channel).isPaused())
+  release(true)
+  await until(() => screen.includes(marker))
 })
 
 test('concurrent launches cannot bypass terminal limits and slow viewers apply SSH output backpressure', { timeout: 30000 }, async t => {

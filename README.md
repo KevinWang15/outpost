@@ -12,19 +12,39 @@ AI agents are becoming part of everyday coding: building features, reviewing cha
 
 Outpost keeps those sessions organized and accessible. Choose a server, create a named session, select your coding tool and project directory, and connect. Your remote agents run independently of the computer you use to reach them. Close the terminal or your laptop, and they keep running while the dev server stays on. Return from the same computer or another one and reconnect to the same session. Manage several servers and multiple sessions on each, with local sessions in the same workspace too.
 
-- **Connect with one click.** Open a terminal on the computer running the manager, already attached to the coding session. See what the agent is doing and continue the conversation, with the convenience of remote desktop and no graphical desktop to set up on the server.
+- **Connect with one click in local mode.** Open a terminal on your computer, already attached to the coding session. Local mode is the default and needs no account.
+- **Use a web terminal in hosted mode.** Select **… → Launch with web terminal** to connect from your browser, including on a phone. The service holds the SSH connection to your server.
 - **Send images to remote agents.** Paste or drop an image into the manager and send it to the coding session, with automatic insertion into supported running sessions.
 - **Find earlier conversations.** Search by topic, phrase, or error message and reopen the session you need. Remote searches run on your dev servers; conversation history stays there and is not downloaded unnecessarily.
 - **See which agent needs you.** Activity indicators distinguish working, idle, and finished turns waiting for your input. Checking a finished turn clears its notice.
 - **Get required software ready.** See what is installed, identify what is missing, and automatically install required software from the manager.
 - **Keep your servers agentless.** There is no extra manager service to keep running on each dev server. Tool adapters leave room to add custom AI harnesses as your workflow grows.
-- **Give each user a workspace.** Sign up, verify your email, and connect your own servers with an account-specific SSH key. Profile settings and password recovery are built in.
+- **Give each user a workspace in hosted mode.** Sign up, verify your email, and connect your own servers with an account-specific SSH key. Profile settings and password recovery are built in.
 
 Explore the [promo project](promo-v2/README.md) for the film's editable sources, screenshots, and rebuild instructions. Generated audio and movies are kept outside Git.
 
 Built with React, Vite, SCSS, Fastify, and TypeScript. Hosted accounts use Node's built-in SQLite; no database service is required. See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
 
-## Run
+## Deployment modes
+
+Choose how Outpost runs with `OUTPOST_MODE`. **Local is the default when the variable is unset.** Hosted mode is an explicit choice for operating a platform or service. The choice applies to the whole installation and takes effect after restarting the backend.
+
+| | Local tool — default | Hosted service — opt-in |
+| --- | --- | --- |
+| Setting | Unset, or `OUTPOST_MODE=local` | `OUTPOST_MODE=hosted` |
+| Runs on | Your computer | A server reachable by users |
+| Authentication | No login, signup, or user accounts | Verified signup, login, profile, and password recovery |
+| Targets | This computer / WSL and SSH servers | SSH servers only |
+| Management SSH credentials | Your existing OpenSSH config, agent, or identity file | A separate Outpost SSH key and known-host records for each account |
+| Main connection workflow | **Connect** launches a desktop terminal on the Outpost computer | **… → Launch with web terminal** opens a browser terminal; the backend connects to the target with an uploaded key |
+| Desktop launch | One click, using your saved terminal preference | Unavailable; a service cannot open a user's desktop terminal |
+| Phone access | Intended for use with your desktop terminal | Browser terminal with touch controls and reconnect support |
+| Network | Loopback only; optionally access through an SSH tunnel | HTTPS reverse proxy in production, with WebSocket forwarding |
+| Manager state | Personal `targets.json` | `accounts.sqlite`, per-user workspaces, and encrypted terminal-key uploads |
+
+Both modes manage the same persistent tmux/dtach coding sessions on execution hosts. Changing deployment mode does not migrate target settings or accounts: local targets remain in the top-level store, and hosted targets remain in their user workspaces. Use separate `OUTPOST_DATA_DIR` values for separate installations. An existing `.env` with `OUTPOST_MODE=hosted` stays hosted; unset it or select `local` to use the local tool.
+
+## Run the local tool (default)
 
 Requires Node.js 24+, npm 11+, and Git. SSH targets also require an OpenSSH client on the manager and connecting computers. Choose the shell matching your terminal:
 
@@ -41,7 +61,7 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. The API runs on `127.0.0.1:3000`, proxied through Vite. The default **hosted** mode opens the sign-in page. Create an account and verify your email; without mail credentials, a local development email link appears in the UI. Alternatively:
+Open **http://127.0.0.1:5173**. The API runs on `127.0.0.1:3000`, proxied through Vite. The local workspace opens immediately, without signup or login. Add a local or SSH target, create a session, and click **Connect** to launch a terminal on the computer running Outpost. Alternatively:
 
 ```sh
 npm run build
@@ -49,22 +69,34 @@ npm start
 # Open http://127.0.0.1:3000
 ```
 
-Run one manager process per data directory. `OUTPOST_DATA_DIR` overrides `~/.outpost`; `.env.example` documents the settings. Development, Vite, and local mode require loopback listeners. Hosted production can accept remote users after configuring HTTPS and email as described below.
+No `.env`, mail service, public URL, or user database is needed for local mode. `NODE_ENV=production` does not enable accounts: a built app still defaults to local. You may copy `.env.example` to `.env` to customize the port or data directory. `OUTPOST_DATA_DIR` overrides `~/.outpost`; run one manager process per data directory. Local mode, development, and Vite require loopback listeners.
 
-For the original personal workspace, set `OUTPOST_MODE=local` in `.env`. This mode has no login and supports local targets and desktop terminal launching. Existing top-level target settings stay in local mode; hosted accounts start with separate target lists.
+For local mode on another machine, forward its web port to the **same** port on your computer, e.g. `ssh -L 3000:127.0.0.1:3000 manager-machine`, then open `http://127.0.0.1:3000`. Desktop launch still opens an app on the manager computer. **Connection options → Copy command** lets you connect from your own computer instead; it must also have SSH access to the target. Use consistent SSH aliases on both computers. Leave the identity field empty to use each SSH client's configuration, or use `~/.ssh/key` to resolve against each computer's home directory. Absolute identity paths must exist on both; Windows and WSL have separate SSH configurations and home directories.
 
-## Accounts and hosted setup
+The optional web terminal is also available for direct SSH targets in local mode via the session menu. It uses a separately uploaded encrypted key on your local manager and introduces no accounts. The desktop **Connect** action remains the default.
+
+## Run a hosted service
+
+Set `OUTPOST_MODE=hosted` explicitly in `.env` or the server environment. The service requires Node.js 24+, npm 11+, and an OpenSSH client. The backend manages users' SSH credentials and makes management and web-terminal connections directly from the service to their targets. Users need a browser, including a mobile browser; the service cannot launch apps on their computers. The welcome page and session list identify this mode.
+
+To try it locally, copy `.env.example` to `.env`, change `OUTPOST_MODE` to `hosted`, choose a separate `OUTPOST_DATA_DIR`, and run `npm run dev`. Without mail credentials, loopback development shows simulated verification and password-reset links in the UI. For public deployment, use the [production configuration below](#production-configuration).
+
+### User workflow
 
 1. **Create an account.** Enter your name, email, and a password of at least 8 characters. Verify the link in your inbox to sign in. Verification links last 24 hours; sign-in can resend them.
 2. **Authorize your Outpost key.** Copy your public key from the welcome page or **Your account** and add it to `/root/.ssh/authorized_keys` on your dev server. The manager uses this account's Ed25519 key, with separate known-host records. It does not use a shared SSH agent, manager identity file, or SSH aliases.
 3. **Add an SSH target.** Enter a hostname/IP and port (default 22), select tools and backends, and manage sessions as usual. Hosted accounts support SSH targets; local execution and desktop launching are available in local mode.
-4. **Connect from your terminal.** Connect opens a command to paste on your own computer. That computer also needs its own SSH access to the server. The optional identity file in a hosted target applies only to this client command.
+4. **Launch a browser terminal.** Choose **… → Launch with web terminal** beside a session. On first use, upload a private SSH key authorized on that target. The backend opens and holds the connection; it works from phones without a local SSH client. Browsing a workspace or preparing a command never automatically launches a web terminal.
+
+There are two SSH credentials in this workflow: the generated **Outpost account key** is used by the service for session management, software checks, and other target operations; the **uploaded private key for a target** is used for its web terminal. Both need access to that target's root account. Keep the service's account public key authorized even after uploading a terminal key.
+
+**Connection options** provides an optional command to paste into a terminal on your own computer. That computer needs its own SSH access to the target. The target's optional **Your terminal's identity file** field applies only to this copied command; it does not select a key on the service. Hosted mode offers no **Connect** desktop-launch action or **Launch terminal** button.
 
 **Your account** lets you change your name and password. **Forgot password?** sends a single-use reset link that lasts one hour. Resetting or changing a password signs out all devices and expires their connection commands. Signing out expires commands issued by that login. Coding sessions keep running on their servers.
 
 ### Web terminal on phones
 
-Open a session’s **…** menu and choose **Launch with web terminal**. On first use, upload or paste an SSH private key authorized for root on that target, and enter its passphrase if encrypted. Outpost saves the key encrypted for your account and this target. **Manage key** lets you replace or remove it. The regular **Connect** workflow continues to use your own terminal; browsing the workspace or uploading a key does not launch a web terminal.
+Open a session’s **…** menu and choose **Launch with web terminal**. On first use, upload or paste an SSH private key authorized for root on that target, and enter its passphrase if encrypted. Outpost saves the key encrypted for your account and this target. **Manage key** lets you replace or remove it. Only this explicit menu choice opens a web terminal; **Connection options** prepares a command for your own terminal.
 
 The terminal supports touch input, a text/paste field, Ctrl, Esc, Tab, arrows, Ctrl+C, Enter, and Shift+Enter. Outpost holds the SSH PTY for 10 minutes after a network drop and restores its screen on reconnect. Closing the dialog detaches immediately. Signing out, resetting your password, removing the target, or replacing/removing its uploaded key closes affected web terminals. Remote tmux/dtach coding sessions continue running; terminating a session still stops it. Up to four web terminals can be held per account, with one viewer per terminal. Web terminals currently support SSH targets with a direct hostname/IP and port, rather than SSH configuration aliases, jump hosts, or local targets.
 
@@ -82,7 +114,9 @@ proxy_read_timeout 75s;
 
 Use one backend process per data directory. Held web terminals and their bounded screen buffers are in memory, so a backend restart requires launching the web terminal again; the remote coding session persists. Back up the entire data directory, including `terminal-keys/` and its generated master key, to retain uploads. Existing `terminal-keys/development-master-key` files are reused automatically. If you use the environment override, also back up that key.
 
-For a public installation, build the app and configure `.env` using this template:
+### Production configuration
+
+For a public hosted installation, build the app and configure `.env` using this template:
 
 ```dotenv
 OUTPOST_MODE=hosted
@@ -102,9 +136,7 @@ Run `npm run build && npm start` behind an HTTPS reverse proxy that preserves th
 
 Back up the entire data directory while the manager is stopped: `accounts.sqlite` contains users, token hashes, login sessions, and the signing secret; `users/<id>/` contains target settings, the account's private SSH key, public key, and known-host file. Keep this state private and persistent across restarts. Per-user target ownership is checked on every API operation. Users authorized for the same remote root account share that server's sessions and conversation history according to its SSH permissions.
 
-When upgrading an existing local installation, set `OUTPOST_MODE=local` and `OUTPOST_DATA_DIR` to your current manager configuration directory to retain target settings and signing keys. Execution hosts now store sessions under `~/.outpost`. Stop existing sessions before moving their state into that directory, then reconnect from Outpost to restart them with the current socket layout and tmux session names. Existing coding-tool conversation histories remain available to search and link.
-
-For local mode on another machine, forward its web port to the **same** port on your computer, e.g. `ssh -L 3000:127.0.0.1:3000 manager-machine`, then open `http://127.0.0.1:3000`. For SSH targets, the generated attach command executes SSH on the computer where you paste it, which must also have SSH access to the dev machine. Use consistent SSH aliases on both computers. Leave the identity field empty to use each SSH client’s configuration, or use `~/.ssh/key` to resolve against the home directory on each computer. Explicit absolute paths must exist on both; Windows paths such as `C:\Users\Dev\.ssh\id_ed25519` are also accepted. Windows and WSL have separate SSH configurations and home directories.
+When upgrading an existing local installation, select `OUTPOST_MODE=local` (or leave it unset) and keep `OUTPOST_DATA_DIR` pointed at your current configuration directory to retain target settings and signing keys. Execution hosts now store sessions under `~/.outpost`. Stop existing sessions before moving their state into that directory, then reconnect from Outpost to restart them with the current socket layout and tmux session names. Existing coding-tool conversation histories remain available to search and link.
 
 ## Screenshots
 
@@ -137,7 +169,7 @@ The capture script starts the Vite frontend and Fastify API with mock services a
 
 ## Local and SSH targets
 
-Local targets and desktop launch require `OUTPOST_MODE=local`. Hosted users connect SSH targets with account keys.
+Local targets and desktop launch are available in the default local mode. Hosted users manage SSH targets with account keys and open browser terminals with uploaded keys.
 
 | Target | Where commands run | User | Connection shells |
 | --- | --- | --- | --- |
@@ -153,14 +185,14 @@ Installations run only after submitting a reviewed script, as the target's execu
 
 1. **Add a target.** Select **SSH** or **Local**, name it, and choose **tmux** (screen restoration and scrollback), **dtach** (minimal persistence), or both, alongside one or more required coding tools. Adding saves settings without installing software. SSH targets take a hostname/IP; local mode also supports SSH aliases and your existing SSH config/agent. Port and identity file are optional. Hosted management uses the account key and port 22 by default; its identity file field applies only to your terminal. SSH uses root. Local targets need no host or key; on Windows you can select a WSL distribution.
 2. **Check Required Software.** The detail page runs a fresh shell inspection through SSH or locally. It checks Bash, Python 3.9+, all selected backends (dtach 0.9+), selected coding tools, and `lsof` when macOS dtach is selected. The panel collapses with an **All good** tick when all requirements pass; expand it to see executable paths and versions. Missing or broken requirements expand the panel with warnings. **Auto install** opens a syntax-highlighted, editable POSIX shell script. **Run installation** executes the exact submitted text and streams stdout/stderr into the modal. Closing the modal triggers a fresh software check and session-list fetch. **Configure required software** changes backend and coding-tool selections for new sessions and immediately rechecks requirements. SSH accepts new host keys on first use and rejects changed keys.
-3. **Create a named session.** Choose an installed backend and coding tool from the configured selections, then an absolute root directory on the target or `~/path`. A missing backend or its dependencies does not prevent using another healthy backend. The root directory field discovers matching directories live on the selected target as you type, including `~/` paths. Use ↑/↓ and Enter, click a suggestion, or press Tab to complete a single match. Existing directories are required unless you check **Create the directory if it doesn’t exist**; you can always type a new path manually. Names are unique per backend on each execution host. The chosen tool, backend, manager UUID, native coding CLI session ID, storage directory, and stable socket path are stored in the target registry. Creation allocates the conversation identity without submitting a prompt; the interactive coding process starts on Connect. The session list shows the native ID and a tmux or dtach badge beside each name; both backends appear together.
-4. **Connect.** Click **Connect** to detect the Outpost computer's OS and open your preferred available terminal, or the recommended fallback. The adjacent **…** button opens connection options: choose a terminal app, launch it on the Outpost computer, or copy a command into an existing window. Apps are grouped by OS with your OS first, then ordered by recommendation; every supported app is shown, even if it cannot be launched on the manager. Local sessions put the Outpost computer's OS first. Your terminal app preference is saved separately for each OS in the browser. The copy-command shell selector matches the shell in your existing tab. If every automatic launch fails, a toast explains the failure and options open automatically. Bash uses `curl … | bash` and reopens the actual terminal device for reading and writing. PowerShell downloads the script with `Invoke-RestMethod` and preserves console handles. SSH requests a remote PTY with `ssh -tt`; local commands attach directly or through WSL. Reattachment uses the existing process; restarting a stopped session uses its saved tool choice. No PowerShell execution-policy changes are needed.
-5. **Leave and return.** Press **Ctrl+\\** to detach or close the terminal. The coding tool keeps running. Copy another command when you want to return. Links expire after 15 minutes; sessions do not. Once attached, the connection no longer depends on the manager remaining open or running.
+3. **Create a named session.** Choose an installed backend and coding tool from the configured selections, then an absolute root directory on the target or `~/path`. A missing backend or its dependencies does not prevent using another healthy backend. The root directory field discovers matching directories live on the selected target as you type, including `~/` paths. Use ↑/↓ and Enter, click a suggestion, or press Tab to complete a single match. Existing directories are required unless you check **Create the directory if it doesn’t exist**; you can always type a new path manually. Names are unique per backend on each execution host. The chosen tool, backend, manager UUID, native coding CLI session ID, storage directory, and stable socket path are stored in the target registry. Creation allocates the conversation identity without submitting a prompt; the interactive coding process starts when a terminal attaches. The session list shows the native ID and a tmux or dtach badge beside each name; both backends appear together.
+4. **Connect in your deployment mode.** In **local mode**, click **Connect** to open your preferred available desktop terminal on the Outpost computer, with a recommended fallback. Its **… → Connection options** dialog lets you choose a terminal app, launch it, or copy a command into an existing window. If automatic launch fails, a toast explains the failure and options open. In **hosted mode**, choose **… → Launch with web terminal** to attach in your browser using the service-held SSH connection. The **Connection options** button only prepares a command for your own terminal; desktop launching is unavailable. Web terminals are always an explicit choice. Reattachment uses the existing coding process; restarting a stopped session uses its saved tool choice.
+5. **Leave and return.** Press **Ctrl+\\** to detach or close the terminal. The coding tool keeps running. Click **Connect** in local mode, reopen **Launch with web terminal** in hosted mode, or copy another command to return. Command links expire after 15 minutes; sessions do not. Desktop and copied-command connections run independently of Outpost after attachment. A web terminal requires the backend to remain running; after a backend restart, launch it again to reattach to the persistent coding session.
 6. **Terminate a session.** Use the stop button beside a running session and confirm. This stops the coding tool and its child processes, disconnects attached terminals, and fetches the session list again. The record, conversation identity, and project files remain; connecting again resumes that conversation in a new coding-tool process.
 7. **Attach an image.** Use the image button beside a session and paste, drop, or browse for a PNG, JPEG, GIF, or WebP image (up to 16 MB). The image is uploaded as a file under `~/.outpost/clipboard/<session>/`, keeping the newest 20 per session. Codex, Claude, and Kimi receive the plain image path. Live tmux sessions (attached or detached) receive one bracketed paste without pressing Enter; review the input in your terminal before submitting it. For dtach or stopped sessions, copy the reference from the dialog. Uploading never starts or restarts a session. Text copy uses OSC 52 through tmux for terminals that support it.
 8. **Manage a target.** Right-click a sidebar target or use its three-dot button for **Open target** and **Remove target**. The button also supports keyboard and touch input. Removal requires confirmation and only forgets the connection in this manager; running sessions stay on the execution machine.
 
-**Desktop terminals.** **Connect** tries your saved favorite for the manager's OS first, then each available terminal in the order below until a launcher succeeds. Connection options offer **Launch terminal** for the explicitly selected app when it is available; an explicit choice never silently opens a different app. Both open a terminal on the **computer running Outpost**. Through an SSH tunnel, your browser and Outpost may run on different computers: use Copy command to connect from your own favorite terminal. Automatic launch uses Bash on macOS/Linux and PowerShell 7 when installed (otherwise Windows PowerShell) on Windows, independently of the shell selected for copying commands:
+**Desktop terminals (local mode).** **Connect** tries your saved favorite for the manager's OS first, then each available terminal in the order below until a launcher succeeds. Connection options offer **Launch terminal** for the explicitly selected app when it is available; an explicit choice never silently opens a different app. Both open a terminal on the **computer running Outpost**. Through an SSH tunnel, your browser and Outpost may run on different computers: use Copy command to connect from your own favorite terminal. Automatic launch uses Bash on macOS/Linux and PowerShell 7 when installed (otherwise Windows PowerShell) on Windows, independently of the shell selected for copying commands:
 
 | Manager platform | Supported terminals in fallback order | Shell |
 | --- | --- | --- |
@@ -215,7 +247,7 @@ New Codex sessions obtain their ID, provider, and version through a short-lived 
 
 Click **Find coding sessions** on a target and submit a conversation keyword. **All coding tools** searches all three native stores, including conversations created outside the manager; the tool selector narrows the request. Searches are case-insensitive literal matches across conversation text, including recorded tool output and reasoning. Native IDs and conversation titles also match. Each submit runs a new target-side scan: SSH targets execute it through SSH, and local targets use the same runtime locally or inside WSL.
 
-Results include the CLI ID, tool, working directory, timestamps, and one excerpt of at most 280 characters. **Link session** opens a named manager-session form with the conversation's tool and working directory fixed; choose an installed backend from the target's requirements. Linking validates that the conversation still exists and prevents duplicate links across backends. Already managed results offer **Connect**. Linking or deleting a manager record preserves CLI-owned history files.
+Results include the CLI ID, tool, working directory, timestamps, and one excerpt of at most 280 characters. **Link session** opens a named manager-session form with the conversation's tool and working directory fixed; choose an installed backend from the target's requirements. Linking validates that the conversation still exists and prevents duplicate links across backends. Already managed results offer **Connect** in local mode or **Connection options** in hosted mode. Linking or deleting a manager record preserves CLI-owned history files.
 
 The finder reads Codex's active and archived rollout JSONL files, Claude's project and [subagent transcripts](https://code.claude.com/docs/en/sub-agents#resume-subagents), and Kimi Code's session index, state, and agent wire logs. Claude and Kimi subagent matches link to their parent conversation. It includes custom CLI stores referenced by managed sessions. Discovery and decoding belong to individual adapters; these native vendor formats are isolated from the manager registry. Kimi uses the current Kimi Code CLI, `KIMI_CODE_HOME` (default `~/.kimi-code`), `session_…` identifiers, and the `kimi acp` protocol.
 
@@ -241,13 +273,16 @@ Only acknowledgement offsets and checksums are saved under the target's `~/.outp
 
 | Data | Location |
 | --- | --- |
-| Target connection settings and signing key | Manager machine: `~/.outpost/targets.json` |
+| Local target settings and signing key | Manager machine: `~/.outpost/targets.json` |
+| Hosted accounts and signing secret | Service: `~/.outpost/accounts.sqlite` |
+| Hosted target settings and management SSH keys | Service: `~/.outpost/users/<id>/` |
+| Uploaded web-terminal keys and generated encryption key | Manager/service: `~/.outpost/terminal-keys/` |
 | Authoritative session records | Each execution host/user: `~/.outpost/sessions.json` |
 | Live tmux or dtach sockets | Each execution host/user: `~/.outpost/sockets/<session-uuid>.sock` |
 | AI activity acknowledgement offsets | Each execution host/user: `~/.outpost/activity/<session-uuid>.json` |
 | Coding tool configuration and history | Each tool’s own existing files on the execution host |
 
-Connection settings live in the local manager; the browser stores only your terminal preference. Every target click (including the selected target), page reload, and manual refresh reads the session list again through its transport, with browser and API caching disabled. The URL stores only the selected target ID so reloads reopen that target. Failed reads show an error instead of an old session list; removing and re-adding the same target rediscovers its existing sessions. Registry changes are protected by `flock` and atomic file replacement. Concurrent initial attachments share the same lock to avoid duplicate processes. Short relative socket paths work even with long home-directory names.
+Connection settings live in the manager: one personal store in local mode, or a separate store per account in hosted mode. The browser stores your terminal preference; hosted authentication uses an HttpOnly cookie. Every target click (including the selected target), page reload, and manual refresh reads the session list again through its transport, with browser and API caching disabled. The URL stores only the selected target ID so reloads reopen that target. Failed reads show an error instead of an old session list; removing and re-adding the same target rediscovers its existing sessions. Registry changes are protected by `flock` and atomic file replacement. Concurrent initial attachments share the same lock to avoid duplicate processes. Short relative socket paths work even with long home-directory names.
 
 - **Ready:** record exists, never connected.
 - **Attached:** the session is running with a terminal attached.
@@ -317,7 +352,21 @@ npm run test:coding       # Installed CLIs: native IDs, cold resume, turn comple
 npx playwright install chromium
 npm run test:ui           # browser workflow, failed check/install retry, desktop/mobile checks
 npm run test:desktop      # Linux: real XTerm under Xvfb; requires xvfb, xauth, and xterm
+npm run test:deployment   # Linux + Docker + Chromium: both modes, production HTTPS/email/SSH/mobile
 ```
+
+`test:deployment` uses the production build created by `npm run check` (or run
+`npm run build` first). It creates disposable local and hosted managers, two
+OpenSSH targets, an HTTPS nginx proxy, and a local EngageLab-compatible mail
+service. It exercises real XTerm launches under Xvfb, signup and verification,
+account and key isolation, all six tool/backend combinations, encrypted-key
+upload without an encryption override, phone input and resizing, proxy/backend
+restarts, key removal/replacement, termination/resume, and password-reset
+revocation. Only coding tools and email delivery are
+fixtures; session management, SSH, terminal persistence, TLS and WebSockets use
+the real implementations. Screenshots are saved under `test-results/deployment-*.png`.
+Containers, networks, certificates, credentials and private state are cleaned up
+after the run. This suite requires no real email or model credentials.
 
 The software suite starts an Alpine SSH container with Bash, Python, and backends absent. It verifies read-only detection, real package installation, live logs, edited-script failure/recovery, version checks, lazy registry creation, and matching inspection/attachment PATH under a root Zsh login shell. It uses coding-tool fixtures and does not download vendor binaries.
 
@@ -337,7 +386,10 @@ All mutation requests require `X-OUTPOST-Request: 1`; JSON bodies use `Content-T
 
 Hosted target and account endpoints require a verified `outpost_session`
 cookie. Connection downloads use short-lived signed tickets tied to that login.
-Authentication routes are available without a login; account changes require it.
+Hosted authentication routes are available without a login; account changes require it.
+In local mode, `/api/auth/session` returns `{mode: "local", user: null}` and all
+other authentication and account routes are absent. Local workspace APIs need
+no login but enforce the loopback and browser-origin restrictions.
 
 | Method | Account endpoint | Purpose |
 | --- | --- | --- |

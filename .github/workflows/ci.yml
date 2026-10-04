@@ -10,7 +10,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -30,6 +30,20 @@ jobs:
       - run: npm run test:desktop
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
+
+  deployment-modes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:deployment
 
   native-coding:
     runs-on: ubuntu-latest

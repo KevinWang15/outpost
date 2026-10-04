@@ -5,8 +5,10 @@ import type { TerminalKeyStatus, WebTerminalInfo } from '../shared/web-terminal'
 import { api, ApiError } from './api'
 import { Modal } from './ui'
 import WebTerminal from './WebTerminal'
+import { useAuth } from './useAuth'
 
 export default function WebTerminalModal({ target, session, onClose }: { target: Target; session: Session; onClose: () => void }) {
+  const hosted = useAuth().mode === 'hosted'
   const base = `/targets/${target.id}`
   const [status, setStatus] = useState<TerminalKeyStatus | null>(null)
   const [terminal, setTerminal] = useState<WebTerminalInfo | null>(null)
@@ -88,7 +90,7 @@ export default function WebTerminalModal({ target, session, onClose }: { target:
         }} /></label>
         <label>Or paste a private key<textarea aria-label="Private key" value={privateKey} onChange={event => setPrivateKey(event.target.value)} spellCheck={false} autoComplete="off" autoCapitalize="off" disabled={busy} rows={5} maxLength={64 * 1024} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" /></label>
         <label>Passphrase (if encrypted)<input type="password" aria-label="Key passphrase" value={passphrase} onChange={event => setPassphrase(event.target.value)} autoComplete="off" disabled={busy} maxLength={1024} /></label>
-        <p className="form-note">This key is used only when you choose “Launch with web terminal”. The regular Connect button keeps using your own terminal.</p>
+        <p className="form-note">This key is used only when you choose “Launch with web terminal”. {hosted ? 'Connection options prepares a command for your own terminal.' : 'The regular Connect button opens your desktop terminal.'}</p>
         <div className="modal-actions"><button className="button primary" disabled={busy || !privateKey.trim()} type="submit">{status.key ? 'Replace key and launch' : 'Save key and launch'}</button></div>
       </form>}
     </div>}

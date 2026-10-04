@@ -1,0 +1,11 @@
+FROM node:24-bookworm-slim
+COPY certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client openssh-server ca-certificates python3 curl tmux dtach xterm xvfb xauth && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh && rm -f /etc/ssh/ssh_host_*key*
+WORKDIR /app
+COPY package.json ./
+COPY dist ./dist
+COPY coding-tool-fixture.py /usr/local/bin/codex
+RUN chmod +x /usr/local/bin/codex && cp /usr/local/bin/codex /usr/local/bin/claude && cp /usr/local/bin/codex /usr/local/bin/kimi
+CMD ["node", "dist/server/server.js"]

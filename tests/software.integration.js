@@ -13,7 +13,8 @@ const execute = promisify(execFile)
 const docker = async (...args) => (await execute('docker', args, { timeout: 180_000, maxBuffer: 4_000_000 })).stdout.trim()
 const fixtures = fileURLToPath(new URL('./fixtures/', import.meta.url))
 
-test('fresh SSH instance: no automatic installation, bootstrap without Bash/Python, explicit installs, edited scripts, and failed-install recovery', { timeout: 240_000 }, async t => {
+// Package mirrors can be slow when this runs alongside both SSH lifecycle suites.
+test('fresh SSH instance: no automatic installation, bootstrap without Bash/Python, explicit installs, edited scripts, and failed-install recovery', { timeout: 420_000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-software-ssh-'))
   let container, app
   t.after(async () => { await app?.close(); if (container) await docker('rm', '-f', container); await rm(directory, { recursive: true, force: true }) })

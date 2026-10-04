@@ -35,10 +35,11 @@ export function useSessionConnection(
     const controller = new AbortController()
     const pending = { controller, sessionId: session.id }
     request.current = pending
-    setConnecting({ sessionId: session.id, mode })
+    const connectionMode = hosted ? 'options' : mode
+    setConnecting({ sessionId: session.id, mode: connectionMode })
     onError('')
     try {
-      if (mode === 'launch' && !hosted) {
+      if (connectionMode === 'launch') {
         try {
           const terminal = await api<DesktopTerminal>(
             `/targets/${targetId}/sessions/${session.id}/launch`, 'POST', { preferences: terminalPreferences() }, controller.signal,

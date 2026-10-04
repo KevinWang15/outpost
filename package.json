@@ -21,6 +21,7 @@
     "test": "node --import tsx --test tests/*.test.js",
     "check": "npm run lint && npm run build && npm test",
     "test:integration": "node --import tsx --test tests/ssh.integration.js tests/software.integration.js tests/web-terminal.integration.js",
+    "test:deployment": "node --test tests/deployment.integration.js",
     "test:ui": "playwright test",
     "test:desktop": "xvfb-run -a node --import tsx --test tests/desktop.integration.js",
     "test:local": "node --import tsx --test tests/local.integration.js tests/keyboard.integration.js tests/activity.integration.js",

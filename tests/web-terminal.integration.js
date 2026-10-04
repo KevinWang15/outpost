@@ -17,17 +17,19 @@ const docker = async (...args) => (await execute('docker', args, { timeout: 1200
 async function until(predicate) { for (let i = 0; i < 100; i++) { if (await predicate()) return; await delay(100) }; assert.fail('condition timed out') }
 async function connect(origin, id, cookie) {
   const ws = new WebSocket(`${origin.replace('http', 'ws')}/api/web-terminals/${id}/socket`, { headers: { origin, cookie } })
-  let screen = ''
+  let screen = '', closed = ''
   ws.on('error', () => {})
   ws.on('message', (data, binary) => {
     if (binary) { screen += data.toString(); ws.send(JSON.stringify({ type: 'ack', bytes: data.length })) }
     else {
       const message = JSON.parse(data)
       if (message.type === 'snapshot') { screen += message.data; ws.send(JSON.stringify({ type: 'ack', bytes: Buffer.byteLength(message.data) })) }
+      else if (message.type === 'closed') closed = message.message
     }
   })
   await once(ws, 'open')
-  await until(() => screen.includes('OUTPOST_FIXTURE_READY'))
+  try { await until(() => screen.includes('OUTPOST_FIXTURE_READY')) }
+  catch (error) { ws.terminate(); throw new Error(`${error.message}; terminal close: ${closed || 'none'}; screen: ${JSON.stringify(screen.slice(-2000))}`, { cause: error }) }
   return { ws, screen: () => screen, send: message => ws.send(JSON.stringify(message)) }
 }
 
@@ -59,7 +61,9 @@ test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize,
   }
   const target = await request('POST', '/targets', { name: 'Real SSH', kind: 'ssh', host: '127.0.0.1', port, identityFile: managerKey, backends: ['tmux', 'dtach'], tools: ['codex'] })
   const base = `/targets/${target.id}`
-  await request('GET', `${base}/software`)
+  const software = await request('GET', `${base}/software`)
+  assert.ok(software.software.every(item => item.status === 'installed'), JSON.stringify(software))
+  await docker('exec', container, 'sh', '-c', 'command -v tmux && command -v dtach')
   await request('PUT', `${base}/terminal-key`, { privateKey: await readFile(keyPath, 'utf8'), passphrase: 'test-passphrase' })
   for (const backend of ['tmux', 'dtach']) await t.test(backend, async () => {
     const rootDir = `/root/web-${backend}`
@@ -67,7 +71,14 @@ test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize,
     const session = await request('POST', `${base}/sessions`, { name: `Web ${backend}`, rootDir, backend, tool: 'codex' })
     await docker('exec', container, 'touch', `${rootDir}/capture-input`)
     const start = () => request('POST', `${base}/sessions/${session.id}/web-terminal`, { cols: 80, rows: 24 })
-    const info = await start(), first = await connect(origin, info.id, cookie)
+    const info = await start()
+    let first
+    try { first = await connect(origin, info.id, cookie) }
+    catch (error) {
+      t.diagnostic(await docker('exec', container, 'bash', '-lic', 'printf "PATH=%s\\n" "$PATH"; command -v tmux; command -v dtach; ls -l /usr/bin/tmux /usr/bin/dtach'))
+      t.diagnostic(JSON.stringify(await request('GET', `${base}/software`)))
+      throw error
+    }
     assert.match((await request('GET', `${base}/terminal-key`)).key.hostFingerprint, /^SHA256:/)
     const heartbeat = () => docker('exec', container, 'cat', `${rootDir}/heartbeat.json`).then(JSON.parse)
     const initial = await heartbeat()

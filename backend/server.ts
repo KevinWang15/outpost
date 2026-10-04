@@ -9,7 +9,7 @@ const port = Number(process.env.PORT ?? 3000)
 if (!Number.isInteger(port) || port < 0 || port > 65535) {
   throw new Error('PORT must be an integer between 0 and 65535')
 }
-const mode = process.env.OUTPOST_MODE ?? 'hosted'
+const mode = process.env.OUTPOST_MODE ?? 'local'
 if (!['local', 'hosted'].includes(mode)) throw new Error('OUTPOST_MODE must be local or hosted')
 // Relative to dist/server/server.js, independent of the process working directory.
 const frontendRoot = fileURLToPath(new URL('../client/', import.meta.url))
@@ -22,6 +22,7 @@ const app = await createApp({
   ...(existsSync(frontendRoot) ? { frontendRoot } : {}),
 })
 const address = await app.listen({ port, host })
+console.log(`Outpost deployment mode: ${mode}`)
 console.log(`Server listening at ${address}`)
 
 let stopping = false

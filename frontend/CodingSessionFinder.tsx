@@ -4,6 +4,7 @@ import type { CodingSessionMatch, CodingSessionSearchResults, CodingTool, Sessio
 import { codingToolLabels } from '../shared/session-manager'
 import { api } from './api'
 import { Modal } from './ui'
+import { useAuth } from './useAuth'
 
 export default function CodingSessionFinder({ target, tools, canLink, onLink, onOpen, onClose }: {
   target: Target
@@ -13,6 +14,7 @@ export default function CodingSessionFinder({ target, tools, canLink, onLink, on
   onOpen: (session: Session) => void
   onClose: () => void
 }) {
+  const hosted = useAuth().mode === 'hosted'
   const [query, setQuery] = useState('')
   const [tool, setTool] = useState<CodingTool | ''>('')
   const [results, setResults] = useState<CodingSessionSearchResults | null>(null)
@@ -96,7 +98,7 @@ export default function CodingSessionFinder({ target, tools, canLink, onLink, on
               {session.updatedAt && <small>Updated {new Date(session.updatedAt).toLocaleString()}</small>}
               {!managed && !available && <small className="finder-warning">{session.rootDir ? `Check Required Software for ${codingToolLabels[session.tool]} and a session backend before linking.` : 'The CLI did not save a working directory for this conversation.'}</small>}
             </div>
-            {managed ? <button className="button secondary" disabled={Boolean(opening)} onClick={() => void open(managed)}>{opening === managed ? <LoaderCircle size={15} className="loading-spinner" /> : <ArrowRight size={15} />} Connect</button>
+            {managed ? <button className="button secondary" disabled={Boolean(opening)} onClick={() => void open(managed)}>{opening === managed ? <LoaderCircle size={15} className="loading-spinner" /> : <ArrowRight size={15} />} {hosted ? 'Connection options' : 'Connect'}</button>
               : <button className="button secondary" disabled={!available || Boolean(opening)} onClick={() => onLink(session)}><Link size={15} /> Link session</button>}
           </li>
         })}

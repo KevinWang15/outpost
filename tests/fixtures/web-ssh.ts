@@ -35,7 +35,7 @@ export async function webSshFixture() {
   server.listen(0, '127.0.0.1'); await once(server, 'listening')
   return {
     key: key.private, publicKey: key.public, hostKey: hostKey.private, port: (server.address() as AddressInfo).port, inputs, sizes, commands,
-    output: (text: string) => { for (const channel of channels) channel.write(text) },
+    output: (text: string, stderr = false) => { for (const channel of channels) (stderr ? channel.stderr : channel).write(text) },
     close: async () => { for (const client of clients) client.end(); await new Promise<void>(resolve => server.close(() => resolve())) },
   }
 }

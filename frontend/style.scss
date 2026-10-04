@@ -83,7 +83,7 @@ button svg { flex-shrink: 0; }
 .auth-dev-link p { color: var(--muted); margin: 6px 0 12px; }
 .auth-dev-link a { display: inline-flex; align-items: center; gap: 8px; }
 .auth-recovery { font-size: 13px; }
-.account-controls { flex-shrink: 0; }
+.account-controls { flex-shrink: 0; flex-wrap: wrap; max-width: 100%; }
 .account-controls .button { max-width: 220px; font-size: 12px; padding: 7px 11px; }
 .account-controls .button > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-key { margin: 24px 0; padding: 22px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
@@ -174,7 +174,7 @@ button svg { flex-shrink: 0; }
 .topbar > div { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .topbar strong { overflow: hidden; color: var(--ink); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .slash { color: var(--border-strong); }
-.local-badge {
+.mode-badge {
   display: flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 5px 10px;
   border: 1px solid var(--border); border-radius: 20px; background: var(--surface-muted);
   color: var(--text); font-size: 11px;

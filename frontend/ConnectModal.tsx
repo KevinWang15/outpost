@@ -100,7 +100,9 @@ export default function ConnectModal({
     <Modal
       title={`Connect to ${session.name}`}
       subtitle={
-        kind === 'local'
+        connection.hosted
+          ? 'Copy a command for your own terminal. For browser or phone access, choose … → Launch with web terminal in the session list.'
+          : kind === 'local'
           ? 'Choose a terminal on the computer running Outpost, using the same user account.'
           : 'Choose your favorite terminal to connect to this session.'
       }

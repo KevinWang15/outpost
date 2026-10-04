@@ -59,7 +59,9 @@ test('hosted accounts connect only with their own SSH key, including when a targ
 })
 
 const shells = process.env.OUTPOST_PWSH ? ['bash', 'powershell'] : ['bash']
-for (const shell of shells) for (const backend of ['dtach', 'tmux']) test(`real SSH + ${backend} + ${shell}: software installation, registry, terminal persistence, repaint, and termination`, { timeout: 360_000 }, async t => {
+// These cases include real installs from public package mirrors before the
+// session assertions. Allow slow downloads without interrupting their cleanup.
+for (const shell of shells) for (const backend of ['dtach', 'tmux']) test(`real SSH + ${backend} + ${shell}: software installation, registry, terminal persistence, repaint, and termination`, { timeout: 600_000 }, async t => {
   const extension = shell === 'bash' ? 'sh' : 'ps1'
   const temporary = await mkdtemp(join(tmpdir(), 'outpost-ssh-'))
   let container, app
@@ -100,6 +102,7 @@ for (const shell of shells) for (const backend of ['dtach', 'tmux']) test(`real 
   assert.equal(initial.result.software.find(item => item.id === backend).status, 'missing')
   assert.equal(await docker('exec', container, 'sh', '-c', 'test -e /root/.outpost/sessions.json && echo exists || echo absent'), 'absent', 'adding and checking never initializes the registry')
   const installBackend = async targetBase => {
+    const started = Date.now()
     const check = await request('GET', `${targetBase}/software`)
     const backendId = check.result.software.find(item => ['tmux', 'dtach'].includes(item.id)).id
     const plan = await request('GET', `${targetBase}/software/${backendId}/script`)
@@ -111,6 +114,7 @@ for (const shell of shells) for (const backend of ['dtach', 'tmux']) test(`real 
     const final = events.find(event => event.type === 'complete')
     assert.equal(final.installation.status, 'succeeded', events.filter(event => event.type === 'output').map(event => event.text).join(''))
     assert.ok(events.some(event => event.type === 'output'))
+    t.diagnostic(`${backendId} installation: ${((Date.now() - started) / 1000).toFixed(1)}s`)
     return request('GET', `${targetBase}/software`)
   }
   const installed = await installBackend(base)

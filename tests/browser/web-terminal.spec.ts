@@ -24,21 +24,27 @@ test('mobile web terminal is opt-in: file upload, SSH input, phone keys, resize,
   await app.listen({ host: '127.0.0.1', port: 0 })
   const address = app.server.address() as { port: number }, origin = `http://127.0.0.1:${address.port}`
   await page.context().addCookies([{ name: 'outpost_session', value: login.token, url: origin, httpOnly: true, sameSite: 'Lax' }])
-  const errors: string[] = [], webRequests: string[] = []
+  const errors: string[] = [], webRequests: string[] = [], desktopRequests: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   page.on('request', request => { if (/terminal-key|web-terminal/.test(request.url()) && request.url().includes('/api/')) webRequests.push(request.url()) })
+  page.on('request', request => { if (request.url().endsWith('/launch')) desktopRequests.push(request.url()) })
   try {
     await page.goto(`${origin}/?target=${target.id}`)
     await expect(page.getByText('Phone work', { exact: true })).toBeVisible()
     expect(webRequests).toEqual([]); expect(ssh.commands).toEqual([])
-    await page.getByRole('button', { name: 'Connect', exact: true }).click()
+    await expect(page.getByText('Hosted service', { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await expect(page.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Connection options', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Connect to Phone work' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Launch terminal', exact: true })).toHaveCount(0)
     expect(webRequests).toEqual([]); expect(ssh.commands).toEqual([])
     await page.getByRole('button', { name: 'Done', exact: true }).click()
     const openMenu = async () => { await page.getByRole('button', { name: 'Connection options for Phone work' }).click(); await page.getByRole('menuitem', { name: 'Launch with web terminal' }).click() }
     await openMenu()
     await expect(page.getByRole('heading', { name: 'Web terminal · Phone work' })).toBeVisible()
     await expect(page.getByText('Add your SSH private key', { exact: true })).toBeVisible()
+    await expect(page.locator('.terminal-key-setup .form-note')).toContainText('Connection options prepares a command for your own terminal.')
     await expect(page.getByRole('button', { name: 'Save key and launch' })).toBeDisabled()
     expect(ssh.commands).toEqual([])
     await page.getByLabel('Private key file', { exact: true }).setInputFiles({ name: 'phone-key', mimeType: 'application/octet-stream', buffer: Buffer.from(ssh.key) })
@@ -94,6 +100,7 @@ test('mobile web terminal is opt-in: file upload, SSH input, phone keys, resize,
     await expect(page.getByRole('alert')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Save key and launch' })).toBeDisabled()
     await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
+    expect(desktopRequests).toEqual([])
     expect(errors).toEqual([])
   } finally { await page.close(); await app.close(); await ssh.close(); await rm(directory, { recursive: true, force: true }) }
 })

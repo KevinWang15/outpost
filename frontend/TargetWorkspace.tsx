@@ -20,6 +20,7 @@ import RequiredSoftware from './RequiredSoftware'
 import CodingSessionFinder from './CodingSessionFinder'
 import SessionList from './SessionList'
 import { useSessionConnection, type ConnectionMode } from './useSessionConnection'
+import { useAuth } from './useAuth'
 const WebTerminalModal = lazy(() => import('./WebTerminalModal'))
 
 type WorkspaceDialog =
@@ -39,6 +40,7 @@ export default function TargetWorkspace({
   onUpdate: (target: Target) => void
   externalDialogOpen: boolean
 }) {
+  const hosted = useAuth().mode === 'hosted'
   const { sessions, registryPath, sessionLoadError, refreshing, refresh } =
     useLiveSessions(target.id)
   const software = useRequiredSoftware(target.id, `${target.backends.join(',')}|${target.tools.join(',')}`)
@@ -203,9 +205,10 @@ export default function TargetWorkspace({
       <div className="bottom-note">
         <Terminal />
         <p>
-          <strong>Your work stays where it runs.</strong> Connect in your own
-          terminal. Detach with <kbd>Ctrl</kbd> + <kbd>\</kbd>, and return
-          whenever you’re ready.
+          <strong>Your work stays where it runs.</strong>{' '}
+          {hosted
+            ? <>Choose <strong>… → Launch with web terminal</strong> to connect in your browser, including on your phone. Outpost holds the SSH connection to your server.</>
+            : <>Click <strong>Connect</strong> to open a terminal on this computer. Detach with <kbd>Ctrl</kbd> + <kbd>\</kbd>, and return whenever you’re ready.</>}
         </p>
       </div>
       {dialog?.kind === 'session' && (

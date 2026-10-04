@@ -300,7 +300,7 @@ export async function createApp(options: {
       },
     } },
   }, async request => {
-    if (accounts) throw new AppError('Use the connection command in a terminal on your own computer.', 403)
+    if (accounts) throw new AppError('Desktop terminal launch is available in local mode. In hosted mode, choose Launch with web terminal from the session menu or copy a connection command.', 403)
     const target = await workspace(request).store.get(request.params.targetId)
     await service.get(target, request.params.sessionId)
     return desktop.launch(shell => connectScript(target, request.params.sessionId, shell), request.body)

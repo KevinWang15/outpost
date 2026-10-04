@@ -127,9 +127,11 @@ export class WebTerminals {
       throw new AppError('The web terminal limit has been reached. Disconnect another web terminal first.', 429)
   }
   private flow(entry: HeldTerminal) {
-    if (!entry.alive) return
-    if (entry.pending >= HIGH_WATER || entry.unacked >= HIGH_WATER || (entry.socket?.bufferedAmount ?? 0) >= HIGH_WATER) entry.channel?.pause()
-    else entry.channel?.resume()
+    const channel = entry.channel
+    if (!entry.alive || !channel) return
+    if (entry.replaying || entry.pending >= HIGH_WATER || entry.unacked >= HIGH_WATER || (entry.socket?.bufferedAmount ?? 0) >= HIGH_WATER) {
+      channel.pause(); channel.stderr.pause()
+    } else { channel.resume(); channel.stderr.resume() }
   }
   private output(entry: HeldTerminal, data: Buffer) {
     if (!entry.alive) return
@@ -146,6 +148,9 @@ export class WebTerminals {
     const entry = this.get(owner, id)
     if (entry.socket) entry.socket.close(4001, 'Opened in another tab')
     entry.socket = socket; entry.replaying = true; entry.unacked = 0; entry.pong = true
+    // Keep new bytes in the SSH channel until the queued screen snapshot has
+    // been sent; otherwise bytes after that snapshot's barrier would be lost.
+    this.flow(entry)
     socket.on('error', () => socket.terminate())
     socket.on('pong', () => { if (entry.socket === socket) entry.pong = true })
     let inputBytes = 0, messages = 0, inputWindow = Date.now()

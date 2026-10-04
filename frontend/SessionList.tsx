@@ -136,11 +136,11 @@ export default function SessionList({
                     className="button connect"
                     title={mode === 'hosted' ? 'Prepare a connection command for your own terminal' : 'Open your preferred available terminal on the computer running Outpost'}
                     disabled={connecting?.sessionId === session.id}
-                    onClick={() => onConnect(session, 'launch')}
+                    onClick={() => onConnect(session, mode === 'hosted' ? 'options' : 'launch')}
                   >
                     {connecting?.sessionId === session.id
                       ? connecting.mode === 'launch' ? 'Opening…' : 'Preparing…'
-                      : 'Connect'}
+                      : mode === 'hosted' ? 'Connection options' : 'Connect'}
                     {connecting?.sessionId === session.id
                       ? <LoaderCircle size={15} className="loading-spinner" aria-hidden="true" />
                       : <ArrowRight size={15} aria-hidden="true" />}

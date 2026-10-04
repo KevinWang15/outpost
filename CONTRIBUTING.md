@@ -21,9 +21,13 @@ Use `OUTPOST_DATA_DIR` for a separate development store. Keep API and frontend
 listeners on loopback. See [SECURITY.md](SECURITY.md) for private vulnerability
 reporting and the supported security boundaries.
 
-The default hosted mode has signup, verification, and password recovery. Without
-mail credentials, development shows simulated email links in the UI. Use
-`OUTPOST_MODE=local` for the original personal workspace and local targets.
+The default local mode opens the personal workspace without login and supports
+local targets, existing SSH credentials, and desktop terminal launching. To work
+on the hosted service, copy `.env.example` to `.env` and set `OUTPOST_MODE=hosted`.
+Hosted mode has signup, verification, password recovery, per-user server SSH,
+and an explicitly selected web terminal for phone access; desktop launching is
+disabled. Without mail credentials, hosted development shows simulated email
+links in the UI. Use separate `OUTPOST_DATA_DIR` values for local and hosted work.
 Tests inject mail stubs and temporary account databases; never use real mail
 credentials or production SSH keys in fixtures.
 

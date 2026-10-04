@@ -136,6 +136,22 @@ Run `npm run build && npm start` behind an HTTPS reverse proxy that preserves th
 
 Back up the entire data directory while the manager is stopped: `accounts.sqlite` contains users, token hashes, login sessions, and the signing secret; `users/<id>/` contains target settings, the account's private SSH key, public key, and known-host file. Keep this state private and persistent across restarts. Per-user target ownership is checked on every API operation. Users authorized for the same remote root account share that server's sessions and conversation history according to its SSH permissions.
 
+### Hosted container
+
+Build the production image with `docker build -t outpost .`. The image serves the frontend and API together on port 3000, includes the OpenSSH client, and runs as user 1000. It selects hosted mode; provide the production email credentials and `PUBLIC_APP_URL` through the container environment. Mount a persistent volume at `/state`; application data is stored in `/state/outpost`.
+
+```sh
+docker run -d --name outpost --restart unless-stopped \
+  --env-file /etc/outpost/production.env \
+  -e HOST=0.0.0.0 -e OUTPOST_DATA_DIR=/state/outpost \
+  --mount type=volume,source=outpost-state,target=/state \
+  -p 127.0.0.1:3000:3000 outpost
+```
+
+Place an HTTPS reverse proxy in front of the container, preserving the Host header and forwarding WebSockets. Run only one replica per volume. In Kubernetes, use a single-replica StatefulSet with retained storage, and set the health probe's Host header to the configured public hostname. The health endpoint is `/health`. Back up the whole volume, including the generated terminal encryption key.
+
+The container workflow publishes `ghcr.io/kevinwang15/outpost:<full-commit-sha>` and `:latest` for commits on `main`. Pin production deployments to a commit and registry digest. This image is intended for hosted deployments; run the local tool directly on your computer for desktop terminal launching.
+
 When upgrading an existing local installation, select `OUTPOST_MODE=local` (or leave it unset) and keep `OUTPOST_DATA_DIR` pointed at your current configuration directory to retain target settings and signing keys. Execution hosts now store sessions under `~/.outpost`. Stop existing sessions before moving their state into that directory, then reconnect from Outpost to restart them with the current socket layout and tmux session names. Existing coding-tool conversation histories remain available to search and link.
 
 ## Screenshots

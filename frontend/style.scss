@@ -612,7 +612,7 @@ input[type='checkbox'] { width: 15px; height: 15px; margin: 0; accent-color: var
   .terminal-loading { display: flex; align-items: center; gap: 8px; }
   .terminal-key-setup { min-height: 0; overflow: auto; }
   .terminal-key-intro { display: flex; gap: 12px; margin: 16px 0; svg { flex-shrink: 0; } p { margin: 6px 0 0; line-height: 1.5; } }
-  .terminal-saved-key { padding: 16px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; code, small { display: block; overflow-wrap: anywhere; } }
+  .terminal-saved-key { padding: 16px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; code, small { display: block; overflow-wrap: anywhere; } pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; } }
   &.has-terminal { height: min(860px, calc(var(--terminal-viewport-height, 100dvh) - 32px)); flex-direction: column; overflow: hidden; &[open] { display: flex; } }
   h2 { font-size: 25px; margin: 12px 0 6px; }
   .modal-subtitle { margin-bottom: 12px; }

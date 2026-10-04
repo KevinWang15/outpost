@@ -208,7 +208,14 @@ export async function createApp(options: {
   }
   app.get<{ Params: Params }>('/api/targets/:targetId/terminal-key', async request => {
     await sshTarget(request)
-    return terminalKeys.status(terminalOwner(request).userId, request.params.targetId)
+    const status = await terminalKeys.status(terminalOwner(request).userId, request.params.targetId).catch(error => {
+      if (!accounts || !(error instanceof AppError) || error.statusCode !== 409) throw error
+      return { encryptionAvailable: terminalKeys.available, key: null, keyError: error.message }
+    })
+    return {
+      ...status,
+      ...(accounts ? { accountKey: await accounts.keys.publicKey(request.account!.user.id) } : {}),
+    }
   })
   app.put<{ Params: Params; Body: { privateKey: string; passphrase?: string } }>('/api/targets/:targetId/terminal-key', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['privateKey'], properties: {
@@ -220,7 +227,7 @@ export async function createApp(options: {
       await sshTarget(request)
       const key = await terminalKeys.upload(owner.userId, request.params.targetId, request.body.privateKey, request.body.passphrase)
       webTerminals.closeTarget(owner, request.params.targetId)
-      return { encryptionAvailable: true, key }
+      return { encryptionAvailable: true, key, ...(accounts ? { accountKey: await accounts.keys.publicKey(owner.userId) } : {}) }
     })
   })
   app.delete<{ Params: Params }>('/api/targets/:targetId/terminal-key', async (request, reply) => {
@@ -232,16 +239,16 @@ export async function createApp(options: {
     })
     return reply.code(204).send()
   })
-  app.post<{ Params: Params; Body: { cols: number; rows: number } }>('/api/targets/:targetId/sessions/:sessionId/web-terminal', {
+  app.post<{ Params: Params; Body: { cols: number; rows: number; keySource?: 'account' | 'uploaded' } }>('/api/targets/:targetId/sessions/:sessionId/web-terminal', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['cols', 'rows'], properties: {
-      cols: { type: 'integer', minimum: 20, maximum: 300 }, rows: { type: 'integer', minimum: 5, maximum: 120 },
+      cols: { type: 'integer', minimum: 20, maximum: 300 }, rows: { type: 'integer', minimum: 5, maximum: 120 }, keySource: { type: 'string', enum: ['account', 'uploaded'] },
     } } },
   }, async request => {
     const owner = terminalOwner(request)
     return webTerminals.exclusive(owner, request.params.targetId, async () => {
       const target = await sshTarget(request)
       await service.get(target, request.params.sessionId)
-      return webTerminals.start(owner, target, request.params.sessionId, request.body.cols, request.body.rows)
+      return webTerminals.start(owner, target, request.params.sessionId, request.body.cols, request.body.rows, request.body.keySource)
     })
   })
   app.delete<{ Params: { terminalId: string } }>('/api/web-terminals/:terminalId', async (request, reply) => {

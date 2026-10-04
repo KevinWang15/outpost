@@ -6,8 +6,13 @@ import { once } from 'node:events'
 export async function webSshFixture() {
   const key = ssh2.utils.generateKeyPairSync('ed25519')
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519')
-  const allowed = ssh2.utils.parseKey(key.public)
-  if (allowed instanceof Error) throw allowed
+  const allowed: ssh2.ParsedKey[] = []
+  const authorize = (publicKey: string) => {
+    const parsed = ssh2.utils.parseKey(publicKey)
+    if (parsed instanceof Error) throw parsed
+    allowed.push(parsed)
+  }
+  authorize(key.public)
   const clients = new Set<Connection>(), channels = new Set<ServerChannel>()
   const inputs: string[] = [], sizes: number[][] = [], commands: string[] = []
   const server = new ssh2.Server({ hostKeys: [hostKey.private] }, client => {
@@ -15,7 +20,7 @@ export async function webSshFixture() {
     client.on('error', () => {})
     client.on('close', () => clients.delete(client))
     client.on('authentication', ctx => {
-      if (ctx.username === 'root' && ctx.method === 'publickey' && ctx.key.data.equals(allowed.getPublicSSH()) && (!ctx.signature || (ctx.blob && allowed.verify(ctx.blob, ctx.signature, ctx.hashAlgo)))) ctx.accept()
+      if (ctx.username === 'root' && ctx.method === 'publickey' && allowed.some(key => ctx.key.data.equals(key.getPublicSSH()) && (!ctx.signature || (ctx.blob && key.verify(ctx.blob, ctx.signature, ctx.hashAlgo))))) ctx.accept()
       else ctx.reject()
     })
     client.on('ready', () => client.on('session', accept => {
@@ -34,7 +39,7 @@ export async function webSshFixture() {
   })
   server.listen(0, '127.0.0.1'); await once(server, 'listening')
   return {
-    key: key.private, publicKey: key.public, hostKey: hostKey.private, port: (server.address() as AddressInfo).port, inputs, sizes, commands,
+    key: key.private, publicKey: key.public, hostKey: hostKey.private, hostPublicKey: hostKey.public, port: (server.address() as AddressInfo).port, inputs, sizes, commands, authorize,
     output: (text: string, stderr = false) => { for (const channel of channels) (stderr ? channel.stderr : channel).write(text) },
     close: async () => { for (const client of clients) client.end(); await new Promise<void>(resolve => server.close(() => resolve())) },
   }

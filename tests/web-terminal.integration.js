@@ -3,7 +3,7 @@ import test from 'node:test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { once } from 'node:events'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,7 +13,9 @@ import { createApp } from '../backend/app.ts'
 import { Accounts } from '../backend/accounts.ts'
 
 const execute = promisify(execFile)
-const docker = async (...args) => (await execute('docker', args, { timeout: 120000, maxBuffer: 4000000 })).stdout.trim()
+const docker = async (...args) => (await execute('docker', args, { timeout: 240000, maxBuffer: 4000000,
+  env: { ...process.env, http_proxy: process.env.http_proxy ?? process.env.HTTP_PROXY, https_proxy: process.env.https_proxy ?? process.env.HTTPS_PROXY },
+})).stdout.trim()
 async function until(predicate) { for (let i = 0; i < 100; i++) { if (await predicate()) return; await delay(100) }; assert.fail('condition timed out') }
 async function connect(origin, id, cookie) {
   const ws = new WebSocket(`${origin.replace('http', 'ws')}/api/web-terminals/${id}/socket`, { headers: { origin, cookie } })
@@ -33,24 +35,27 @@ async function connect(origin, id, cookie) {
   return { ws, screen: () => screen, send: message => ws.send(JSON.stringify(message)) }
 }
 
-test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize, repaint and process across web disconnects', { timeout: 240000 }, async t => {
+test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize, repaint and process across web disconnects', { timeout: 360000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-web-terminal-integration-'))
   let container, app, accounts
   t.after(async () => { if (app) await app.close(); else accounts?.close(); if (container) await docker('rm', '-f', container); await rm(directory, { recursive: true, force: true }) })
   await docker('build', '-t', 'outpost-ssh-test:local', fileURLToPath(new URL('./fixtures/', import.meta.url)))
+  // Install PTY backends at build time so a target needs no public network access.
+  await copyFile('/etc/ssl/certs/ca-certificates.crt', join(directory, 'certificates.crt'))
+  const proxyArgs = ['http_proxy', 'https_proxy'].flatMap(name => process.env[name] || process.env[name.toUpperCase()] ? ['--build-arg', name] : [])
+  await docker('build', '--network', 'host', ...proxyArgs, '-f', fileURLToPath(new URL('./fixtures/Dockerfile.web-terminal', import.meta.url)), '-t', 'outpost-web-ssh-test:local', directory)
   const keyPath = join(directory, 'synthetic-key')
   await execute('ssh-keygen', ['-q', '-t', 'ed25519', '-N', 'test-passphrase', '-f', keyPath])
-  // Management needs an unencrypted identity, while web mode accepts the encrypted upload.
+  // First test the sole authorized account key; also cover an optional encrypted upload.
   accounts = await Accounts.open({ directory: join(directory, 'state'), publicUrl: 'http://127.0.0.1:5173', production: false, mailer: null })
   const user = accounts.store.create('ssh-web@example.com', 'SSH Dev', 'unused')
   const verified = accounts.store.consumeToken(accounts.store.issueToken(user.id, 'verify', 10000), 'verify')
   const cookie = `outpost_session=${accounts.store.issueSession(verified).token}`
   await accounts.keys.publicKey(user.id)
   const managerKey = accounts.keys.paths(user.id).identityFile
-  container = await docker('run', '-d', '--rm', '-p', '127.0.0.1::22', 'outpost-ssh-test:local')
-  await docker('cp', `${keyPath}.pub`, `${container}:/root/.ssh/authorized_keys`)
-  await docker('cp', `${managerKey}.pub`, `${container}:/tmp/manager.pub`)
-  await docker('exec', container, 'sh', '-c', 'cat /tmp/manager.pub >> /root/.ssh/authorized_keys; chown 0:0 /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys; apt-get update -qq && apt-get install -y -qq tmux dtach')
+  container = await docker('run', '-d', '--rm', '-p', '127.0.0.1::22', 'outpost-web-ssh-test:local')
+  await docker('cp', `${managerKey}.pub`, `${container}:/root/.ssh/authorized_keys`)
+  await docker('exec', container, 'sh', '-c', 'chown 0:0 /root/.ssh /root/.ssh/authorized_keys; chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys')
   const port = Number((await docker('port', container, '22')).split(':').at(-1))
   app = await createApp({ accounts })
   await app.listen({ host: '127.0.0.1', port: 0 }); const origin = `http://127.0.0.1:${app.server.address().port}`
@@ -64,13 +69,17 @@ test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize,
   const software = await request('GET', `${base}/software`)
   assert.ok(software.software.every(item => item.status === 'installed'), JSON.stringify(software))
   await docker('exec', container, 'sh', '-c', 'command -v tmux && command -v dtach')
-  await request('PUT', `${base}/terminal-key`, { privateKey: await readFile(keyPath, 'utf8'), passphrase: 'test-passphrase' })
   for (const backend of ['tmux', 'dtach']) await t.test(backend, async () => {
+    if (backend === 'dtach') {
+      await docker('cp', `${keyPath}.pub`, `${container}:/tmp/web.pub`)
+      await docker('exec', container, 'sh', '-c', 'cat /tmp/web.pub >> /root/.ssh/authorized_keys')
+      await request('PUT', `${base}/terminal-key`, { privateKey: await readFile(keyPath, 'utf8'), passphrase: 'test-passphrase' })
+    }
     const rootDir = `/root/web-${backend}`
     await docker('exec', container, 'mkdir', '-p', rootDir)
     const session = await request('POST', `${base}/sessions`, { name: `Web ${backend}`, rootDir, backend, tool: 'codex' })
     await docker('exec', container, 'touch', `${rootDir}/capture-input`)
-    const start = () => request('POST', `${base}/sessions/${session.id}/web-terminal`, { cols: 80, rows: 24 })
+    const start = () => request('POST', `${base}/sessions/${session.id}/web-terminal`, { cols: 80, rows: 24, ...(backend === 'dtach' ? { keySource: 'uploaded' } : {}) })
     const info = await start()
     let first
     try { first = await connect(origin, info.id, cookie) }
@@ -79,7 +88,14 @@ test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize,
       t.diagnostic(JSON.stringify(await request('GET', `${base}/software`)))
       throw error
     }
-    assert.match((await request('GET', `${base}/terminal-key`)).key.hostFingerprint, /^SHA256:/)
+    const keyStatus = await request('GET', `${base}/terminal-key`)
+    assert.deepEqual(keyStatus.accountKey, await accounts.keys.publicKey(user.id))
+    if (backend === 'dtach') assert.match(keyStatus.key.hostFingerprint, /^SHA256:/)
+    else {
+      assert.equal(keyStatus.key, null)
+      await assert.rejects(readFile(join(directory, 'state', 'terminal-keys', 'master-key')), { code: 'ENOENT' })
+      assert.match(await readFile(accounts.keys.paths(user.id).knownHostsFile, 'utf8'), /ssh-ed25519|ecdsa-sha2|ssh-rsa/)
+    }
     const heartbeat = () => docker('exec', container, 'cat', `${rootDir}/heartbeat.json`).then(JSON.parse)
     const initial = await heartbeat()
     first.send({ type: 'input', data: 'WEB_MOBILE_INPUT\r' })

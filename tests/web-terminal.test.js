@@ -113,7 +113,7 @@ test('hosted production accepts private-key uploads without an encryption-key ov
   const request = (method, url, payload) => app.inject({ method, url, payload, headers: { host: 'outpost.example', origin: 'https://outpost.example', cookie, 'x-outpost-request': '1' } })
   const target = (await request('POST', '/api/targets', { name: 'Production SSH', kind: 'ssh', host: 'dev.example', backends: ['tmux'], tools: ['codex'] })).json()
   const path = `/api/targets/${target.id}/terminal-key`
-  assert.deepEqual((await request('GET', path)).json(), { encryptionAvailable: true, key: null })
+  assert.deepEqual((await request('GET', path)).json(), { encryptionAvailable: true, key: null, accountKey: await accounts.keys.publicKey(user.id) })
   const saved = await request('PUT', path, { privateKey: ssh2.utils.generateKeyPairSync('ed25519').private })
   assert.equal(saved.statusCode, 200, saved.body); assert.match(saved.json().key.fingerprint, /^SHA256:/)
   assert.equal((await readFile(join(directory, 'terminal-keys', 'master-key'))).length, 32)
@@ -132,6 +132,50 @@ test('uploaded RSA and ECDSA keys normalize without passphrases and preserve the
   }
 })
 
+test('hosted terminals reuse the authorized account key without uploads, enforce host trust and isolate accounts even with invalid upload encryption', { timeout: 30000 }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-account-terminal-')), ssh = await webSshFixture()
+  const accounts = await Accounts.open({ directory, publicUrl: 'http://127.0.0.1:5173', production: false, mailer: null })
+  const app = await createApp({ accounts, terminalKeys: new TerminalKeys(directory, 'invalid'), service: { get: async (_target, id) => ({ id }) } })
+  await app.listen({ host: '127.0.0.1', port: 0 }); const origin = `http://127.0.0.1:${app.server.address().port}`
+  t.after(async () => { await app.close(); await ssh.close(); await rm(directory, { recursive: true, force: true }) })
+  const member = email => {
+    const user = accounts.store.create(email, 'Dev', 'unused')
+    const verified = accounts.store.consumeToken(accounts.store.issueToken(user.id, 'verify', 10000), 'verify')
+    return { user, cookie: `outpost_session=${accounts.store.issueSession(verified).token}` }
+  }
+  const alice = member('account-terminal@example.com'), bob = member('other-terminal@example.com')
+  const request = (member, method, url, payload) => app.inject({ method, url, payload, headers: { cookie: member.cookie, 'x-outpost-request': '1' } })
+  const target = (await request(alice, 'POST', '/api/targets', { name: 'Account SSH', kind: 'ssh', host: '127.0.0.1', port: ssh.port, backends: ['tmux'], tools: ['codex'] })).json()
+  const base = `/api/targets/${target.id}`, launchPath = `${base}/sessions/test-session/web-terminal`
+  const accountKey = await accounts.keys.publicKey(alice.user.id), knownHosts = accounts.keys.paths(alice.user.id).knownHostsFile
+  const launch = () => request(alice, 'POST', launchPath, { cols: 80, rows: 24 })
+  const status = await request(alice, 'GET', `${base}/terminal-key`)
+  assert.deepEqual(status.json(), { encryptionAvailable: false, key: null, accountKey })
+  assert.equal(ssh.commands.length, 0, 'looking up public credentials never opens a terminal')
+  const unverified = await launch(); assert.equal(unverified.statusCode, 409); assert.match(unverified.body, /host key has not been verified/)
+  const hostEntry = publicKey => `[127.0.0.1]:${ssh.port} ${publicKey}\n`
+  await writeFile(knownHosts, hostEntry(ssh2.utils.generateKeyPairSync('ed25519').public))
+  const changed = await launch(); assert.equal(changed.statusCode, 409); assert.match(changed.body, /host key changed/)
+  await writeFile(knownHosts, hostEntry(ssh.hostPublicKey))
+  const unauthorized = await launch(); assert.equal(unauthorized.statusCode, 409); assert.match(unauthorized.body, /authorize your Outpost account public key/)
+  ssh.authorize(accountKey.publicKey)
+  const launched = await launch(); assert.equal(launched.statusCode, 200, launched.body)
+  const missingUpload = await request(alice, 'POST', launchPath, { cols: 80, rows: 24, keySource: 'uploaded' })
+  assert.equal(missingUpload.statusCode, 409, 'selecting an upload cannot silently reuse an account-key terminal')
+  const viewer = await connect(origin, launched.json().id, alice.cookie)
+  viewer.send({ type: 'input', data: 'ACCOUNT_KEY_MOBILE\r' })
+  await until(() => ssh.inputs.join('').includes('ACCOUNT_KEY_MOBILE'))
+  await assert.rejects(readdir(join(directory, 'terminal-keys')), { code: 'ENOENT' }, 'the account private key is never copied into the upload vault')
+  assert.equal((await request(bob, 'POST', launchPath, { cols: 80, rows: 24 })).statusCode, 404)
+  const otherTarget = (await request(bob, 'POST', '/api/targets', { name: 'Other account', kind: 'ssh', host: '127.0.0.1', port: ssh.port, backends: ['tmux'], tools: ['codex'] })).json()
+  assert.notEqual((await accounts.keys.publicKey(bob.user.id)).publicKey, accountKey.publicKey)
+  assert.equal((await stat(accounts.keys.paths(alice.user.id).identityFile)).mode & 0o777, 0o600)
+  await writeFile(accounts.keys.paths(bob.user.id).knownHostsFile, hostEntry(ssh.hostPublicKey))
+  assert.equal((await request(bob, 'POST', `/api/targets/${otherTarget.id}/sessions/test-session/web-terminal`, { cols: 80, rows: 24 })).statusCode, 409, 'another account cannot borrow the authorized key')
+  const revoked = once(viewer.ws, 'close'); await request(alice, 'POST', '/api/auth/logout'); await revoked
+  assert.equal((await request(alice, 'GET', `${base}/terminal-key`)).statusCode, 401)
+})
+
 test('real SSH web terminal: explicit launch, private credentials, origin/auth checks, resize, reconnect, revocation and cleanup', { timeout: 30000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-web-ssh-')), ssh = await webSshFixture()
   const accounts = await Accounts.open({ directory, publicUrl: 'http://127.0.0.1:5173', production: false, mailer: null })
@@ -145,16 +189,16 @@ test('real SSH web terminal: explicit launch, private credentials, origin/auth c
   const keyPath = `/api/targets/${target.id}/terminal-key`, launchPath = `/api/targets/${target.id}/sessions/test-session/web-terminal`
   assert.equal(ssh.commands.length, 0)
   assert.equal((await request('GET', keyPath)).json().key, null)
-  assert.equal((await request('POST', launchPath, { cols: 80, rows: 24 })).statusCode, 409)
-  for (const [method, path, body] of [['GET', keyPath], ['PUT', keyPath, { privateKey: ssh.key }], ['DELETE', keyPath], ['POST', launchPath, { cols: 80, rows: 24 }]]) assert.equal((await request(method, path, body, bob.cookie)).statusCode, 404)
+  assert.equal((await request('POST', launchPath, { cols: 80, rows: 24, keySource: 'uploaded' })).statusCode, 409)
+  for (const [method, path, body] of [['GET', keyPath], ['PUT', keyPath, { privateKey: ssh.key }], ['DELETE', keyPath], ['POST', launchPath, { cols: 80, rows: 24, keySource: 'uploaded' }]]) assert.equal((await request(method, path, body, bob.cookie)).statusCode, 404)
   assert.equal((await request('PUT', keyPath, { privateKey: ssh.publicKey })).statusCode, 400)
   const saved = await request('PUT', keyPath, { privateKey: ssh.key }); assert.equal(saved.statusCode, 200, saved.body)
   assert.equal(saved.body.includes('PRIVATE KEY'), false); assert.equal(ssh.commands.length, 0, 'upload does not start SSH')
   assert.equal((await request('POST', launchPath, { cols: 5, rows: 24 })).statusCode, 400)
-  const launched = await request('POST', launchPath, { cols: 80, rows: 24 }); assert.equal(launched.statusCode, 200, launched.body)
+  const launched = await request('POST', launchPath, { cols: 80, rows: 24, keySource: 'uploaded' }); assert.equal(launched.statusCode, 200, launched.body)
   const info = launched.json(), id = info.id
   assert.equal(ssh.commands.length, 1); assert.match(ssh.commands[0], /python3/)
-  assert.equal((await request('POST', launchPath, { cols: 80, rows: 24 })).json().id, id, 'relaunch resumes held PTY')
+  assert.equal((await request('POST', launchPath, { cols: 80, rows: 24, keySource: 'uploaded' })).json().id, id, 'relaunch resumes held PTY')
   for (const [cookie, extra, expected] of [[bob.cookie, {}, 404], ['', {}, 401], [alice.cookie, { origin: 'https://evil.example' }, 403], [alice.cookie, { origin: '' }, 403]]) {
     const ws = new WebSocket(`${origin.replace('http', 'ws')}/api/web-terminals/${id}/socket`, { headers: { origin, cookie, ...extra } })
     const status = await new Promise(resolve => { ws.on('error', () => {}); ws.on('unexpected-response', (_request, response) => { response.resume(); resolve(response.statusCode); ws.terminate() }) })
@@ -175,12 +219,12 @@ test('real SSH web terminal: explicit launch, private credentials, origin/auth c
   assert.equal((await request('GET', keyPath)).statusCode, 401)
   // A fresh login can reuse the saved key, but cannot reuse the revoked login's PTY.
   const newCookie = `outpost_session=${accounts.store.issueSession(alice.user).token}`
-  const next = await request('POST', launchPath, { cols: 80, rows: 24 }, newCookie); assert.equal(next.statusCode, 200, next.body)
+  const next = await request('POST', launchPath, { cols: 80, rows: 24, keySource: 'uploaded' }, newCookie); assert.equal(next.statusCode, 200, next.body)
   const third = await connect(origin, next.json().id, newCookie), removed = once(third.ws, 'close')
   assert.equal((await request('DELETE', keyPath, undefined, newCookie)).statusCode, 204); await removed
   assert.equal((await request('GET', keyPath, undefined, newCookie)).json().key, null)
   await request('PUT', keyPath, { privateKey: ssh.key }, newCookie)
-  const expiring = (await request('POST', launchPath, { cols: 80, rows: 24 }, newCookie)).json()
+  const expiring = (await request('POST', launchPath, { cols: 80, rows: 24, keySource: 'uploaded' }, newCookie)).json()
   await delay(2100)
   assert.equal((await request('DELETE', `/api/web-terminals/${expiring.id}`, undefined, newCookie)).statusCode, 404, 'unattached terminals expire')
   await request('DELETE', `/api/targets/${target.id}`, undefined, newCookie)
@@ -233,6 +277,8 @@ test('concurrent launches cannot bypass terminal limits and slow viewers apply S
   const targets = []
   for (let i = 0; i < 5; i++) {
     const target = (await request('POST', '/api/targets', { name: `SSH ${i}`, kind: 'ssh', host: '127.0.0.1', port: ssh.port, backends: ['tmux'], tools: ['codex'] })).json()
+    assert.equal('accountKey' in (await request('GET', `/api/targets/${target.id}/terminal-key`)).json(), false, 'local mode has no Outpost account identity')
+    assert.equal((await request('POST', `/api/targets/${target.id}/sessions/test/web-terminal`, { cols: 80, rows: 24, keySource: 'account' })).statusCode, 400)
     assert.equal((await request('PUT', `/api/targets/${target.id}/terminal-key`, { privateKey: ssh.key })).statusCode, 200)
     targets.push(target)
   }

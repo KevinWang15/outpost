@@ -266,25 +266,30 @@ test('real deployments: default local desktop/local/SSH sessions and production 
     await api(alice, 'GET', origin, `/targets/${bobTarget.id}/sessions/${session.id}`, undefined, 404)
   })
   const openTerminal = async session => {
-    await phone.getByRole('button', { name: `Connection options for ${session.name}`, exact: true }).click()
-    await phone.getByRole('menuitem', { name: 'Launch with web terminal', exact: true }).click()
+    await phone.locator('.session-row').filter({ has: phone.getByText(session.name, { exact: true }) }).getByRole('button', { name: 'Connect using web terminal', exact: true }).click()
   }
   const first = sessions[0]
   const heartbeat = async item => JSON.parse(await docker('exec', targets.alice.container, 'cat', `${item.root}/heartbeat.json`))
   let originalPid, encryptionKey
-  await t.test('phone opt-in, encrypted private-key upload, real SSH PTY input, touch controls and resizing through nginx', async () => {
+  await t.test('phone opt-in uses the account key without an upload; optional encrypted keys, real SSH input, touch controls and resize work through nginx', async () => {
     await phone.goto(`${origin}/?target=${aliceTarget.id}`)
     await expect(phone.getByText(first.session.name, { exact: true })).toBeVisible()
     await expect(phone.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0)
     const webRequests = []
     phone.on('request', request => { if (/\/api\/.*(?:web-terminal|terminal-key)/.test(request.url())) webRequests.push(request.url()) })
-    await phone.getByRole('button', { name: 'Connection options', exact: true }).first().click()
+    await phone.getByRole('button', { name: `Connection options for ${first.session.name}`, exact: true }).click()
+    await phone.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
     await expect(phone.getByRole('dialog')).toBeVisible()
     await expect(phone.getByRole('button', { name: 'Launch terminal', exact: true })).toHaveCount(0)
     assert.deepEqual(webRequests, [])
     await phone.getByRole('button', { name: 'Done', exact: true }).click()
     await openTerminal(first.session)
-    await expect(phone.getByText('Add your SSH private key', { exact: true })).toBeVisible()
+    await expect(phone.locator('.terminal-toolbar')).toContainText('Connected')
+    await expect(phone.getByLabel('Private key file', { exact: true })).toHaveCount(0)
+    assert.equal((await api(alice, 'GET', origin, `/targets/${aliceTarget.id}/terminal-key`)).key, null)
+    await phone.getByRole('button', { name: 'Manage key', exact: true }).click()
+    await expect(phone.getByText('Your Outpost account key', { exact: true })).toBeVisible()
+    await phone.getByRole('button', { name: 'Use a different key', exact: true }).click()
     await phone.getByLabel('Private key file', { exact: true }).setInputFiles(webKey)
     await phone.getByLabel('Key passphrase', { exact: true }).fill('wrong-passphrase')
     await phone.getByRole('button', { name: 'Save key and launch', exact: true }).click()
@@ -333,7 +338,7 @@ test('real deployments: default local desktop/local/SSH sessions and production 
     assert.equal((await docker('exec', targets.alice.container, 'cat', `${first.root}/starts.log`)).trim(), String(originalPid))
   })
   await phone.getByRole('button', { name: 'Close dialog', exact: true }).click()
-  await t.test('a backend restart keeps accounts, targets, encrypted uploads and the coding process; relaunch uses the saved key', async () => {
+  await t.test('a backend restart keeps accounts, targets and optional uploads; the main Connect action still uses the account key', async () => {
     await docker('restart', manager)
     await until(async () => (await alice.request.get(`${origin}/health`)).ok(), 'backend restart')
     assert.equal((await api(alice, 'GET', origin, '/auth/session')).user.id, aliceUser.id)
@@ -359,17 +364,16 @@ test('real deployments: default local desktop/local/SSH sessions and production 
       await phone.getByRole('button', { name: 'Close dialog', exact: true }).click()
     }
   })
-  await t.test('removing an uploaded key closes its attachment; replacing it resumes the same remote process', async () => {
+  await t.test('removing an uploaded key restores account-key access to the same remote process', async () => {
     await openTerminal(first.session)
     await expect(phone.locator('.terminal-toolbar')).toContainText('Connected')
     await phone.getByRole('button', { name: 'Manage key', exact: true }).click()
+    await phone.getByRole('button', { name: 'Use a different key', exact: true }).click()
     await phone.getByRole('button', { name: 'Remove saved key', exact: true }).click()
-    await expect(phone.getByText('Add your SSH private key', { exact: true })).toBeVisible()
+    await expect(phone.getByText('Your Outpost account key', { exact: true })).toBeVisible()
     assert.equal((await api(alice, 'GET', origin, `/targets/${aliceTarget.id}/terminal-key`)).key, null)
     assert.equal((await heartbeat(first)).pid, originalPid)
-    await phone.getByLabel('Private key file', { exact: true }).setInputFiles(webKey)
-    await phone.getByLabel('Key passphrase', { exact: true }).fill('fixture-passphrase')
-    await phone.getByRole('button', { name: 'Save key and launch', exact: true }).click()
+    await phone.getByRole('button', { name: 'Launch web terminal', exact: true }).click()
     await expect(phone.locator('.terminal-toolbar')).toContainText('Connected')
     assert.equal((await heartbeat(first)).pid, originalPid)
     await phone.getByRole('button', { name: 'Close dialog', exact: true }).click()

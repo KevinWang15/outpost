@@ -37,7 +37,7 @@ export default function SessionList({
   onRefresh: () => void
   onCreate: () => void
   onConnect: (session: Session, mode: ConnectionMode) => void
-  onWebTerminal?: (session: Session) => void
+  onWebTerminal?: (session: Session, differentKey?: boolean) => void
   onImage: (session: Session) => void
   onConfirm: (session: Session, action: 'delete' | 'terminate') => void
 }) {
@@ -134,13 +134,13 @@ export default function SessionList({
                 <div className="connect-button" role="group" aria-label={`Connect to ${session.name}`}>
                   <button
                     className="button connect"
-                    title={mode === 'hosted' ? 'Prepare a connection command for your own terminal' : 'Open your preferred available terminal on the computer running Outpost'}
+                    title={mode === 'hosted' ? 'Connect in your browser using your Outpost account key' : 'Open your preferred available terminal on the computer running Outpost'}
                     disabled={connecting?.sessionId === session.id}
-                    onClick={() => onConnect(session, mode === 'hosted' ? 'options' : 'launch')}
+                    onClick={() => mode === 'hosted' ? onWebTerminal?.(session) : onConnect(session, 'launch')}
                   >
                     {connecting?.sessionId === session.id
                       ? connecting.mode === 'launch' ? 'Opening…' : 'Preparing…'
-                      : mode === 'hosted' ? 'Connection options' : 'Connect'}
+                      : mode === 'hosted' ? 'Connect using web terminal' : 'Connect'}
                     {connecting?.sessionId === session.id
                       ? <LoaderCircle size={15} className="loading-spinner" aria-hidden="true" />
                       : <ArrowRight size={15} aria-hidden="true" />}
@@ -161,8 +161,8 @@ export default function SessionList({
                         <DropdownMenu.Item className="target-menu-item" onSelect={() => onConnect(session, 'options')}>
                           <SquareTerminal size={16} /> Connection options
                         </DropdownMenu.Item>
-                        {onWebTerminal && <DropdownMenu.Item className="target-menu-item" onSelect={() => onWebTerminal(session)}>
-                          <SquareTerminal size={16} /> Launch with web terminal
+                        {onWebTerminal && <DropdownMenu.Item className="target-menu-item" onSelect={() => onWebTerminal(session, mode === 'hosted')}>
+                          <SquareTerminal size={16} /> {mode === 'hosted' ? 'Connect with another SSH key' : 'Launch with web terminal'}
                         </DropdownMenu.Item>}
                       </DropdownMenu.Content>
                     </DropdownMenu.Portal>

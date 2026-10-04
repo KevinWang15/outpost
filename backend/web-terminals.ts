@@ -1,20 +1,22 @@
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import ssh2, { type Client, type ClientChannel, type ServerHostKeyAlgorithm } from 'ssh2'
 import headless, { type ITerminalAddon } from '@xterm/headless'
 import serialize from '@xterm/addon-serialize'
 import { WebSocket } from 'ws'
 import type { SshTarget } from '../shared/session-manager'
-import type { WebTerminalInfo } from '../shared/web-terminal'
+import type { TerminalKeySource, WebTerminalInfo } from '../shared/web-terminal'
 import { AppError } from './errors'
 import { quote } from './shell'
 import { sessionAttachOperation } from './sessions'
 import type { TerminalKeys } from './terminal-keys'
+import { managedSshIdentity } from './account-ssh'
 
 export interface TerminalOwner { userId: string; authSessionId: string }
 const sameOwner = (a: TerminalOwner, b: TerminalOwner) => a.userId === b.userId && a.authSessionId === b.authSessionId
 const HIGH_WATER = 128 * 1024
 interface HeldTerminal {
-  id: string; owner: TerminalOwner; targetId: string; sessionId: string
+  id: string; owner: TerminalOwner; targetId: string; sessionId: string; keySource: TerminalKeySource
   client: Client; channel: ClientChannel | null; screen: InstanceType<typeof headless.Terminal>
   serializer: InstanceType<typeof serialize.SerializeAddon>; socket: WebSocket | null
   disconnectedAt: number; unacked: number; pending: number; replaying: boolean; alive: boolean; pong: boolean; blockedInput: boolean
@@ -48,23 +50,30 @@ export class WebTerminals {
     if (!this.validOwner(owner)) throw new AppError('Sign in to continue.', 401)
     return entry
   }
-  async start(owner: TerminalOwner, target: SshTarget, sessionId: string, cols: number, rows: number) {
+  async start(owner: TerminalOwner, target: SshTarget, sessionId: string, cols: number, rows: number, keySource?: TerminalKeySource) {
     if (this.stopped) throw new AppError('Outpost is restarting. Try again shortly.', 409)
     if (!this.validOwner(owner)) throw new AppError('Sign in to continue.', 401)
-    const existing = [...this.entries.values()].find(entry => sameOwner(entry.owner, owner) && entry.targetId === target.id && entry.sessionId === sessionId)
+    const identity = managedSshIdentity(target)
+    keySource ??= identity ? 'account' : 'uploaded'
+    if (keySource === 'account' && !identity) throw new AppError('Outpost account keys are only available in hosted mode.', 400)
+    const existing = [...this.entries.values()].find(entry => sameOwner(entry.owner, owner) && entry.targetId === target.id && entry.sessionId === sessionId && entry.keySource === keySource)
     if (existing) return this.info(existing)
     this.checkLimit(owner)
     for (const [id, bucket] of this.starts) if (bucket.until <= Date.now()) this.starts.delete(id)
     const bucket = this.starts.get(owner.userId) ?? { count: 0, until: Date.now() + 60_000 }
     if (bucket.count >= 20 || this.starts.size >= 10000) throw new AppError('Too many terminal launches. Try again in a minute.', 429)
     bucket.count++; this.starts.set(owner.userId, bucket)
-    const credential = await this.keys.read(owner.userId, target.id)
-    if (!credential) throw new AppError('Upload a private key for this target before launching a web terminal.', 409)
+    const credential = keySource === 'uploaded' ? await this.keys.read(owner.userId, target.id) : null
+    if (keySource === 'uploaded' && !credential) throw new AppError('Upload a private key for this target before launching a web terminal.', 409)
     const known = await this.keys.knownHostKeys(target)
+    // The session lookup has already connected with OpenSSH and pinned the host.
+    // Account keys reuse that trust record and never enter the upload vault.
+    if (!credential && !known.length) throw new AppError('The target SSH host key has not been verified. Refresh the workspace before reconnecting.', 409)
+    const privateKey = credential?.privateKey ?? await readFile(identity!.identityFile, 'utf8')
     // Recheck after I/O; different targets can launch concurrently.
     if (this.stopped) throw new AppError('Outpost is restarting. Try again shortly.', 409)
     this.checkLimit(owner)
-    const trusted = credential.hostKey ? [credential.hostKey] : known
+    const trusted = credential?.hostKey ? [credential.hostKey] : known
     const hostAlgorithms: ServerHostKeyAlgorithm[] = trusted.flatMap(encoded => {
       const parsed = ssh2.utils.parseKey(Buffer.from(encoded, 'base64'))
       if (parsed instanceof Error) return []
@@ -74,7 +83,7 @@ export class WebTerminals {
     const client = new ssh2.Client(), screen = new headless.Terminal({ cols, rows, scrollback: 1000, allowProposedApi: true, logLevel: 'off' })
     const serializer = new serialize.SerializeAddon()
     screen.loadAddon(serializer as unknown as ITerminalAddon)
-    const entry: HeldTerminal = { id: randomUUID(), owner, targetId: target.id, sessionId, client, channel: null, screen, serializer, socket: null, disconnectedAt: Date.now(), unacked: 0, pending: 0, replaying: false, alive: true, pong: true, blockedInput: false }
+    const entry: HeldTerminal = { id: randomUUID(), owner, targetId: target.id, sessionId, keySource, client, channel: null, screen, serializer, socket: null, disconnectedAt: Date.now(), unacked: 0, pending: 0, replaying: false, alive: true, pong: true, blockedInput: false }
     screen.onData(data => { if (entry.alive && (!entry.socket || entry.replaying)) entry.channel?.write(data) })
     // Reserve the slot before connecting so simultaneous requests cannot bypass limits.
     this.entries.set(entry.id, entry)
@@ -88,7 +97,7 @@ export class WebTerminals {
         const fail = () => {
           if (settled) return
           settled = true; cleanup()
-          reject(new AppError(hostError || 'SSH connection failed. Check the target host, port, uploaded key, and root authorized_keys.', 409))
+          reject(new AppError(hostError || `SSH connection failed. Check the target host and port, and authorize ${credential ? 'the uploaded key' : 'your Outpost account public key'} in root's authorized_keys.`, 409))
         }
         const deadline = setTimeout(fail, 20_000).unref()
         const ready = () => {
@@ -107,11 +116,12 @@ export class WebTerminals {
         client.once('ready', ready)
         client.once('error', fail)
         client.once('close', fail)
-        client.connect({ host: target.host, port: target.port ?? 22, username: 'root', privateKey: credential.privateKey, passphrase: credential.passphrase || undefined,
+        client.connect({ host: target.host, port: target.port ?? 22, username: 'root', privateKey, passphrase: credential?.passphrase || undefined,
           readyTimeout: 15_000, keepaliveInterval: 15_000, keepaliveCountMax: 3,
           ...(hostAlgorithms.length ? { algorithms: { serverHostKey: hostAlgorithms } } : {}),
           hostVerifier: (key: Buffer, callback: (valid: boolean) => void) => {
-            void this.keys.verifyHost(owner.userId, target.id, credential, key, known).then(valid => {
+            const verification = credential ? this.keys.verifyHost(owner.userId, target.id, credential, key, known) : Promise.resolve(known.includes(key.toString('base64')))
+            void verification.then(valid => {
               if (!valid) hostError = 'SSH host key changed or differs from the trusted management key. Verify the server before reconnecting.'
               callback(valid && entry.alive)
             }, () => { hostError = 'Could not securely save the SSH host key.'; callback(false) })

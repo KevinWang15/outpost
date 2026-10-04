@@ -28,7 +28,7 @@ type WorkspaceDialog =
   | { kind: 'finder' }
   | { kind: 'connection'; session: Session; data: Connection }
   | { kind: 'image'; session: Session }
-  | { kind: 'web-terminal'; session: Session }
+  | { kind: 'web-terminal'; session: Session; differentKey?: boolean }
   | { kind: 'confirm'; session: Session; action: 'delete' | 'terminate' }
 
 export default function TargetWorkspace({
@@ -200,14 +200,14 @@ export default function TargetWorkspace({
         checking={checking} onCheck={session => void checkSession(session)}
         onRefresh={() => void refresh()} onCreate={() => openSessionForm()}
         onConnect={connect} onImage={session => openDialog({ kind: 'image', session })}
-        onWebTerminal={target.kind === 'ssh' ? session => openDialog({ kind: 'web-terminal', session }) : undefined}
+        onWebTerminal={target.kind === 'ssh' ? (session, differentKey) => openDialog({ kind: 'web-terminal', session, differentKey }) : undefined}
         onConfirm={(session, action) => openDialog({ kind: 'confirm', session, action })} />
       <div className="bottom-note">
         <Terminal />
         <p>
           <strong>Your work stays where it runs.</strong>{' '}
           {hosted
-            ? <>Choose <strong>… → Launch with web terminal</strong> to connect in your browser, including on your phone. Outpost holds the SSH connection to your server.</>
+            ? <>Click <strong>Connect using web terminal</strong> to connect in your browser, including on your phone, using your authorized Outpost account key.</>
             : <>Click <strong>Connect</strong> to open a terminal on this computer. Detach with <kbd>Ctrl</kbd> + <kbd>\</kbd>, and return whenever you’re ready.</>}
         </p>
       </div>
@@ -218,7 +218,7 @@ export default function TargetWorkspace({
       {dialog?.kind === 'finder' && (
         <CodingSessionFinder target={target} tools={installedTools} canLink={canCreate}
           onClose={() => setDialog(null)} onLink={openSessionForm}
-          onOpen={session => connect(session, 'launch')} />
+          onOpen={session => hosted ? openDialog({ kind: 'web-terminal', session }) : connect(session, 'launch')} />
       )}
       {dialog?.kind === 'connection' && (
         <ConnectModal targetId={target.id} kind={target.kind} session={dialog.session}
@@ -230,7 +230,7 @@ export default function TargetWorkspace({
         <ImageAttach targetId={target.id} session={dialog.session} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'web-terminal' && <Suspense fallback={<Modal title="Web terminal" subtitle="Loading terminal…" onClose={() => setDialog(null)}><p role="status">Loading…</p></Modal>}>
-        <WebTerminalModal target={target} session={dialog.session} onClose={() => { setDialog(null); void refresh() }} />
+        <WebTerminalModal target={target} session={dialog.session} differentKey={dialog.differentKey} onClose={() => { setDialog(null); void refresh() }} />
       </Suspense>}
       {dialog?.kind === 'confirm' && (
         <Modal

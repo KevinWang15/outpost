@@ -109,7 +109,8 @@ test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize,
     assert.equal((await heartbeat()).pid, initial.pid, 'a network drop keeps the backend PTY and coding process')
     assert.match(second.screen(), /OUTPOST_FIXTURE_READY/)
     const secondClosed = once(second.ws, 'close'); await request('DELETE', `/web-terminals/${info.id}`); await secondClosed
-    assert.equal((await request('GET', `${base}/sessions/${session.id}`)).status, 'detached')
+    // WebSocket closure precedes the SSH channel teardown on the remote host.
+    await until(async () => (await request('GET', `${base}/sessions/${session.id}`)).status === 'detached')
     const again = await start(), third = await connect(origin, again.id, cookie)
     assert.notEqual(again.id, info.id)
     assert.equal((await heartbeat()).pid, initial.pid, 'explicit web detach also preserves the remote process')

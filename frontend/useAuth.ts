@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { AuthState } from '../shared/auth'
 
-export interface AuthContextValue extends AuthState {
+interface AuthContextValue extends AuthState {
   refresh: () => Promise<AuthState>
   signOut: () => Promise<void>
   navigate: (path: string) => void

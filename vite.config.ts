@@ -20,7 +20,4 @@ export default defineConfig({
     },
   },
   preview: { host: loopbackHost(process.env.VITE_HOST, 'VITE_HOST') },
-  resolve: {
-    tsconfigPaths: true,
-  },
 })

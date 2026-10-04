@@ -13,7 +13,7 @@ npm run dev
 
 Open `http://127.0.0.1:5173`; Vite forwards API requests to
 `http://127.0.0.1:3000`. The API uses `tsx watch`, including changes to the Python
-runtime files. `npm run ts:debug -- backend/server.ts` starts a watcher with the
+runtime files. `npm run dev:debug` starts the backend watcher with the
 inspector on loopback port 9229; the VS Code attach configuration reconnects
 after restarts.
 
@@ -39,7 +39,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-`check` runs lint, type checks, a production build, and unit tests. Existing
+`check` runs lint, type checks, a production build, and unit tests. The
 workspace browser tests mock the API; account tests start the real backend with
 temporary users and mock target services. Build before running those browser
 tests so `dist/client` is available. Platform and transport tests have additional prerequisites:
@@ -47,6 +47,7 @@ tests so `dist/client` is available. Platform and transport tests have additiona
 | Command | Prerequisites |
 | --- | --- |
 | `npm run test:integration` | Docker; optionally `OUTPOST_PWSH=pwsh` for PowerShell coverage |
+| `npm run test:deployment` | Linux, Docker, Playwright Chromium, and a completed production build |
 | `npm run test:local` | Linux/macOS, Python, tmux, dtach; `lsof` on macOS |
 | `npm run test:desktop` | Linux, Xvfb, xauth, and XTerm |
 | `npm run test:coding` | Native Codex, Claude Code, and Kimi Code binaries, Python, tmux |

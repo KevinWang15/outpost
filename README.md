@@ -359,7 +359,7 @@ and synchronizes account changes across browser tabs.
 Typechecks use the native TypeScript 7 compiler. ESLint uses Microsoft's separate TypeScript JavaScript API package through the `typescript` dependency, following the [official tooling setup](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-60).
 
 ```sh
-npm run check             # lint, typechecks, production build, API and starter tests
+npm run check             # lint, typechecks, production build, unit and API tests
 npm run test:local        # Linux/macOS: lifecycle, keyboard/focus/input, AI activity, both backends
 npm run test:integration  # Docker required: isolated real SSH + both backends + interactive fixture
 npm run test:coding       # Installed CLIs: native IDs, cold resume, turn completion/errors; fake providers

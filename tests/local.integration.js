@@ -77,6 +77,16 @@ test('native local lifecycle: both backends, all tools, live state, persistence,
     assert.equal(target.environment.platform, process.platform)
     assert.equal(target.host, undefined)
     targets.push(target)
+    if (backend === 'tmux') await t.test('invalid creation requests never initialize session storage', async () => {
+      for (const input of [
+        { backend: 'screen', tool: 'codex' }, { backend: null, tool: 'codex' }, { backend: [], tool: 'codex' },
+        { backend: 'tmux', tool: 'unknown' }, { backend: 'tmux', tool: null },
+        { backend: 'tmux', tool: [] }, { backend: 'tmux', tool: {} },
+      ]) {
+        await assert.rejects(service.create(target, { name: 'Invalid', rootDir: home, ...input }), /Unsupported session backend|Unsupported coding tool/)
+        await assert.rejects(stat(join(home, '.outpost')), { code: 'ENOENT' })
+      }
+    })
     for (const tool of ['codex', 'kimi', 'claude']) {
       const root = join(home, `${backend}-${tool} project's $(literal) & é`)
       const launchEnv = { OUTPOST_SESSION_MESSAGE: `${backend}-${tool}: 'quotes' $HOME $(touch OUTPOST_ENV_INJECTED)\nsecond line é`, OUTPOST_SESSION_EMPTY: '', OUTPOST_SESSION_OVERRIDE: 'overridden' }

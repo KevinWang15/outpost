@@ -27,7 +27,7 @@ export class WebTerminals {
   private stopped = false
   private starts = new Map<string, { count: number; until: number }>()
   private cleanup: NodeJS.Timeout
-  constructor(private keys: TerminalKeys, private validOwner: (owner: TerminalOwner) => boolean = () => true, private graceMs = 10 * 60_000) {
+  constructor(private keys: TerminalKeys, private validOwner: (owner: TerminalOwner) => boolean, private graceMs = 10 * 60_000) {
     this.cleanup = setInterval(() => {
       for (const entry of this.entries.values()) {
         if (!this.validOwner(entry.owner)) this.finish(entry, 'Sign-in ended. Sign in again to reconnect.')

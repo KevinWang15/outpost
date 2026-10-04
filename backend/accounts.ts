@@ -43,26 +43,19 @@ class AccountRateLimit {
   }
 }
 
-export interface AccountOptions {
+interface AccountOptions {
   directory?: string
   publicUrl: string
   production?: boolean
   mailer?: AccountMailer | null
 }
 export class Accounts {
-  readonly publicUrl: URL
-  readonly production: boolean
-  readonly store: AccountStore
   readonly keys: AccountSshKeys
   private workspaces = new Map<string, AccountTargetStore>()
   private rateLimit = new AccountRateLimit()
-  private constructor(options: AccountOptions, store: AccountStore, private mailer: AccountMailer | null, private dummyPassword: string) {
-    this.publicUrl = new URL(options.publicUrl)
-    this.production = options.production ?? (process.env.NODE_ENV === 'production' || !this.isLocalOrigin())
-    this.store = store
+  private constructor(readonly publicUrl: URL, readonly production: boolean, readonly store: AccountStore, private mailer: AccountMailer | null, private dummyPassword: string) {
     this.keys = new AccountSshKeys(store.directory)
   }
-  private isLocalOrigin() { return this.publicUrl.hostname === 'localhost' || isLoopbackAddress(this.publicUrl.hostname.replace(/^\[|\]$/g, '')) }
   static async open(options: AccountOptions) {
     const origin = new URL(options.publicUrl)
     if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) {
@@ -74,7 +67,7 @@ export class Accounts {
     if (production && !mailer) throw new Error('Hosted production mode requires ENGAGE_LAB_USERNAME, ENGAGE_LAB_API_KEY, and ENGAGE_LAB_FROM_EMAIL.')
     const dummyPassword = await hashPassword(randomBytes(32).toString('hex'))
     const store = await AccountStore.open(options.directory ?? process.env.OUTPOST_DATA_DIR ?? join(homedir(), '.outpost'))
-    return new Accounts({ ...options, production }, store, mailer, dummyPassword)
+    return new Accounts(origin, production, store, mailer, dummyPassword)
   }
   close() { this.store.close() }
   allowsHost(host: string) {

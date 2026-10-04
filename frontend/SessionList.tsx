@@ -3,7 +3,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { ArrowRight, Circle, Ellipsis, ImagePlus, LoaderCircle, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import type { Session } from '../shared/session-manager'
 import { codingToolLabels } from '../shared/session-manager'
-import type { ConnectionMode, PendingConnection } from './useSessionConnection'
+import type { PendingConnection } from './useSessionConnection'
 import SessionActivityBadge from './SessionActivityBadge'
 import { useAuth } from './useAuth'
 
@@ -25,7 +25,7 @@ function relativeDate(value: string) {
 }
 export default function SessionList({
   sessions, error, refreshing, canCreate, connecting,
-  checking, onCheck, onRefresh, onCreate, onConnect, onWebTerminal, onImage, onConfirm,
+  checking, onCheck, onRefresh, onCreate, onConnect, onConnectionOptions, onWebTerminal, onImage, onConfirm,
 }: {
   sessions: Session[]
   error: string
@@ -36,7 +36,8 @@ export default function SessionList({
   onCheck: (session: Session) => void
   onRefresh: () => void
   onCreate: () => void
-  onConnect: (session: Session, mode: ConnectionMode) => void
+  onConnect: (session: Session) => void
+  onConnectionOptions: (session: Session) => void
   onWebTerminal?: (session: Session, differentKey?: boolean) => void
   onImage: (session: Session) => void
   onConfirm: (session: Session, action: 'delete' | 'terminate') => void
@@ -136,7 +137,7 @@ export default function SessionList({
                     className="button connect"
                     title={mode === 'hosted' ? 'Connect in your browser using your Outpost account key' : 'Open your preferred available terminal on the computer running Outpost'}
                     disabled={connecting?.sessionId === session.id}
-                    onClick={() => mode === 'hosted' ? onWebTerminal?.(session) : onConnect(session, 'launch')}
+                    onClick={() => onConnect(session)}
                   >
                     {connecting?.sessionId === session.id
                       ? connecting.mode === 'launch' ? 'Opening…' : 'Preparing…'
@@ -158,7 +159,7 @@ export default function SessionList({
                     </DropdownMenu.Trigger>
                     <DropdownMenu.Portal>
                       <DropdownMenu.Content className="target-menu" align="end" sideOffset={6} collisionPadding={12}>
-                        <DropdownMenu.Item className="target-menu-item" onSelect={() => onConnect(session, 'options')}>
+                        <DropdownMenu.Item className="target-menu-item" onSelect={() => onConnectionOptions(session)}>
                           <SquareTerminal size={16} /> Connection options
                         </DropdownMenu.Item>
                         {onWebTerminal && <DropdownMenu.Item className="target-menu-item" onSelect={() => onWebTerminal(session, mode === 'hosted')}>

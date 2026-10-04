@@ -7,7 +7,7 @@ import { AppError } from './errors'
 import { runCommand } from './process'
 import { TargetStore } from './store'
 
-export interface ManagedSshIdentity { identityFile: string; knownHostsFile: string }
+interface ManagedSshIdentity { identityFile: string; knownHostsFile: string }
 const identities = new WeakMap<SshTarget, ManagedSshIdentity>()
 export function managedSshIdentity(target: SshTarget) { return identities.get(target) }
 

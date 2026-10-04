@@ -8,7 +8,7 @@ import { managedSshIdentity } from './account-ssh'
 import { runCommand } from './process'
 import { parseTerminalKey } from './terminal-key-parser'
 
-export interface TerminalCredential {
+interface TerminalCredential {
   privateKey: string; fingerprint: string; type: string; uploadedAt: string
   hostKey: string | null
 }

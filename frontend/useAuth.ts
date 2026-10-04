@@ -6,9 +6,9 @@ interface AuthContextValue extends AuthState {
   signOut: () => Promise<void>
   navigate: (path: string) => void
 }
-export const AuthContext = createContext<AuthContextValue>({
-  mode: 'local', user: null,
-  refresh: async () => ({ mode: 'local', user: null }),
-  signOut: async () => {}, navigate: path => { window.location.href = path },
-})
-export const useAuth = () => useContext(AuthContext)
+export const AuthContext = createContext<AuthContextValue | null>(null)
+export function useAuth() {
+  const auth = useContext(AuthContext)
+  if (!auth) throw new Error('useAuth requires AuthGate.')
+  return auth
+}

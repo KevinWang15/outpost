@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { KeyRound, LoaderCircle } from 'lucide-react'
-import type { Session, Target } from '../shared/session-manager'
+import type { Session, SshTarget } from '../shared/session-manager'
 import type { TerminalKeySource, TerminalKeyStatus, WebTerminalInfo } from '../shared/web-terminal'
 import { api } from './api'
 import { Modal } from './ui'
@@ -9,38 +9,50 @@ import { useAuth } from './useAuth'
 
 type ConnectedTerminal = WebTerminalInfo & { keySource: TerminalKeySource }
 
-export default function WebTerminalModal({ target, session, differentKey = false, onClose }: { target: Target; session: Session; differentKey?: boolean; onClose: () => void }) {
+export default function WebTerminalModal({ target, session, differentKey = false, onClose }: { target: SshTarget; session: Session; differentKey?: boolean; onClose: () => void }) {
   const hosted = useAuth().mode === 'hosted'
   const base = `/targets/${target.id}`
   const [status, setStatus] = useState<TerminalKeyStatus | null>(null)
   const [terminal, setTerminal] = useState<ConnectedTerminal | null>(null)
   const [manageKey, setManageKey] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
+  const [sending, setSending] = useState(false)
   const initialSource: TerminalKeySource = hosted && !differentKey ? 'account' : 'uploaded'
   const [source, setSource] = useState<TerminalKeySource>(initialSource)
   const [privateKey, setPrivateKey] = useState(''), [passphrase, setPassphrase] = useState('')
   const [busy, setBusy] = useState(true), [error, setError] = useState('')
   const alive = useRef(true), heldTerminal = useRef<ConnectedTerminal | null>(null)
-  const launch = useCallback(async (keySource: TerminalKeySource) => {
-    setBusy(true); setError('')
-    try {
+  const loadKeyStatus = useCallback(async () => {
+    const info = await api<TerminalKeyStatus>(`${base}/terminal-key`)
+    if (alive.current) setStatus(info)
+    return info
+  }, [base])
+  const connect = useCallback((keySource: TerminalKeySource) => {
+    const request = async () => {
       if (heldTerminal.current && heldTerminal.current.keySource !== keySource) {
-        await api(`/web-terminals/${heldTerminal.current.id}`, 'DELETE').catch(error => { if (error.status !== 404) throw error })
-        heldTerminal.current = null; setTerminal(null)
+        await api(`/web-terminals/${heldTerminal.current.id}`, 'DELETE').catch(error => { if (error.status !== 404) throw error }).then(() => {
+          heldTerminal.current = null; setTerminal(null)
+        })
       }
-      setSource(keySource)
-      const info = await api<WebTerminalInfo>(`${base}/sessions/${session.id}/web-terminal`, 'POST', { cols: 80, rows: 24, keySource })
+      return api<WebTerminalInfo>(`${base}/sessions/${session.id}/web-terminal`, 'POST', { cols: 80, rows: 24, keySource })
+    }
+    return request().then(info => {
       if (!alive.current) { void api(`/web-terminals/${info.id}`, 'DELETE').catch(() => {}); return }
       heldTerminal.current = { ...info, keySource }; setTerminal(heldTerminal.current); setManageKey(false)
-    } catch (error) { if (alive.current) setError((error as Error).message) }
-    finally { if (alive.current) setBusy(false) }
+    }).catch(error => { if (alive.current) setError((error as Error).message) })
+      .finally(() => { if (alive.current) setBusy(false) })
   }, [base, session.id])
+  const launch = useCallback((keySource: TerminalKeySource) => {
+    setBusy(true); setManageKey(false); setError(''); setSource(keySource)
+    return connect(keySource)
+  }, [connect])
   useEffect(() => {
     alive.current = true
-    void api<TerminalKeyStatus>(`${base}/terminal-key`).then(info => {
+    if (initialSource === 'account') void connect('account')
+    else void loadKeyStatus().then(info => {
       if (!alive.current) return
-      setStatus(info)
-      if (initialSource === 'uploaded' && info.keyError) setError(info.keyError)
-      if (!differentKey && (initialSource === 'account' ? info.accountKey : info.key)) void launch(initialSource)
+      if (info.keyError) setError(info.keyError)
+      if (!differentKey && info.key) void launch('uploaded')
       else { setManageKey(true); setBusy(false) }
     }, error => {
       if (!alive.current) return
@@ -50,7 +62,13 @@ export default function WebTerminalModal({ target, session, differentKey = false
       alive.current = false
       if (heldTerminal.current) void api(`/web-terminals/${heldTerminal.current.id}`, 'DELETE').catch(() => {})
     }
-  }, [base, launch, initialSource, differentKey])
+  }, [loadKeyStatus, connect, launch, initialSource, differentKey])
+  async function openKeySettings() {
+    setFullscreen(false); setManageKey(true); setStatus(null); setBusy(true); setError('')
+    try { await loadKeyStatus() }
+    catch (error) { if (alive.current) setError((error as Error).message) }
+    finally { if (alive.current) setBusy(false) }
+  }
   async function saveKey(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError('')
     try {
@@ -80,14 +98,14 @@ export default function WebTerminalModal({ target, session, differentKey = false
       heldTerminal.current = null; onClose()
     } catch (error) { setError((error as Error).message); setBusy(false) }
   }
-  return <Modal title={`Web terminal · ${session.name}`} subtitle={`root@${target.kind === 'ssh' ? target.host : target.name} · ${session.backend} · Closing detaches the terminal; your coding session keeps running.`}
-    className={`web-terminal-dialog ${terminal && !manageKey ? 'has-terminal' : ''}`} onClose={() => void close()} closeDisabled={busy}>
+  return <Modal title={`Web terminal · ${session.name}`} subtitle={`root@${target.host} · ${session.backend} · Closing detaches the terminal; your coding session keeps running.`}
+    className={`web-terminal-dialog ${terminal && !manageKey ? 'has-terminal' : ''} ${fullscreen ? 'is-fullscreen' : ''}`} onClose={() => void close()} closeDisabled={busy || sending}>
     {error && <p className="error" role="alert">{error}</p>}
-    {busy && <p className="terminal-loading" role="status"><LoaderCircle className="loading-spinner" size={18} /> {status?.key || status?.accountKey ? 'Connecting securely…' : 'Preparing web terminal…'}</p>}
-    {terminal && !manageKey && <WebTerminal info={terminal} onRelaunch={() => launch(source)} onManageKey={() => setManageKey(true)} />}
-    {status && (!terminal || manageKey) && <div className="terminal-key-setup">
+    {busy && <p className="terminal-loading" role="status"><LoaderCircle className="loading-spinner" size={18} /> {manageKey ? 'Updating connection settings…' : 'Connecting securely…'}</p>}
+    {terminal && !manageKey && <WebTerminal info={terminal} targetId={target.id} sessionId={session.id} fullscreen={fullscreen} onFullscreenChange={setFullscreen} onSendingChange={setSending} onRelaunch={() => launch(source)} onManageKey={() => void openKeySettings()} />}
+    {status && manageKey && !busy && <div className="terminal-key-setup">
       <div className="terminal-key-intro"><KeyRound size={22} /><div><strong>{source === 'account' ? 'Your Outpost account key' : status.key ? 'Private key for this target' : 'Add your SSH private key'}</strong>
-        <p>{source === 'account' ? 'Web terminals use the same Outpost key as session management. This key belongs only to your account. Authorize its public key in /root/.ssh/authorized_keys on your server.' : 'Upload a private key authorized for root on this server. It is used only when you select this connection option.'}</p></div></div>
+        <p>{source === 'account' ? 'This is the same SSH key used to manage this target. You can choose a different private key for this terminal if needed.' : 'Upload a private key authorized for root on this server. It is used only when you select this connection option.'}</p></div></div>
       {source === 'account' && status.accountKey && <div className="terminal-saved-key">
         <code>{status.accountKey.fingerprint}</code>
         <pre>{status.accountKey.publicKey}</pre>
@@ -114,6 +132,10 @@ export default function WebTerminalModal({ target, session, differentKey = false
         <div className="modal-actions"><button className="button primary" disabled={busy || !privateKey.trim()} type="submit">{status.key ? 'Replace key and launch' : 'Save key and launch'}</button></div>
       </form>)}
     </div>}
-    {!busy && !status && <button className="button secondary" onClick={onClose}>Close</button>}
+    {!busy && !terminal && !manageKey && <div className="modal-actions">
+      <button className="button primary" onClick={() => void launch(source)}>Retry connection</button>
+      <button className="button secondary" onClick={() => void openKeySettings()}>Manage key</button>
+    </div>}
+    {!busy && manageKey && !status && <button className="button secondary" onClick={() => void openKeySettings()}>Retry key settings</button>}
   </Modal>
 }

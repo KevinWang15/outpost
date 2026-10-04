@@ -1,0 +1,106 @@
+import { expect, test } from '@playwright/test'
+import { webTerminalWorkspace } from './web-terminal-fixture'
+
+for (const mobile of [false, true]) test.describe(mobile ? 'phone connection' : 'desktop connection', () => {
+  test.use(mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {})
+  test('hosted Connect opens directly with the account key and shows only progress while SSH is pending', async ({ page }) => {
+    const state = await webTerminalWorkspace(page, { hosted: true, autoConnect: false })
+    let complete!: () => void
+    const pending = new Promise<void>(resolve => { complete = resolve })
+    state.onLaunch(async route => {
+      await pending
+      await route.fulfill({ json: { id: 'terminal', cols: 80, rows: 24, reconnectSeconds: 600 } })
+    })
+    // The default connection must work independently of the optional upload settings.
+    state.onKeyStatus(route => route.fulfill({ status: 503, json: { message: 'Upload settings unavailable' } }))
+    try {
+      await state.open()
+      await expect(page.getByRole('status')).toHaveText('Connecting securely…')
+      await expect.poll(() => state.launches.length).toBeGreaterThan(0)
+      expect(state.launches.every(launch => launch.keySource === 'account')).toBe(true)
+      expect(state.keyRequests).toBe(0)
+      await expect(page.locator('.terminal-key-setup')).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'Launch web terminal', exact: true })).toHaveCount(0)
+      expect(await page.getByRole('dialog').evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth)).toBe(true)
+      await page.screenshot({ path: `test-results/web-terminal-connecting-${mobile ? 'phone' : 'desktop'}.png` })
+    } finally { complete() }
+    await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+    await expect(page.locator('.terminal-loading')).toHaveCount(0)
+    expect(state.keyRequests).toBe(0)
+    expect(state.errors).toEqual([])
+  })
+})
+
+test('a failed hosted connection offers retry and loads key details only when requested, with recovery if settings fail', async ({ page }) => {
+  const state = await webTerminalWorkspace(page, { hosted: true, autoConnect: false })
+  state.onLaunch(route => route.fulfill({ status: 502, json: { message: 'SSH connection refused' } }))
+  await state.open()
+  await expect(page.getByRole('alert')).toHaveText('SSH connection refused')
+  await expect(page.getByRole('button', { name: 'Retry connection', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Manage key', exact: true })).toBeEnabled()
+  await expect(page.locator('.terminal-key-setup')).toHaveCount(0)
+  expect(state.keyRequests).toBe(0)
+  const attempts = state.launches.length
+  await page.getByRole('button', { name: 'Retry connection', exact: true }).click()
+  await expect.poll(() => state.launches.length).toBe(attempts + 1)
+  await expect(page.getByRole('alert')).toHaveText('SSH connection refused')
+  expect(state.keyRequests).toBe(0)
+  state.onKeyStatus(route => route.fulfill({ status: 503, json: { message: 'Key settings unavailable' } }))
+  await page.getByRole('button', { name: 'Manage key', exact: true }).click()
+  await expect(page.getByRole('alert')).toHaveText('Key settings unavailable')
+  expect(state.keyRequests).toBe(1)
+  state.onKeyStatus(route => route.fulfill({ json: { encryptionAvailable: true, key: null, accountKey: { publicKey: 'ssh-ed25519 fixture', fingerprint: 'account' } } }))
+  await page.getByRole('button', { name: 'Retry key settings', exact: true }).click()
+  await expect(page.getByText('Your Outpost account key', { exact: true })).toBeVisible()
+  await expect(page.getByText('ssh-ed25519 fixture', { exact: true })).toBeVisible()
+  expect(state.keyRequests).toBe(2)
+  state.onLaunch(route => route.fulfill({ json: { id: 'terminal', cols: 80, rows: 24, reconnectSeconds: 600 } }))
+  await page.getByRole('button', { name: 'Launch web terminal', exact: true }).click()
+  await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  expect(state.launches.every(launch => launch.keySource === 'account')).toBe(true)
+  const connectedAttempts = state.launches.length
+  await page.getByRole('button', { name: 'Manage key', exact: true }).click()
+  await expect(page.getByText('Your Outpost account key', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Return to terminal', exact: true }).click()
+  await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+  expect(state.launches).toHaveLength(connectedAttempts)
+  expect(state.errors).toEqual([])
+})
+
+test('another SSH key remains an explicit hosted option and never replaces the default account key', async ({ page }) => {
+  const state = await webTerminalWorkspace(page, { hosted: true, autoConnect: false })
+  await state.open(true)
+  await expect(page.getByText('Private key for this target', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Private key file', { exact: true })).toBeVisible()
+  expect(state.keyRequests).toBeGreaterThan(0)
+  expect(state.launches).toEqual([])
+  await page.getByRole('button', { name: 'Launch web terminal', exact: true }).click()
+  await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+  expect(state.launches.map(launch => launch.keySource)).toEqual(['uploaded'])
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
+  const keyRequests = state.keyRequests
+  await state.open()
+  await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+  expect(state.launches.at(-1)!.keySource).toBe('account')
+  expect(state.keyRequests).toBe(keyRequests)
+  expect(state.errors).toEqual([])
+})
+
+test('local mode still requires an uploaded key for web terminals and automatically reuses a saved key', async ({ page }) => {
+  const state = await webTerminalWorkspace(page, { autoConnect: false })
+  state.onKeyStatus(route => route.fulfill({ json: { encryptionAvailable: true, key: null } }))
+  await state.open()
+  await expect(page.getByText('Add your SSH private key', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Private key file', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save key and launch', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Use Outpost account key', exact: true })).toHaveCount(0)
+  expect(state.launches).toEqual([])
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
+  state.onKeyStatus(route => route.fulfill({ json: { encryptionAvailable: true, key: { fingerprint: 'uploaded', type: 'ssh-ed25519', uploadedAt: '2026-10-04T00:00:00Z', hostFingerprint: null } } }))
+  await state.open()
+  await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+  expect(state.launches.every(launch => launch.keySource === 'uploaded')).toBe(true)
+  await expect(page.locator('.terminal-key-setup')).toHaveCount(0)
+  expect(state.errors).toEqual([])
+})

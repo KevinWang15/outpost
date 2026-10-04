@@ -3,13 +3,13 @@ export type CodingTool = 'codex' | 'kimi' | 'claude'
 export const codingToolLabels: Record<CodingTool, string> = { codex: 'Codex', kimi: 'Kimi', claude: 'Claude' }
 export interface TargetRequirements { backends: SessionBackend[]; tools: CodingTool[] }
 interface TargetBase extends TargetRequirements { name: string }
-export interface SshTargetInput extends TargetBase {
+interface SshTargetInput extends TargetBase {
   kind: 'ssh'
   host: string
   port?: number
   identityFile?: string
 }
-export interface LocalTargetInput extends TargetBase { kind: 'local'; distribution?: string }
+interface LocalTargetInput extends TargetBase { kind: 'local'; distribution?: string }
 export type TargetInput = SshTargetInput | LocalTargetInput
 export interface ExecutionEnvironment {
   home: string

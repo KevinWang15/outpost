@@ -64,7 +64,7 @@ function ConnectDetails({ session, expiresAt }: { session: Session; expiresAt: s
       <p><Folder /><code>{session.rootDir}</code></p>
       <p><Link /><span>Command expires at{' '}{new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. The session stays available.</span></p>
     </div>
-    <div className="form-note"><Terminal /><p>Detach with <kbd>Ctrl</kbd> + <kbd>\</kbd> or close the terminal. {codingToolLabels[session.tool]} keeps running on the target. Reconnect here whenever you’re ready.</p></div>
+    <div className="form-note"><Terminal /><p>Detach with <kbd>Ctrl</kbd> + <kbd>\</kbd>. {codingToolLabels[session.tool]} keeps running on the target. Press <kbd>Enter</kbd> at the disconnected banner to reconnect, or <kbd>Ctrl</kbd> + <kbd>C</kbd> to exit. You can also close the terminal and reconnect here later.</p></div>
   </>
 }
 

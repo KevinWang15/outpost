@@ -1,22 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { Maximize2, Minimize2 } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalClientMessage, TerminalServerMessage, WebTerminalInfo } from '../shared/web-terminal'
+import TerminalComposer from './TerminalComposer'
 
-export default function WebTerminal({ info, onRelaunch, onManageKey }: { info: WebTerminalInfo; onRelaunch: () => Promise<void>; onManageKey: () => void }) {
+export default function WebTerminal({ info, targetId, sessionId, fullscreen, onFullscreenChange, onRelaunch, onManageKey, onSendingChange }: {
+  info: WebTerminalInfo
+  targetId: string
+  sessionId: string
+  fullscreen: boolean
+  onFullscreenChange: (fullscreen: boolean) => void
+  onRelaunch: () => Promise<void>
+  onManageKey: () => void
+  onSendingChange: (sending: boolean) => void
+}) {
   const container = useRef<HTMLDivElement>(null), terminal = useRef<Terminal | null>(null), socket = useRef<WebSocket | null>(null)
+  const ready = useRef(false)
   const [connection, setConnection] = useState('Connecting…'), [connected, setConnected] = useState(false)
   const [ctrl, setCtrl] = useState(false), ctrlArmed = useRef(false)
-  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
   const fitNow = useRef<() => void>(() => {})
   useEffect(() => {
     const term = new Terminal({ cols: info.cols, rows: info.rows, fontSize: 14, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', theme: { background: '#111827', foreground: '#e5e7eb', cursor: '#a7f3d0', selectionBackground: '#374151' }, cursorBlink: true, scrollback: 1000, convertEol: false, logLevel: 'off' })
     const fit = new FitAddon(); term.loadAddon(fit); term.open(container.current!); terminal.current = term
     term.textarea?.setAttribute('aria-label', 'Terminal input')
     term.textarea?.setAttribute('autocapitalize', 'off'); term.textarea?.setAttribute('autocomplete', 'off')
-    let stopped = false, ready = false, attempts = 0, retry: ReturnType<typeof setTimeout> | undefined, resizeTimer: ReturnType<typeof setTimeout> | undefined
-    const send = (message: TerminalClientMessage) => { if (ready && socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify(message)) }
+    let stopped = false, attempts = 0, retry: ReturnType<typeof setTimeout> | undefined, resizeTimer: ReturnType<typeof setTimeout> | undefined
+    const send = (message: TerminalClientMessage) => { if (ready.current && socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify(message)) }
     const fitTerminal = () => {
       if (!container.current?.clientHeight || !container.current.clientWidth) return
       const size = fit.proposeDimensions()
@@ -24,16 +36,19 @@ export default function WebTerminal({ info, onRelaunch, onManageKey }: { info: W
       const cols = Math.max(20, Math.min(300, size.cols)), rows = Math.max(5, Math.min(120, size.rows))
       if (term.cols !== cols || term.rows !== rows) { term.resize(cols, rows); send({ type: 'resize', cols, rows }) }
     }
-    fitNow.current = fitTerminal
     const dialog = container.current!.closest('dialog')
     const scheduleFit = () => {
-      const height = window.visualViewport?.height ?? window.innerHeight
+      const viewport = window.visualViewport, height = viewport?.height ?? window.innerHeight
       dialog?.classList.toggle('terminal-compact', height < 560)
       dialog?.style.setProperty('--terminal-viewport-height', `${height}px`)
-      dialog?.style.setProperty('--terminal-viewport-top', `${window.visualViewport?.offsetTop ?? 0}px`)
+      dialog?.style.setProperty('--terminal-viewport-width', `${viewport?.width ?? window.innerWidth}px`)
+      dialog?.style.setProperty('--terminal-viewport-top', `${viewport?.offsetTop ?? 0}px`)
+      dialog?.style.setProperty('--terminal-viewport-left', `${viewport?.offsetLeft ?? 0}px`)
       clearTimeout(resizeTimer); resizeTimer = setTimeout(fitTerminal, 80)
     }
+    fitNow.current = scheduleFit
     const observer = new ResizeObserver(scheduleFit); observer.observe(container.current!)
+    window.addEventListener('resize', scheduleFit)
     window.visualViewport?.addEventListener('resize', scheduleFit)
     window.visualViewport?.addEventListener('scroll', scheduleFit)
     scheduleFit()
@@ -47,7 +62,7 @@ export default function WebTerminal({ info, onRelaunch, onManageKey }: { info: W
     })
     const connect = () => {
       if (stopped) return
-      ready = false
+      ready.current = false; setConnected(false)
       const url = new URL(`/api/web-terminals/${info.id}/socket`, window.location.origin); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
       const ws = new WebSocket(url); ws.binaryType = 'arraybuffer'; socket.current = ws
       const ack = (bytes: number) => { if (!stopped && socket.current === ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ack', bytes })) }
@@ -59,45 +74,55 @@ export default function WebTerminal({ info, onRelaunch, onManageKey }: { info: W
           term.reset(); term.resize(message.cols, message.rows)
           term.write(message.data, () => {
             if (stopped || socket.current !== ws) return
-            ack(new TextEncoder().encode(message.data).length); ready = true; attempts = 0
+            ack(new TextEncoder().encode(message.data).length); ready.current = true; attempts = 0
             setConnected(true); setConnection('Connected'); fitTerminal()
             if (window.matchMedia('(pointer: fine)').matches) term.focus()
           })
-        } else if (message.type === 'closed') { stopped = true; ready = false; setConnected(false); setConnection(message.message) }
+        } else if (message.type === 'closed') { stopped = true; ready.current = false; setConnected(false); setConnection(message.message) }
       }
       ws.onclose = event => {
-        ready = false; setConnected(false)
+        if (stopped || socket.current !== ws) return
+        ready.current = false; setConnected(false)
         if (event.code === 4001) { stopped = true; setConnection('This terminal was opened in another tab.'); return }
-        if (stopped) return
         if (++attempts <= 8) { setConnection(`Connection lost. Reconnecting… (${attempts}/8)`); retry = setTimeout(connect, Math.min(10000, attempts * 1000)) }
         else setConnection('Connection ended. Relaunch to resume your coding session.')
       }
     }
     connect()
     return () => {
-      stopped = true; clearTimeout(retry); clearTimeout(resizeTimer); observer.disconnect(); window.visualViewport?.removeEventListener('resize', scheduleFit); window.visualViewport?.removeEventListener('scroll', scheduleFit)
+      stopped = true; clearTimeout(retry); clearTimeout(resizeTimer); observer.disconnect(); window.removeEventListener('resize', scheduleFit); window.visualViewport?.removeEventListener('resize', scheduleFit); window.visualViewport?.removeEventListener('scroll', scheduleFit)
+      fitNow.current = () => {}
+      ready.current = false
       socket.current?.close(); socket.current = null; input.dispose(); term.dispose(); terminal.current = null
     }
   }, [info])
+  useEffect(() => { fitNow.current() }, [fullscreen])
   function send(data: string) {
-    if (!connected || socket.current?.readyState !== WebSocket.OPEN) return
+    if (!ready.current || socket.current?.readyState !== WebSocket.OPEN) return
     if (new TextEncoder().encode(data).length > 16 * 1024) { setConnection('Input must fit within 16 KiB. Send smaller sections.'); return }
     socket.current.send(JSON.stringify({ type: 'input', data })); terminal.current?.focus()
+  }
+  function sendComposer(text: string) {
+    if (!ready.current || !terminal.current || socket.current?.readyState !== WebSocket.OPEN) throw new Error('Terminal disconnected. Reconnect to send your draft.')
+    const normalized = text.replace(/\r?\n/g, '\r')
+    const pasted = normalized && terminal.current.modes.bracketedPasteMode ? `\x1b[200~${normalized}\x1b[201~` : normalized
+    const data = pasted + '\r'
+    if (new TextEncoder().encode(data).length > 16 * 1024) throw new Error('Input must fit within 16 KiB. Send smaller sections.')
+    socket.current.send(JSON.stringify({ type: 'input', data }))
+    if (window.matchMedia('(pointer: fine)').matches) terminal.current.focus()
   }
   return <div className="web-terminal">
     <div className="terminal-toolbar"><span role="status" className={connected ? 'terminal-connected' : ''}>{connection}</span>
       <div><button className="button secondary" onClick={() => terminal.current?.focus()}>Keyboard</button>
-        <button className="button secondary" onClick={onManageKey}>Manage key</button>
-        {!connected && <button className="button secondary" onClick={() => void onRelaunch()}>Relaunch</button>}</div></div>
+        <button className="button secondary" disabled={sending} onClick={onManageKey}>Manage key</button>
+        <button className="button secondary terminal-fullscreen-toggle" aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} aria-pressed={fullscreen} onClick={() => onFullscreenChange(!fullscreen)}>{fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button>
+        {!connected && <button className="button secondary" disabled={sending} onClick={() => void onRelaunch()}>Relaunch</button>}</div></div>
     <div className="terminal-surface" ref={container} aria-label="SSH terminal" />
     <div className="terminal-keys" role="toolbar" aria-label="Terminal keys">
       <button type="button" disabled={!connected} aria-pressed={ctrl} onClick={() => { ctrlArmed.current = !ctrlArmed.current; setCtrl(ctrlArmed.current); terminal.current?.focus() }}>Ctrl</button>
       {([['Esc', '\x1b'], ['Tab', '\t'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['Ctrl+C', '\x03'], ['Enter', '\r'], ['Shift+Enter', '\x1b[13;2u']] as const).map(([label, data]) => <button type="button" key={label} disabled={!connected} aria-label={label} onClick={() => send(data)}>{label}</button>)}
     </div>
-    <form className="terminal-compose" onSubmit={event => { event.preventDefault(); send(text + '\r'); setText('') }}>
-      <input aria-label="Terminal text" placeholder="Type or paste text…" value={text} autoComplete="off" autoCapitalize="off" spellCheck={false} maxLength={8000} disabled={!connected} onChange={event => setText(event.target.value)} onFocus={() => setTimeout(() => fitNow.current(), 250)} />
-      <button className="button secondary" disabled={!connected} type="submit">Send</button>
-    </form>
+    <TerminalComposer targetId={targetId} sessionId={sessionId} connected={connected} onSend={sendComposer} onBusyChange={busy => { setSending(busy); onSendingChange(busy) }} />
     <p className="terminal-hint">A dropped connection is held for {Math.round(info.reconnectSeconds / 60)} minutes. Use Close to detach now.</p>
   </div>
 }

@@ -172,20 +172,6 @@ def directory_suggestions(prefix):
     return {'directories': directories[:50], 'truncated': len(directories) > 50}
 
 
-def backend(session):
-    value = session.get('backend')
-    if value not in ('dtach', 'tmux'):
-        fail('Unsupported session backend. Existing data was not modified.', 409)
-    return value
-
-
-def coding_tool(session):
-    value = session.get('tool')
-    if value not in ('codex', 'kimi', 'claude'):
-        fail('Unsupported coding tool. Expected codex, kimi, or claude. Existing data was not modified.', 409)
-    return value
-
-
 def tmux_command(session, *arguments):
     return ['tmux', '-S', socket_name(session), '-f', '/dev/null', *arguments]
 
@@ -224,7 +210,7 @@ def alive(session):
 def describe(session):
     status = 'stopped' if session['lastConnectedAt'] else 'idle'
     if alive(session):
-        if backend(session) == 'tmux':
+        if session['backend'] == 'tmux':
             clients = tmux_query(session, '#{session_attached}')
             if clients is not None:
                 status = 'attached' if int(clients) else 'detached'
@@ -374,7 +360,7 @@ def paste_image(session, request):
     injected = False
     # tmux paste-buffer writes to the pane directly; no attached client is
     # needed. dtach has no control channel, so its sessions stay manual.
-    if backend(session) == 'tmux' and alive(session):
+    if session['backend'] == 'tmux' and alive(session):
         # Bracketed paste delivers the reference as one paste, not as keystrokes.
         result = subprocess.run(tmux_command(session, 'set-buffer', '-b', 'outpost-image', '--', reference,
                                              ';', 'paste-buffer', '-p', '-d', '-b', 'outpost-image', '-t', '=outpost:'),
@@ -391,7 +377,7 @@ def terminate_session(session):
         Path(socket_name(session)).unlink(missing_ok=True)
         activity(session).initialize()
         return describe(session)
-    if backend(session) == 'tmux':
+    if session['backend'] == 'tmux':
         # Each managed session has its own server/socket, so this process tree
         # cannot include another manager session or the user's personal tmux.
         owner = tmux_query(session, '#{pid}')
@@ -465,7 +451,7 @@ def terminate_session(session):
 
 
 def attach_session(session):
-    if backend(session) == 'tmux':
+    if session['backend'] == 'tmux':
         # tmux restores its retained screen; it needs no synthetic resize.
         # Timed paste guessing can bypass the detach binding on a fast keypress
         # and send Ctrl-\ to the coding tool as SIGQUIT instead.
@@ -532,7 +518,7 @@ def attach_session(session):
         observer.input()  # Returning to this terminal checks the existing completion.
     except (OSError, ValueError):
         pass  # Missing activity signals must not prevent terminal attachment.
-    return attach(command, tmux_environment(), observer.input, repaint=backend(session) == 'dtach')
+    return attach(command, tmux_environment(), observer.input, repaint=session['backend'] == 'dtach')
 
 
 def main():
@@ -563,7 +549,11 @@ def main():
         respond(result)
         return
     if action == 'create':
-        selected_backend = backend(request)
+        selected_backend, tool = request.get('backend'), request.get('tool')
+        if selected_backend not in ('dtach', 'tmux'):
+            fail('Unsupported session backend. Expected dtach or tmux.', 409)
+        if not isinstance(tool, str) or tool not in CODING_ADAPTERS:
+            fail('Unsupported coding tool. Expected codex, kimi, or claude.', 409)
         STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
         (STATE / 'sockets').mkdir(mode=0o700, exist_ok=True)
         STATE.chmod(0o700)
@@ -583,7 +573,6 @@ def main():
         if action == 'list':
             result = {'registryPath': str(REGISTRY), 'sessions': [describe(s) for s in sessions]}
         elif action == 'create':
-            tool = coding_tool(request)
             environment, arguments = request['env'], request['args']
             if not valid_launch_options(environment, arguments):
                 fail('Invalid environment variables or arguments')
@@ -663,12 +652,12 @@ def main():
                 activity(session).remove()
                 result = {'ok': True}
             elif action == 'attach':
-                if not shutil.which(backend(session)):
-                    fail(backend(session) + ' is missing on this target. Open Required Software to install it.', 409)
+                if not shutil.which(session['backend']):
+                    fail(session['backend'] + ' is missing on this target. Open Required Software to install it.', 409)
                 if not alive(session):
                     if not Path(session['rootDir']).is_dir():
                         fail('Session root directory no longer exists', 409)
-                    tool = coding_tool(session)
+                    tool = session['tool']
                     executable = shutil.which(tool, path=session['env'].get('PATH', os.environ.get('PATH')))
                     if not executable:
                         fail(tool + " is not on " + pwd.getpwuid(os.getuid()).pw_name + "'s interactive login PATH. Check that user's shell startup files before connecting.", 409)
@@ -679,7 +668,7 @@ def main():
                     activity(session).initialize()
                     launch = [command_shell, '-c', launch_script(session, executable)]
                     # The persistence tool owns the PTY independently of SSH.
-                    if backend(session) == 'tmux':
+                    if session['backend'] == 'tmux':
                         size = os.get_terminal_size()
                         command = tmux_command(session, 'new-session', '-d', '-s', 'outpost',
                                                '-c', session['rootDir'], '-x', str(max(1, size.columns)),

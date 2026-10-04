@@ -11,7 +11,7 @@ import { quote } from './shell'
 const execute = promisify(execFile)
 const encodePowerShell = (script: string) => Buffer.from(script, 'utf16le').toString('base64')
 
-export interface DesktopHost {
+interface DesktopHost {
   platform: string
   env: NodeJS.ProcessEnv
   executable(name: string): Promise<string | null>

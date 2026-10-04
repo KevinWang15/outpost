@@ -14,6 +14,7 @@ import { createApp } from '../backend/app.ts'
 import { Accounts } from '../backend/accounts.ts'
 import { TargetStore } from '../backend/store.ts'
 import { webSshFixture } from './fixtures/web-ssh.ts'
+import { sshKeyPair } from './fixtures/ssh-key.ts'
 import { WebTerminals } from '../backend/web-terminals.ts'
 
 async function until(predicate) { for (let i = 0; i < 100; i++) { if (predicate()) return; await delay(30) }; assert.fail('condition timed out') }
@@ -33,7 +34,7 @@ test('terminal vault encrypts keys, discards passphrases, authenticates ownershi
   const directory = await mkdtemp(join(tmpdir(), 'outpost-key-test-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const master = randomBytes(32).toString('base64'), vault = new TerminalKeys(directory, master)
-  const keys = ssh2.utils.generateKeyPairSync('ed25519', { passphrase: 'synthetic-secret', cipher: 'aes256-cbc' })
+  const keys = await sshKeyPair('synthetic-secret')
   await assert.rejects(vault.upload('alice', 'target', keys.public), /private key/)
   await assert.rejects(vault.upload('alice', 'target', keys.private, 'wrong'), /private key/)
   const info = await vault.upload('alice', 'target', keys.private, 'synthetic-secret')
@@ -51,7 +52,7 @@ test('terminal vault encrypts keys, discards passphrases, authenticates ownershi
   const restored = await new TerminalKeys(directory, master).read('alice', 'target')
   assert.ok(ssh2.utils.parseKey(restored.privateKey).getPublicSSH().equals(ssh2.utils.parseKey(keys.public).getPublicSSH()))
   assert.equal('passphrase' in restored, false, 'the passphrase unlocks the uploaded key once and is discarded')
-  const host = ssh2.utils.parseKey(ssh2.utils.generateKeyPairSync('ed25519').public).getPublicSSH()
+  const host = ssh2.utils.parseKey((await sshKeyPair()).public).getPublicSSH()
   assert.equal(await vault.verifyHost('alice', 'target', restored, host, []), true)
   assert.equal(await vault.verifyHost('alice', 'target', restored, Buffer.from('different'), []), false)
   assert.equal(await vault.verifyHost('alice', 'target', restored, host, [Buffer.from('different').toString('base64')]), false)
@@ -71,7 +72,7 @@ test('terminal vault encrypts keys, discards passphrases, authenticates ownershi
 test('automatic encryption keys persist across restarts, retain private permissions and honor overrides', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-automatic-key-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
-  const vault = new TerminalKeys(directory, ''), key = ssh2.utils.generateKeyPairSync('ed25519')
+  const vault = new TerminalKeys(directory, ''), key = await sshKeyPair()
   assert.deepEqual(await vault.status('alice', 'target'), { encryptionAvailable: true, key: null })
   const masterPath = join(directory, 'terminal-keys', 'master-key')
   await assert.rejects(readFile(masterPath), { code: 'ENOENT' }, 'checking availability does not create key material')
@@ -108,7 +109,7 @@ test('hosted production accepts private-key uploads without an encryption-key ov
   const target = (await request('POST', '/api/targets', { name: 'Production SSH', kind: 'ssh', host: 'dev.example', backends: ['tmux'], tools: ['codex'] })).json()
   const path = `/api/targets/${target.id}/terminal-key`
   assert.deepEqual((await request('GET', path)).json(), { encryptionAvailable: true, key: null, accountKey: await accounts.keys.publicKey(user.id) })
-  const saved = await request('PUT', path, { privateKey: ssh2.utils.generateKeyPairSync('ed25519').private })
+  const saved = await request('PUT', path, { privateKey: (await sshKeyPair()).private })
   assert.equal(saved.statusCode, 200, saved.body); assert.match(saved.json().key.fingerprint, /^SHA256:/)
   assert.equal((await readFile(join(directory, 'terminal-keys', 'master-key'))).length, 32)
 })
@@ -148,7 +149,7 @@ test('hosted terminals reuse the authorized account key without uploads, enforce
   assert.equal(ssh.commands.length, 0, 'looking up public credentials never opens a terminal')
   const unverified = await launch(); assert.equal(unverified.statusCode, 409); assert.match(unverified.body, /host key has not been verified/)
   const hostEntry = publicKey => `[127.0.0.1]:${ssh.port} ${publicKey}\n`
-  await writeFile(knownHosts, hostEntry(ssh2.utils.generateKeyPairSync('ed25519').public))
+  await writeFile(knownHosts, hostEntry((await sshKeyPair()).public))
   const changed = await launch(); assert.equal(changed.statusCode, 409); assert.match(changed.body, /host key changed/)
   await writeFile(knownHosts, hostEntry(ssh.hostPublicKey))
   const unauthorized = await launch(); assert.equal(unauthorized.statusCode, 409); assert.match(unauthorized.body, /authorize your Outpost account public key/)
@@ -227,7 +228,7 @@ test('real SSH web terminal: explicit launch, private credentials, origin/auth c
 
 for (const stderr of [false, true]) test(`screen snapshots preserve SSH ${stderr ? 'stderr' : 'stdout'} arriving during replay`, { timeout: 10000 }, async t => {
   const ssh = await webSshFixture(), owner = { userId: 'alice', authSessionId: 'session' }
-  const terminals = new WebTerminals({ read: async () => ({ privateKey: ssh.key }), knownHostKeys: async () => [], verifyHost: async () => true })
+  const terminals = new WebTerminals({ read: async () => ({ privateKey: ssh.key }), knownHostKeys: async () => [], verifyHost: async () => true }, () => true)
   const server = createServer(), sockets = new WebSocketServer({ server })
   let viewer, release
   t.after(async () => {

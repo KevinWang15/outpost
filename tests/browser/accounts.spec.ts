@@ -116,7 +116,10 @@ test('real signup, verification, private workspaces, account settings, connectio
     await page.getByRole('button', { name: 'Change password', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible()
     expect(errors).toEqual([])
-  } finally { await bobContext.close(); await app.close(); await rm(directory, { recursive: true, force: true }) }
+  } finally {
+    await Promise.all([page.context().close(), bobContext.close()])
+    await app.close(); await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test('account pages work on mobile and failed auth loading never opens the workspace', async ({ page }) => {
@@ -176,5 +179,5 @@ test('production signup uses email delivery, HTTPS cookies, and the configured p
     await expect(page.getByRole('button', { name: /Hosted User — Your account/ })).toBeVisible()
     await expect(page.locator('.account-key pre')).toContainText('ssh-ed25519')
     expect(errors).toEqual([])
-  } finally { await page.unrouteAll({ behavior: 'wait' }); await page.close(); await app.close(); await rm(directory, { recursive: true, force: true }) }
+  } finally { await page.unrouteAll({ behavior: 'wait' }); await page.context().close(); await app.close(); await rm(directory, { recursive: true, force: true }) }
 })

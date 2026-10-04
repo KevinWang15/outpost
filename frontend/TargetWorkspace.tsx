@@ -3,6 +3,7 @@ import { Circle, Plus, Search, Terminal, X } from 'lucide-react'
 import type {
   Connection,
   Target,
+  SshTarget,
   Session,
   SessionInput,
   CodingSessionMatch,
@@ -28,7 +29,7 @@ type WorkspaceDialog =
   | { kind: 'finder' }
   | { kind: 'connection'; session: Session; data: Connection }
   | { kind: 'image'; session: Session }
-  | { kind: 'web-terminal'; session: Session; differentKey?: boolean }
+  | { kind: 'web-terminal'; target: SshTarget; session: Session; differentKey?: boolean }
   | { kind: 'confirm'; session: Session; action: 'delete' | 'terminate' }
 
 export default function TargetWorkspace({
@@ -79,6 +80,14 @@ export default function TargetWorkspace({
   function connect(session: Session, mode: ConnectionMode) {
     setDialog(null)
     void connection.connect(session, mode)
+  }
+  function openWebTerminal(session: Session, differentKey = false) {
+    if (target.kind !== 'ssh') { setError('Web terminals are available for SSH targets.'); return }
+    openDialog({ kind: 'web-terminal', target, session, differentKey })
+  }
+  function connectPreferred(session: Session) {
+    if (hosted) openWebTerminal(session)
+    else connect(session, 'launch')
   }
   async function checkSession(session: Session) {
     if (!session.activity.completionId) return
@@ -199,8 +208,9 @@ export default function TargetWorkspace({
         canCreate={canCreate} connecting={connection.connecting}
         checking={checking} onCheck={session => void checkSession(session)}
         onRefresh={() => void refresh()} onCreate={() => openSessionForm()}
-        onConnect={connect} onImage={session => openDialog({ kind: 'image', session })}
-        onWebTerminal={target.kind === 'ssh' ? (session, differentKey) => openDialog({ kind: 'web-terminal', session, differentKey }) : undefined}
+        onConnect={connectPreferred} onConnectionOptions={session => connect(session, 'options')}
+        onImage={session => openDialog({ kind: 'image', session })}
+        onWebTerminal={target.kind === 'ssh' ? openWebTerminal : undefined}
         onConfirm={(session, action) => openDialog({ kind: 'confirm', session, action })} />
       <div className="bottom-note">
         <Terminal />
@@ -218,7 +228,7 @@ export default function TargetWorkspace({
       {dialog?.kind === 'finder' && (
         <CodingSessionFinder target={target} tools={installedTools} canLink={canCreate}
           onClose={() => setDialog(null)} onLink={openSessionForm}
-          onOpen={session => hosted ? openDialog({ kind: 'web-terminal', session }) : connect(session, 'launch')} />
+          onOpen={connectPreferred} />
       )}
       {dialog?.kind === 'connection' && (
         <ConnectModal targetId={target.id} kind={target.kind} session={dialog.session}
@@ -230,7 +240,7 @@ export default function TargetWorkspace({
         <ImageAttach targetId={target.id} session={dialog.session} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'web-terminal' && <Suspense fallback={<Modal title="Web terminal" subtitle="Loading terminal…" onClose={() => setDialog(null)}><p role="status">Loading…</p></Modal>}>
-        <WebTerminalModal target={target} session={dialog.session} differentKey={dialog.differentKey} onClose={() => { setDialog(null); void refresh() }} />
+        <WebTerminalModal target={dialog.target} session={dialog.session} differentKey={dialog.differentKey} onClose={() => { setDialog(null); void refresh() }} />
       </Suspense>}
       {dialog?.kind === 'confirm' && (
         <Modal

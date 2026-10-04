@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { AppError } from './errors'
 
 export interface Command { executable: string; args: string[]; label: string; expandHome?: boolean }
-export interface CommandOptions {
+interface CommandOptions {
   signal?: AbortSignal
   env?: NodeJS.ProcessEnv
   timeoutMs?: number

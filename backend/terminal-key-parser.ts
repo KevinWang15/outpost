@@ -11,8 +11,7 @@ const { utils } = require(workerData.modulePath);
 const uint = value => { const b = Buffer.alloc(4); b.writeUInt32BE(value); return b; };
 const string = value => { const b = Buffer.from(value); return Buffer.concat([uint(b.length), b]); };
 try {
-  const result = utils.parseKey(workerData.privateKey, workerData.passphrase);
-  const key = Array.isArray(result) ? result[0] : result;
+  const key = utils.parseKey(workerData.privateKey, workerData.passphrase);
   if (key instanceof Error || !key?.isPrivateKey()) throw new Error('invalid');
   const native = createPrivateKey(key.getPrivatePEM());
   let normalized;

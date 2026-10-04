@@ -1,11 +1,11 @@
 import ssh2, { type Connection, type ServerChannel } from 'ssh2'
 import type { AddressInfo } from 'node:net'
 import { once } from 'node:events'
+import { sshKeyPair } from './ssh-key'
 
 // A real SSH handshake and channel, with a deterministic terminal process.
 export async function webSshFixture() {
-  const key = ssh2.utils.generateKeyPairSync('ed25519')
-  const hostKey = ssh2.utils.generateKeyPairSync('ed25519')
+  const [key, hostKey] = await Promise.all([sshKeyPair(), sshKeyPair()])
   const allowed: ssh2.ParsedKey[] = []
   const authorize = (publicKey: string) => {
     const parsed = ssh2.utils.parseKey(publicKey)
@@ -39,7 +39,7 @@ export async function webSshFixture() {
   })
   server.listen(0, '127.0.0.1'); await once(server, 'listening')
   return {
-    key: key.private, publicKey: key.public, hostKey: hostKey.private, hostPublicKey: hostKey.public, port: (server.address() as AddressInfo).port, inputs, sizes, commands, authorize,
+    key: key.private, publicKey: key.public, hostPublicKey: hostKey.public, port: (server.address() as AddressInfo).port, inputs, sizes, commands, authorize,
     output: (text: string, stderr = false) => { for (const channel of channels) (stderr ? channel.stderr : channel).write(text) },
     close: async () => { for (const client of clients) client.end(); await new Promise<void>(resolve => server.close(() => resolve())) },
   }

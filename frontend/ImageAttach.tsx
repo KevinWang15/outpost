@@ -1,20 +1,9 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import { Check, Circle, Copy, ImagePlus, LoaderCircle } from 'lucide-react'
-import type { Session, SessionImage, SessionImageInput } from '../shared/session-manager'
-import { codingToolLabels, imageMediaTypes, maxImageBytes } from '../shared/session-manager'
-import { api } from './api'
+import type { Session, SessionImage } from '../shared/session-manager'
+import { codingToolLabels, imageMediaTypes } from '../shared/session-manager'
+import { imageFileError, uploadSessionImage } from './image-upload'
 import { Modal } from './ui'
-
-const mediaTypes = new Set<string>(imageMediaTypes)
-
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(new Error('Could not read the image file'))
-    reader.readAsDataURL(file)
-  })
-}
 
 export default function ImageAttach({
   targetId,
@@ -48,12 +37,9 @@ export default function ImageAttach({
     setCopied(false)
     setFile(null)
     setPreview('')
-    if (!mediaTypes.has(candidate.type)) {
-      setError('That is not a PNG, JPEG, GIF, or WebP image.')
-      return
-    }
-    if (!candidate.size || candidate.size > maxImageBytes) {
-      setError('Images are limited to 16 MB.')
+    const failure = imageFileError(candidate)
+    if (failure) {
+      setError(failure)
       return
     }
     setError('')
@@ -76,13 +62,7 @@ export default function ImageAttach({
     setBusy(true)
     setError('')
     try {
-      const dataUrl = await readFile(file)
-      setResult(
-        await api<SessionImage>(`/targets/${targetId}/sessions/${session.id}/image`, 'POST', {
-          data: dataUrl.slice(dataUrl.indexOf(',') + 1),
-          mediaType: file.type as SessionImageInput['mediaType'],
-        }),
-      )
+      setResult(await uploadSessionImage(targetId, session.id, file))
     } catch (failure) {
       setError((failure as Error).message)
     } finally {

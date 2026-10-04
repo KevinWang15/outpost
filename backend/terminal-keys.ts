@@ -21,28 +21,33 @@ export class TerminalKeys {
   private directory: string
   private parsing = 0
   private uploads = new Map<string, { count: number; until: number }>()
-  constructor(directory: string, private production = false, private configuredKey = process.env.OUTPOST_TERMINAL_ENCRYPTION_KEY) {
+  constructor(directory: string, private configuredKey = process.env.OUTPOST_TERMINAL_ENCRYPTION_KEY) {
     this.directory = join(directory, 'terminal-keys')
   }
-  get available() { return !this.production || Boolean(this.configuredKey && /^[A-Za-z0-9+/]{43}=$/.test(this.configuredKey) && Buffer.from(this.configuredKey, 'base64').length === 32) }
+  get available() { return !this.configuredKey || /^[A-Za-z0-9+/]{43}=$/.test(this.configuredKey) }
   private masterKey() {
-    if (!this.available) throw new AppError('The administrator must configure OUTPOST_TERMINAL_ENCRYPTION_KEY before private keys can be uploaded.', 409)
+    if (!this.available) throw new AppError('OUTPOST_TERMINAL_ENCRYPTION_KEY must be 32 bytes encoded as base64.', 409)
     this.master ??= this.prepareMaster().catch(error => { this.master = null; throw error })
     return this.master
   }
   private async prepareMaster() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
     await chmod(this.directory, 0o700)
-    if (this.configuredKey) {
-      if (!/^[A-Za-z0-9+/]{43}=$/.test(this.configuredKey)) throw new AppError('The terminal encryption key must be 32 bytes encoded as base64.', 409)
-      return Buffer.from(this.configuredKey, 'base64')
+    if (this.configuredKey) return Buffer.from(this.configuredKey, 'base64')
+    let path = join(this.directory, 'master-key')
+    try { await stat(path) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      // Retain the key used by existing local/development installations.
+      const legacy = join(this.directory, 'development-master-key')
+      try { await stat(legacy); path = legacy }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     }
-    const path = join(this.directory, 'development-master-key')
     try { await writeFile(path, randomBytes(32), { mode: 0o600, flag: 'wx' }) }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
     await chmod(path, 0o600)
     const key = await readFile(path)
-    if (key.length !== 32) throw new AppError('The development terminal encryption key is invalid.', 409)
+    if (key.length !== 32) throw new AppError('The saved terminal encryption key is invalid. Restore it from a backup.', 409)
     return key
   }
   private scope(owner: string, targetId: string) { return JSON.stringify([owner, targetId]) }

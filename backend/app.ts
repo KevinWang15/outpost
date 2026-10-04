@@ -58,7 +58,7 @@ export async function createApp(options: {
   }
   const workspace = (request: FastifyRequest) => accounts ? userWorkspace(request.account!.user.id) : { store, targets }
   const terminalOwner = (request: FastifyRequest): TerminalOwner => accounts ? { userId: request.account!.user.id, authSessionId: request.account!.id } : { userId: 'local', authSessionId: 'local' }
-  const terminalKeys = options.terminalKeys ?? new TerminalKeys(accounts?.store.directory ?? store.directory, accounts?.production ?? false)
+  const terminalKeys = options.terminalKeys ?? new TerminalKeys(accounts?.store.directory ?? store.directory)
   const webTerminals = new WebTerminals(terminalKeys, owner => !accounts || Boolean(accounts.store.ticketSession(owner.userId, owner.authSessionId)), options.terminalGraceMs)
   app.addHook('preClose', async () => { webTerminals.close() })
   app.addHook('preClose', () => installations.close())

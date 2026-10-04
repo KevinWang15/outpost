@@ -43,10 +43,14 @@ Web terminals are explicitly launched from the session menu. Uploaded private
 keys are scoped to an account and target, normalized after bounded parsing in a
 worker, and encrypted with AES-256-GCM authenticated against that ownership.
 Upload passphrases are discarded after decryption. Files are mode 0600 in a
-0700 directory; metadata APIs never return key material. Production requires a
-32-byte base64 `OUTPOST_TERMINAL_ENCRYPTION_KEY` held separately from the data
-directory. Protect and back up both. A trusted backend operator can access keys
-in memory; encryption does not protect against a compromised running server.
+0700 directory; metadata APIs never return key material. In every mode, Outpost
+generates a persistent 32-byte key at `terminal-keys/master-key` with mode 0600
+when no override is configured. Existing development master keys are reused.
+The optional 32-byte base64 `OUTPOST_TERMINAL_ENCRYPTION_KEY` takes precedence
+and allows separate key management. Protect and back up the data directory and
+any override; existing uploads require their original key. A trusted backend
+operator can access keys in memory; encryption does not protect against a
+compromised running server.
 
 SSH host keys are checked against account management known-host records and
 pinned for web connections on first use. Changed keys fail closed. WebSocket

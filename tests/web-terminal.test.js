@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
@@ -30,7 +30,7 @@ async function connect(origin, id, cookie, extra = {}) {
 test('terminal vault encrypts keys, discards passphrases, authenticates ownership, supports encrypted keys, and pins host identity', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-key-test-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
-  const master = randomBytes(32).toString('base64'), vault = new TerminalKeys(directory, true, master)
+  const master = randomBytes(32).toString('base64'), vault = new TerminalKeys(directory, master)
   const keys = ssh2.utils.generateKeyPairSync('ed25519', { passphrase: 'synthetic-secret', cipher: 'aes256-cbc' })
   await assert.rejects(vault.upload('alice', 'target', keys.public), /private key/)
   await assert.rejects(vault.upload('alice', 'target', keys.private, 'wrong'), /private key/)
@@ -46,7 +46,7 @@ test('terminal vault encrypts keys, discards passphrases, authenticates ownershi
   await writeFile(forged, encrypted)
   await assert.rejects(vault.read('bob', 'target'), /cannot be decrypted/, 'ciphertext cannot be moved to another account')
   await vault.remove('bob', 'target')
-  const restored = await new TerminalKeys(directory, true, master).read('alice', 'target')
+  const restored = await new TerminalKeys(directory, master).read('alice', 'target')
   assert.ok(ssh2.utils.parseKey(restored.privateKey).getPublicSSH().equals(ssh2.utils.parseKey(keys.public).getPublicSSH()))
   assert.equal(restored.passphrase, '', 'the passphrase unlocks the uploaded key once and is discarded')
   const host = ssh2.utils.parseKey(ssh2.utils.generateKeyPairSync('ed25519').public).getPublicSSH()
@@ -56,13 +56,65 @@ test('terminal vault encrypts keys, discards passphrases, authenticates ownershi
   assert.match((await vault.status('alice', 'target')).key.hostFingerprint, /^SHA256:/)
   await vault.upload('alice', 'target', keys.private, 'synthetic-secret')
   assert.equal((await vault.read('alice', 'target')).hostKey, host.toString('base64'), 'replacement keeps the host pin')
-  const wrongMaster = new TerminalKeys(directory, true, randomBytes(32).toString('base64'))
+  const wrongMaster = new TerminalKeys(directory, randomBytes(32).toString('base64'))
   await assert.rejects(wrongMaster.read('alice', 'target'), /cannot be decrypted/)
   const corrupt = JSON.parse(await readFile(path, 'utf8')); corrupt.tag = randomBytes(16).toString('base64')
   await writeFile(path, JSON.stringify(corrupt)); await assert.rejects(vault.read('alice', 'target'), /cannot be decrypted/)
   await vault.remove('alice', 'target'); assert.equal((await vault.status('alice', 'target')).key, null)
-  assert.equal((await new TerminalKeys(directory, true, '').status('alice', 'target')).encryptionAvailable, false)
-  await assert.rejects(new TerminalKeys(directory, true, '').upload('alice', 'target', keys.private), /administrator/)
+  assert.equal((await new TerminalKeys(directory, 'invalid').status('alice', 'target')).encryptionAvailable, false)
+  await assert.rejects(new TerminalKeys(directory, 'invalid').upload('alice', 'target', keys.private), /32 bytes encoded as base64/)
+})
+
+test('automatic encryption keys persist across restarts, retain private permissions and honor overrides and legacy keys', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-automatic-key-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const vault = new TerminalKeys(directory, ''), key = ssh2.utils.generateKeyPairSync('ed25519')
+  assert.deepEqual(await vault.status('alice', 'target'), { encryptionAvailable: true, key: null })
+  const masterPath = join(directory, 'terminal-keys', 'master-key')
+  await assert.rejects(readFile(masterPath), { code: 'ENOENT' }, 'checking availability does not create key material')
+  const info = await vault.upload('alice', 'target', key.private)
+  const master = await readFile(masterPath)
+  assert.equal(master.length, 32); assert.equal((await stat(masterPath)).mode & 0o777, 0o600)
+  await chmod(masterPath, 0o644)
+  const restarted = new TerminalKeys(directory, '')
+  assert.equal((await restarted.status('alice', 'target')).key.fingerprint, info.fingerprint)
+  assert.ok(master.equals(await readFile(masterPath))); assert.equal((await stat(masterPath)).mode & 0o777, 0o600)
+  // An explicit key takes precedence even when a generated key already exists.
+  const override = new TerminalKeys(directory, randomBytes(32).toString('base64'))
+  await override.upload('alice', 'override-target', key.private)
+  await assert.rejects(restarted.read('alice', 'override-target'), /cannot be decrypted/)
+  assert.ok(master.equals(await readFile(masterPath)))
+  // Preserve uploads encrypted by the old local/development master-key file.
+  const legacyDirectory = join(directory, 'legacy'), legacyKey = randomBytes(32)
+  await new TerminalKeys(legacyDirectory, legacyKey.toString('base64')).upload('alice', 'target', key.private)
+  await writeFile(join(legacyDirectory, 'terminal-keys', 'development-master-key'), legacyKey, { mode: 0o600 })
+  assert.equal((await new TerminalKeys(legacyDirectory, '').status('alice', 'target')).key.fingerprint, info.fingerprint)
+  await assert.rejects(readFile(join(legacyDirectory, 'terminal-keys', 'master-key')), { code: 'ENOENT' })
+  // Never overwrite a corrupt persisted master key or fall back to a different key.
+  const corruptDirectory = join(directory, 'corrupt')
+  await mkdir(join(corruptDirectory, 'terminal-keys'), { recursive: true })
+  const corruptPath = join(corruptDirectory, 'terminal-keys', 'master-key')
+  await writeFile(corruptPath, 'invalid')
+  await writeFile(join(corruptDirectory, 'terminal-keys', 'development-master-key'), randomBytes(32))
+  await assert.rejects(new TerminalKeys(corruptDirectory, '').upload('alice', 'target', key.private), /saved terminal encryption key is invalid/)
+  assert.equal(await readFile(corruptPath, 'utf8'), 'invalid')
+})
+
+test('hosted production accepts private-key uploads without an encryption-key override', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-production-key-'))
+  const accounts = await Accounts.open({ directory, publicUrl: 'https://outpost.example', production: true, mailer: async () => {} })
+  const app = await createApp({ accounts, terminalKeys: new TerminalKeys(directory, '') })
+  t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true }) })
+  const user = accounts.store.create('production-key@example.com', 'Dev', 'unused')
+  const verified = accounts.store.consumeToken(accounts.store.issueToken(user.id, 'verify', 10000), 'verify')
+  const cookie = `outpost_session=${accounts.store.issueSession(verified).token}`
+  const request = (method, url, payload) => app.inject({ method, url, payload, headers: { host: 'outpost.example', origin: 'https://outpost.example', cookie, 'x-outpost-request': '1' } })
+  const target = (await request('POST', '/api/targets', { name: 'Production SSH', kind: 'ssh', host: 'dev.example', backends: ['tmux'], tools: ['codex'] })).json()
+  const path = `/api/targets/${target.id}/terminal-key`
+  assert.deepEqual((await request('GET', path)).json(), { encryptionAvailable: true, key: null })
+  const saved = await request('PUT', path, { privateKey: ssh2.utils.generateKeyPairSync('ed25519').private })
+  assert.equal(saved.statusCode, 200, saved.body); assert.match(saved.json().key.fingerprint, /^SHA256:/)
+  assert.equal((await readFile(join(directory, 'terminal-keys', 'master-key'))).length, 32)
 })
 
 test('uploaded RSA and ECDSA keys normalize without passphrases and preserve their public identity', async t => {

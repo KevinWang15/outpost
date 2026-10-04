@@ -79,7 +79,7 @@ export default function WebTerminalModal({ target, session, onClose }: { target:
         <div className="modal-actions"><button className="button secondary" disabled={busy} onClick={() => terminal ? setManageKey(false) : void launch()}>{terminal ? 'Return to terminal' : 'Launch web terminal'}</button>
           <button className="button danger" disabled={busy} onClick={() => void removeKey()}>Remove saved key</button></div></div>}
       {keyProblem && <button className="button danger" disabled={busy} onClick={() => void removeKey()}>Remove saved key</button>}
-      {!status.encryptionAvailable ? <p role="alert" className="error">The administrator must configure OUTPOST_TERMINAL_ENCRYPTION_KEY before private keys can be uploaded.</p> : <form onSubmit={event => void saveKey(event)}>
+      {!status.encryptionAvailable ? <p role="alert" className="error">Private-key uploads are unavailable because the server’s encryption configuration is invalid. Contact the administrator.</p> : <form onSubmit={event => void saveKey(event)}>
         <label>Private key file<input type="file" aria-label="Private key file" disabled={busy} onChange={event => {
           const file = event.target.files?.[0]
           if (!file) return

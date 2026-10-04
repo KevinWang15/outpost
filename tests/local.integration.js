@@ -104,6 +104,8 @@ test('native local lifecycle: both backends, all tools, live state, persistence,
       assert.ok((await heartbeat(root, first.time)).time > first.time)
       await terminal(file)
       assert.equal((await heartbeat(root)).pid, first.pid, 'reconnect preserves the process')
+      await terminal(file, 'reconnect')
+      assert.equal((await heartbeat(root)).pid, first.pid, 'Enter reconnects repeatedly in the same terminal')
       records.push({ target, session, file, root, pid: first.pid, expectedArgs, expectedEnv: first.env })
     }
     const list = await request('GET', `${base}/sessions`)

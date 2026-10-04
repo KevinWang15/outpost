@@ -219,15 +219,7 @@ export class DesktopLauncher implements DesktopService {
       const contents = plan.terminal.shell === 'powershell' ? script : `#!/usr/bin/env bash
 rm -f -- ${quote(file)}
 rmdir -- ${quote(directory)} 2>/dev/null || true
-(
 ${script}
-)
-status=$?
-if [ "$status" -ne 0 ]; then
-  printf '\\nConnection failed. Press Enter to close this window.\\n'
-  read -r _
-fi
-exit "$status"
 `
       await writeFile(file, contents, { mode: 0o700, flag: 'wx' })
       await this.host.start(plan.executable, plan.args(file, directory), plan.hidden, plan.waitForExit)

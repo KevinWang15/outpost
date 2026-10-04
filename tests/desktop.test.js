@@ -82,7 +82,7 @@ test('macOS and Linux launch private scripts as literal arguments and clean up s
         assert.ok(script.startsWith(root))
         const contents = await readFile(script, 'utf8')
         assert.match(contents, /dev-alias/)
-        assert.match(contents, /Connection failed/)
+        assert.match(contents, /DISCONNECTED/)
         if (process.platform !== 'win32') assert.equal((await stat(script)).mode & 0o777, 0o700)
         throw new Error('display unavailable')
       },

@@ -52,8 +52,8 @@ test('target API requires explicit kinds and rejects transport-specific fields o
   const path = new URL(connection.json().commands.bash.match(/'([^']+)'/)[1]).pathname
   const script = await request('GET', path)
   assert.equal(script.statusCode, 200)
-  assert.match(script.body, /exec '\/bin\/zsh'/)
-  assert.doesNotMatch(script.body, /exec 'ssh'|OpenSSH/)
+  assert.match(script.body, /'\/bin\/zsh'.*0<>"\$terminal"/)
+  assert.doesNotMatch(script.body, /'ssh'|OpenSSH/)
   assert.equal((await request('POST', `${base}/sessions/session/launch`, {})).statusCode, 200)
   assert.equal(scripts[0], script.body)
 })

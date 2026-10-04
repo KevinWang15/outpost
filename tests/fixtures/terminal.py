@@ -55,6 +55,8 @@ try:
                 painted_at = time.monotonic()
             if not real_codex or time.monotonic() - painted_at >= 0.6:
                 break
+        elif b'Press Enter to reconnect' in output:
+            break
     if not painted():
         raise RuntimeError('No interactive process: ' + output.decode(errors='replace'))
     if len(sys.argv) > 3:
@@ -84,8 +86,48 @@ try:
                 output += os.read(fd, 65536)
         if completion not in output:
             raise RuntimeError('Keyboard probe did not reach the session: ' + output.decode(errors='replace'))
-    if real_codex or sys.argv[2] in ('detach', 'clipboard', 'keyboard'):
+    def wait_for_banner(timeout=5):
+        global output
+        deadline = time.time() + timeout
+        while b'Press Enter to reconnect' not in output and time.time() < deadline:
+            if select.select([fd], [], [], 0.2)[0]:
+                try:
+                    chunk = os.read(fd, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output += chunk
+        if b'DISCONNECTED' not in output or b'Press Enter to reconnect' not in output:
+            raise RuntimeError('No reconnect banner: ' + output.decode(errors='replace'))
+
+    if sys.argv[2] in ('reconnect', 'network-reconnect'):
+        first_pid = re.search(rb'OUTPOST_FIXTURE_READY (\d+)', output).group(1)
+        for attempt in range(2 if sys.argv[2] == 'reconnect' else 1):
+            output = b''
+            if sys.argv[2] == 'reconnect':
+                os.write(fd, b'\x1c')
+            wait_for_banner(15)
+            os.write(fd, b'x')
+            time.sleep(0.25)
+            if select.select([fd], [], [], 0)[0]:
+                output += os.read(fd, 65536)
+            if b'Connecting.' in output:
+                raise RuntimeError('Reconnected without Enter')
+            output = b''
+            os.write(fd, b'\r')
+            deadline = time.time() + 10
+            while not painted() and time.time() < deadline:
+                if select.select([fd], [], [], 0.2)[0]:
+                    output += os.read(fd, 65536)
+            if not painted() or re.search(rb'OUTPOST_FIXTURE_READY (\d+)', output).group(1) != first_pid:
+                raise RuntimeError('Reconnect did not preserve the coding process: ' + output.decode(errors='replace'))
+    if real_codex or sys.argv[2] in ('detach', 'clipboard', 'keyboard', 'reconnect', 'network-reconnect'):
+        output_before_detach = output
+        output = b''
         os.write(fd, b'\x1c')
+        wait_for_banner()
+        os.write(fd, b'\x03')
         deadline = time.time() + 5
         while time.time() < deadline:
             if select.select([fd], [], [], 0.2)[0]:
@@ -97,25 +139,16 @@ try:
                 except OSError:
                     break
         else:
-            raise RuntimeError('Detach shortcut did not close the connection')
+            raise RuntimeError('Ctrl+C did not exit the disconnected terminal: ' + output.decode(errors='replace'))
+        output = output_before_detach + output
     elif sys.argv[2] == 'exit':
         os.write(fd, b'exit\n')
         time.sleep(0.3)
     elif sys.argv[2] == 'hold':
         time.sleep(1)
     elif sys.argv[2] == 'until-disconnected':
-        deadline = time.time() + 15
-        while time.time() < deadline:
-            if select.select([fd], [], [], 0.2)[0]:
-                try:
-                    chunk = os.read(fd, 65536)
-                    if not chunk:
-                        break
-                    output += chunk
-                except OSError:
-                    break
-        else:
-            raise RuntimeError('Attached terminal did not disconnect after termination')
+        wait_for_banner(15)
+        os.write(fd, b'\x03')
     elif sys.argv[2] == 'interactive':
         print(json.dumps({'ready': True, 'focusReporting': b'\x1b[?1004h' in output}), flush=True)
         while True:

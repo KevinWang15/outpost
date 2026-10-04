@@ -88,7 +88,7 @@ test('real deployments: default local desktop/local/SSH sessions and production 
   await execute('ssh-keygen', ['-q', '-t', 'ed25519', '-N', 'fixture-passphrase', '-f', webKey])
   await docker('cp', `${plainKey}.pub`, `${targets.alice.container}:/root/.ssh/authorized_keys`)
   await docker('cp', `${webKey}.pub`, `${targets.alice.container}:/tmp/web.pub`)
-  await docker('exec', targets.alice.container, 'sh', '-c', 'cat /tmp/web.pub >> /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys')
+  await docker('exec', targets.alice.container, 'sh', '-c', 'cat /tmp/web.pub >> /root/.ssh/authorized_keys; chown root:root /root/.ssh /root/.ssh/authorized_keys; chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys')
 
   browser = await chromium.launch()
   const local = await browser.newContext(), desktopPage = await local.newPage()
@@ -229,7 +229,7 @@ test('real deployments: default local desktop/local/SSH sessions and production 
       const path = join(directory, `${name}.pub`)
       await writeFile(path, key.publicKey + '\n')
       await docker('cp', path, `${targets[name].container}:/tmp/account.pub`)
-      await docker('exec', targets[name].container, 'sh', '-c', 'cat /tmp/account.pub >> /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys')
+      await docker('exec', targets[name].container, 'sh', '-c', 'cat /tmp/account.pub >> /root/.ssh/authorized_keys; chown root:root /root/.ssh /root/.ssh/authorized_keys; chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys')
       assert.equal((await fileInfo(`/state/users/${user.id}/ssh-key`)).mode, 0o600)
     }
     assert.notEqual(publicKeys[0], publicKeys[1])

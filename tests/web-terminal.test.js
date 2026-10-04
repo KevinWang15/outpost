@@ -161,7 +161,9 @@ test('real SSH web terminal: explicit launch, private credentials, origin/auth c
     assert.equal(status, expected)
   }
   const first = await connect(origin, id, alice.cookie)
-  assert.match(first.messages[0].data, /SSH fixture ready/)
+  const firstScreen = () => first.messages.map(message => message.data ?? '').join('') + first.output.join('')
+  await until(() => firstScreen().includes('SSH fixture ready'))
+  assert.match(firstScreen(), /SSH fixture ready/)
   first.send({ type: 'input', data: 'hello-mobile\r' }); first.send({ type: 'resize', cols: 42, rows: 18 })
   await until(() => ssh.inputs.join('').includes('hello-mobile') && ssh.sizes.some(size => size[0] === 42 && size[1] === 18))
   const closed = once(first.ws, 'close'); first.ws.terminate(); await closed
@@ -240,20 +242,21 @@ test('concurrent launches cannot bypass terminal limits and slow viewers apply S
   const active = started.filter(response => response.statusCode === 200).map(response => response.json())
   const ws = new WebSocket(`${origin.replace('http', 'ws')}/api/web-terminals/${active[0].id}/socket`, { headers: { origin } })
   ws.on('error', () => {})
-  let snapshot = false, bytes = 0, acknowledge = false
+  let snapshot = false, bytes = 0, acknowledge = false, initialScreen = ''
   ws.on('message', (data, binary) => {
-    if (binary) { bytes += data.length; if (acknowledge) ws.send(JSON.stringify({ type: 'ack', bytes: data.length })) }
+    if (binary) { bytes += data.length; initialScreen += data.toString(); if (acknowledge) ws.send(JSON.stringify({ type: 'ack', bytes: data.length })) }
     else {
       const message = JSON.parse(data)
-      if (message.type === 'snapshot') { snapshot = true; ws.send(JSON.stringify({ type: 'ack', bytes: Buffer.byteLength(message.data) })) }
+      if (message.type === 'snapshot') { snapshot = true; initialScreen += message.data; ws.send(JSON.stringify({ type: 'ack', bytes: Buffer.byteLength(message.data) })) }
     }
   })
-  await once(ws, 'open'); await until(() => snapshot)
+  await once(ws, 'open'); await until(() => snapshot && initialScreen.includes('SSH fixture ready'))
+  const baseline = bytes
   ssh.output('x'.repeat(512 * 1024))
-  await until(() => bytes >= 128 * 1024); await delay(200)
-  assert.ok(bytes < 512 * 1024, 'without browser acknowledgements the remote channel pauses')
+  await until(() => bytes >= baseline + 128 * 1024); await delay(200)
+  assert.ok(bytes < baseline + 512 * 1024, 'without browser acknowledgements the remote channel pauses')
   acknowledge = true; ws.send(JSON.stringify({ type: 'ack', bytes }))
-  await until(() => bytes === 512 * 1024)
+  await until(() => bytes === baseline + 512 * 1024)
   const closed = once(ws, 'close'); ws.send(JSON.stringify({ type: 'resize', cols: -1, rows: 20 })); assert.equal((await closed)[0], 1008)
   for (const entry of active) assert.equal((await request('DELETE', `/api/web-terminals/${entry.id}`)).statusCode, 204)
   const again = await request('POST', `/api/targets/${targets[0].id}/sessions/test/web-terminal`, { cols: 80, rows: 24 })

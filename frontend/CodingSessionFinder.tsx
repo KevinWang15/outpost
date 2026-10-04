@@ -98,7 +98,7 @@ export default function CodingSessionFinder({ target, tools, canLink, onLink, on
               {session.updatedAt && <small>Updated {new Date(session.updatedAt).toLocaleString()}</small>}
               {!managed && !available && <small className="finder-warning">{session.rootDir ? `Check Required Software for ${codingToolLabels[session.tool]} and a session backend before linking.` : 'The CLI did not save a working directory for this conversation.'}</small>}
             </div>
-            {managed ? <button className="button secondary" disabled={Boolean(opening)} onClick={() => void open(managed)}>{opening === managed ? <LoaderCircle size={15} className="loading-spinner" /> : <ArrowRight size={15} />} {hosted ? 'Connection options' : 'Connect'}</button>
+            {managed ? <button className="button secondary" disabled={Boolean(opening)} onClick={() => void open(managed)}>{opening === managed ? <LoaderCircle size={15} className="loading-spinner" /> : <ArrowRight size={15} />} {hosted ? 'Connect using web terminal' : 'Connect'}</button>
               : <button className="button secondary" disabled={!available || Boolean(opening)} onClick={() => onLink(session)}><Link size={15} /> Link session</button>}
           </li>
         })}

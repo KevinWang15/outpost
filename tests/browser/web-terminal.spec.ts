@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp } from '../../backend/app'
 import { Accounts } from '../../backend/accounts'
+import { TargetStore } from '../../backend/store'
 import { webSshFixture } from '../fixtures/web-ssh'
 import { healthySoftware } from './software-fixture'
 import { codingIdentity } from './session-fixture'
@@ -23,7 +24,10 @@ test('mobile web terminal is opt-in: account key, optional upload, SSH input, ph
   const accountKey = await accounts.keys.publicKey(user.id)
   ssh.authorize(accountKey.publicKey)
   await writeFile(accounts.keys.paths(user.id).knownHostsFile, `[127.0.0.1]:${ssh.port} ${ssh.hostPublicKey}\n`)
-  const app = await createApp({ accounts, frontendRoot: fileURLToPath(new URL('../../dist/client/', import.meta.url)), service: { list: async () => ({ sessions: [session], registryPath: '/root/.outpost/sessions.json' }), get: async () => session } as never, software: { inspect: async () => healthySoftware(['tmux'], ['codex']) } as never })
+  const app = await createApp({ accounts, frontendRoot: fileURLToPath(new URL('../../dist/client/', import.meta.url)), service: {
+    list: async () => ({ sessions: [session], registryPath: '/root/.outpost/sessions.json' }), get: async () => session,
+    search: async () => ({ sessions: [{ tool: session.tool, cliSessionId: session.cliSessionId, cliSessionEnv: session.cliSessionEnv, rootDir: session.rootDir, title: 'Phone conversation', createdAt: session.createdAt, updatedAt: session.createdAt, excerpt: null, managedSessionIds: [session.id] }], warnings: [], truncated: false }),
+  } as never, software: { inspect: async () => healthySoftware(['tmux'], ['codex']) } as never })
   await app.listen({ host: '127.0.0.1', port: 0 })
   const address = app.server.address() as { port: number }, origin = `http://127.0.0.1:${address.port}`
   await page.context().addCookies([{ name: 'outpost_session', value: login.token, url: origin, httpOnly: true, sameSite: 'Lax' }])
@@ -42,6 +46,8 @@ test('mobile web terminal is opt-in: account key, optional upload, SSH input, ph
     await page.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Connect to Phone work' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Launch terminal', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('combobox', { name: 'Terminal app', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('combobox', { name: 'Shell for copy command', exact: true })).toBeVisible()
     expect(webRequests).toEqual([]); expect(ssh.commands).toEqual([])
     await page.getByRole('button', { name: 'Done', exact: true }).click()
     const openMenu = async (differentKey = false) => {
@@ -114,8 +120,9 @@ test('mobile web terminal is opt-in: account key, optional upload, SSH input, ph
     await page.getByRole('button', { name: 'Remove saved key', exact: true }).click()
     await expect(page.getByText('Your Outpost account key', { exact: true })).toBeVisible()
     await expect(page.getByLabel('Private key file', { exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Launch web terminal', exact: true }).click()
+    await page.getByRole('button', { name: 'Return to terminal', exact: true }).click()
     await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+    expect(ssh.commands).toHaveLength(5)
     await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
     const stored = await page.request.put(`${origin}/api/targets/${target.id}/terminal-key`, { headers: { 'x-outpost-request': '1' }, data: { privateKey: ssh.key } })
     expect(stored.status()).toBe(200)
@@ -134,7 +141,60 @@ test('mobile web terminal is opt-in: account key, optional upload, SSH input, ph
     await page.getByRole('button', { name: 'Launch web terminal', exact: true }).click()
     await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
     await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
+    await page.getByRole('button', { name: 'Find coding sessions', exact: true }).click()
+    const finder = page.getByRole('dialog', { name: 'Find coding sessions', exact: true })
+    await finder.getByRole('textbox', { name: 'Conversation keyword', exact: true }).fill('Phone')
+    await finder.getByRole('button', { name: 'Search', exact: true }).click()
+    await finder.getByRole('button', { name: 'Connect using web terminal', exact: true }).click()
+    await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+    await expect(page.getByLabel('Private key file', { exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
     expect(desktopRequests).toEqual([])
+    expect(errors).toEqual([])
+  } finally { await page.close(); await app.close(); await ssh.close(); await rm(directory, { recursive: true, force: true }) }
+})
+
+test('local mode keeps desktop launch independent of uploads and recovers a corrupt web-terminal key without accounts', async ({ page }) => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-local-terminal-browser-')), ssh = await webSshFixture()
+  const store = new TargetStore(directory)
+  const target = await store.add({ id: '12345678-1234-4123-8123-123456789011', createdAt: new Date().toISOString(), name: 'Local SSH', kind: 'ssh', host: '127.0.0.1', port: ssh.port, backends: ['tmux'], tools: ['codex'] })
+  const session: Session = { ...codingIdentity('codex', '12345678-1234-4123-8123-123456789012'), id: '12345678-1234-4123-8123-123456789012', name: 'Local work', backend: 'tmux', tool: 'codex', rootDir: '/root/project', env: {}, args: '', createdAt: target.createdAt, lastConnectedAt: null, status: 'detached', socketPath: '/root/.outpost/sockets/test', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null } }
+  let desktopLaunches = 0
+  const app = await createApp({ store, frontendRoot: fileURLToPath(new URL('../../dist/client/', import.meta.url)),
+    service: { list: async () => ({ sessions: [session], registryPath: '/root/.outpost/sessions.json' }), get: async () => session } as never,
+    software: { inspect: async () => healthySoftware(['tmux'], ['codex']) } as never,
+    desktop: { available: async () => ({ os: 'linux', terminals: [], recommendedId: null }), launch: async () => { desktopLaunches++; return { id: 'linux-gnome', os: 'linux', name: 'GNOME Terminal', shell: 'bash' } } },
+  })
+  const origin = await app.listen({ host: '127.0.0.1', port: 0 }), path = `${origin}/api/targets/${target.id}/terminal-key`
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  try {
+    expect((await page.request.put(path, { headers: { 'x-outpost-request': '1' }, data: { privateKey: ssh.key } })).status()).toBe(200)
+    const vault = join(directory, 'terminal-keys'), file = (await readdir(vault)).find(name => name.endsWith('.json'))!
+    const record = JSON.parse(await readFile(join(vault, file), 'utf8')); record.tag = Buffer.alloc(16).toString('base64')
+    await writeFile(join(vault, file), JSON.stringify(record))
+    await page.goto(`${origin}/?target=${target.id}`)
+    await expect(page.getByText('Local work', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Connect using web terminal', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Connect', exact: true }).click()
+    await expect.poll(() => desktopLaunches).toBe(1)
+    expect(ssh.commands).toEqual([])
+    await page.getByRole('button', { name: 'Connection options for Local work', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Launch with web terminal', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('cannot be decrypted')
+    await expect(page.getByRole('button', { name: 'Use Outpost account key', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Remove saved key', exact: true }).click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await page.getByLabel('Private key', { exact: true }).fill(ssh.key)
+    await page.getByRole('button', { name: 'Save key and launch', exact: true }).click()
+    await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+    await page.getByLabel('Terminal text', { exact: true }).fill('local uploaded key')
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    await expect.poll(() => ssh.inputs.join('')).toContain('local uploaded key\r')
+    expect(await (await page.request.get(path)).json()).not.toHaveProperty('accountKey')
+    expect((await page.request.get(`${origin}/api/account/ssh-key`)).status()).toBe(404)
+    expect((await page.request.get(`${origin}/signup`)).status()).toBe(404)
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
     expect(errors).toEqual([])
   } finally { await page.close(); await app.close(); await ssh.close(); await rm(directory, { recursive: true, force: true }) }
 })

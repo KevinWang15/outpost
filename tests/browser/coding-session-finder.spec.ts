@@ -29,7 +29,7 @@ async function workspace(page: Page, search: (route: Route) => Promise<unknown>,
     if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions, registryPath: '/home/dev/.outpost/sessions.json' } })
     if (path.endsWith('/sessions/linked-manager-session')) return route.fulfill({ json: sessions[0] })
     if (path.endsWith('/launch')) return route.fulfill({ status: 409, json: { message: 'No desktop terminal available' } })
-    if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'connect-exact-managed-session' }, expiresAt: '2026-09-30T23:59:59Z', desktop: desktopAvailability() } })
+    if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'connect-exact-managed-session' }, expiresAt: '2026-09-30T23:59:59Z', mode: 'local', desktop: desktopAvailability() } })
     throw new Error(`Unexpected request: ${path}`)
   })
   await page.goto('/')

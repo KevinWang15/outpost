@@ -37,7 +37,7 @@ for (const platform of ['linux', 'darwin', 'win32']) test(`${platform}: add a lo
       reads++
       return route.fulfill({ json: { sessions: session ? [session] : [], registryPath: '/home/dev/.outpost/sessions.json' } })
     }
-    if (path.endsWith('/connect')) return route.fulfill({ json: { commands, expiresAt: new Date(Date.now() + 900000).toISOString(), desktop: desktopAvailability(terminalOS(platform)!, [terminal.id]) } })
+    if (path.endsWith('/connect')) return route.fulfill({ json: { commands, expiresAt: new Date(Date.now() + 900000).toISOString(), mode: 'local', desktop: desktopAvailability(terminalOS(platform)!, [terminal.id]) } })
     if (path.endsWith('/launch')) { expect(route.request().postDataJSON()).toEqual({ terminalId: terminal.id }); launches++; return route.fulfill({ json: terminal }) }
     return route.fulfill({ status: 404 })
   })

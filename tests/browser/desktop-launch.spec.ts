@@ -28,7 +28,7 @@ async function workspace(page: Page, terminal: DesktopTerminal | null, launch: (
     if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions: [{ ...codingIdentity('kimi', 'session'), id: 'session', name: 'Desktop session', backend: 'tmux', tool: 'kimi', rootDir: '/root/projects/app', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', lastConnectedAt: null }], registryPath: '/root/.outpost/sessions.json' } })
     if (path.endsWith('/connect')) {
       connections.push(path)
-      return route.fulfill({ json: { commands: { bash: 'bash-command', powershell: 'powershell-command', cmd: 'cmd-command' }, expiresAt: new Date(Date.now() + 900000).toISOString(), desktop: desktopAvailability(terminal?.os ?? 'linux', terminal ? [terminal.id] : []) } })
+      return route.fulfill({ json: { commands: { bash: 'bash-command', powershell: 'powershell-command', cmd: 'cmd-command' }, expiresAt: new Date(Date.now() + 900000).toISOString(), mode: 'local', desktop: desktopAvailability(terminal?.os ?? 'linux', terminal ? [terminal.id] : []) } })
     }
     return route.fulfill({ status: 404 })
   })

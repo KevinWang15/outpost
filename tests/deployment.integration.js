@@ -281,6 +281,8 @@ test('real deployments: default local desktop/local/SSH sessions and production 
     await phone.getByRole('menuitem', { name: 'Connection options', exact: true }).click()
     await expect(phone.getByRole('dialog')).toBeVisible()
     await expect(phone.getByRole('button', { name: 'Launch terminal', exact: true })).toHaveCount(0)
+    await expect(phone.getByRole('combobox', { name: 'Terminal app', exact: true })).toHaveCount(0)
+    await expect(phone.getByRole('combobox', { name: 'Shell for copy command', exact: true })).toBeVisible()
     assert.deepEqual(webRequests, [])
     await phone.getByRole('button', { name: 'Done', exact: true }).click()
     await openTerminal(first.session)
@@ -364,7 +366,7 @@ test('real deployments: default local desktop/local/SSH sessions and production 
       await phone.getByRole('button', { name: 'Close dialog', exact: true }).click()
     }
   })
-  await t.test('removing an uploaded key restores account-key access to the same remote process', async () => {
+  await t.test('removing an uploaded key preserves the active account-key terminal and remote process', async () => {
     await openTerminal(first.session)
     await expect(phone.locator('.terminal-toolbar')).toContainText('Connected')
     await phone.getByRole('button', { name: 'Manage key', exact: true }).click()
@@ -373,7 +375,7 @@ test('real deployments: default local desktop/local/SSH sessions and production 
     await expect(phone.getByText('Your Outpost account key', { exact: true })).toBeVisible()
     assert.equal((await api(alice, 'GET', origin, `/targets/${aliceTarget.id}/terminal-key`)).key, null)
     assert.equal((await heartbeat(first)).pid, originalPid)
-    await phone.getByRole('button', { name: 'Launch web terminal', exact: true }).click()
+    await phone.getByRole('button', { name: 'Return to terminal', exact: true }).click()
     await expect(phone.locator('.terminal-toolbar')).toContainText('Connected')
     assert.equal((await heartbeat(first)).pid, originalPid)
     await phone.getByRole('button', { name: 'Close dialog', exact: true }).click()

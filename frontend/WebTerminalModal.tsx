@@ -2,34 +2,35 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { KeyRound, LoaderCircle } from 'lucide-react'
 import type { Session, Target } from '../shared/session-manager'
 import type { TerminalKeySource, TerminalKeyStatus, WebTerminalInfo } from '../shared/web-terminal'
-import { api, ApiError } from './api'
+import { api } from './api'
 import { Modal } from './ui'
 import WebTerminal from './WebTerminal'
 import { useAuth } from './useAuth'
+
+type ConnectedTerminal = WebTerminalInfo & { keySource: TerminalKeySource }
 
 export default function WebTerminalModal({ target, session, differentKey = false, onClose }: { target: Target; session: Session; differentKey?: boolean; onClose: () => void }) {
   const hosted = useAuth().mode === 'hosted'
   const base = `/targets/${target.id}`
   const [status, setStatus] = useState<TerminalKeyStatus | null>(null)
-  const [terminal, setTerminal] = useState<(WebTerminalInfo & { keySource: TerminalKeySource }) | null>(null)
+  const [terminal, setTerminal] = useState<ConnectedTerminal | null>(null)
   const [manageKey, setManageKey] = useState(false)
   const initialSource: TerminalKeySource = hosted && !differentKey ? 'account' : 'uploaded'
   const [source, setSource] = useState<TerminalKeySource>(initialSource)
-  const [keyProblem, setKeyProblem] = useState(false)
   const [privateKey, setPrivateKey] = useState(''), [passphrase, setPassphrase] = useState('')
   const [busy, setBusy] = useState(true), [error, setError] = useState('')
-  const alive = useRef(true), terminalId = useRef<string | null>(null), terminalSource = useRef<TerminalKeySource | null>(null)
+  const alive = useRef(true), heldTerminal = useRef<ConnectedTerminal | null>(null)
   const launch = useCallback(async (keySource: TerminalKeySource) => {
     setBusy(true); setError('')
     try {
-      if (terminalId.current && terminalSource.current !== keySource) {
-        await api(`/web-terminals/${terminalId.current}`, 'DELETE').catch(error => { if (error.status !== 404) throw error })
-        terminalId.current = null; setTerminal(null)
+      if (heldTerminal.current && heldTerminal.current.keySource !== keySource) {
+        await api(`/web-terminals/${heldTerminal.current.id}`, 'DELETE').catch(error => { if (error.status !== 404) throw error })
+        heldTerminal.current = null; setTerminal(null)
       }
       setSource(keySource)
       const info = await api<WebTerminalInfo>(`${base}/sessions/${session.id}/web-terminal`, 'POST', { cols: 80, rows: 24, keySource })
       if (!alive.current) { void api(`/web-terminals/${info.id}`, 'DELETE').catch(() => {}); return }
-      terminalId.current = info.id; terminalSource.current = keySource; setTerminal({ ...info, keySource }); setManageKey(false)
+      heldTerminal.current = { ...info, keySource }; setTerminal(heldTerminal.current); setManageKey(false)
     } catch (error) { if (alive.current) setError((error as Error).message) }
     finally { if (alive.current) setBusy(false) }
   }, [base, session.id])
@@ -38,19 +39,16 @@ export default function WebTerminalModal({ target, session, differentKey = false
     void api<TerminalKeyStatus>(`${base}/terminal-key`).then(info => {
       if (!alive.current) return
       setStatus(info)
-      setKeyProblem(Boolean(info.keyError))
       if (initialSource === 'uploaded' && info.keyError) setError(info.keyError)
       if (!differentKey && (initialSource === 'account' ? info.accountKey : info.key)) void launch(initialSource)
       else { setManageKey(true); setBusy(false) }
     }, error => {
       if (!alive.current) return
       setError(error.message); setBusy(false)
-      // An unreadable saved key can still be removed or replaced through the UI.
-      if (error instanceof ApiError && error.status === 409) { setStatus({ encryptionAvailable: true, key: null }); setKeyProblem(true) }
     })
     return () => {
       alive.current = false
-      if (terminalId.current) void api(`/web-terminals/${terminalId.current}`, 'DELETE').catch(() => {})
+      if (heldTerminal.current) void api(`/web-terminals/${heldTerminal.current.id}`, 'DELETE').catch(() => {})
     }
   }, [base, launch, initialSource, differentKey])
   async function saveKey(event: React.FormEvent) {
@@ -58,7 +56,8 @@ export default function WebTerminalModal({ target, session, differentKey = false
     try {
       const info = await api<TerminalKeyStatus>(`${base}/terminal-key`, 'PUT', { privateKey, passphrase })
       if (!alive.current) return
-      setStatus(info); setKeyProblem(false); setPrivateKey(''); setPassphrase(''); terminalId.current = null; setTerminal(null)
+      setStatus(info); setPrivateKey(''); setPassphrase('')
+      if (heldTerminal.current?.keySource === 'uploaded') { heldTerminal.current = null; setTerminal(null) }
       await launch('uploaded')
     } catch (error) { if (alive.current) { setError((error as Error).message); setBusy(false) } }
   }
@@ -66,18 +65,19 @@ export default function WebTerminalModal({ target, session, differentKey = false
     setBusy(true); setError('')
     try {
       await api(`${base}/terminal-key`, 'DELETE')
-      terminalId.current = null; setTerminal(null); setManageKey(true)
+      if (heldTerminal.current?.keySource === 'uploaded') { heldTerminal.current = null; setTerminal(null) }
+      setManageKey(true)
       const info = await api<TerminalKeyStatus>(`${base}/terminal-key`)
       if (!alive.current) return
-      setStatus(info); setSource(info.accountKey ? 'account' : 'uploaded'); setKeyProblem(false); setPrivateKey(''); setPassphrase('')
-    } catch (error) { setError((error as Error).message) }
-    finally { setBusy(false) }
+      setStatus(info); setSource(hosted ? 'account' : 'uploaded'); setPrivateKey(''); setPassphrase('')
+    } catch (error) { if (alive.current) setError((error as Error).message) }
+    finally { if (alive.current) setBusy(false) }
   }
   async function close() {
     setBusy(true)
     try {
-      if (terminalId.current) await api(`/web-terminals/${terminalId.current}`, 'DELETE').catch(error => { if (error.status !== 404) throw error })
-      terminalId.current = null; onClose()
+      if (heldTerminal.current) await api(`/web-terminals/${heldTerminal.current.id}`, 'DELETE').catch(error => { if (error.status !== 404) throw error })
+      heldTerminal.current = null; onClose()
     } catch (error) { setError((error as Error).message); setBusy(false) }
   }
   return <Modal title={`Web terminal · ${session.name}`} subtitle={`root@${target.kind === 'ssh' ? target.host : target.name} · ${session.backend} · Closing detaches the terminal; your coding session keeps running.`}
@@ -99,7 +99,7 @@ export default function WebTerminalModal({ target, session, differentKey = false
         {status.key.hostFingerprint && <small>Trusted host: <code>{status.key.hostFingerprint}</code></small>}
         <div className="modal-actions"><button className="button secondary" disabled={busy} onClick={() => terminal?.keySource === 'uploaded' ? setManageKey(false) : void launch('uploaded')}>{terminal?.keySource === 'uploaded' ? 'Return to terminal' : 'Launch web terminal'}</button>
           <button className="button danger" disabled={busy} onClick={() => void removeKey()}>Remove saved key</button></div></div>}
-      {source === 'uploaded' && keyProblem && <button className="button danger" disabled={busy} onClick={() => void removeKey()}>Remove saved key</button>}
+      {source === 'uploaded' && status.keyError && <button className="button danger" disabled={busy} onClick={() => void removeKey()}>Remove saved key</button>}
       {source === 'uploaded' && (!status.encryptionAvailable ? <p role="alert" className="error">Private-key uploads are unavailable because the server’s encryption configuration is invalid. Contact the administrator.</p> : <form onSubmit={event => void saveKey(event)}>
         <p className="form-note">Uploaded keys are encrypted on Outpost. A passphrase unlocks the upload once and is discarded.</p>
         <label>Private key file<input type="file" aria-label="Private key file" disabled={busy} onChange={event => {

@@ -219,8 +219,9 @@ test('production cookies, host/origin checks, bearer ticket integrity, and logou
   // Unexpected ports do not match the configured public authority.
   assert.equal(connection.message, 'Use the configured Outpost address.')
   const valid = (await f.request('POST', `/api/targets/${target.id}/sessions/work/connect`, undefined, owner.cookie)).json()
-  assert.equal(valid.hosted, true)
-  assert.deepEqual(valid.desktop.terminals, [])
+  assert.equal(valid.mode, 'hosted')
+  assert.equal('desktop' in valid, false)
+  assert.equal('hosted' in valid, false)
   const url = new URL(valid.commands.bash.match(/'(https[^']+)'/)[1])
   assert.equal(url.origin, 'https://outpost.example')
   assert.equal((await f.request('GET', url.pathname)).statusCode, 200)

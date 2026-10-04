@@ -44,28 +44,34 @@ links expire after 24 hours, reset links after one hour; both are single use.
 Password changes and resets revoke every login session and connection ticket.
 Logout revokes its session and its tickets. Rate limits bound account attempts.
 
-Web terminals are explicitly launched from the session menu. Uploaded private
+Hosted web terminals launch explicitly with **Connect using web terminal** and
+use the owner’s account SSH key by default. Local web terminals launch through
+the session menu and require an uploaded key. Hosted uploads are an explicit
+alternative; browsing a workspace never opens a terminal. Uploaded private
 keys are scoped to a target within its hosted account or local workspace,
 normalized after bounded parsing in a worker, and encrypted with AES-256-GCM
 authenticated against that ownership.
 Upload passphrases are discarded after decryption. Files are mode 0600 in a
 0700 directory; metadata APIs never return key material. In every mode, Outpost
 generates a persistent 32-byte key at `terminal-keys/master-key` with mode 0600
-when no override is configured. Existing development master keys are reused.
+on the first upload when no override is configured. Account-key terminals do
+not use the upload vault or generate its encryption key.
 The optional 32-byte base64 `OUTPOST_TERMINAL_ENCRYPTION_KEY` takes precedence
 and allows separate key management. Protect and back up the data directory and
-any override; existing uploads require their original key. A trusted backend
-operator can access keys in memory; encryption does not protect against a
+any override; encrypted uploads require the same key throughout their lifetime.
+A trusted backend operator can access keys in memory; encryption does not protect against a
 compromised running server.
 
-SSH host keys are checked against account management known-host records and
-pinned for web connections on first use. Changed keys fail closed. Hosted
+Account-key terminals require the host key pinned by account management.
+Uploaded-key terminals must match any account management known-host record;
+otherwise they pin the host on first use. Changed keys fail closed. Hosted
 WebSocket upgrades require the permitted browser Origin and a verified login;
 local upgrades require a loopback peer and an Origin matching the exact Host
 and port. Terminal IDs are scoped to the originating login or local workspace
 and are not bearer credentials. Hosted login revocation is checked on input
-and every second. Key replacement/removal and
-target deletion close corresponding terminals. Terminal output is held only
+and every second. Uploaded-key replacement/removal closes terminals using that
+upload, while account-key terminals stay connected. Target deletion closes all
+its terminals. Terminal output is held only
 in bounded memory; reconnect restores a screen snapshot, not an unbounded log.
 Input, output backpressure, uploads and concurrent terminal counts are bounded.
 Disconnected attachments expire after 10 minutes. Closing an attachment does

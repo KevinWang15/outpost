@@ -47,7 +47,7 @@ async function fixture(page: Page, missing: SoftwareId[] = [], options: { backen
       return route.fulfill({ status: 201, json: session })
     }
     if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions, registryPath: '/root/.outpost/sessions.json' } })
-    if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'curl session | bash' }, expiresAt: target.createdAt, desktop: desktopAvailability() } })
+    if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'curl session | bash' }, expiresAt: target.createdAt, mode: 'local', desktop: desktopAvailability() } })
     if (path.endsWith('/directories')) return route.fulfill({ json: { directories: [], truncated: false } })
     return route.fulfill({ status: 404 })
   })

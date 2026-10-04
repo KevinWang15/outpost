@@ -29,7 +29,7 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
     else if (path.endsWith('/sessions') && method === 'POST') {
       const session: Session = { ...codingIdentity((route.request().postDataJSON()).tool, '55eef465-9d0f-4992-8f1a-859dc977f7f5'), ...route.request().postDataJSON(), id: '55eef465-9d0f-4992-8f1a-859dc977f7f5', createdAt: new Date().toISOString(), lastConnectedAt: null, activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', socketPath: '/root/.outpost/sockets/55eef465.sock' }
       sessions.push(session); result = session
-    } else if (path.endsWith('/connect')) result = { commands, expiresAt: new Date(Date.now() + 900000).toISOString(), desktop: desktopAvailability() }
+    } else if (path.endsWith('/connect')) result = { commands, expiresAt: new Date(Date.now() + 900000).toISOString(), mode: 'local', desktop: desktopAvailability() }
     else return route.fulfill({ status: 404, json: { message: 'Not found' } })
     await route.fulfill({ json: result })
   })

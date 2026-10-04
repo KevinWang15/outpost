@@ -9,7 +9,7 @@ import { runCommand } from './process'
 import { parseTerminalKey } from './terminal-key-parser'
 
 export interface TerminalCredential {
-  privateKey: string; passphrase: string; fingerprint: string; type: string; uploadedAt: string
+  privateKey: string; fingerprint: string; type: string; uploadedAt: string
   hostKey: string | null
 }
 const fingerprint = (key: Buffer) => `SHA256:${createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`
@@ -34,15 +34,7 @@ export class TerminalKeys {
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
     await chmod(this.directory, 0o700)
     if (this.configuredKey) return Buffer.from(this.configuredKey, 'base64')
-    let path = join(this.directory, 'master-key')
-    try { await stat(path) }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      // Retain the key used by existing local/development installations.
-      const legacy = join(this.directory, 'development-master-key')
-      try { await stat(legacy); path = legacy }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-    }
+    const path = join(this.directory, 'master-key')
     try { await writeFile(path, randomBytes(32), { mode: 0o600, flag: 'wx' }) }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
     await chmod(path, 0o600)
@@ -54,8 +46,13 @@ export class TerminalKeys {
   private path(owner: string, targetId: string) { return join(this.directory, `${createHash('sha256').update(this.scope(owner, targetId)).digest('hex')}.json`) }
   async status(owner: string, targetId: string): Promise<TerminalKeyStatus> {
     if (!this.available) return { encryptionAvailable: false, key: null }
-    const key = await this.read(owner, targetId)
-    return { encryptionAvailable: true, key: key ? metadata(key) : null }
+    try {
+      const key = await this.read(owner, targetId)
+      return { encryptionAvailable: true, key: key ? metadata(key) : null }
+    } catch (error) {
+      if (!(error instanceof AppError) || error.statusCode !== 409) throw error
+      return { encryptionAvailable: true, key: null, keyError: error.message }
+    }
   }
   async read(owner: string, targetId: string): Promise<TerminalCredential | null> {
     let encrypted: string
@@ -92,7 +89,7 @@ export class TerminalKeys {
     try { key = await parseTerminalKey(privateKey, passphrase) } finally { this.parsing-- }
     // Replacing a login key must not silently reset an already trusted host key.
     const previous = await this.read(owner, targetId).catch(error => { if (error instanceof AppError && error.statusCode === 409) return null; throw error })
-    const credential: TerminalCredential = { privateKey: key.privateKey, passphrase: '', fingerprint: fingerprint(Buffer.from(key.publicKey, 'base64')), type: key.type, uploadedAt: new Date().toISOString(), hostKey: previous?.hostKey ?? null }
+    const credential: TerminalCredential = { privateKey: key.privateKey, fingerprint: fingerprint(Buffer.from(key.publicKey, 'base64')), type: key.type, uploadedAt: new Date().toISOString(), hostKey: previous?.hostKey ?? null }
     await this.write(owner, targetId, credential)
     return metadata(credential)
   }

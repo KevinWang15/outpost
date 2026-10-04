@@ -16,7 +16,7 @@ async function workspace(page: Page) {
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware() })
     if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions: [{ ...codingIdentity('codex', 'work'), id: 'work', name: 'Work', backend: 'tmux', tool: 'codex', rootDir: '/home/dev/project', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'detached', lastConnectedAt: null }], registryPath: '/home/dev/.outpost/sessions.json' } })
     if (path.endsWith('/directories')) return route.fulfill({ json: { directories: ['/home/dev/project/'], truncated: false } })
-    if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'bash-command', powershell: 'powershell-command', cmd: 'cmd-command' }, expiresAt: '2026-09-30T23:59:59Z', desktop: desktopAvailability() } })
+    if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'bash-command', powershell: 'powershell-command', cmd: 'cmd-command' }, expiresAt: '2026-09-30T23:59:59Z', mode: 'local', desktop: desktopAvailability() } })
     throw new Error(`Unexpected request: ${path}`)
   })
   await page.goto('/')

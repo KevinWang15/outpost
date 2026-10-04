@@ -46,15 +46,14 @@ export class WebTerminals {
   private info(entry: HeldTerminal): WebTerminalInfo { return { id: entry.id, cols: entry.screen.cols, rows: entry.screen.rows, reconnectSeconds: this.graceMs / 1000 } }
   get(owner: TerminalOwner, id: string) {
     const entry = this.entries.get(id)
-    if (!entry || !sameOwner(entry.owner, owner)) throw new AppError('Web terminal not found. Launch it from the session menu.', 404)
+    if (!entry || !sameOwner(entry.owner, owner)) throw new AppError('Web terminal not found. Connect again from the session list.', 404)
     if (!this.validOwner(owner)) throw new AppError('Sign in to continue.', 401)
     return entry
   }
-  async start(owner: TerminalOwner, target: SshTarget, sessionId: string, cols: number, rows: number, keySource?: TerminalKeySource) {
+  async start(owner: TerminalOwner, target: SshTarget, sessionId: string, cols: number, rows: number, keySource: TerminalKeySource) {
     if (this.stopped) throw new AppError('Outpost is restarting. Try again shortly.', 409)
     if (!this.validOwner(owner)) throw new AppError('Sign in to continue.', 401)
     const identity = managedSshIdentity(target)
-    keySource ??= identity ? 'account' : 'uploaded'
     if (keySource === 'account' && !identity) throw new AppError('Outpost account keys are only available in hosted mode.', 400)
     const existing = [...this.entries.values()].find(entry => sameOwner(entry.owner, owner) && entry.targetId === target.id && entry.sessionId === sessionId && entry.keySource === keySource)
     if (existing) return this.info(existing)
@@ -116,7 +115,7 @@ export class WebTerminals {
         client.once('ready', ready)
         client.once('error', fail)
         client.once('close', fail)
-        client.connect({ host: target.host, port: target.port ?? 22, username: 'root', privateKey, passphrase: credential?.passphrase || undefined,
+        client.connect({ host: target.host, port: target.port ?? 22, username: 'root', privateKey,
           readyTimeout: 15_000, keepaliveInterval: 15_000, keepaliveCountMax: 3,
           ...(hostAlgorithms.length ? { algorithms: { serverHostKey: hostAlgorithms } } : {}),
           hostVerifier: (key: Buffer, callback: (valid: boolean) => void) => {
@@ -211,8 +210,8 @@ export class WebTerminals {
     entry.channel?.close(); entry.client.destroy(); entry.screen.dispose()
   }
   disconnect(owner: TerminalOwner, id: string) { this.finish(this.get(owner, id), 'Terminal disconnected. Your coding session remains on the target.') }
-  closeTarget(owner: TerminalOwner, targetId: string, sessionId?: string) {
-    for (const entry of this.entries.values()) if (entry.owner.userId === owner.userId && entry.targetId === targetId && (!sessionId || entry.sessionId === sessionId)) this.finish(entry, 'Terminal access removed. Your coding session remains on the target.')
+  closeTarget(owner: TerminalOwner, targetId: string, filter: { sessionId?: string; keySource?: TerminalKeySource } = {}) {
+    for (const entry of this.entries.values()) if (entry.owner.userId === owner.userId && entry.targetId === targetId && (!filter.sessionId || entry.sessionId === filter.sessionId) && (!filter.keySource || entry.keySource === filter.keySource)) this.finish(entry, 'Terminal access removed. Your coding session remains on the target.')
   }
   close() { this.stopped = true; clearInterval(this.cleanup); for (const entry of this.entries.values()) this.finish(entry, 'Outpost is restarting. Launch again to resume your coding session.') }
 }

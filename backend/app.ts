@@ -3,7 +3,7 @@ import Fastify, { LogController, type FastifyRequest } from 'fastify'
 import staticFiles from '@fastify/static'
 import cookies from '@fastify/cookie'
 import websocket from '@fastify/websocket'
-import type { CodingSessionSearchInput, Target, TargetInput, TargetRequirements, SessionInput, SessionImageInput, SoftwareId } from '../shared/session-manager'
+import type { CodingSessionSearchInput, Connection, Target, TargetInput, TargetRequirements, SessionInput, SessionImageInput, SoftwareId } from '../shared/session-manager'
 import { terminalApps, type DesktopLaunchInput } from '../shared/terminals'
 import { AppError } from './errors'
 import { targetBody, requirementsBody, sessionBody, imageBody, codingSessionSearchBody } from './schema'
@@ -40,12 +40,12 @@ export async function createApp(options: {
   await app.register(websocket, { options: { maxPayload: 32 * 1024, perMessageDeflate: false } })
   app.decorateRequest('account', null)
   const accounts = options.accounts
-  const store = options.store ?? new TargetStore()
+  const store = accounts ? null : options.store ?? new TargetStore()
   const service = options.service ?? new SessionClient(process.env, Boolean(accounts))
-  const desktop = options.desktop ?? new DesktopLauncher()
+  const desktop = accounts ? null : options.desktop ?? new DesktopLauncher()
   const software = options.software ?? new SoftwareClient(process.env, Boolean(accounts))
   const installations = new Installations(software)
-  const targets = new TargetLifecycle(store, installations)
+  const localWorkspace = store ? { store, targets: new TargetLifecycle(store, installations) } : null
   const workspaces = new Map<string, { store: TargetStore; targets: TargetLifecycle }>()
   function userWorkspace(userId: string) {
     let context = workspaces.get(userId)
@@ -56,13 +56,13 @@ export async function createApp(options: {
     }
     return context
   }
-  const workspace = (request: FastifyRequest) => accounts ? userWorkspace(request.account!.user.id) : { store, targets }
+  const workspace = (request: FastifyRequest) => accounts ? userWorkspace(request.account!.user.id) : localWorkspace!
   const terminalOwner = (request: FastifyRequest): TerminalOwner => accounts ? { userId: request.account!.user.id, authSessionId: request.account!.id } : { userId: 'local', authSessionId: 'local' }
-  const terminalKeys = options.terminalKeys ?? new TerminalKeys(accounts?.store.directory ?? store.directory)
+  const terminalKeys = options.terminalKeys ?? new TerminalKeys(accounts?.store.directory ?? store!.directory)
   const webTerminals = new WebTerminals(terminalKeys, owner => !accounts || Boolean(accounts.store.ticketSession(owner.userId, owner.authSessionId)), options.terminalGraceMs)
   app.addHook('preClose', async () => { webTerminals.close() })
   app.addHook('preClose', () => installations.close())
-  const tickets = new ConnectionTickets(accounts ? accounts.store.secret() : await store.secret())
+  const tickets = new ConnectionTickets(accounts ? accounts.store.secret() : await store!.secret())
   if (accounts) {
     const cleanup = setInterval(() => accounts.store.cleanup(), 60 * 60_000).unref()
     app.addHook('onClose', async () => { clearInterval(cleanup); accounts.close() })
@@ -189,7 +189,7 @@ export async function createApp(options: {
     const owner = terminalOwner(request)
     await webTerminals.exclusive(owner, request.params.targetId, async () => {
       await service.remove(await workspace(request).store.get(request.params.targetId), request.params.sessionId)
-      webTerminals.closeTarget(owner, request.params.targetId, request.params.sessionId)
+      webTerminals.closeTarget(owner, request.params.targetId, { sessionId: request.params.sessionId })
     })
     return reply.code(204).send()
   })
@@ -197,7 +197,7 @@ export async function createApp(options: {
     const owner = terminalOwner(request)
     return webTerminals.exclusive(owner, request.params.targetId, async () => {
       const session = await service.terminate(await workspace(request).store.get(request.params.targetId), request.params.sessionId)
-      webTerminals.closeTarget(owner, request.params.targetId, request.params.sessionId)
+      webTerminals.closeTarget(owner, request.params.targetId, { sessionId: request.params.sessionId })
       return session
     })
   })
@@ -208,10 +208,7 @@ export async function createApp(options: {
   }
   app.get<{ Params: Params }>('/api/targets/:targetId/terminal-key', async request => {
     await sshTarget(request)
-    const status = await terminalKeys.status(terminalOwner(request).userId, request.params.targetId).catch(error => {
-      if (!accounts || !(error instanceof AppError) || error.statusCode !== 409) throw error
-      return { encryptionAvailable: terminalKeys.available, key: null, keyError: error.message }
-    })
+    const status = await terminalKeys.status(terminalOwner(request).userId, request.params.targetId)
     return {
       ...status,
       ...(accounts ? { accountKey: await accounts.keys.publicKey(request.account!.user.id) } : {}),
@@ -226,7 +223,7 @@ export async function createApp(options: {
     return webTerminals.exclusive(owner, request.params.targetId, async () => {
       await sshTarget(request)
       const key = await terminalKeys.upload(owner.userId, request.params.targetId, request.body.privateKey, request.body.passphrase)
-      webTerminals.closeTarget(owner, request.params.targetId)
+      webTerminals.closeTarget(owner, request.params.targetId, { keySource: 'uploaded' })
       return { encryptionAvailable: true, key, ...(accounts ? { accountKey: await accounts.keys.publicKey(owner.userId) } : {}) }
     })
   })
@@ -234,7 +231,7 @@ export async function createApp(options: {
     const owner = terminalOwner(request)
     await webTerminals.exclusive(owner, request.params.targetId, async () => {
       await sshTarget(request)
-      webTerminals.closeTarget(owner, request.params.targetId)
+      webTerminals.closeTarget(owner, request.params.targetId, { keySource: 'uploaded' })
       await terminalKeys.remove(owner.userId, request.params.targetId)
     })
     return reply.code(204).send()
@@ -247,8 +244,10 @@ export async function createApp(options: {
     const owner = terminalOwner(request)
     return webTerminals.exclusive(owner, request.params.targetId, async () => {
       const target = await sshTarget(request)
+      const keySource = request.body.keySource ?? (accounts ? 'account' : 'uploaded')
+      if (!accounts && keySource === 'account') throw new AppError('Outpost account keys are only available in hosted mode.', 400)
       await service.get(target, request.params.sessionId)
-      return webTerminals.start(owner, target, request.params.sessionId, request.body.cols, request.body.rows, request.body.keySource)
+      return webTerminals.start(owner, target, request.params.sessionId, request.body.cols, request.body.rows, keySource)
     })
   })
   app.delete<{ Params: { terminalId: string } }>('/api/web-terminals/:terminalId', async (request, reply) => {
@@ -288,9 +287,8 @@ export async function createApp(options: {
     return {
       commands: Object.fromEntries(supportedShells(target).map(shell => [shell, commands[shell]])),
       expiresAt,
-      desktop: accounts ? { os: null, terminals: [], recommendedId: null } : await desktop.available(),
-      ...(accounts ? { hosted: true } : {}),
-    }
+      ...(accounts ? { mode: 'hosted' as const } : { mode: 'local' as const, desktop: await desktop!.available() }),
+    } satisfies Connection
   }))
   app.post<{ Params: Params; Body: DesktopLaunchInput }>('/api/targets/:targetId/sessions/:sessionId/launch', {
     schema: { body: {
@@ -307,15 +305,15 @@ export async function createApp(options: {
       },
     } },
   }, async request => {
-    if (accounts) throw new AppError('Desktop terminal launch is available in local mode. In hosted mode, choose Launch with web terminal from the session menu or copy a connection command.', 403)
+    if (accounts) throw new AppError('Desktop terminal launch is available in local mode. In hosted mode, choose Connect using web terminal or copy a connection command.', 403)
     const target = await workspace(request).store.get(request.params.targetId)
     await service.get(target, request.params.sessionId)
-    return desktop.launch(shell => connectScript(target, request.params.sessionId, shell), request.body)
+    return desktop!.launch(shell => connectScript(target, request.params.sessionId, shell), request.body)
   })
   app.get<{ Params: { token: string } }>('/api/connect/:token', async (request, reply) => {
     const ticket = tickets.verify(request.params.token)
     if (accounts && (!ticket.userId || !ticket.authSessionId || !accounts.store.ticketSession(ticket.userId, ticket.authSessionId))) throw new AppError('Connection link expired or sign-in ended. Sign in and generate a new command.', 403)
-    const targetStore = accounts ? userWorkspace(ticket.userId!).store : store
+    const targetStore = accounts ? userWorkspace(ticket.userId!).store : store!
     const target = await targetStore.get(ticket.targetId)
     return reply.type(ticket.shell === 'bash' ? 'text/x-shellscript; charset=utf-8' : 'text/plain; charset=utf-8')
       .send(connectScript(target, ticket.sessionId, ticket.shell))
@@ -324,7 +322,7 @@ export async function createApp(options: {
     await app.register(staticFiles, { root: options.frontendRoot })
     const authPages = new Set(['/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'])
     app.setNotFoundHandler((request, reply) => {
-      if (['GET', 'HEAD'].includes(request.method) && authPages.has(request.url.split('?')[0])) return reply.sendFile('index.html')
+      if (accounts && ['GET', 'HEAD'].includes(request.method) && authPages.has(request.url.split('?')[0])) return reply.sendFile('index.html')
       return reply.code(404).send({ message: 'Not found' })
     })
   }

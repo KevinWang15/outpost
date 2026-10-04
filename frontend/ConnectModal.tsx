@@ -11,21 +11,71 @@ const SHIFT_ENTER_BINDING = `{
   "keys": "shift+enter",
   "command": { "action": "sendInput", "input": "\\u001b[13;2u" }
 }`
-export default function ConnectModal({
-  targetId,
-  kind,
-  session,
-  connection,
-  notification,
-  onClose,
-}: {
+interface ConnectProps {
   targetId: string
   kind: Target['kind']
   session: Session
   connection: Connection
   notification?: ReactNode
   onClose: () => void
-}) {
+}
+
+export default function ConnectModal(props: ConnectProps) {
+  return props.connection.mode === 'hosted'
+    ? <HostedConnectModal {...props} />
+    : <LocalConnectModal {...props} connection={props.connection} />
+}
+
+function HostedConnectModal({ session, connection, notification, onClose }: ConnectProps) {
+  const [shell, setShell] = useState<TerminalShell>(browserOS() === 'windows' ? 'powershell' : 'bash')
+  const [copied, setCopied] = useState(false), [copyError, setCopyError] = useState(false)
+  const command = connection.commands[shell]
+  async function copy() {
+    try { await navigator.clipboard.writeText(command!); setCopied(true); setCopyError(false) }
+    catch { setCopyError(true) }
+  }
+  return <Modal title={`Connect to ${session.name}`} subtitle="Copy a command for your own terminal. For browser or phone access, choose Connect using web terminal beside the session." onClose={onClose}>
+    <div className="manual-connection">
+      <strong>Use your own terminal</strong>
+      <p>Your computer needs its own SSH access to this server. This command uses your computer’s SSH credentials. Signing out expires this command.</p>
+      <label className="terminal-choice">Shell for copy command
+        <select value={shell} onChange={event => { setShell(event.target.value as TerminalShell); setCopied(false); setCopyError(false) }}>
+          {(['bash', 'powershell', 'cmd'] as const).filter(shell => connection.commands[shell]).map(shell => <option key={shell} value={shell}>{shell === 'powershell' ? 'PowerShell' : shell === 'cmd' ? 'Command Prompt' : 'Bash'}</option>)}
+        </select>
+      </label>
+      {command && <div className="command-box">
+        <div><span>{shell.toUpperCase()}</span><button className="copy-button" onClick={copy}>{copied ? <Check /> : <Copy />}{copied ? 'Copied' : 'Copy command'}</button></div>
+        <code>{command}</code>
+      </div>}
+      {copyError && <p className="error">Clipboard unavailable. Select and copy the command above.</p>}
+      <p className="terminal-help">{shell === 'bash' ? 'Requires Bash, curl, and OpenSSH.' : 'Requires OpenSSH Client.'}</p>
+    </div>
+    <ConnectDetails session={session} expiresAt={connection.expiresAt} />
+    <div className="modal-actions"><button className="button primary" onClick={onClose}>Done</button></div>
+    {notification}
+  </Modal>
+}
+
+function ConnectDetails({ session, expiresAt }: { session: Session; expiresAt: string }) {
+  return <>
+    <div className="connect-details">
+      <p><Terminal /><span>Session backend: <strong>{session.backend}</strong></span></p>
+      <p><Terminal /><span>Coding tool: <strong>{codingToolLabels[session.tool]}</strong></span></p>
+      <p><Folder /><code>{session.rootDir}</code></p>
+      <p><Link /><span>Command expires at{' '}{new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. The session stays available.</span></p>
+    </div>
+    <div className="form-note"><Terminal /><p>Detach with <kbd>Ctrl</kbd> + <kbd>\</kbd> or close the terminal. {codingToolLabels[session.tool]} keeps running on the target. Reconnect here whenever you’re ready.</p></div>
+  </>
+}
+
+function LocalConnectModal({
+  targetId,
+  kind,
+  session,
+  connection,
+  notification,
+  onClose,
+}: Omit<ConnectProps, 'connection'> & { connection: Extract<Connection, { mode: 'local' }> }) {
   const [copied, setCopied] = useState(false),
     [copyError, setCopyError] = useState(false)
   const [copiedBinding, setCopiedBinding] = useState(false)
@@ -100,9 +150,7 @@ export default function ConnectModal({
     <Modal
       title={`Connect to ${session.name}`}
       subtitle={
-        connection.hosted
-          ? 'Copy a command for your own terminal. For browser or phone access, choose … → Launch with web terminal in the session list.'
-          : kind === 'local'
+        kind === 'local'
           ? 'Choose a terminal on the computer running Outpost, using the same user account.'
           : 'Choose your favorite terminal to connect to this session.'
       }
@@ -131,7 +179,7 @@ export default function ConnectModal({
       <p className="terminal-help" id="terminal-help">
         Choices are ordered by OS, then recommendation. Selecting an app saves your preference for {terminalOSLabels[selected.os]}.
       </p>
-      {!connection.hosted && <div className="desktop-launch">
+      <div className="desktop-launch">
         {available ? <>
           <button className="button primary" onClick={launch} disabled={launching}>
             <Terminal />
@@ -150,10 +198,10 @@ export default function ConnectModal({
         <p>Direct Connect uses your saved preference for the Outpost computer’s OS, then falls back to an available terminal.</p>
         {launched && <p role="status">{launched}</p>}
         {launchError && <p role="alert" className="error">{launchError}</p>}
-      </div>}
+      </div>
       <div className="manual-connection">
         <strong>Use an existing terminal</strong>
-        <p>Open {selected.name} and paste this command. {connection.hosted ? 'Your computer needs its own SSH access to this server. Signing out expires this command.' : kind === 'local' ? 'Run it on the Outpost computer.' : 'You can connect from your own computer, including through an SSH tunnel to Outpost.'}</p>
+        <p>Open {selected.name} and paste this command. {kind === 'local' ? 'Run it on the Outpost computer.' : 'You can connect from your own computer, including through an SSH tunnel to Outpost.'}</p>
         {localCompatible && shellChoices.some(shell => connection.commands[shell]) && <label className="terminal-choice">
           Shell for copy command
           <select value={shell} onChange={event => { setCopyShell(event.target.value as TerminalShell); setCopied(false); setCopyError(false) }}>
@@ -175,39 +223,7 @@ export default function ConnectModal({
           <p className="terminal-help">{kind === 'local' ? selected.os === 'windows' ? 'Requires WSL on the Outpost computer.' : 'Requires Bash and curl.' : shell === 'bash' ? 'Requires Bash, curl, and OpenSSH.' : 'Requires OpenSSH Client.'}</p>
         </> : <p className="error">This local session requires a terminal on the {connection.desktop.os ? terminalOSLabels[connection.desktop.os] : 'Outpost'} computer. Select that OS to get a compatible command.</p>}
       </div>
-      <div className="connect-details">
-        <p>
-          <Terminal />
-          <span>
-            Session backend: <strong>{session.backend}</strong>
-          </span>
-        </p>
-        <p>
-          <Terminal />
-          <span>
-            Coding tool: <strong>{codingToolLabels[session.tool]}</strong>
-          </span>
-        </p>
-        <p>
-          <Folder />
-          <code>{session.rootDir}</code>
-        </p>
-        <p>
-          <Link />
-          <span>
-            Command expires at{' '}
-            {new Date(connection.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.
-            The session stays available.
-          </span>
-        </p>
-      </div>
-      <div className="form-note">
-        <Terminal />
-        <p>
-          Detach with <kbd>Ctrl</kbd> + <kbd>\</kbd> or close the terminal. {codingToolLabels[session.tool]}{' '}
-          keeps running on the target. Reconnect here whenever you’re ready.
-        </p>
-      </div>
+      <ConnectDetails session={session} expiresAt={connection.expiresAt} />
       <details className="keyboard-help">
         <summary><ChevronDown size={14} aria-hidden="true" /> Newline with Shift+Enter</summary>
         <div>

@@ -50,7 +50,7 @@ test('terminal vault encrypts keys, discards passphrases, authenticates ownershi
   await vault.remove('bob', 'target')
   const restored = await new TerminalKeys(directory, master).read('alice', 'target')
   assert.ok(ssh2.utils.parseKey(restored.privateKey).getPublicSSH().equals(ssh2.utils.parseKey(keys.public).getPublicSSH()))
-  assert.equal(restored.passphrase, '', 'the passphrase unlocks the uploaded key once and is discarded')
+  assert.equal('passphrase' in restored, false, 'the passphrase unlocks the uploaded key once and is discarded')
   const host = ssh2.utils.parseKey(ssh2.utils.generateKeyPairSync('ed25519').public).getPublicSSH()
   assert.equal(await vault.verifyHost('alice', 'target', restored, host, []), true)
   assert.equal(await vault.verifyHost('alice', 'target', restored, Buffer.from('different'), []), false)
@@ -60,6 +60,7 @@ test('terminal vault encrypts keys, discards passphrases, authenticates ownershi
   assert.equal((await vault.read('alice', 'target')).hostKey, host.toString('base64'), 'replacement keeps the host pin')
   const wrongMaster = new TerminalKeys(directory, randomBytes(32).toString('base64'))
   await assert.rejects(wrongMaster.read('alice', 'target'), /cannot be decrypted/)
+  assert.match((await wrongMaster.status('alice', 'target')).keyError, /cannot be decrypted/)
   const corrupt = JSON.parse(await readFile(path, 'utf8')); corrupt.tag = randomBytes(16).toString('base64')
   await writeFile(path, JSON.stringify(corrupt)); await assert.rejects(vault.read('alice', 'target'), /cannot be decrypted/)
   await vault.remove('alice', 'target'); assert.equal((await vault.status('alice', 'target')).key, null)
@@ -67,7 +68,7 @@ test('terminal vault encrypts keys, discards passphrases, authenticates ownershi
   await assert.rejects(new TerminalKeys(directory, 'invalid').upload('alice', 'target', keys.private), /32 bytes encoded as base64/)
 })
 
-test('automatic encryption keys persist across restarts, retain private permissions and honor overrides and legacy keys', async t => {
+test('automatic encryption keys persist across restarts, retain private permissions and honor overrides', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-automatic-key-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const vault = new TerminalKeys(directory, ''), key = ssh2.utils.generateKeyPairSync('ed25519')
@@ -86,18 +87,11 @@ test('automatic encryption keys persist across restarts, retain private permissi
   await override.upload('alice', 'override-target', key.private)
   await assert.rejects(restarted.read('alice', 'override-target'), /cannot be decrypted/)
   assert.ok(master.equals(await readFile(masterPath)))
-  // Preserve uploads encrypted by the old local/development master-key file.
-  const legacyDirectory = join(directory, 'legacy'), legacyKey = randomBytes(32)
-  await new TerminalKeys(legacyDirectory, legacyKey.toString('base64')).upload('alice', 'target', key.private)
-  await writeFile(join(legacyDirectory, 'terminal-keys', 'development-master-key'), legacyKey, { mode: 0o600 })
-  assert.equal((await new TerminalKeys(legacyDirectory, '').status('alice', 'target')).key.fingerprint, info.fingerprint)
-  await assert.rejects(readFile(join(legacyDirectory, 'terminal-keys', 'master-key')), { code: 'ENOENT' })
   // Never overwrite a corrupt persisted master key or fall back to a different key.
   const corruptDirectory = join(directory, 'corrupt')
   await mkdir(join(corruptDirectory, 'terminal-keys'), { recursive: true })
   const corruptPath = join(corruptDirectory, 'terminal-keys', 'master-key')
   await writeFile(corruptPath, 'invalid')
-  await writeFile(join(corruptDirectory, 'terminal-keys', 'development-master-key'), randomBytes(32))
   await assert.rejects(new TerminalKeys(corruptDirectory, '').upload('alice', 'target', key.private), /saved terminal encryption key is invalid/)
   assert.equal(await readFile(corruptPath, 'utf8'), 'invalid')
 })
@@ -127,7 +121,7 @@ test('uploaded RSA and ECDSA keys normalize without passphrases and preserve the
     const key = ssh2.utils.generateKeyPairSync(type, { ...(type === 'rsa' ? { bits: 2048 } : { bits: 256 }), passphrase: 'synthetic-secret', cipher: 'aes256-cbc' })
     await vault.upload('alice', type, key.private, 'synthetic-secret')
     const saved = await vault.read('alice', type)
-    assert.equal(saved.passphrase, '')
+    assert.equal('passphrase' in saved, false)
     assert.ok(ssh2.utils.parseKey(saved.privateKey).getPublicSSH().equals(ssh2.utils.parseKey(key.public).getPublicSSH()))
   }
 })
@@ -242,7 +236,7 @@ for (const stderr of [false, true]) test(`screen snapshots preserve SSH ${stderr
     await new Promise(resolve => server.close(resolve)); await ssh.close()
   })
   const target = { id: 'target', name: 'SSH', kind: 'ssh', host: '127.0.0.1', port: ssh.port, backends: ['tmux'], tools: ['codex'] }
-  const info = await terminals.start(owner, target, 'test', 80, 24), entry = terminals.get(owner, info.id)
+  const info = await terminals.start(owner, target, 'test', 80, 24, 'uploaded'), entry = terminals.get(owner, info.id)
   await new Promise(resolve => entry.screen.write('', resolve))
   // Hold the real terminal parser to reproduce a busy screen during reconnect.
   const parsing = new Promise(resolve => entry.screen.parser.registerCsiHandler({ prefix: '?', final: 'h' }, () => {
@@ -309,4 +303,47 @@ test('concurrent launches cannot bypass terminal limits and slow viewers apply S
   assert.equal(again.statusCode, 200, again.body)
   const viewer = await connect(origin, again.json().id, '')
   const shutDown = once(viewer.ws, 'close'); await app.close(); await shutDown
+})
+
+test('uploaded-key replacement and removal close only uploaded terminals, preserving the hosted account connection', { timeout: 30000 }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-key-sources-')), ssh = await webSshFixture()
+  const accounts = await Accounts.open({ directory, publicUrl: 'http://127.0.0.1:5173', production: false, mailer: null })
+  const app = await createApp({ accounts, service: { get: async (_target, id) => ({ id }) } })
+  const origin = await app.listen({ host: '127.0.0.1', port: 0 })
+  t.after(async () => { await app.close(); await ssh.close(); await rm(directory, { recursive: true, force: true }) })
+  const user = accounts.store.create('key-sources@example.com', 'Dev', 'unused')
+  const verified = accounts.store.consumeToken(accounts.store.issueToken(user.id, 'verify', 10000), 'verify')
+  const cookie = `outpost_session=${accounts.store.issueSession(verified).token}`
+  const request = (method, url, payload) => app.inject({ method, url, payload, headers: { cookie, 'x-outpost-request': '1' } })
+  const target = (await request('POST', '/api/targets', { name: 'SSH', kind: 'ssh', host: '127.0.0.1', port: ssh.port, backends: ['tmux'], tools: ['codex'] })).json()
+  const base = `/api/targets/${target.id}`
+  ssh.authorize((await accounts.keys.publicKey(user.id)).publicKey)
+  await writeFile(accounts.keys.paths(user.id).knownHostsFile, `[127.0.0.1]:${ssh.port} ${ssh.hostPublicKey}\n`)
+  assert.equal((await request('PUT', `${base}/terminal-key`, { privateKey: ssh.key })).statusCode, 200)
+  const launch = async keySource => {
+    const response = await request('POST', `${base}/sessions/test/web-terminal`, { cols: 80, rows: 24, keySource })
+    assert.equal(response.statusCode, 200, response.body)
+    return response.json()
+  }
+  const account = await launch('account'), uploaded = await launch('uploaded')
+  const accountViewer = await connect(origin, account.id, cookie), uploadedViewer = await connect(origin, uploaded.id, cookie)
+  t.after(() => { accountViewer.ws.terminate(); uploadedViewer.ws.terminate() })
+  const replaced = once(uploadedViewer.ws, 'close')
+  assert.equal((await request('PUT', `${base}/terminal-key`, { privateKey: ssh.key })).statusCode, 200)
+  await replaced
+  assert.equal(accountViewer.ws.readyState, WebSocket.OPEN)
+  assert.equal((await launch('account')).id, account.id)
+  accountViewer.send({ type: 'input', data: 'account survives replacement\r' })
+  await until(() => ssh.inputs.join('').includes('account survives replacement'))
+  const next = await launch('uploaded'), nextViewer = await connect(origin, next.id, cookie)
+  t.after(() => nextViewer.ws.terminate())
+  const removed = once(nextViewer.ws, 'close')
+  assert.equal((await request('DELETE', `${base}/terminal-key`)).statusCode, 204)
+  await removed
+  assert.equal((await launch('account')).id, account.id)
+  accountViewer.send({ type: 'input', data: 'account survives removal\r' })
+  await until(() => ssh.inputs.join('').includes('account survives removal'))
+  const deleted = once(accountViewer.ws, 'close')
+  assert.equal((await request('DELETE', base)).statusCode, 204)
+  await deleted
 })

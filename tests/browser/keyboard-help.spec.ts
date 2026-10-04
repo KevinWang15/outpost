@@ -11,7 +11,7 @@ async function connect(page: Page) {
     if (path === '/api/targets') return route.fulfill({ json: [{ id: 'keys', kind: 'ssh', name: 'Keys', host: 'dev.example.com', backends: ['tmux'], tools: ['codex'], createdAt: '2026-09-30T00:00:00Z' }] })
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware(['tmux'], ['codex']) })
     if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions: [{ ...codingIdentity('codex', 'work'), id: 'work', name: 'Work', backend: 'tmux', tool: 'codex', rootDir: '/home/dev/project', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'detached', lastConnectedAt: null }], registryPath: '/home/dev/.outpost/sessions.json' } })
-    if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'bash-command', powershell: 'powershell-command', cmd: 'cmd-command' }, expiresAt: '2026-09-30T23:59:59Z', desktop: desktopAvailability() } })
+    if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'bash-command', powershell: 'powershell-command', cmd: 'cmd-command' }, expiresAt: '2026-09-30T23:59:59Z', mode: 'local', desktop: desktopAvailability() } })
     throw new Error(`Unexpected request: ${path}`)
   })
   await page.goto('/')

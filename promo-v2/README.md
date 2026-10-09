@@ -47,7 +47,7 @@ The committed timeline and screenshots are enough to render stills without an AP
 
 ## Brand
 
-The shared logo is [`../public/outpost.svg`](../public/outpost.svg): an "O" ring around a terminal prompt, with a beacon signalling from the ring's opening. Rendering copies it to [`assets/logo.svg`](assets/logo.svg) for offline playback. The work keeps running out at the outpost, and you check in from anywhere. The film and app show the name as **Outpost** with the descriptor **AI Session Manager**. With the repository's app dependencies installed, run `npm run promo:capture` from the repository root to refresh the four app screenshots in `assets/screenshots`. The capture uses synthetic targets and sessions on loopback port 4191; `OUTPOST_PROMO_PORT` overrides it. `OUTPOST_PROMO_CAPTURE_DIR` selects an alternate output directory.
+The shared logo is [`../public/outpost.svg`](../public/outpost.svg): a rounded rectangular terminal around a `>_` prompt, with a Wi-Fi beacon in the top-right opening. Rendering copies it to [`assets/logo.svg`](assets/logo.svg) for offline playback. The work keeps running out at the outpost, and you check in from anywhere. The film and app show the name as **Outpost** with the descriptor **AI Session Manager**. With the repository's app dependencies installed, run `npm run promo:capture` from the repository root to refresh the four app screenshots in `assets/screenshots`. The capture uses synthetic targets and sessions on loopback port 4191; `OUTPOST_PROMO_PORT` overrides it. `OUTPOST_PROMO_CAPTURE_DIR` selects an alternate output directory.
 
 ## Where to edit
 

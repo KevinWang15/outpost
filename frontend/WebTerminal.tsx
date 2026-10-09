@@ -5,6 +5,7 @@ import { Maximize2, Minimize2 } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalClientMessage, TerminalServerMessage, WebTerminalInfo } from '../shared/web-terminal'
 import TerminalComposer from './TerminalComposer'
+import { attachTerminalClipboard, type TerminalClipboardState } from './terminal-clipboard'
 
 export default function WebTerminal({ info, targetId, sessionId, fullscreen, onFullscreenChange, onRelaunch, onManageKey, onSendingChange }: {
   info: WebTerminalInfo
@@ -21,6 +22,8 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
   const [connection, setConnection] = useState('Connecting…'), [connected, setConnected] = useState(false)
   const [ctrl, setCtrl] = useState(false), ctrlArmed = useRef(false)
   const [sending, setSending] = useState(false)
+  const [clipboardState, setClipboardState] = useState<TerminalClipboardState>({ canCopy: false, message: '' })
+  const clipboard = useRef<ReturnType<typeof attachTerminalClipboard> | null>(null)
   const fitNow = useRef<() => void>(() => {})
   useEffect(() => {
     const term = new Terminal({ cols: info.cols, rows: info.rows, fontSize: 14, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', theme: { background: '#111827', foreground: '#e5e7eb', cursor: '#a7f3d0', selectionBackground: '#374151' }, cursorBlink: true, scrollback: 1000, convertEol: false, logLevel: 'off' })
@@ -52,11 +55,20 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
     window.visualViewport?.addEventListener('resize', scheduleFit)
     window.visualViewport?.addEventListener('scroll', scheduleFit)
     scheduleFit()
+    const terminalClipboard = attachTerminalClipboard(term, {
+      connection: () => ready.current && socket.current?.readyState === WebSocket.OPEN ? socket.current : null,
+      beforePaste: () => { ctrlArmed.current = false; setCtrl(false) },
+      onChange: setClipboardState,
+    })
+    clipboard.current = terminalClipboard
     const input = term.onData(data => {
       if (ctrlArmed.current && /^[a-zA-Z@[\]\\^_]$/.test(data)) { data = String.fromCharCode(data.toUpperCase().charCodeAt(0) & 31); ctrlArmed.current = false; setCtrl(false) }
+      if (new TextEncoder().encode(data).length > 16 * 1024) { setConnection('Input must fit within 16 KiB. Send smaller sections.'); return }
+      if (ready.current) setConnection('Connected')
       send({ type: 'input', data })
     })
     term.attachCustomKeyEventHandler(event => {
+      if (!terminalClipboard.handleKeyEvent(event)) return false
       if (event.type === 'keydown' && event.shiftKey && event.key === 'Enter') { send({ type: 'input', data: '\x1b[13;2u' }); return false }
       return true
     })
@@ -71,7 +83,8 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
         if (event.data instanceof ArrayBuffer) { const bytes = new Uint8Array(event.data); term.write(bytes, () => ack(bytes.length)); return }
         const message: TerminalServerMessage = JSON.parse(event.data)
         if (message.type === 'snapshot') {
-          term.reset(); term.resize(message.cols, message.rows)
+          ready.current = false
+          term.reset(); terminalClipboard.reset(); term.resize(message.cols, message.rows)
           term.write(message.data, () => {
             if (stopped || socket.current !== ws) return
             ack(new TextEncoder().encode(message.data).length); ready.current = true; attempts = 0
@@ -93,6 +106,7 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
       stopped = true; clearTimeout(retry); clearTimeout(resizeTimer); observer.disconnect(); window.removeEventListener('resize', scheduleFit); window.visualViewport?.removeEventListener('resize', scheduleFit); window.visualViewport?.removeEventListener('scroll', scheduleFit)
       fitNow.current = () => {}
       ready.current = false
+      terminalClipboard.dispose(); clipboard.current = null
       socket.current?.close(); socket.current = null; input.dispose(); term.dispose(); terminal.current = null
     }
   }, [info])
@@ -112,13 +126,15 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
     if (window.matchMedia('(pointer: fine)').matches) terminal.current.focus()
   }
   return <div className="web-terminal">
-    <div className="terminal-toolbar"><span role="status" className={connected ? 'terminal-connected' : ''}>{connection}</span>
+    <div className="terminal-toolbar"><span role="status" className={connected ? 'terminal-connected' : ''}>{connection}{connected && clipboardState.message && <> · <span className="terminal-clipboard-status">{clipboardState.message}</span></>}</span>
       <div><button className="button secondary" onClick={() => terminal.current?.focus()}>Keyboard</button>
         <button className="button secondary" disabled={sending} onClick={onManageKey}>Manage key</button>
         <button className="button secondary terminal-fullscreen-toggle" aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} aria-pressed={fullscreen} onClick={() => onFullscreenChange(!fullscreen)}>{fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button>
         {!connected && <button className="button secondary" disabled={sending} onClick={() => void onRelaunch()}>Relaunch</button>}</div></div>
     <div className="terminal-surface" ref={container} aria-label="SSH terminal" />
     <div className="terminal-keys" role="toolbar" aria-label="Terminal keys">
+      <button type="button" disabled={!clipboardState.canCopy} title="Copy to your clipboard" onClick={() => void clipboard.current?.copy()}>Copy</button>
+      <button type="button" disabled={!connected} title="Paste from your clipboard" onClick={() => void clipboard.current?.paste()}>Paste</button>
       <button type="button" disabled={!connected} aria-pressed={ctrl} onClick={() => { ctrlArmed.current = !ctrlArmed.current; setCtrl(ctrlArmed.current); terminal.current?.focus() }}>Ctrl</button>
       {([['Esc', '\x1b'], ['Tab', '\t'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['Ctrl+C', '\x03'], ['Enter', '\r'], ['Shift+Enter', '\x1b[13;2u']] as const).map(([label, data]) => <button type="button" key={label} disabled={!connected} aria-label={label} onClick={() => send(data)}>{label}</button>)}
     </div>

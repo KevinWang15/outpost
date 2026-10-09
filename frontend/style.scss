@@ -632,6 +632,7 @@ input[type='checkbox'] { width: 15px; height: 15px; margin: 0; accent-color: var
 }
 .terminal-image-preview { display: flex; align-items: center; gap: 8px; min-width: 0; img { width: 40px; height: 40px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; } span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); } .icon-button { width: 44px; height: 44px; } }
 .terminal-hint { margin: 0; font-size: 12px; color: var(--muted); }
+.terminal-clipboard-status { color: var(--muted); }
 .web-terminal-dialog:is(.terminal-compact, .is-fullscreen) {
   padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   .modal-heading { position: absolute; top: max(6px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); .eyebrow { display: none; } .icon-button { width: 44px; height: 44px; } }

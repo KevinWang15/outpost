@@ -9,6 +9,7 @@ export async function webTerminalWorkspace(page: Page, options: { hosted?: boole
   const backend = options.backend ?? 'tmux'
   const session = { ...codingIdentity('codex', 'work'), id: 'work', name: 'Composer work', backend, tool: 'codex', rootDir: '/root/project', env: {}, args: '', createdAt: '2026-10-04T00:00:00Z', lastConnectedAt: null, status: 'detached', socketPath: '/root/.outpost/sockets/work', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null } }
   const inputs: string[] = [], sizes: { cols: number; rows: number }[] = [], uploads: SessionImageInput[] = [], sockets: WebSocketRoute[] = []
+  const acknowledgements: number[] = []
   const launches: { keySource: string }[] = [], errors: string[] = []
   let keyRequests = 0
   page.on('pageerror', error => errors.push(error.message))
@@ -20,6 +21,7 @@ export async function webTerminalWorkspace(page: Page, options: { hosted?: boole
       const event = JSON.parse(message.toString())
       if (event.type === 'input') inputs.push(event.data)
       if (event.type === 'resize') sizes.push({ cols: event.cols, rows: event.rows })
+      if (event.type === 'ack') acknowledgements.push(event.bytes)
     })
     if (!pauseReconnect) snapshot(socket)
   })
@@ -61,7 +63,7 @@ export async function webTerminalWorkspace(page: Page, options: { hosted?: boole
     await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
   }
   return {
-    inputs, sizes, uploads, sockets, errors, launches, open,
+    inputs, sizes, uploads, sockets, errors, launches, open, acknowledgements,
     get keyRequests() { return keyRequests },
     onLaunch: (handler: (route: Route) => Promise<void>) => { launch = handler },
     onKeyStatus: (handler: (route: Route) => Promise<void>) => { keyStatus = handler },

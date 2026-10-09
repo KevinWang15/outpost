@@ -4,9 +4,9 @@
 
 One workspace for **Codex, Claude Code, and Kimi** sessions across your local computer and remote development servers.
 
-**Watch the three-minute overview:**
+**Download the three-minute overview (9.34 MB):**
 
-https://github.com/user-attachments/assets/cd7c1fc0-613a-4670-92c5-39d41a36f4cf
+[![Outpost — AI Session Manager promotional movie](promo-v2/output/poster.png)](https://transfer.ke.wang/attachments/4d044eead1bd085fe17c8ed8059a206e?fileName=outpost-promo-v2-github.mp4)
 
 AI agents are becoming part of everyday coding: building features, reviewing changes, and exploring ideas. That work often spans several dev servers, each with its own projects and environments. Connecting from a laptop over ordinary SSH can be fragile: a dropped connection can interrupt an agent tied to the terminal, clipboard features do not carry over as expected, and pasting a design image becomes awkward. As conversations spread across machines, it gets harder to remember where each piece of work is running.
 

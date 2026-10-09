@@ -1,0 +1,37 @@
+{
+  "fictionalData": true,
+  "screenshots": [
+    {
+      "file": "dashboard.png",
+      "width": 1600,
+      "height": 1143,
+      "sha256": "d60a3b8159ea82151b6c2d4e28a49a4b9508d6541ef96f21f6bdb6d557748ce8"
+    },
+    {
+      "file": "dashboard-focus.png",
+      "width": 1264,
+      "height": 505,
+      "sha256": "194d4537af00f3c426de3f4198982cc55f606f60ae6b478d02868b3e86e32573"
+    },
+    {
+      "file": "activity-before-focus.png",
+      "width": 1264,
+      "height": 505,
+      "sha256": "194d4537af00f3c426de3f4198982cc55f606f60ae6b478d02868b3e86e32573"
+    },
+    {
+      "file": "activity-checked-focus.png",
+      "width": 1264,
+      "height": 505,
+      "sha256": "69900b930533ee972f474bc20f501e54a9a05e91a1e75b552bc4ae5e37474216"
+    }
+  ],
+  "requests": {
+    "GET /api/auth/session": 2,
+    "GET /api/targets": 2,
+    "GET /api/targets/demo-atlas/software": 1,
+    "GET /api/targets/demo-atlas/sessions": 2,
+    "POST /api/targets/demo-atlas/sessions/demo-api/acknowledge": 1
+  },
+  "fixtureSha256": "d42efdbcc6231ac36cf553beccddbec293b51dc659d6849fc51f58aaa820964e"
+}

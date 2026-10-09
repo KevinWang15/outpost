@@ -8,19 +8,19 @@
       "file": "banner.png",
       "width": 1600,
       "height": 560,
-      "sha256": "beb02be8c196618f676fe2b773b0c417a444c3f45d577e1bd29ab079200cd834"
+      "sha256": "7fa1c3480eb264bcce8ff923d97ae9d74d5d4ea34be5cd3bea74cfbdf208eb8f"
     },
     {
       "file": "dashboard-concept.png",
       "width": 720,
       "height": 420,
-      "sha256": "0c92fd0d02e9aba254ce09d39ccc0801f65bb0285c6f14c571720766d23b8824"
+      "sha256": "c572a75718cc891816de848b2510b263805e2daf9ba51733509c513ab4e2470b"
     },
     {
       "file": "workspace.png",
       "width": 1440,
       "height": 1163,
-      "sha256": "36dfac0479599056d8881d5c5f38ef874add8bc09275f28075b860230be0b17b"
+      "sha256": "73df620a7d630a81db5ea405a3f9c7c7ce1361e51b6a8b49287feb10b791f59f"
     },
     {
       "file": "create-session.png",
@@ -38,10 +38,11 @@
       "file": "image-attachment.png",
       "width": 800,
       "height": 674,
-      "sha256": "321c0d17e70fe5a67619b46c52f9c50dc279573076fc870f5dd8c7c83ab1f9fa"
+      "sha256": "d836b6e22b5901a548431abd114cd55281d61328244dd80bf46d831ad82d4fed"
     }
   ],
   "requests": [
+    "GET /api/auth/session",
     "GET /api/targets",
     "GET /api/targets/readme-atlas/directories",
     "GET /api/targets/readme-atlas/sessions",

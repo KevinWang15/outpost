@@ -2,6 +2,7 @@
 // Builds the film page, mixes the soundtrack, and exports a 1920×1080 30 fps MP4.
 //   node scripts/render.mjs            full render
 //   node scripts/render.mjs --stills   one still per scene (plus --at=12.5,40 for specific times)
+//   node scripts/render.mjs --poster   refresh the outro poster
 //   node scripts/render.mjs --preview  serve the interactive player
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
@@ -37,7 +38,7 @@ async function buildPage() {
   const result = await build({ entryPoints: [resolve(root, 'src/film.js')], bundle: true, write: false, format: 'iife', target: 'chrome120', loader: { '.json': 'json' }, minify: true, legalComments: 'none' })
   const css = await readFile(resolve(root, 'src/film.css'), 'utf8')
   const js = result.outputFiles[0].text.replaceAll('</script', '<\\/script')
-  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Outpost — AI Session Manager</title><style>${css}</style></head><body><script>${js}</script></body></html>`
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/svg+xml" href="../assets/logo.svg"><title>Outpost — AI Session Manager</title><style>${css}</style></head><body><script>${js}</script></body></html>`
   await writeFile(resolve(out, 'film.html'), page)
 }
 
@@ -60,7 +61,7 @@ async function mixAudio() {
     `[bed][key]sidechaincompress=threshold=0.02:ratio=5:attack=40:release=650:makeup=1[ducked]`,
     `[voice][ducked]amix=inputs=2:normalize=0,alimiter=limit=0.89:level=false[out]`,
   ].join(';')
-  await run(ffmpeg, ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, '-i', resolve(root, 'assets/music/score.mp3'), '-filter_complex', filter, '-map', '[out]', '-c:a', 'aac', '-b:a', '256k', '-t', D, resolve(out, 'soundtrack.m4a')]).done
+  await run(ffmpeg, ['-y', '-hide_banner', '-loglevel', 'error', '-filter_complex_threads', '1', ...inputs, '-i', resolve(root, 'assets/music/score.mp3'), '-filter_complex', filter, '-map', '[out]', '-c:a', 'aac', '-threads', '2', '-b:a', '256k', '-t', D, resolve(out, 'soundtrack.m4a')]).done
 }
 
 function serve(port = 0) {
@@ -98,18 +99,18 @@ if (flag('preview')) {
   await mixAudio()
   const { origin } = await serve(Number(process.env.PORT ?? 4300))
   console.log(`Preview: ${origin}/output/film.html`)
-} else if (flag('stills')) {
+} else if (flag('stills') || flag('poster')) {
   const { server, origin } = await serve()
   const { browser, page, errors } = await openFilm(origin)
   const dir = resolve(out, 'stills')
   await mkdir(dir, { recursive: true })
-  const times = option('at') ? option('at').split(',').map(Number) : timeline.scenes.map(s => s.start + (s.end - s.start) * 0.62)
+  const times = flag('poster') ? [timeline.duration - 2.5] : option('at') ? option('at').split(',').map(Number) : timeline.scenes.map(s => s.start + (s.end - s.start) * 0.62)
   for (const t of times) {
     await page.evaluate(time => window.renderFrame(time), t)
-    await page.screenshot({ path: resolve(dir, `t${t.toFixed(2).padStart(7, '0')}.png`) })
+    await page.screenshot({ path: flag('poster') ? resolve(out, 'poster.png') : resolve(dir, `t${t.toFixed(2).padStart(7, '0')}.png`) })
   }
   if (errors.length) console.error(errors.join('\n'))
-  console.log(`Saved ${times.length} stills to ${dir}`)
+  console.log(flag('poster') ? `Saved poster to ${out}` : `Saved ${times.length} stills to ${dir}`)
   await browser.close()
   server.close()
 } else {
@@ -118,7 +119,8 @@ if (flag('preview')) {
   const from = Number(option('from') ?? 0)
   const to = Number(option('to') ?? timeline.duration)
   const total = Math.round((to - from) * FPS)
-  const workers = Number(option('workers') ?? 6)
+  const workers = Number(option('workers') ?? 1)
+  if (!Number.isInteger(workers) || workers < 1) throw new Error('--workers must be a positive integer')
   const per = Math.ceil(total / workers)
   const started = Date.now()
   let rendered = 0
@@ -129,7 +131,7 @@ if (flag('preview')) {
     const part = resolve(out, `part-${k}.mp4`)
     if (!count) return null
     const { browser, page, errors } = await openFilm(origin)
-    const encoder = run(ffmpeg, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'image2pipe', '-c:v', 'mjpeg', '-framerate', String(FPS), '-i', 'pipe:0', '-c:v', 'libx264', '-preset', 'slow', '-crf', '21', '-maxrate', '12M', '-bufsize', '24M', '-tune', 'film', '-pix_fmt', 'yuv420p', '-threads', '2', part], { stdin: true })
+    const encoder = run(ffmpeg, ['-y', '-hide_banner', '-loglevel', 'error', '-filter_threads', '1', '-f', 'image2pipe', '-c:v', 'mjpeg', '-threads', '2', '-framerate', String(FPS), '-i', 'pipe:0', '-c:v', 'libx264', '-preset', 'slow', '-crf', '21', '-maxrate', '12M', '-bufsize', '24M', '-tune', 'film', '-pix_fmt', 'yuv420p', '-threads', '2', part], { stdin: true })
     for (let f = first; f < first + count; f++) {
       await page.evaluate(time => window.renderFrame(time), from + f / FPS)
       const jpg = await page.screenshot({ type: 'jpeg', quality: 95 })

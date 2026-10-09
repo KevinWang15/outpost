@@ -24,6 +24,7 @@
     "test:desktop": "xvfb-run -a node --import tsx --test tests/desktop.integration.js",
     "test:local": "node --import tsx --test tests/local.integration.js tests/keyboard.integration.js tests/activity.integration.js",
     "test:coding": "node --import tsx --test tests/coding-cli.integration.js",
+    "logo:generate": "node scripts/logo/generate.mjs",
     "docs:capture": "node --import tsx scripts/readme/capture.mjs",
     "promo:capture": "npm --prefix promo-v2 run capture",
     "promo:narrate": "npm --prefix promo-v2 run narrate",

@@ -35,15 +35,25 @@ cd promo-v2
 npm ci
 npx playwright install chromium
 npm run stills                  # one still per scene; works without audio or an API key
+npm run poster                  # rebuild the outro poster with the shared logo
 
 export ELEVENLABS_API_KEY=...    # needed to generate your own narration and score
 npm run narrate                 # records missing or changed audio and updates the timeline
 npm run music                   # composes a missing or changed score
 npm run preview                 # serves the interactive player
-npm run render                  # MP4 export; --workers=N, --from/--to for a segment
+npm run render                  # MP4 export; one worker by default, --from/--to for a segment
 ```
 
 The committed timeline and screenshots are enough to render stills without an API key. Movie export needs locally generated audio. The key is read from the environment only and never written to disk. Review the provider's terms and your plan before publishing generated media; release assets or a separate host keep large movies out of source history. See [third-party notices](../THIRD_PARTY_NOTICES.md) for license scope.
+
+Exports use one browser worker and two encoder threads by default; `--workers=N` opts into parallel rendering. On Linux with systemd, cap the entire process tree, including Chromium and FFmpeg, with:
+
+```sh
+systemd-run --scope -p CPUQuota=400% -p MemoryMax=4G \
+  nice -n 15 npm run render -- --workers=1
+```
+
+This limits rendering to four logical CPUs and 4 GB of memory. It may require system-manager privileges. Refresh the app screenshots, stills, and poster before exporting the movie.
 
 ## Brand
 

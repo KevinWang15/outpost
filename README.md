@@ -185,6 +185,8 @@ npm run docs:capture
 
 The capture script starts the Vite frontend and Fastify API with mock services and a temporary target store, then saves PNGs through Chrome DevTools Protocol's `Page.captureScreenshot`. The banner and example design are rendered from HTML and CSS in [`scripts/readme`](scripts/readme). Set `OUTPOST_README_PORT` if the default capture port, `4193`, is in use.
 
+The shared logo is [`public/outpost.svg`](public/outpost.svg). After editing it, run `npm run logo:generate` to rebuild the logo PNG, Apple touch icon, and PNG/ICO favicons, then refresh the documentation captures and [promo assets](promo-v2/README.md).
+
 ## Local and SSH targets
 
 Local targets and desktop launch are available in the default local mode. Hosted users manage SSH targets and open browser terminals with their authorized account key; uploading a separate terminal key is optional.

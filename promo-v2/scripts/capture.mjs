@@ -72,6 +72,7 @@ async function fixture(route) {
   if (!url.pathname.startsWith('/api/')) return route.continue()
   const key = `${request.method()} ${url.pathname}`
   manifest.requests[key] = (manifest.requests[key] ?? 0) + 1
+  if (url.pathname === '/api/auth/session' && request.method() === 'GET') return route.fulfill({ json: { mode: 'local', user: null } })
   if (url.pathname === '/api/targets' && request.method() === 'GET') return route.fulfill({ json: targets })
   const [, , targetId, resource, sessionId, action] = url.pathname.split('/').filter(Boolean)
   const target = targets.find(target => target.id === targetId)

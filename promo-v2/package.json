@@ -8,6 +8,7 @@
     "narrate": "node scripts/narrate.mjs",
     "music": "node scripts/music.mjs",
     "stills": "node scripts/render.mjs --stills",
+    "poster": "node scripts/render.mjs --poster",
     "preview": "node scripts/render.mjs --preview",
     "render": "node scripts/render.mjs"
   },

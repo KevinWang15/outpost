@@ -22,7 +22,7 @@ from outpost_session_runtime import launch_script
 
 results = []
 for request in json.load(sys.stdin):
-    result = subprocess.run(['bash', '-c', launch_script(request['session'], request['executable'])],
+    result = subprocess.run(['bash', '-c', launch_script(request['session'], request['executable'], request.get('signals'))],
                             capture_output=True, text=True)
     results.append({'code': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr})
 print(json.dumps(results))

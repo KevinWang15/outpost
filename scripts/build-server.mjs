@@ -19,6 +19,8 @@ await build({
 })
 
 await copyFile(new URL('../backend/session-runtime.py', import.meta.url), new URL('../dist/server/session-runtime.py', import.meta.url))
+await copyFile(new URL('../backend/signal-relay.py', import.meta.url), new URL('../dist/server/signal-relay.py', import.meta.url))
+await copyFile(new URL('../backend/signal-client.py', import.meta.url), new URL('../dist/server/signal-client.py', import.meta.url))
 await copyFile(new URL('../backend/coding_sessions.py', import.meta.url), new URL('../dist/server/coding_sessions.py', import.meta.url))
 await copyFile(new URL('../backend/coding_protocol.py', import.meta.url), new URL('../dist/server/coding_protocol.py', import.meta.url))
 await copyFile(new URL('../backend/activity_state.py', import.meta.url), new URL('../dist/server/activity_state.py', import.meta.url))

@@ -9,6 +9,7 @@ import { Modal } from './ui'
 import { useAuth } from './useAuth'
 import AccountSettings from './AccountSettings'
 import AccountSshKey from './AccountSshKey'
+import BrowserSignals from './BrowserSignals'
 
 function updateTargetUrl(id: string) {
   const url = new URL(window.location.href)
@@ -290,6 +291,7 @@ export default function App() {
         <TargetForm key={dialog.id} onSave={input => addTarget(input, dialog.id)} onClose={() => dispatch({ type: 'close-dialog' })} />
       )}
       {accountOpen && <AccountSettings onClose={() => setAccountOpen(false)} />}
+      {hosted && <BrowserSignals />}
       {dialog?.kind === 'remove' && (
         <Modal title={`Remove ${dialog.target.name}?`}
           subtitle="This only removes the connection from this manager. Sessions and running coding tools stay on the target."

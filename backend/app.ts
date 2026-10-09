@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
+import open from 'open'
 import Fastify, { LogController, type FastifyRequest } from 'fastify'
 import staticFiles from '@fastify/static'
 import cookies from '@fastify/cookie'
@@ -21,12 +22,16 @@ import { isLoopbackAddress } from '../shared/loopback'
 import { Accounts } from './accounts'
 import { TerminalKeys } from './terminal-keys'
 import { WebTerminals, type TerminalOwner } from './web-terminals'
+import { Signals, type SignalOwner } from './signals'
+import { SignalChannels } from './signal-channels'
+import { signalRoutes } from './signal-routes'
+import { browserUrl } from '../shared/signals'
 
 type Params = { targetId: string; sessionId: string }
 const loopback = (host: string) => ['localhost', '127.0.0.1', '[::1]'].includes(host)
 
 export async function createApp(options: {
-  frontendRoot?: string; logger?: boolean; store?: TargetStore; service?: SessionService; desktop?: DesktopService; software?: SoftwareService; accounts?: Accounts; trustProxy?: string[]; terminalKeys?: TerminalKeys; terminalGraceMs?: number
+  frontendRoot?: string; logger?: boolean; store?: TargetStore; service?: SessionService; desktop?: DesktopService; software?: SoftwareService; accounts?: Accounts; trustProxy?: string[]; terminalKeys?: TerminalKeys; terminalGraceMs?: number; openBrowser?: (url: string) => Promise<unknown>; signals?: Signals
 } = {}) {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -41,7 +46,17 @@ export async function createApp(options: {
   app.decorateRequest('account', null)
   const accounts = options.accounts
   const store = accounts ? null : options.store ?? new TargetStore()
-  const service = options.service ?? new SessionClient(process.env, Boolean(accounts))
+  const secret = accounts ? accounts.store.secret() : await store!.secret()
+  const signals = options.signals ?? new Signals(owner => !accounts || Boolean(accounts.store.ticketSession(owner.userId, owner.authSessionId)))
+  signals.define('browser.open', browserUrl)
+  if (!accounts) signals.registerLocal('browser.open', async event => { await (options.openBrowser ?? open)(browserUrl(event.payload)) })
+  const signalChannels = new SignalChannels((token, message) => signals.dispatch(token, message), process.env, Boolean(accounts), token => signals.active(token))
+  const service = options.service ?? new SessionClient(process.env, Boolean(accounts), signalChannels)
+  const signalScope = (userId: string, targetId: string) => createHmac('sha256', secret).update(JSON.stringify(['signals', userId, targetId])).digest('hex').slice(0, 32)
+  const prepareSignals = (owner: SignalOwner, target: Target, sessionId: string) => service.prepareSignals?.(target, sessionId, {
+    scope: signalScope(owner.userId, target.id), token: signals.issue(owner, target.id, sessionId),
+  })
+  app.addHook('preClose', async () => { signalChannels.close(); signals.close() })
   const desktop = accounts ? null : options.desktop ?? new DesktopLauncher()
   const software = options.software ?? new SoftwareClient(process.env, Boolean(accounts))
   const installations = new Installations(software)
@@ -61,7 +76,7 @@ export async function createApp(options: {
   const webTerminals = new WebTerminals(terminalKeys, owner => !accounts || Boolean(accounts.store.ticketSession(owner.userId, owner.authSessionId)), options.terminalGraceMs)
   app.addHook('preClose', async () => { webTerminals.close() })
   app.addHook('preClose', () => installations.close())
-  const tickets = new ConnectionTickets(accounts ? accounts.store.secret() : await store!.secret())
+  const tickets = new ConnectionTickets(secret)
   if (accounts) {
     const cleanup = setInterval(() => accounts.store.cleanup(), 60 * 60_000).unref()
     app.addHook('onClose', async () => { clearInterval(cleanup); accounts.close() })
@@ -100,6 +115,7 @@ export async function createApp(options: {
   app.get('/health', async () => ({ status: 'ok' }))
   if (accounts) accounts.register(app)
   else app.get('/api/auth/session', async () => ({ mode: 'local', user: null }))
+  signalRoutes(app, signals, terminalOwner)
   app.get('/api/environment', async () => accounts ? { platform: 'hosted', supported: false, usesWsl: false } : localEnvironment())
   app.get('/api/targets', async request => requestStore(request).list())
   app.post<{ Body: TargetInput }>('/api/targets', { schema: { body: targetBody } }, async (request, reply) => {
@@ -152,6 +168,8 @@ export async function createApp(options: {
     const owner = terminalOwner(request)
     await webTerminals.exclusive(owner, request.params.targetId, async () => {
       await targetLifecycle(request).remove(request.params.targetId)
+      signals.revoke(owner.userId, request.params.targetId)
+      signalChannels.closeTarget(signalScope(owner.userId, request.params.targetId))
       webTerminals.closeTarget(owner, request.params.targetId)
       await terminalKeys.remove(owner.userId, request.params.targetId)
     })
@@ -188,6 +206,8 @@ export async function createApp(options: {
     const owner = terminalOwner(request)
     await webTerminals.exclusive(owner, request.params.targetId, async () => {
       await service.remove(await requestStore(request).get(request.params.targetId), request.params.sessionId)
+      signals.revoke(owner.userId, request.params.targetId, request.params.sessionId)
+      signalChannels.forget(signalScope(owner.userId, request.params.targetId), request.params.sessionId)
       webTerminals.closeTarget(owner, request.params.targetId, { sessionId: request.params.sessionId })
     })
     return reply.code(204).send()
@@ -196,6 +216,8 @@ export async function createApp(options: {
     const owner = terminalOwner(request)
     return webTerminals.exclusive(owner, request.params.targetId, async () => {
       const session = await service.terminate(await requestStore(request).get(request.params.targetId), request.params.sessionId)
+      signals.revoke(owner.userId, request.params.targetId, request.params.sessionId)
+      signalChannels.forget(signalScope(owner.userId, request.params.targetId), request.params.sessionId)
       webTerminals.closeTarget(owner, request.params.targetId, { sessionId: request.params.sessionId })
       return session
     })
@@ -246,7 +268,7 @@ export async function createApp(options: {
       const keySource = request.body.keySource ?? (accounts ? 'account' : 'uploaded')
       if (!accounts && keySource === 'account') throw new AppError('Outpost account keys are only available in hosted mode.', 400)
       await service.get(target, request.params.sessionId)
-      return webTerminals.start(owner, target, request.params.sessionId, request.body.cols, request.body.rows, keySource)
+      return webTerminals.start(owner, target, request.params.sessionId, request.body.cols, request.body.rows, keySource, await prepareSignals(owner, target, request.params.sessionId))
     })
   })
   app.delete<{ Params: { terminalId: string } }>('/api/web-terminals/:terminalId', async (request, reply) => {
@@ -305,17 +327,26 @@ export async function createApp(options: {
     } },
   }, async request => {
     if (accounts) throw new AppError('Desktop terminal launch is available in local mode. In hosted mode, choose Connect using web terminal or copy a connection command.', 403)
-    const target = await requestStore(request).get(request.params.targetId)
-    await service.get(target, request.params.sessionId)
-    return desktop!.launch(shell => connectScript(target, request.params.sessionId, shell), request.body)
+    const owner = terminalOwner(request)
+    return webTerminals.exclusive(owner, request.params.targetId, async () => {
+      const target = await requestStore(request).get(request.params.targetId)
+      await service.get(target, request.params.sessionId)
+      const signalEnvironment = await prepareSignals(owner, target, request.params.sessionId)
+      return desktop!.launch(shell => connectScript(target, request.params.sessionId, shell, signalEnvironment), request.body)
+    })
   })
   app.get<{ Params: { token: string } }>('/api/connect/:token', async (request, reply) => {
     const ticket = tickets.verify(request.params.token)
     if (accounts && (!ticket.userId || !ticket.authSessionId || !accounts.store.ticketSession(ticket.userId, ticket.authSessionId))) throw new AppError('Connection link expired or sign-in ended. Sign in and generate a new command.', 403)
     const targetStore = accounts ? accounts.targetStore(ticket.userId!) : store!
-    const target = await targetStore.get(ticket.targetId)
-    return reply.type(ticket.shell === 'bash' ? 'text/x-shellscript; charset=utf-8' : 'text/plain; charset=utf-8')
-      .send(connectScript(target, ticket.sessionId, ticket.shell))
+    const owner = accounts ? { userId: ticket.userId!, authSessionId: ticket.authSessionId! } : { userId: 'local', authSessionId: 'local' }
+    return webTerminals.exclusive(owner, ticket.targetId, async () => {
+      const target = await targetStore.get(ticket.targetId)
+      await service.get(target, ticket.sessionId)
+      const signalEnvironment = await prepareSignals(owner, target, ticket.sessionId)
+      return reply.type(ticket.shell === 'bash' ? 'text/x-shellscript; charset=utf-8' : 'text/plain; charset=utf-8')
+        .send(connectScript(target, ticket.sessionId, ticket.shell, signalEnvironment))
+    })
   })
   if (options.frontendRoot) {
     await app.register(staticFiles, { root: options.frontendRoot })

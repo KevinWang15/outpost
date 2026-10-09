@@ -621,7 +621,27 @@ input[type='checkbox'] { width: 15px; height: 15px; margin: 0; accent-color: var
 .terminal-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; > div { display: flex; gap: 6px; flex-wrap: wrap; } .button { min-height: 44px; padding: 8px 12px; font-size: 12px; } .terminal-fullscreen-toggle { width: 44px; padding: 0; flex-shrink: 0; } }
 .terminal-connected { color: #24734e; }
 .terminal-surface { flex: 1; min-height: 100px; padding: 10px; border-radius: 8px; background: #111827; overflow: hidden; .xterm { height: 100%; } .xterm-helper-textarea { padding: 0; border: 0; min-height: 0; width: 1px; font-size: 16px; } }
-.terminal-keys { display: flex; gap: 5px; overflow-x: auto; padding: 2px 0; flex-shrink: 0; button { min-width: 42px; min-height: 44px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); padding: 7px 10px; white-space: nowrap; cursor: pointer; &[aria-pressed=true] { background: #dbeafe; color: #1d4ed8; } } }
+.terminal-keyboard {
+  position: relative; flex-shrink: 0;
+  button { display: flex; align-items: center; justify-content: center; gap: 2px; min-width: 0; min-height: 44px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); padding: 6px 3px; font-size: 13px; white-space: nowrap; cursor: pointer; touch-action: manipulation;
+    &:hover:not(:disabled) { background: var(--surface-hover, #eef2f7); }
+    &:active:not(:disabled) { transform: translateY(1px); }
+    &[aria-pressed=true], &[aria-expanded=true] { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+    &:disabled { opacity: .45; cursor: not-allowed; }
+    &.terminal-key-glyph { font-size: 18px; }
+  }
+}
+.terminal-keys { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; button[aria-label='More keys'] { flex-direction: column; gap: 0; font-size: 10px; line-height: 12px; } }
+.terminal-keyboard-panel { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 3; display: flex; flex-direction: column; gap: 8px; width: min(100%, 540px); max-height: min(280px, calc(var(--terminal-viewport-height, 100dvh) * .45)); padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 -6px 28px #0f172a26; }
+.terminal-keyboard-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; flex-shrink: 0; button { min-height: 36px; font-size: 11px; } }
+.terminal-extra-keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.terminal-symbol-keys { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.terminal-keyboard .terminal-compact-key { display: none; }
+@media (min-width: 760px) { .terminal-keys { grid-template-columns: repeat(14, minmax(0, 1fr)); } }
+@media (max-width: 759px) {
+  .terminal-compact .terminal-keys button[data-compact=false] { display: none; }
+  .terminal-compact .terminal-keyboard .terminal-compact-key { display: flex; }
+}
 .terminal-composer { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; .error { margin: 0; font-size: 12px; } }
 .terminal-compose {
   display: flex; align-items: flex-end; gap: 8px;
@@ -633,6 +653,7 @@ input[type='checkbox'] { width: 15px; height: 15px; margin: 0; accent-color: var
 .terminal-image-preview { display: flex; align-items: center; gap: 8px; min-width: 0; img { width: 40px; height: 40px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; } span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); } .icon-button { width: 44px; height: 44px; } }
 .terminal-hint { margin: 0; font-size: 12px; color: var(--muted); }
 .terminal-clipboard-status { color: var(--muted); }
+.browser-signal-url { overflow-wrap: anywhere; }
 .web-terminal-dialog:is(.terminal-compact, .is-fullscreen) {
   padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   .modal-heading { position: absolute; top: max(6px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); .eyebrow { display: none; } .icon-button { width: 44px; height: 44px; } }

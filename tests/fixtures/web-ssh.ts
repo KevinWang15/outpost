@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { sshKeyPair } from './ssh-key'
 
 // A real SSH handshake and channel, with a deterministic terminal process.
-export async function webSshFixture() {
+export async function webSshFixture(execute?: (command: string, channel: ServerChannel) => void) {
   const [key, hostKey] = await Promise.all([sshKeyPair(), sshKeyPair()])
   const allowed: ssh2.ParsedKey[] = []
   const authorize = (publicKey: string) => {
@@ -32,6 +32,7 @@ export async function webSshFixture() {
         const channel = accept(); channels.add(channel)
         channel.on('error', () => {})
         channel.on('close', () => channels.delete(channel))
+        if (execute) { execute(info.command, channel); return }
         channel.on('data', (bytes: Buffer) => { inputs.push(bytes.toString()); channel.write(bytes) })
         channel.write('\x1b[32mSSH fixture ready\x1b[0m\r\n')
       })
@@ -41,6 +42,7 @@ export async function webSshFixture() {
   return {
     key: key.private, publicKey: key.public, hostPublicKey: hostKey.public, port: (server.address() as AddressInfo).port, inputs, sizes, commands, authorize,
     output: (text: string, stderr = false) => { for (const channel of channels) (stderr ? channel.stderr : channel).write(text) },
+    disconnect: () => { for (const client of clients) client.end() },
     close: async () => { for (const client of clients) client.end(); await new Promise<void>(resolve => server.close(() => resolve())) },
   }
 }

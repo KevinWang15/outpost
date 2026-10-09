@@ -13,7 +13,7 @@ export default function TerminalComposer({ targetId, sessionId, connected, onSen
   targetId: string
   sessionId: string
   connected: boolean
-  onSend: (data: string) => void
+  onSend: (data: string) => Promise<void>
   onBusyChange: (busy: boolean) => void
 }) {
   const [text, setText] = useState(''), [file, setFile] = useState<File | null>(null), [preview, setPreview] = useState('')
@@ -63,7 +63,8 @@ export default function TerminalComposer({ targetId, sessionId, connected, onSen
       }
       // Running tmux sessions already received the reference from the upload endpoint.
       const data = image ? `${image.injected ? '' : image.reference}${text ? ` ${text}` : ''}` : text
-      onSend(data)
+      await onSend(data)
+      if (!alive.current) return
       setText(''); clearImage()
     } catch (failure) {
       if (alive.current) setError((failure as Error).message)
@@ -82,7 +83,7 @@ export default function TerminalComposer({ targetId, sessionId, connected, onSen
     <form className="terminal-compose" aria-busy={busy} onSubmit={event => { event.preventDefault(); void submit() }}>
       <input ref={chooser} type="file" aria-label="Choose terminal image" accept={imageMediaTypes.join(',')} hidden disabled={!connected || busy} onChange={event => { pick(event.target.files?.[0]); event.target.value = '' }} />
       <button type="button" className="button secondary terminal-image-button" aria-label="Attach image" title="Attach image" disabled={!connected || busy} onClick={() => chooser.current?.click()}><ImagePlus size={18} /></button>
-      <textarea ref={textarea} aria-label="Terminal text" aria-description="Enter adds a line. Ctrl or Command plus Enter sends. Paste an image to attach it." placeholder="Type or paste text…" value={text} rows={1} autoComplete="off" autoCapitalize="off" spellCheck={false} maxLength={8000} disabled={!connected || busy} enterKeyHint="enter" onPaste={paste} onChange={event => { setText(event.target.value); setError('') }} onKeyDown={event => {
+      <textarea ref={textarea} aria-label="Terminal text" aria-description="Enter adds a line. Ctrl or Command plus Enter sends. Paste an image to attach it." placeholder="Type or paste text…" value={text} rows={1} autoComplete="off" autoCapitalize="off" spellCheck={false} maxLength={8000} disabled={busy} enterKeyHint="enter" onPaste={paste} onChange={event => { setText(event.target.value); setError('') }} onKeyDown={event => {
         if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void submit() }
       }} />
       <button className="button secondary" disabled={!connected || busy} type="submit">{busy ? <><LoaderCircle className="loading-spinner" size={16} /> Sending…</> : 'Send'}</button>

@@ -12,6 +12,7 @@ export async function webTerminalWorkspace(page: Page, options: { hosted?: boole
   const acknowledgements: number[] = []
   const launches: { keySource: string }[] = [], errors: string[] = []
   let keyRequests = 0
+  let submit: ((socket: WebSocketRoute, id: string, data: string) => void) | null = null
   page.on('pageerror', error => errors.push(error.message))
   let upload: ((route: Route) => Promise<void>) | null = null, launch: ((route: Route) => Promise<void>) | null = null, keyStatus: ((route: Route) => Promise<void>) | null = null, pauseReconnect = false
   const snapshot = (socket: WebSocketRoute) => socket.send(JSON.stringify({ type: 'snapshot', cols: 80, rows: 24, data: '\x1b[?2004hComposer ready\r\n' }))
@@ -19,7 +20,13 @@ export async function webTerminalWorkspace(page: Page, options: { hosted?: boole
     sockets.push(socket)
     socket.onMessage(message => {
       const event = JSON.parse(message.toString())
-      if (event.type === 'input') inputs.push(event.data)
+      if (event.type === 'input') {
+        inputs.push(event.data)
+        if (event.id) {
+          if (submit) submit(socket, event.id, event.data)
+          else socket.send(JSON.stringify({ type: 'input-result', id: event.id, accepted: true }))
+        }
+      }
       if (event.type === 'resize') sizes.push({ cols: event.cols, rows: event.rows })
       if (event.type === 'ack') acknowledgements.push(event.bytes)
     })
@@ -28,6 +35,7 @@ export async function webTerminalWorkspace(page: Page, options: { hosted?: boole
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/auth/session') return route.fulfill({ json: { mode: options.hosted ? 'hosted' : 'local', user: options.hosted ? { id: 'user', email: 'user@example.com', name: 'Composer user', emailVerifiedAt: session.createdAt, createdAt: session.createdAt } : null } })
+    if (path === '/api/signals/events') return route.fulfill({ status: 204 })
     if (path === '/api/environment') return route.fulfill({ json: { platform: 'linux', supported: true, usesWsl: false } })
     if (path === '/api/targets') return route.fulfill({ json: [{ id: 'composer', kind: 'ssh', name: 'Composer', host: 'dev.example.com', backends: [backend], tools: ['codex'], createdAt: session.createdAt }] })
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware([backend], ['codex']) })
@@ -68,6 +76,7 @@ export async function webTerminalWorkspace(page: Page, options: { hosted?: boole
     onLaunch: (handler: (route: Route) => Promise<void>) => { launch = handler },
     onKeyStatus: (handler: (route: Route) => Promise<void>) => { keyStatus = handler },
     onUpload: (handler: (route: Route) => Promise<void>) => { upload = handler },
+    onSubmit: (handler: (socket: WebSocketRoute, id: string, data: string) => void) => { submit = handler },
     disconnect: () => { pauseReconnect = true; sockets.at(-1)!.close({ code: 1012, reason: 'Fixture disconnect' }) },
     reconnect: () => { pauseReconnect = false; snapshot(sockets.at(-1)!) },
   }

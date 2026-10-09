@@ -6,6 +6,8 @@ import { supportingPath } from './shell'
 import { runProtocol } from './process'
 import { transportFor } from './transport'
 import { terminalScript } from './terminal'
+import type { SignalEnvironment } from '../shared/signals'
+import type { SignalChannels } from './signal-channels'
 
 type SessionRequest = { action: 'list' }
   | ({ action: 'coding-search' } & CodingSessionSearchInput)
@@ -24,17 +26,18 @@ export function sessionLaunchOptions(input: SessionInput): SessionLaunchOptions 
 }
 
 export const supportedShells = (target: Target) => transportFor(target).shells
-export function sessionAttachOperation(target: Target, id: string) {
-  return `${supportingPath}; exec ${pythonCommand({ action: 'attach', id, context: transportFor(target).context })}`
+export function sessionAttachOperation(target: Target, id: string, signals?: SignalEnvironment) {
+  return `${supportingPath}; exec ${pythonCommand({ action: 'attach', id, context: transportFor(target).context, signals: signals?.OUTPOST_SIGNAL_ENV })}`
 }
-export function connectScript(target: Target, id: string, shell: 'bash' | 'powershell') {
+export function connectScript(target: Target, id: string, shell: 'bash' | 'powershell', signals?: SignalEnvironment) {
   const transport = transportFor(target)
   if (!transport.shells.includes(shell)) throw new AppError('This terminal shell is not supported for this local target', 400)
-  const operation = sessionAttachOperation(target, id)
+  const operation = sessionAttachOperation(target, id, signals)
   return terminalScript(transport.attach(operation), shell)
 }
 
 export interface SessionService {
+  prepareSignals?(target: Target, id: string, setup: { scope: string; token: string }): Promise<SignalEnvironment | undefined>
   list(target: Target, signal?: AbortSignal): Promise<SessionList>
   search(target: Target, input: CodingSessionSearchInput, signal?: AbortSignal): Promise<CodingSessionSearchResults>
   directories(target: Target, path: string, signal?: AbortSignal): Promise<DirectorySuggestions>
@@ -47,7 +50,8 @@ export interface SessionService {
 }
 
 export class SessionClient implements SessionService {
-  constructor(private env = process.env, private requireAccountIdentity = false) {}
+  constructor(private env = process.env, private requireAccountIdentity = false, private signals?: SignalChannels) {}
+  async prepareSignals(target: Target, id: string, setup: { scope: string; token: string }) { return this.signals?.prepare(target, id, setup) }
   private async run<T>(target: Target, request: SessionRequest, signal?: AbortSignal) {
     const transport = transportFor(target, this.requireAccountIdentity)
     const operation = `${supportingPath}; exec ${pythonCommand({ ...request, context: transport.context })}`

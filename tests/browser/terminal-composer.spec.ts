@@ -126,6 +126,58 @@ test('invalid pasted images never upload, failures preserve the image and text, 
   expect(state.errors).toEqual([])
 })
 
+test('Send keeps text and its image until SSH acceptance, and rejection permits a retry without another upload', async ({ page }) => {
+  const state = await workspace(page)
+  const text = page.getByLabel('Terminal text', { exact: true })
+  let reply: (accepted: boolean) => void = () => { throw new Error('No submission') }
+  state.onSubmit((socket, id) => { reply = accepted => socket.send(JSON.stringify({ type: 'input-result', id, accepted, ...(accepted ? {} : { message: 'Terminal input is busy. Your draft is kept; try again shortly.' }) })) })
+  await text.fill('important draft\nsecond line')
+  await pasteImage(page)
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect.poll(() => state.inputs.length).toBe(1)
+  await expect(text).toHaveValue('important draft\nsecond line')
+  await expect(page.getByRole('button', { name: 'Sending…', exact: true })).toBeDisabled()
+  await expect(page.getByAltText('Terminal image preview')).toBeVisible()
+  reply(false)
+  await expect(page.getByRole('alert')).toContainText('Your draft is kept')
+  await expect(text).toBeEnabled()
+  await expect(text).toHaveValue('important draft\nsecond line')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect.poll(() => state.inputs.length).toBe(2)
+  expect(state.uploads).toHaveLength(1)
+  reply(true)
+  await expect(text).toHaveValue('')
+  await expect(page.getByAltText('Terminal image preview')).toHaveCount(0)
+  expect(state.errors).toEqual([])
+})
+
+test('a disconnect during Send preserves an editable draft and stale acknowledgements cannot clear later edits', async ({ page }) => {
+  const state = await workspace(page)
+  const socketCount = state.sockets.length
+  const text = page.getByLabel('Terminal text', { exact: true })
+  let oldId = ''
+  state.onSubmit((_socket, id) => { oldId = id })
+  await text.fill('keep this text')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect.poll(() => oldId).not.toBe('')
+  state.disconnect()
+  await expect(page.getByRole('alert')).toContainText('Delivery was not confirmed')
+  await expect(text).toHaveValue('keep this text')
+  await expect(text).toBeEnabled()
+  await text.fill('keep this text — edited while offline')
+  await expect.poll(() => state.sockets.length).toBe(socketCount + 1)
+  state.reconnect()
+  await expect(page.locator('.terminal-toolbar')).toContainText('Connected')
+  state.sockets.at(-1)!.send(JSON.stringify({ type: 'input-result', id: oldId, accepted: true }))
+  await expect(text).toHaveValue('keep this text — edited while offline')
+  expect(state.inputs).toHaveLength(1)
+  state.onSubmit((socket, id) => socket.send(JSON.stringify({ type: 'input-result', id, accepted: true })))
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(text).toHaveValue('')
+  expect(state.inputs).toEqual([bracket('keep this text'), bracket('keep this text — edited while offline')])
+  expect(state.errors).toEqual([])
+})
+
 test.describe('phone composer', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   test('hosted mode keeps multiline text, images and Send reachable in fullscreen, landscape and with the keyboard open', async ({ page }) => {

@@ -26,6 +26,10 @@ test('SSH attachment payload stays within its Windows command-line budget withou
   assert.equal(command.executable, 'ssh')
   const length = command.args.at(-1).length
   assert.ok(length < 20_000, `SSH attachment is ${length} characters; its budget is 20,000`)
+  const signals = { OUTPOST_SIGNAL_ENV: "/home/developer with 'spaces é/.outpost/signals/" + 'a'.repeat(32) + '/' + 'b'.repeat(32) + '/environment.sh' }
+  const withSignals = connectScript(target, '12345678-1234-4123-8123-123456789012', 'powershell', signals)
+  const signalCommand = JSON.parse(Buffer.from(withSignals.match(/FromBase64String\('([A-Za-z0-9+/=]+)'\)/)[1], 'base64').toString())
+  assert.ok(signalCommand.args.at(-1).length < 22_000, 'signal setup also leaves room below the Windows native command-line limit')
 })
 
 test('PowerShell downloads preserve native SSH arguments, home paths, output, and errors', { skip: !runtimes.length && 'Set OUTPOST_PWSH to test PowerShell on Unix', timeout: 60_000 }, async t => {

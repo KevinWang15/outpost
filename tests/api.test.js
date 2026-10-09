@@ -361,7 +361,7 @@ test('connection scripts verify signatures and expiry, reopen the terminal, and 
   assert.equal((await request('GET', `/api/connect/${payload}.${signature}`)).statusCode, 410)
   const expiredPs = Buffer.from(JSON.stringify({ ...psTicket, expires: 0 })).toString('base64url')
   assert.equal((await request('GET', `/api/connect/${expiredPs}.${createHmac('sha256', await store.secret()).update(expiredPs).digest('base64url')}`)).statusCode, 410)
-  const restarted = await createApp({ store: new TargetStore(store.directory) })
+  const restarted = await createApp({ store: new TargetStore(store.directory), service: { get: async () => ({ id: 'session' }) } })
   t.after(() => restarted.close())
   assert.equal((await restarted.inject(path)).statusCode, 200)
   await request('DELETE', `/api/targets/${target.id}`)

@@ -3,6 +3,7 @@ import test from 'node:test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { once } from 'node:events'
+import { randomUUID } from 'node:crypto'
 import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,6 +21,7 @@ async function until(predicate) { for (let i = 0; i < 100; i++) { if (await pred
 async function connect(origin, id, cookie) {
   const ws = new WebSocket(`${origin.replace('http', 'ws')}/api/web-terminals/${id}/socket`, { headers: { origin, cookie } })
   let screen = '', closed = ''
+  const inputResults = []
   ws.on('error', () => {})
   ws.on('message', (data, binary) => {
     if (binary) { screen += data.toString(); ws.send(JSON.stringify({ type: 'ack', bytes: data.length })) }
@@ -27,22 +29,23 @@ async function connect(origin, id, cookie) {
       const message = JSON.parse(data)
       if (message.type === 'snapshot') { screen += message.data; ws.send(JSON.stringify({ type: 'ack', bytes: Buffer.byteLength(message.data) })) }
       else if (message.type === 'closed') closed = message.message
+      else if (message.type === 'input-result') inputResults.push(message)
     }
   })
   await once(ws, 'open')
   try { await until(() => screen.includes('OUTPOST_FIXTURE_READY')) }
   catch (error) { ws.terminate(); throw new Error(`${error.message}; terminal close: ${closed || 'none'}; screen: ${JSON.stringify(screen.slice(-2000))}`, { cause: error }) }
-  return { ws, screen: () => screen, send: message => ws.send(JSON.stringify(message)) }
+  return { ws, inputResults, screen: () => screen, send: message => ws.send(JSON.stringify(message)) }
 }
 
 test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize, repaint and process across web disconnects', { timeout: 360000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-web-terminal-integration-'))
   let container, app, accounts
   t.after(async () => { if (app) await app.close(); else accounts?.close(); if (container) await docker('rm', '-f', container); await rm(directory, { recursive: true, force: true }) })
-  await docker('build', '-t', 'outpost-ssh-test:local', fileURLToPath(new URL('./fixtures/', import.meta.url)))
+  const proxyArgs = ['http_proxy', 'https_proxy'].flatMap(name => process.env[name] || process.env[name.toUpperCase()] ? ['--build-arg', name] : [])
+  await docker('build', '--network', 'host', ...proxyArgs, '-t', 'outpost-ssh-test:local', fileURLToPath(new URL('./fixtures/', import.meta.url)))
   // Install PTY backends at build time so a target needs no public network access.
   await copyFile('/etc/ssl/certs/ca-certificates.crt', join(directory, 'certificates.crt'))
-  const proxyArgs = ['http_proxy', 'https_proxy'].flatMap(name => process.env[name] || process.env[name.toUpperCase()] ? ['--build-arg', name] : [])
   await docker('build', '--network', 'host', ...proxyArgs, '-f', fileURLToPath(new URL('./fixtures/Dockerfile.web-terminal', import.meta.url)), '-t', 'outpost-web-ssh-test:local', directory)
   const keyPath = join(directory, 'synthetic-key')
   await execute('ssh-keygen', ['-q', '-t', 'ed25519', '-N', 'test-passphrase', '-f', keyPath])
@@ -98,7 +101,32 @@ test('OpenSSH web PTY with tmux and dtach preserves CLI identity, input, resize,
     }
     const heartbeat = () => docker('exec', container, 'cat', `${rootDir}/heartbeat.json`).then(JSON.parse)
     const initial = await heartbeat()
-    first.send({ type: 'input', data: 'WEB_MOBILE_INPUT\r' })
+    // Exercise the default app wiring, inherited environment, real remote helper,
+    // account SSH transport, token resolution, and authenticated SSE together.
+    const stream = await fetch(`${origin}/api/signals/events?id=${randomUUID()}&types=browser.open`, {
+      headers: { cookie }, signal: AbortSignal.timeout(15000),
+    })
+    assert.equal(stream.status, 200)
+    const delivered = (async () => {
+      let text = ''
+      for await (const chunk of stream.body) {
+        text += Buffer.from(chunk).toString('utf8')
+        const data = text.match(/\ndata: ([^\n]+)\n\n/)
+        if (data) return JSON.parse(data[1])
+      }
+      assert.fail('Signal stream closed without delivery')
+    })()
+    const url = `https://example.com/${backend}?fileName=hello.zip&literal=%24%28test%29`
+    const [event] = await Promise.all([delivered, docker('exec', container, 'python3', '-c',
+      'import pathlib,subprocess,sys; env=dict(item.split("=",1) for item in pathlib.Path("/proc/"+sys.argv[1]+"/environ").read_text().split("\\0") if item); assert env["BROWSER"] == "outpost-browser"; assert env["OUTPOST_SESSION_TOKEN"]; sys.exit(subprocess.call([env["BROWSER"], sys.argv[2]],env=env))',
+      String(initial.pid), url)])
+    assert.equal(event.type, 'browser.open')
+    assert.equal(event.targetId, target.id)
+    assert.equal(event.sessionId, session.id)
+    assert.deepEqual(event.payload, { url })
+    first.send({ type: 'input', id: 'composer-draft', data: 'WEB_MOBILE_INPUT\r' })
+    await until(() => first.inputResults.length === 1)
+    assert.deepEqual(first.inputResults, [{ type: 'input-result', id: 'composer-draft', accepted: true }])
     first.send({ type: 'resize', cols: 42, rows: 18 })
     await until(async () => (await docker('exec', container, 'cat', `${rootDir}/sizes.log`)).includes('42x18'))
     await until(async () => (await docker('exec', container, 'cat', `${rootDir}/input.bin`)).includes('WEB_MOBILE_INPUT'))

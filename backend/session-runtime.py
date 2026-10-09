@@ -115,12 +115,16 @@ def valid_launch_options(environment, arguments):
     return len(json.dumps({'env': environment, 'args': arguments}, ensure_ascii=False, separators=(',', ':')).encode('utf-8')) <= 16 * 1024
 
 
-def launch_script(session, executable):
+def launch_script(session, executable, signals=None):
     # Environment values and paths are literal; only the argument string is shell text.
     steps = ['cd -- ' + shlex.quote(session['rootDir'])]
     environment = {**session['env'], **session['cliSessionEnv']}
     if environment:
         steps.append('export -- ' + ' '.join(key + '=' + shlex.quote(value) for key, value in environment.items()))
+    if signals:
+        steps.append('. ' + shlex.quote(signals))
+        if 'BROWSER' in environment:
+            steps.append('export BROWSER=' + shlex.quote(environment['BROWSER']))
     adapter = CODING_ADAPTERS[session['tool']]
     flags = ' '.join(shlex.quote(value) for value in adapter.arguments(session))
     # Bash expands the call's arguments once. The function checks that exact
@@ -666,7 +670,7 @@ def main():
                     if not command_shell:
                         fail('Bash is missing on this target. Open Required Software to install it.', 409)
                     activity(session).initialize()
-                    launch = [command_shell, '-c', launch_script(session, executable)]
+                    launch = [command_shell, '-c', launch_script(session, executable, request.get('signals'))]
                     # The persistence tool owns the PTY independently of SSH.
                     if session['backend'] == 'tmux':
                         size = os.get_terminal_size()

@@ -5,12 +5,13 @@ import headless, { type ITerminalAddon } from '@xterm/headless'
 import serialize from '@xterm/addon-serialize'
 import { WebSocket } from 'ws'
 import type { SshTarget } from '../shared/session-manager'
-import type { TerminalKeySource, WebTerminalInfo } from '../shared/web-terminal'
+import type { TerminalInputResult, TerminalKeySource, WebTerminalInfo } from '../shared/web-terminal'
 import { AppError } from './errors'
 import { quote } from './shell'
 import { sessionAttachOperation } from './sessions'
 import type { TerminalKeys } from './terminal-keys'
 import { managedSshIdentity } from './account-ssh'
+import type { SignalEnvironment } from '../shared/signals'
 
 export interface TerminalOwner { userId: string; authSessionId: string }
 const sameOwner = (a: TerminalOwner, b: TerminalOwner) => a.userId === b.userId && a.authSessionId === b.authSessionId
@@ -50,7 +51,7 @@ export class WebTerminals {
     if (!this.validOwner(owner)) throw new AppError('Sign in to continue.', 401)
     return entry
   }
-  async start(owner: TerminalOwner, target: SshTarget, sessionId: string, cols: number, rows: number, keySource: TerminalKeySource) {
+  async start(owner: TerminalOwner, target: SshTarget, sessionId: string, cols: number, rows: number, keySource: TerminalKeySource, signals?: SignalEnvironment) {
     if (this.stopped) throw new AppError('Outpost is restarting. Try again shortly.', 409)
     if (!this.validOwner(owner)) throw new AppError('Sign in to continue.', 401)
     const identity = managedSshIdentity(target)
@@ -101,7 +102,7 @@ export class WebTerminals {
         const deadline = setTimeout(fail, 20_000).unref()
         const ready = () => {
           const shell = target.environment?.shell ?? '/bin/bash'
-          client.exec(`${quote(shell)} -lic ${quote(sessionAttachOperation(target, sessionId))}`, { pty: { term: 'xterm-256color', cols, rows, width: 0, height: 0 } }, (error, channel) => {
+          client.exec(`${quote(shell)} -lic ${quote(sessionAttachOperation(target, sessionId, signals))}`, { pty: { term: 'xterm-256color', cols, rows, width: 0, height: 0 } }, (error, channel) => {
             if (error || !entry.alive || settled) { channel?.close(); return fail() }
             entry.channel = channel
             channel.on('drain', () => { entry.blockedInput = false })
@@ -174,10 +175,21 @@ export class WebTerminals {
         const message = JSON.parse(data.toString())
         if (message.type === 'ack' && Number.isSafeInteger(message.bytes) && message.bytes >= 0 && message.bytes <= entry.unacked) {
           entry.unacked -= message.bytes; this.flow(entry)
-        } else if (message.type === 'input' && typeof message.data === 'string' && Buffer.byteLength(message.data) <= 16 * 1024 && !entry.replaying) {
-          inputBytes += Buffer.byteLength(message.data)
-          if (inputBytes > 128 * 1024 || entry.blockedInput) return socket.close(1008, 'Input rate exceeded')
-          entry.blockedInput = !(entry.channel?.write(message.data) ?? true)
+        } else if (message.type === 'input' && typeof message.data === 'string' && (message.id === undefined || (typeof message.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(message.id)))) {
+          const result = (failure?: string) => {
+            if (!message.id || entry.socket !== socket || socket.readyState !== WebSocket.OPEN) return
+            const response: TerminalInputResult = failure ? { type: 'input-result', id: message.id, accepted: false, message: failure } : { type: 'input-result', id: message.id, accepted: true }
+            socket.send(JSON.stringify(response))
+          }
+          const bytes = Buffer.byteLength(message.data)
+          const failure = bytes > 16 * 1024 ? 'Input must fit within 16 KiB. Send smaller sections.'
+            : entry.replaying || !entry.channel?.writable ? 'Terminal is not ready. Your draft is kept; reconnect and try again.'
+              : inputBytes + bytes > 128 * 1024 || entry.blockedInput ? 'Terminal input is busy. Your draft is kept; try again shortly.' : ''
+          if (failure) { if (message.id) result(failure); else socket.close(1008, 'Input unavailable'); return }
+          inputBytes += bytes
+          entry.blockedInput = !entry.channel!.write(message.data, (error?: Error | null) => {
+            result(error ? 'SSH could not confirm delivery. Your draft is kept; check the terminal before retrying.' : undefined)
+          })
         } else if (message.type === 'resize' && Number.isInteger(message.cols) && message.cols >= 20 && message.cols <= 300 && Number.isInteger(message.rows) && message.rows >= 5 && message.rows <= 120 && !entry.replaying) {
           if (entry.screen.cols !== message.cols || entry.screen.rows !== message.rows) {
             entry.screen.resize(message.cols, message.rows); entry.channel?.setWindow(message.rows, message.cols, 0, 0)

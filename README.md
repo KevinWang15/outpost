@@ -98,7 +98,9 @@ The generated **Outpost account key** covers session management, software checks
 
 In hosted mode, click **Connect using web terminal** beside a session to connect with your authorized Outpost account key immediately. The dialog shows connection progress and opens the terminal without another key setup or confirmation step. If a connection fails, you can retry or open **Manage key**. **Manage key** shows that key's public key and fingerprint and offers an optional **Use a different key** upload for this target. In local mode, **Connect** uses your desktop terminal and existing SSH configuration, agent or identity file. No Outpost account key is generated or trusted. Its optional **… → Launch with web terminal** requires an uploaded private key because there is no account key. Uploads accept a file or pasted key and its passphrase if encrypted. Only an explicit Connect or launch action opens a web terminal; **Connection options** prepares a command for your own terminal.
 
-The terminal supports touch input, Ctrl, Esc, Tab, arrows, Ctrl+C, Enter, and Shift+Enter. Its text composer starts as a single line and expands for multiline content, with scrolling for longer drafts. **Enter** adds a line; **Send** or **Ctrl/Cmd+Enter** submits the draft. Paste a PNG, JPEG, GIF, or WebP image (up to 16 MB), or use the image button to choose a file from your phone or computer. A preview lets you remove the attachment before sending. **Send** uploads the image to the session's target and submits its reference with your text. Failed uploads keep your draft for retry.
+The onscreen terminal keyboard keeps common controls in a grid: Copy/Paste, Esc, Tab, arrows, Ctrl+C, Enter, and Shift+Enter. **Ctrl** and **Alt** apply to the next terminal key and can be combined. **More** opens navigation keys, control shortcuts, symbols, and F1–F12. Arrows follow the remote application's cursor mode. On small screens with the phone keyboard open, the grid shrinks to one row and additional controls move under **More → Navigate**. **Keyboard** opens your device's keyboard for typing.
+
+The text composer starts as a single line and expands for multiline content, with scrolling for longer drafts. **Enter** adds a line; **Send** or **Ctrl/Cmd+Enter** submits the draft. Paste a PNG, JPEG, GIF, or WebP image (up to 16 MB), or use the image button to choose a file from your phone or computer. A preview lets you remove the attachment before sending. **Send** uploads the image to the session's target and submits its reference with your text. Text and images stay in the composer until the SSH connection accepts the input. Failed uploads or sends keep the draft editable; retries reuse an uploaded image. If a disconnect or timeout leaves delivery uncertain, check the terminal before retrying: the input may already have arrived. Reconnecting never resends a draft automatically.
 
 Clipboard shortcuts use the clipboard on the computer running your browser. **Ctrl+V** (Windows/Linux) or **Cmd+V** (macOS) pastes text into the terminal without pressing Enter; **Ctrl+Shift+V** and **Shift+Insert** also work where supported by the browser. Select terminal text and press **Ctrl+C**, **Ctrl+Shift+C**, or **Cmd+C** to copy it. Hold **Shift** while selecting if the remote application captures the mouse. With no selection, **Ctrl+C** still interrupts the remote process; the on-screen **Ctrl+C** key always sends an interrupt. The **Copy** and **Paste** buttons provide the same local clipboard actions. These buttons need HTTPS (or localhost) and browser clipboard permission; if Paste is blocked, use the native paste shortcut or paste into the text composer.
 
@@ -249,6 +251,55 @@ Sessions with different coding tools can coexist on the same target and backend.
 Expand **Arguments and environment variables (optional)** when creating a session to customize its launch. Arguments are one string appended to the selected command and evaluated by Bash, with normal quoting and variable/command expansion. For example, `--model "$MODEL"` uses the session's `MODEL` environment variable as one argument. Environment names must be shell identifiers, and their values are passed literally, including spaces, quotes, newlines, and empty strings. They extend or override the login environment for that coding tool without changing other sessions. Both options are saved in the instance's session registry and reused when a stopped session starts again; reconnecting to a running session keeps its existing process and environment. Environment values are stored in the registry (mode `0600`), not the manager's target configuration. The API accepts optional `args` and `env` fields on session creation, up to 32 variables, 4096 characters per value, 8192 characters of arguments, and 16 KiB combined serialized launch settings. Invalid argument syntax is rejected before a session is saved.
 
 Target configuration, session registries, and connection tickets use strict schemas. Invalid or incomplete data and unknown fields are rejected without rewriting records. Target entries use `kind: "ssh" | "local"` and explicit nonempty `backends` and `tools` arrays. Execution-user metadata may be stored in `environment`; software status is never persisted. Session records have their own `backend`, `tool`, `env`, `args`, `cliSessionId`, and `cliSessionEnv`; new sessions without launch options save an empty object and string.
+
+## Remote signals and browser links
+
+Managed coding sessions receive `BROWSER=outpost-browser`. A tool that opens a web link can therefore open it on the user's computer:
+
+- **Local mode:** Outpost calls the [`open` package](https://github.com/sindresorhus/open) on the computer running the manager, including when the coding tool runs over SSH. The Outpost webpage can be closed.
+- **Hosted mode:** Outpost selects one registered window in the login session that attached the terminal and sends an SSE event. That window calls `window.open()`. Focused windows take priority, then visible windows, then the most recently active window. Other windows receive nothing.
+- If a browser blocks an automatic popup, the selected window displays the URL and an **Open link** button. Allowing popups for Outpost enables automatic opening. A custom `BROWSER` in the session's environment takes precedence.
+
+Sessions already running before this feature was installed must be restarted once to inherit the helper and its PATH. Outpost never restarts a coding process to change its environment. Subsequent attachments refresh the helper's connection file, so surviving processes can use a new connection without restarting.
+
+Browser opening is an adapter on a general signal channel:
+
+```mermaid
+flowchart LR
+  Sender["BROWSER / outpost-signal / curl"] --> Receiver["Target loopback HTTP receiver"]
+  Receiver <-->|"SSH, local, or WSL stdio"| Broker["Session token → listener registry"]
+  Broker --> Native["Local listener: open package"]
+  Broker -->|"one SSE recipient"| Window["Hosted listener: window.open"]
+```
+
+The receiver binds only to the target's loopback interface. One connection per target uses the same transport and identity as session management; SSH aliases, SSH configuration, local targets, and WSL do not need a public callback URL, reverse tunnel, or additional daemon installation. The Python receiver is owned by Outpost and stops when its transport closes. After a temporary disconnect, Outpost reconnects and updates the existing helpers.
+
+Each attachment issues an opaque token scoped to its owner, login, target, and session. It grants signal publication only, with no access to account or target management APIs. Tokens are resolved in memory by the manager, never stored in session records or returned by the browser APIs. Target-side configuration files use mode 0600 in a private directory. Sign-out, expired login sessions, target removal, and session termination/deletion revoke the corresponding grants. A manager restart requires reattaching to refresh the token.
+
+The generic helper reads the current connection file on each invocation:
+
+```bash
+outpost-signal browser.open '{"url":"https://example.com/download.zip"}'
+outpost-signal work.progress '{"completed":2,"total":3}'
+```
+
+The second example needs a registered `work.progress` listener. An unknown signal type has no implicit behavior. Applications can also call the target HTTP endpoint directly:
+
+```bash
+curl --fail --silent --show-error --noproxy '*' --max-time 15 \
+  -H "Authorization: Bearer $OUTPOST_SESSION_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"version":1,"id":"example-request-1","type":"browser.open","payload":{"url":"https://example.com/"}}' \
+  "$OUTPOST_SIGNAL_URL"
+```
+
+Use a new `id` for each logical request and reuse it only when retrying that request. The bundled helper generates UUIDs. For a long-lived shell using raw curl, `. "$OUTPOST_SIGNAL_ENV"` refreshes its endpoint and token after reconnection; the bundled helpers do this automatically without modifying the caller's environment.
+
+The protocol is `{version: 1, id, type, payload}` with a 32 KiB envelope limit. Types use dotted or hyphenated names, such as `browser.open`; payloads are JSON. HTTP 200 means Outpost handed the request to a registered listener, not that a page finished loading. No matching listener returns 503, invalid/revoked credentials return 401, invalid payloads return 400, conflicting request IDs return 409, and capacity/rate limits return 429. `curl --fail` and both helpers return nonzero for failures. Each session is limited to 120 new signals per minute.
+
+Delivery is **at most once**, rather than a broadcast. Outpost reserves the request ID before dispatch and remembers its result for one hour; duplicate requests do not trigger another handler. Once dispatched, a signal is never replayed on SSE reconnection or reassigned to another window, even if the selected window closes before acting. This deliberately favors avoiding duplicate side effects over guaranteed delivery after a disconnect. Browser popup prompts remain in their selected window. Use one backend process per data directory, as with held web terminals.
+
+To add a feature, define its payload validator with `Signals.define`, then register a local handler with `Signals.registerLocal` and/or a hosted handler through `listenForSignals`. Transport, credential resolution, deduplication, and recipient selection stay independent of feature behavior. The browser adapter accepts only HTTP(S) URLs without embedded credentials; it never executes URL text as shell code. The implementation is split across [the broker](backend/signals.ts), [target transport](backend/signal-channels.ts), [SSE routes](backend/signal-routes.ts), and [browser adapter](frontend/BrowserSignals.tsx).
 
 ## Coding conversations and finder
 
@@ -432,6 +483,8 @@ no login but enforce the loopback and browser-origin restrictions.
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | GET | `/api/environment` | Manager platform, local support, and whether local targets use WSL |
+| GET | `/api/signals/events?id=…&types=…` | Register an authenticated SSE listener for comma-separated signal types; `id` is a fresh UUID per window |
+| POST | `/api/signals/listeners/:id/activity` | Update that login's listener with `{focused, visible}` for recipient selection |
 | GET | `/api/targets` | List saved connections |
 | POST | `/api/targets` | Save `{kind:"ssh", name, host, backends, tools, port?, identityFile?}` or `{kind:"local", name, backends, tools, distribution?}`; `backends` selects `tmux`, `dtach`, or both |
 | PATCH | `/api/targets/:id/requirements` | Save `{backends:["tmux", "dtach"], tools:["codex", "kimi", "claude"]}` atomically; both selections require at least one item |

@@ -150,6 +150,8 @@ test('production signup uses email delivery, HTTPS cookies, and the configured p
     // Simulate HTTPS termination while keeping the real production API and CSP.
     await page.route('https://outpost.example/**', async route => {
       const url = new URL(route.request().url())
+      // route.fetch buffers responses; streaming delivery is covered by signals.spec.
+      if (url.pathname === '/api/signals/events') return route.fulfill({ status: 204 })
       const response = await route.fetch({ url: origin + url.pathname + url.search, headers: { ...route.request().headers(), host: 'outpost.example' } })
       await route.fulfill({ response })
     })

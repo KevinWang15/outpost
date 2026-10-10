@@ -47,13 +47,17 @@ test('native launch is limited to local macOS/Windows desktop scripts and carrie
 
 // CI opts in on disposable desktop runners. Ordinary npm test never overwrites
 // the clipboard on a developer's computer.
-test('the actual OS clipboard reader handles a PNG, Unicode text, and an empty clipboard', {
+test('the actual OS clipboard reader handles PNG, macOS TIFF conversion, Unicode text, and an empty clipboard', {
   skip: process.env.OUTPOST_NATIVE_CLIPBOARD_TEST !== '1' || !['darwin', 'win32'].includes(process.platform), timeout: 30_000,
 }, async () => {
   const text = 'Outpost 本地 🙂\nclipboard', encoded = png.toString('base64')
   async function set(kind) {
     if (process.platform === 'darwin') {
-      const script = `ObjC.import('AppKit'); var p = $.NSPasteboard.generalPasteboard; p.clearContents; ${kind === 'image' ? `p.setDataForType($.NSData.alloc.initWithBase64EncodedStringOptions('${encoded}', 0), $.NSPasteboardTypePNG);` : kind === 'text' ? `p.setStringForType($(${JSON.stringify(text)}), $.NSPasteboardTypeString);` : ''}`
+      const data = `$.NSData.alloc.initWithBase64EncodedStringOptions('${encoded}', 0)`
+      const contents = kind === 'image' ? `p.setDataForType(${data}, $.NSPasteboardTypePNG);`
+        : kind === 'tiff' ? `p.setDataForType($.NSBitmapImageRep.imageRepWithData(${data}).TIFFRepresentation, $.NSPasteboardTypeTIFF);`
+        : kind === 'text' ? `p.setStringForType($(${JSON.stringify(text)}), $.NSPasteboardTypeString);` : ''
+      const script = `ObjC.import('AppKit'); var p = $.NSPasteboard.generalPasteboard; p.clearContents; ${contents}`
       await execute('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script])
     } else {
       const script = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Clipboard]::Clear(); ${kind === 'image' ? `$s = New-Object IO.MemoryStream(,[Convert]::FromBase64String('${encoded}')); $b = [Drawing.Image]::FromStream($s); try { [Windows.Forms.Clipboard]::SetImage($b) } finally { $b.Dispose(); $s.Dispose() }` : kind === 'text' ? `[Windows.Forms.Clipboard]::SetText([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(text).toString('base64')}')))` : ''}`
@@ -61,11 +65,13 @@ test('the actual OS clipboard reader handles a PNG, Unicode text, and an empty c
     }
   }
   try {
-    await set('image')
-    const image = await readNativeClipboard(new AbortController().signal)
-    assert.equal(image.kind, 'image')
-    assert.equal(image.image.mediaType, 'image/png')
-    assert.ok(Buffer.from(image.image.data, 'base64').subarray(0, 8).equals(png.subarray(0, 8)))
+    for (const kind of process.platform === 'darwin' ? ['image', 'tiff'] : ['image']) {
+      await set(kind)
+      const image = await readNativeClipboard(new AbortController().signal)
+      assert.equal(image.kind, 'image')
+      assert.equal(image.image.mediaType, 'image/png')
+      assert.ok(Buffer.from(image.image.data, 'base64').subarray(0, 8).equals(png.subarray(0, 8)))
+    }
     await set('text')
     assert.deepEqual(await readNativeClipboard(new AbortController().signal), { kind: 'text', text })
     await set('empty')

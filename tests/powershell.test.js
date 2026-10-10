@@ -91,7 +91,7 @@ sys.exit(23 if os.environ.get('OUTPOST_SSH_FAIL') == '1' else 0)
     assert.ok(args.at(-1).length < 20_000, 'fits within Windows native command-line limits')
     const encoded = args.at(-1).match(/b64decode\("([A-Za-z0-9+/=]+)"\)/)[1]
     const program = inflateSync(Buffer.from(encoded, 'base64')).toString()
-    assert.ok(program.endsWith(await readFile(new URL('../backend/session-runtime.py', import.meta.url), 'utf8')))
+    assert.ok(program.endsWith((await readFile(new URL('../backend/session-runtime.py', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')))
     for (const tool of ['codex', 'claude', 'kimi']) assert.ok(program.includes(`outpost_${tool}_adapter`))
     assert.equal(program.includes('class Scan:'), false, 'attachment excludes history-search code to fit native Windows command-line limits')
     await assert.rejects(execute(runtime, ['-NoProfile', '-Command', connection.commands.powershell], { env: { ...env, OUTPOST_SSH_FAIL: '1' } }), error => /SSH exited with code 23/.test(error.stderr))

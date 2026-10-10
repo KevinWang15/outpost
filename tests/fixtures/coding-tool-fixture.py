@@ -133,7 +133,9 @@ while True:
         keyboard_reset_at = None
     temporary_heartbeat.write_text(json.dumps({'pid': pid, 'tool': tool, 'time': time.time(), 'cwd': os.getcwd(),
                                               'args': arguments, 'nativeArgs': native_arguments, 'cliSessionId': cli_session_id,
-                                              'env': {key: value for key, value in os.environ.items() if key.startswith('OUTPOST_SESSION_')}}))
+                                              # Only capture user launch options, never the signaling credential.
+                                              'env': {key: value for key, value in os.environ.items()
+                                                      if key.startswith('OUTPOST_SESSION_') and key != 'OUTPOST_SESSION_TOKEN'}}))
     temporary_heartbeat.replace(heartbeat)
     ready()
     if select.select([sys.stdin], [], [], 0.1)[0]:

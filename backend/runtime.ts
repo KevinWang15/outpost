@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { deflateSync } from 'node:zlib'
 import { quote } from './shell'
 
+// Windows checkouts must produce the same compact SSH payload as Unix checkouts.
+const readSource = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const modules = [
   ['outpost_coding_protocol', './coding_protocol.py'],
   ['outpost_activity_state', './activity_state.py'],
@@ -15,8 +17,8 @@ const modules = [
   ['outpost_codex_adapter', './coding_adapters/codex.py'],
   ['outpost_claude_adapter', './coding_adapters/claude.py'],
   ['outpost_kimi_adapter', './coding_adapters/kimi.py'],
-].map(([name, path]) => [name, readFileSync(new URL(path, import.meta.url), 'utf8')])
-const runtime = readFileSync(new URL('./session-runtime.py', import.meta.url), 'utf8')
+].map(([name, path]) => [name, readSource(path)])
+const runtime = readSource('./session-runtime.py')
 function sourceLiteral(source: string) {
   // Raw Python strings preserve source escapes and compress better alongside
   // the unescaped runtime. Fall back when neither delimiter is safe.

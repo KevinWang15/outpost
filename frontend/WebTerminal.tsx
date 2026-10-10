@@ -9,6 +9,9 @@ import { attachTerminalClipboard, type TerminalClipboardState } from './terminal
 import { TerminalSubmit } from './terminal-submit'
 import TerminalKeyboard from './TerminalKeyboard'
 import { terminalKey, type TerminalModifiers } from './terminal-keyboard'
+import { TerminalImagePaste, type TerminalImagePasteState } from './terminal-image-paste'
+import { uploadSessionImage } from './image-upload'
+import { terminalPaste } from './terminal-paste'
 
 export default function WebTerminal({ info, targetId, sessionId, fullscreen, onFullscreenChange, onRelaunch, onManageKey, onSendingChange }: {
   info: WebTerminalInfo
@@ -27,9 +30,27 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
   const [modifiers, setModifiers] = useState<TerminalModifiers>({}), armed = useRef<TerminalModifiers>({})
   const updateModifiers = useCallback((next: TerminalModifiers) => { armed.current = next; setModifiers(next) }, [])
   const [sending, setSending] = useState(false)
+  const composing = useRef(false), imagePaste = useRef<TerminalImagePaste | null>(null)
+  const [imagePasteState, setImagePasteState] = useState<TerminalImagePasteState>(null)
   const [clipboardState, setClipboardState] = useState<TerminalClipboardState>({ canCopy: false, message: '' })
   const clipboard = useRef<ReturnType<typeof attachTerminalClipboard> | null>(null)
   const fitNow = useRef<() => void>(() => {})
+  // A retained image belongs to the session, including after a terminal relaunch.
+  useEffect(() => {
+    const images = new TerminalImagePaste({
+      connection: () => ready.current && socket.current?.readyState === WebSocket.OPEN ? socket.current : null,
+      blocked: () => composing.current,
+      upload: (file, signal) => uploadSessionImage(targetId, sessionId, file, signal),
+      insert: (ws, reference) => submissions.current.send(ws, terminalPaste(reference, terminal.current!.modes.bracketedPasteMode)),
+      onChange: state => {
+        setImagePasteState(state)
+        const busy = composing.current || Boolean(state?.busy)
+        setSending(busy); onSendingChange(busy)
+      },
+    })
+    imagePaste.current = images
+    return () => { images.dispose(); imagePaste.current = null }
+  }, [targetId, sessionId, onSendingChange])
   useEffect(() => {
     const submission = submissions.current
     const term = new Terminal({ cols: info.cols, rows: info.rows, fontSize: 14, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', theme: { background: '#111827', foreground: '#e5e7eb', cursor: '#a7f3d0', selectionBackground: '#374151' }, cursorBlink: true, scrollback: 1000, convertEol: false, logLevel: 'off' })
@@ -61,9 +82,11 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
     window.visualViewport?.addEventListener('resize', scheduleFit)
     window.visualViewport?.addEventListener('scroll', scheduleFit)
     scheduleFit()
+    const connection = () => ready.current && socket.current?.readyState === WebSocket.OPEN ? socket.current : null
     const terminalClipboard = attachTerminalClipboard(term, {
-      connection: () => ready.current && socket.current?.readyState === WebSocket.OPEN ? socket.current : null,
+      connection,
       beforePaste: () => updateModifiers({}),
+      pasteImage: file => imagePaste.current?.paste(file),
       onChange: setClipboardState,
     })
     clipboard.current = terminalClipboard
@@ -132,9 +155,7 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
   }
   async function sendComposer(text: string) {
     if (!ready.current || !terminal.current || socket.current?.readyState !== WebSocket.OPEN) throw new Error('Terminal disconnected. Reconnect to send your draft.')
-    const normalized = text.replace(/\r?\n/g, '\r')
-    const pasted = normalized && terminal.current.modes.bracketedPasteMode ? `\x1b[200~${normalized}\x1b[201~` : normalized
-    const data = pasted + '\r'
+    const data = terminalPaste(text, terminal.current.modes.bracketedPasteMode) + '\r'
     if (new TextEncoder().encode(data).length > 16 * 1024) throw new Error('Input must fit within 16 KiB. Send smaller sections.')
     await submissions.current.send(socket.current, data)
     if (window.matchMedia('(pointer: fine)').matches) terminal.current?.focus()
@@ -153,7 +174,16 @@ export default function WebTerminal({ info, targetId, sessionId, fullscreen, onF
       const data = terminalKey(key, { ...armed.current, ...extra }, terminal.current?.modes.applicationCursorKeysMode)
       if (data !== null) { send(data); updateModifiers({}) }
     }} onCopy={() => void clipboard.current?.copy()} onPaste={() => void clipboard.current?.paste()} />
-    <TerminalComposer targetId={targetId} sessionId={sessionId} connected={connected} onSend={sendComposer} onBusyChange={busy => { setSending(busy); onSendingChange(busy) }} />
+    {imagePasteState && <div className="terminal-image-paste" role={imagePasteState.busy ? 'status' : 'alert'}>
+      <span>{imagePasteState.message}</span>
+      {!imagePasteState.busy && <div>{imagePasteState.canRetry && <button className="button secondary" disabled={!connected || sending} onClick={() => void imagePaste.current?.retry()}>Retry image paste</button>}
+        <button className="button secondary" onClick={() => imagePaste.current?.dismiss()}>Dismiss</button></div>}
+    </div>}
+    <TerminalComposer targetId={targetId} sessionId={sessionId} connected={connected && !imagePasteState?.busy} onSend={sendComposer} onBusyChange={busy => {
+      composing.current = busy
+      const pending = busy || Boolean(imagePaste.current?.busy)
+      setSending(pending); onSendingChange(pending)
+    }} />
     <p className="terminal-hint">A dropped connection is held for {Math.round(info.reconnectSeconds / 60)} minutes. Use Close to detach now.</p>
   </div>
 }

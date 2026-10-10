@@ -7,6 +7,7 @@ export interface TerminalClipboardState { canCopy: boolean; message: string }
 export function attachTerminalClipboard(term: Terminal, options: {
   connection: () => WebSocket | null
   beforePaste: () => void
+  pasteImage: (file: File) => void
   onChange: (state: TerminalClipboardState) => void
 }) {
   let disposed = false, pendingCopy: string | null = null, revision = 0, message = ''
@@ -36,14 +37,41 @@ export function attachTerminalClipboard(term: Terminal, options: {
     const connection = options.connection()
     if (!connection) return
     try {
-      const text = await navigator.clipboard.readText()
+      let text = ''
+      if (navigator.clipboard.read) {
+        const items = await navigator.clipboard.read()
+        if (disposed || connection !== options.connection()) return
+        const images = items.filter(item => item.types.some(type => type.startsWith('image/')))
+        if (images.length > 1) { update('Paste one image at a time.'); return }
+        const image = images[0]
+        if (image) {
+          const type = image.types.find(type => type === 'image/png') ?? image.types.find(type => type.startsWith('image/'))!
+          const blob = await image.getType(type)
+          if (!disposed && connection === options.connection()) {
+            options.beforePaste(); update(''); options.pasteImage(new File([blob], 'clipboard-image', { type }))
+          }
+          return
+        }
+        const item = items.find(item => item.types.includes('text/plain'))
+        if (item) text = await (await item.getType('text/plain')).text()
+      } else text = await navigator.clipboard.readText()
       if (disposed || connection !== options.connection()) return
       options.beforePaste(); update(''); term.paste(text); term.focus()
     } catch {
       if (!disposed && connection === options.connection()) update('Paste was blocked. Use your paste shortcut in the terminal or the text box below.')
     }
   }
-  const nativePaste = () => { options.beforePaste(); update('') }
+  const nativePaste = (event: ClipboardEvent) => {
+    options.beforePaste(); update('')
+    const images = [...(event.clipboardData?.items ?? [])].filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+    if (!images.length) return
+    // Capture before xterm turns the same clipboard item into a text paste.
+    event.preventDefault(); event.stopImmediatePropagation()
+    if (images.length > 1) { update('Paste one image at a time.'); return }
+    const file = images[0].getAsFile()
+    if (file) options.pasteImage(file)
+    else update('Could not read the clipboard image. Copy it again and retry.')
+  }
   const nativeCopy = (event: ClipboardEvent) => {
     if (!term.hasSelection() || !event.clipboardData) return
     event.clipboardData.setData('text/plain', term.getSelection())

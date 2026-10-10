@@ -71,7 +71,7 @@ test('Paste uses the local clipboard and gives a native-shortcut fallback when A
   await page.evaluate(() => navigator.clipboard.writeText('local button paste'))
   await page.getByRole('button', { name: 'Paste', exact: true }).click()
   await expect.poll(() => state.inputs).toEqual([bracket('local button paste')])
-  await page.evaluate(() => { navigator.clipboard.readText = async () => { throw new DOMException('Blocked', 'NotAllowedError') } })
+  await page.evaluate(() => { navigator.clipboard.read = navigator.clipboard.readText = async () => { throw new DOMException('Blocked', 'NotAllowedError') } })
   await page.getByRole('button', { name: 'Paste', exact: true }).click()
   await expect(page.locator('.terminal-clipboard-status')).toContainText('Use your paste shortcut')
   await page.getByLabel('Terminal input', { exact: true }).press('Control+v')
@@ -94,6 +94,7 @@ test('remote OSC 52 copies Unicode locally, accepts both terminators, and never 
   await page.evaluate(() => {
     document.body.dataset.clipboardReads = '0'
     navigator.clipboard.readText = async () => { document.body.dataset.clipboardReads = '1'; return 'private local content' }
+    navigator.clipboard.read = async () => { document.body.dataset.clipboardReads = '1'; return [] }
     navigator.clipboard.writeText = async () => { document.body.dataset.unexpectedCopy = 'true' }
   })
   await output(state, '\x1b]52;c;?\x07\x1b]52;c;invalid!\x07')
@@ -128,6 +129,8 @@ test('a remote copy blocked by the browser can be completed with the Copy button
 test('an asynchronous paste cannot cross a disconnected connection', async ({ page }) => {
   const state = await workspace(page)
   await page.evaluate(() => {
+    // Browsers without Clipboard.read still support text-only button paste.
+    Object.defineProperty(navigator.clipboard, 'read', { value: undefined, configurable: true })
     navigator.clipboard.readText = () => new Promise(resolve => {
       document.body.dataset.pastePending = 'true'
       document.addEventListener('resolve-test-paste', () => resolve('stale paste'), { once: true })

@@ -2,7 +2,7 @@ import type { TerminalInputResult } from '../shared/web-terminal'
 
 const uncertain = 'Delivery was not confirmed. Your draft is kept; check the terminal before retrying.'
 
-/** Only the composer waits for acceptance. Live keystrokes remain a stream.
+/** Draft submissions wait for acceptance. Live keystrokes remain a stream.
  * Never replay a submission after losing its connection or acknowledgement. */
 export class TerminalSubmit {
   private pending: { socket: WebSocket; id: string; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null

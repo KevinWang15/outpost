@@ -88,6 +88,9 @@ jobs:
       - run: node --import tsx --test tests/process.test.js tests/powershell.test.js tests/desktop.test.js tests/local.test.js tests/windows-ssh.test.js
         env:
           OUTPOST_DESKTOP_NATIVE: '1'
+      - run: node --import tsx --test tests/native-clipboard.test.js tests/native-paste.test.js tests/native-session.test.js
+        env:
+          OUTPOST_NATIVE_CLIPBOARD_TEST: '1'
 
   macos-local:
     runs-on: macos-latest
@@ -100,6 +103,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node --import tsx --test tests/process.test.js tests/desktop.test.js
+      - run: node --import tsx --test tests/native-clipboard.test.js tests/native-paste.test.js tests/native-session.test.js
+        env:
+          OUTPOST_NATIVE_CLIPBOARD_TEST: '1'
       - run: brew install tmux dtach
       - run: npm run test:local
       - run: node --import tsx --test tests/desktop.integration.js

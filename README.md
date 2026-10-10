@@ -75,6 +75,30 @@ For local mode on another machine, forward its web port to the **same** port on 
 
 The optional web terminal is also available for direct SSH targets in local mode via the session menu. It uses a separately uploaded encrypted key on your local manager and introduces no accounts. The desktop **Connect** action remains the default.
 
+### Native terminal clipboard on macOS and Windows
+
+Terminals opened with **Connect** or **Launch terminal** in local mode support **F8** to paste an image or text from the local clipboard. On Mac keyboards with media keys, use **Fn+F8**. An image is converted to PNG, uploaded through the existing image channel, and its remote reference is inserted once, without Enter. Both tmux and dtach are supported. Images are limited to 16 MB and clipboard text to 1 MB.
+
+**Shift+F8** retries a failed paste using the retained clipboard snapshot and any completed upload. **F8** starts a new paste from the current clipboard. Reconnecting never automatically resends a paste. If delivery was uncertain, check the terminal before retrying. Each terminal owns its paste operation, so multiple windows do not upload or insert each other's clipboard images. Closing the terminal releases its retained paste. The bridge and uploader run locally and continue to work after the Outpost manager closes.
+
+Outpost uses its existing Node runtime, the OS clipboard APIs (macOS pasteboard or Windows PowerShell in STA mode), and [`node-pty`](https://github.com/microsoft/node-pty) to preserve interactive SSH, terminal resizing and reconnects. Run `npm ci` including optional dependencies; `node-pty` includes binaries for macOS and Windows on x64 and ARM64. Clipboard reads occur only when the terminal receives a local paste shortcut. The helper does not monitor the clipboard or install global keyboard hooks. Copied connection commands remain portable SSH/local-shell scripts and use the terminal emulator's own paste behavior; use a terminal launched by local Outpost for these native clipboard shortcuts.
+
+Terminal apps normally consume Cmd+V/Ctrl+V themselves, before a shell or Node receives anything. F8 works without changing those bindings. To choose another shortcut:
+
+- **iTerm2:** in the profile's **Keys → Key Mappings**, add the desired shortcut, choose **Send Escape Sequence**, and enter `[9001~` for paste or `[9002~` for retry. A dedicated Outpost profile can bind Cmd+V this way. See [iTerm2 key mappings](https://iterm2.com/documentation-preferences-profiles-keys.html).
+- **Windows Terminal:** merge the following entries into the existing `actions` and `keybindings` arrays in Settings → Open JSON file. The example adds Ctrl+Alt+V. Changing `keys` to `ctrl+v` routes that shortcut to Outpost in every Windows Terminal tab, including tabs that are not running Outpost. See [Windows Terminal actions](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions).
+
+```json
+{
+  "actions": [
+    { "id": "User.OutpostPaste", "command": { "action": "sendInput", "input": "\u001b[9001~" } }
+  ],
+  "keybindings": [
+    { "keys": "ctrl+alt+v", "id": "User.OutpostPaste" }
+  ]
+}
+```
+
 ## Run a hosted service
 
 Set `OUTPOST_MODE=hosted` explicitly in `.env` or the server environment. The service requires Node.js 24+, npm 11+, and an OpenSSH client. The backend manages users' SSH credentials and makes management and web-terminal connections directly from the service to their targets. Users need a browser, including a mobile browser; the service cannot launch apps on their computers. The welcome page and session list identify this mode.
@@ -107,8 +131,6 @@ Clipboard shortcuts use the clipboard on the computer running your browser. **Ct
 Select terminal text and press **Ctrl+C**, **Ctrl+Shift+C**, or **Cmd+C** to copy it. Hold **Shift** while selecting if the remote application captures the mouse. With no selection, **Ctrl+C** still interrupts the remote process; the on-screen **Ctrl+C** key always sends an interrupt. The **Copy** and **Paste** buttons need HTTPS (or localhost) and browser clipboard permission; if Paste is blocked, use the native paste shortcut or paste into the text composer. Browsers without `Clipboard.read()` retain text-only button paste; image paste through the browser's native clipboard event remains available.
 
 Remote applications that emit OSC 52 copy requests can also copy to your local clipboard. If the browser requires a click, Outpost keeps the copied text and prompts you to press **Copy**. Remote clipboard read requests are ignored: pasting from your clipboard requires a local action. Applications that only change the remote operating system's clipboard need OSC 52 support to copy through the web terminal.
-
-**Native terminal image paste.** A Bash or PowerShell wrapper receives the bytes sent by the terminal emulator; it does not receive the browser's [`ClipboardEvent`](https://developer.mozilla.org/en-US/docs/Web/API/ClipboardEvent/clipboardData). For example, [Windows Terminal's paste implementation](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalApp/TerminalPage.cpp) reads text and file paths, and [kitty's richer clipboard protocol](https://sw.kovidgoyal.net/kitty/clipboard/) requires explicit terminal support. Native bitmap paste therefore needs an adapter on the user's computer: a terminal hook or forwarded shortcut reads the local image, uploads it for that specific Outpost session, and inserts the returned reference without Enter. Outpost's native attachment scripts do not yet install such an adapter. The web terminal or the session's image dialog can upload images while a native terminal is attached. The remote signal channel does not grant access to the user's clipboard.
 
 Use the **Fullscreen** button to fill the browser window and give the terminal more room. **Exit fullscreen** restores the usual layout without reconnecting. The terminal adapts to phone rotation and the on-screen keyboard, keeping its touch keys, composer, and Close button accessible.
 

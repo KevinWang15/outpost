@@ -6,8 +6,8 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 await rm(new URL('../dist/server/', import.meta.url), { recursive: true, force: true })
 await build({
   absWorkingDir: root,
-  entryPoints: ['backend/server.ts'],
-  outfile: 'dist/server/server.js',
+  entryPoints: ['backend/server.ts', 'backend/native-terminal.ts'],
+  outdir: 'dist/server',
   bundle: true,
   platform: 'node',
   target: 'node24',

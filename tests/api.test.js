@@ -472,7 +472,7 @@ test('desktop launch uses a live validated session and rejects browser-supplied 
   assert.equal(launched.headers['cache-control'], 'no-store')
   assert.deepEqual(launched.json(), terminal)
   assert.equal(launches.length, 1)
-  assert.match(launches[0], /'ssh'.*0<>"\$terminal"/)
+  assert.match(launches[0], process.platform === 'darwin' || process.platform === 'win32' ? /native-terminal\.ts/ : /'ssh'.*0<>"\$terminal"/)
   for (const body of [{ terminalId: terminal.id }, { preferences: { macos: 'macos-iterm2', windows: 'windows-terminal', linux: 'linux-xterm' } }]) {
     assert.equal((await request('POST', `${base}/launch`, body)).statusCode, 200)
     assert.deepEqual(inputs.at(-1), body, 'validated terminal choices reach the desktop launcher')

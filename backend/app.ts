@@ -17,6 +17,7 @@ import { SoftwareClient, type SoftwareService } from './software'
 import { Installations } from './installations'
 import { TargetLifecycle } from './target-lifecycle'
 import { ConnectionTickets } from './connections'
+import { desktopConnectScript } from './native-launch'
 import { withRequestSignal } from './request'
 import { isLoopbackAddress } from '../shared/loopback'
 import { Accounts } from './accounts'
@@ -332,7 +333,7 @@ export async function createApp(options: {
       const target = await requestStore(request).get(request.params.targetId)
       await service.get(target, request.params.sessionId)
       const signalEnvironment = await prepareSignals(owner, target, request.params.sessionId)
-      return desktop!.launch(shell => connectScript(target, request.params.sessionId, shell, signalEnvironment), request.body)
+      return desktop!.launch(shell => desktopConnectScript(target, request.params.sessionId, shell, signalEnvironment), request.body)
     })
   })
   app.get<{ Params: { token: string } }>('/api/connect/:token', async (request, reply) => {

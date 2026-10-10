@@ -11,7 +11,7 @@ import TerminalKeyboard from './TerminalKeyboard'
 import { terminalKey, type TerminalModifiers } from './terminal-keyboard'
 import { TerminalImagePaste, type TerminalImagePasteState } from './terminal-image-paste'
 import { uploadSessionImage } from './image-upload'
-import { terminalPaste } from './terminal-paste'
+import { terminalPaste } from '../shared/terminal-paste'
 
 export default function WebTerminal({ info, targetId, sessionId, fullscreen, onFullscreenChange, onRelaunch, onManageKey, onSendingChange }: {
   info: WebTerminalInfo

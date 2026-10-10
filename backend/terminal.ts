@@ -1,7 +1,7 @@
 import type { Command } from './process'
 import { quote } from './shell'
 
-const disconnectedBanner = `+--------------------------------------------------+
+export const disconnectedBanner = `+--------------------------------------------------+
 |                                                  |
 |                   DISCONNECTED                   |
 |                                                  |
@@ -11,10 +11,10 @@ const disconnectedBanner = `+--------------------------------------------------+
 +--------------------------------------------------+`
 
 // Leave alternate screens and input protocols behind after an abrupt disconnect.
-const terminalReset = '\x1b7\x1b[?1049l\x1b8\x1b[0m\x1b[?25h\x1b[?1l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b[>4;0m'
+export const terminalReset = '\x1b7\x1b[?1049l\x1b8\x1b[0m\x1b[?25h\x1b[?1l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b[>4;0m'
 
-export function terminalScript(command: Command, shell: 'bash' | 'powershell') {
-  if (shell === 'powershell') return powershellScript(command)
+export function terminalScript(command: Command, shell: 'bash' | 'powershell', reconnect = true) {
+  if (shell === 'powershell') return powershellScript(command, reconnect)
   // tmux needs a real PTY path opened read/write, not the /dev/tty alias or a read-only fd.
   return `#!/usr/bin/env bash
 set -euo pipefail
@@ -43,7 +43,7 @@ while true; do
     printf '%s\\n' ${quote(command.label + ' executable is required.')} >&3
     status=127
   fi
-  restore_terminal
+  restore_terminal${reconnect ? '' : '\n  exit "$status"'}
   printf '\\r\\n' >&3
   if (( status != 0 )); then printf '%s\\n' ${quote(command.label + ' exited with code ')}"$status." >&3; fi
   if [[ \${TERM:-dumb} != dumb ]]; then printf '\\033[30;43m' >&3; fi
@@ -62,7 +62,7 @@ done
 `
 }
 
-function powershellScript(command: Command) {
+function powershellScript(command: Command, reconnect: boolean) {
   const encodedArgs = Buffer.from(JSON.stringify(command)).toString('base64')
   return String.raw`# Requires PowerShell 5.1+.
 $ErrorActionPreference = 'Stop'
@@ -113,7 +113,7 @@ try {
       $global:LASTEXITCODE = $connectionCode
     }
     if ($interactive -and $Host.UI.SupportsVirtualTerminal) { [Console]::Write('${terminalReset}') }
-    if ($failure) { Write-Host $failure -ForegroundColor Red }
+    if ($failure) { Write-Host $failure -ForegroundColor Red }${reconnect ? '' : '\n    break'}
     Write-Host ""
     Write-Host '${disconnectedBanner}' -ForegroundColor Black -BackgroundColor Yellow
     Write-Host ""

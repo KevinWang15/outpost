@@ -26,7 +26,7 @@ export function sessionLaunchOptions(input: SessionInput): SessionLaunchOptions 
 }
 
 export const supportedShells = (target: Target) => transportFor(target).shells
-export function sessionAttachOperation(target: Target, id: string, signals?: SignalEnvironment) {
+export function sessionAttachOperation(target: Target, id: string, signals?: Pick<SignalEnvironment, 'OUTPOST_SIGNAL_ENV'>) {
   return `${supportingPath}; exec ${pythonCommand({ action: 'attach', id, context: transportFor(target).context, signals: signals?.OUTPOST_SIGNAL_ENV })}`
 }
 export function connectScript(target: Target, id: string, shell: 'bash' | 'powershell', signals?: SignalEnvironment) {
@@ -46,7 +46,7 @@ export interface SessionService {
   acknowledge(target: Target, id: string, completionId: string): Promise<Session>
   terminate(target: Target, id: string): Promise<Session>
   remove(target: Target, id: string): Promise<void>
-  pasteImage(target: Target, id: string, image: SessionImageInput): Promise<SessionImage>
+  pasteImage(target: Target, id: string, image: SessionImageInput, signal?: AbortSignal): Promise<SessionImage>
 }
 
 export class SessionClient implements SessionService {
@@ -70,7 +70,7 @@ export class SessionClient implements SessionService {
   async acknowledge(target: Target, id: string, completionId: string) { return this.run<Session>(target, { action: 'acknowledge', id, completionId }) }
   async terminate(target: Target, id: string) { return this.run<Session>(target, { action: 'terminate', id }) }
   async remove(target: Target, id: string) { await this.run(target, { action: 'delete', id }) }
-  async pasteImage(target: Target, id: string, image: SessionImageInput) {
+  async pasteImage(target: Target, id: string, image: SessionImageInput, signal?: AbortSignal) {
     const extension = imageExtensions[image.mediaType]
     if (!extension) throw new AppError('Unsupported image type. Use a PNG, JPEG, GIF, or WebP image.', 400)
     const data = image.data
@@ -88,6 +88,6 @@ ${operation} <<'OUTPOST_IMAGE'
 ${data}
 OUTPOST_IMAGE
 `
-    return runProtocol<SessionImage>(transport.script(), script, { env: this.env })
+    return runProtocol<SessionImage>(transport.script(), script, { env: this.env, signal })
   }
 }

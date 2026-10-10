@@ -196,6 +196,7 @@ function LocalConnectModal({
               : `${selected.name} is unavailable on the computer running Outpost. Choose an available app to launch, or copy the command below.`}
         </p>}
         <p>Direct Connect uses your saved preference for the Outpost computer’s OS, then falls back to an available terminal.</p>
+        {available && (available.os === 'macos' || available.os === 'windows') && <p>In a terminal launched here, <kbd>F8</kbd> pastes a local image or text, and <kbd>Shift</kbd> + <kbd>F8</kbd> retries a failed paste.{available.os === 'macos' && ' Hold Fn if your keyboard uses F8 for media controls.'}</p>}
         {launched && <p role="status">{launched}</p>}
         {launchError && <p role="alert" className="error">{launchError}</p>}
       </div>

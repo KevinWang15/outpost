@@ -34,7 +34,9 @@ export class NativePaste<Connection> {
       if (this.clipboard?.kind === 'image') {
         if (!this.uploaded) {
           this.options.status('Uploading clipboard image…')
-          this.uploaded = await this.options.upload(this.clipboard.image, controller.signal)
+          const uploaded = await this.options.upload(this.clipboard.image, controller.signal)
+          if (this.disposed) return
+          this.uploaded = uploaded
         }
         if (this.disposed) return
         if (!this.uploaded.injected) this.insert(connection, this.uploaded.reference)

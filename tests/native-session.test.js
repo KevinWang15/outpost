@@ -15,10 +15,10 @@ function terminal() {
   output.columns = 100; output.rows = 30
   return { input, output, text: () => chunks.join('') }
 }
-async function until(predicate) {
+async function until(predicate, diagnostics = () => '') {
   const end = Date.now() + 8000
   while (Date.now() < end) { if (await predicate()) return; await delay(20) }
-  assert.fail('Timed out waiting for the terminal fixture')
+  assert.fail(`Timed out waiting for the terminal fixture\n${diagnostics()}`)
 }
 
 test('native terminal bridges stay isolated, forward input and resize, and clean up on closure', async () => {
@@ -87,7 +87,7 @@ process.stdout.write('\\x1b[?2004hNATIVE_READY\\r\\n');`
   })
   t.after(async () => { fixture.input.end(); await session })
   const records = async () => { try { return (await readFile(capture, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) } catch { return [] } }
-  await until(() => fixture.text().includes('NATIVE_READY'))
+  await until(() => fixture.text().includes('NATIVE_READY'), fixture.text)
   const first = (await records())[0]
   assert.deepEqual(first, { args: [...args.slice(0, -1), join(homedir(), 'private key')], tty: [true, true, true], cols: 100, rows: 30 })
   fixture.input.write('本地🙂\x1b[A\x03')

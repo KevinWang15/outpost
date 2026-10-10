@@ -83,6 +83,8 @@ Terminals opened with **Connect** or **Launch terminal** in local mode support *
 
 Outpost uses its existing Node runtime, the OS clipboard APIs (macOS pasteboard or Windows PowerShell in STA mode), and [`node-pty`](https://github.com/microsoft/node-pty) to preserve interactive SSH, terminal resizing and reconnects. Run `npm ci` including optional dependencies; `node-pty` includes binaries for macOS and Windows on x64 and ARM64. Clipboard reads occur only when the terminal receives a local paste shortcut. The helper does not monitor the clipboard or install global keyboard hooks. Copied connection commands remain portable SSH/local-shell scripts and use the terminal emulator's own paste behavior; use a terminal launched by local Outpost for these native clipboard shortcuts.
 
+The PTY dependency is pinned to `1.2.0-beta.15`: it includes the upstream fix for the [macOS helper permissions bug in stable 1.1.0](https://github.com/microsoft/node-pty/issues/850), without modifying installed dependencies at runtime.
+
 Terminal apps normally consume Cmd+V/Ctrl+V themselves, before a shell or Node receives anything. F8 works without changing those bindings. To choose another shortcut:
 
 - **iTerm2:** in the profile's **Keys → Key Mappings**, add the desired shortcut, choose **Send Escape Sequence**, and enter `[9001~` for paste or `[9002~` for retry. A dedicated Outpost profile can bind Cmd+V this way. See [iTerm2 key mappings](https://iterm2.com/documentation-preferences-profiles-keys.html).

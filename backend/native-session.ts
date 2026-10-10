@@ -83,6 +83,9 @@ export async function nativeSession(command: Command, options: {
         const exit = pty.onExit(({ exitCode }) => {
           if (connection !== active) return
           connection = null; keys.reset(); active.dispose()
+          // ConPTY owns a worker even after the attached process exits. Release
+          // it before reconnecting or it keeps the Node process alive on Windows.
+          if (process.platform === 'win32') pty.kill()
           disconnected(exitCode ? `${command.label} exited with code ${exitCode}.` : undefined)
         })
       } catch (error) { disconnected((error as Error).message) }

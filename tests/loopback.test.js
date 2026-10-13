@@ -30,10 +30,10 @@ test('listeners reject public interfaces and normalize localhost to a loopback a
   assert.equal(loopbackHost('localhost'), '127.0.0.1')
   assert.equal(loopbackHost('::1'), '::1')
   for (const host of ['0.0.0.0', '::', '192.0.2.10', 'example.com', '']) {
-    assert.throws(() => loopbackHost(host), /only supports loopback/)
+    assert.throws(() => loopbackHost(host), /listeners require loopback/)
   }
 })
 
 test('Vite rejects a public host override before opening a listener', async () => {
-  await assert.rejects(createServer({ server: { host: '0.0.0.0' } }), /only supports loopback/)
+  await assert.rejects(createServer({ server: { host: '0.0.0.0' } }), /listeners require loopback/)
 })

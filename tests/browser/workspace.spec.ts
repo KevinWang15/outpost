@@ -1,10 +1,10 @@
 import { desktopAvailability } from './terminal-fixture'
-import { codingIdentity } from './session-fixture'
+import { sessionFixture } from './session-fixture'
 import { healthySoftware } from './software-fixture'
 import { expect, test } from '@playwright/test'
-import { codingToolLabels, type Target, type Session } from '../../shared/session-manager'
+import { codingToolLabels, type Target, type Session, type SessionInput } from '../../shared/session-manager'
 
-for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.entries(codingToolLabels)) test(`${backend} + ${tool}: target configuration, session creation, connection, filtering, and mobile layout`, async ({ page }) => {
+for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.entries(codingToolLabels)) test(`${backend} + ${tool}: target configuration, session creation, connection, filtering, and mobile layout`, async ({ page }, testInfo) => {
   const configuredBackends = backend === 'tmux' && tool === 'codex' ? ['tmux', 'dtach'] : [backend]
   if (backend === 'tmux') await page.addInitScript(() => Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }))
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -27,7 +27,8 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
     } else if (path.endsWith('/software')) result = healthySoftware(targets[0].backends, targets[0].tools)
     else if (path.endsWith('/sessions') && method === 'GET') result = { sessions, registryPath: '/root/.outpost/sessions.json' }
     else if (path.endsWith('/sessions') && method === 'POST') {
-      const session: Session = { ...codingIdentity((route.request().postDataJSON()).tool, '55eef465-9d0f-4992-8f1a-859dc977f7f5'), ...route.request().postDataJSON(), id: '55eef465-9d0f-4992-8f1a-859dc977f7f5', createdAt: new Date().toISOString(), lastConnectedAt: null, activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', socketPath: '/root/.outpost/sockets/55eef465.sock' }
+      const input: SessionInput = route.request().postDataJSON()
+      const session = sessionFixture({ ...input, id: '55eef465-9d0f-4992-8f1a-859dc977f7f5' })
       sessions.push(session); result = session
     } else if (path.endsWith('/connect')) result = { commands, expiresAt: new Date(Date.now() + 900000).toISOString(), mode: 'local', desktop: desktopAvailability() }
     else return route.fulfill({ status: 404, json: { message: 'Not found' } })
@@ -35,7 +36,7 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
   })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Your next session starts here.' })).toBeVisible()
-  await page.screenshot({ path: 'test-results/welcome.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('welcome.png'), fullPage: true })
   await page.getByRole('button', { name: 'Add your first target' }).click()
   await page.getByRole('textbox', { name: 'Target name' }).fill('Development')
   await page.getByRole('textbox', { name: 'Host or SSH alias' }).fill('dev.example.com')
@@ -46,8 +47,8 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
     await page.getByRole('checkbox', { name: 'dtach', exact: true }).check()
   }
   if (configuredBackends.length === 2) await page.getByRole('checkbox', { name: 'dtach', exact: true }).check()
-  await page.screenshot({ path: `test-results/add-target-${backend}.png`, fullPage: true })
-  await expect(page.getByRole('dialog').locator('.form-note')).toContainText('Adding an instance saves its settings')
+  await page.screenshot({ path: testInfo.outputPath('add-target.png'), fullPage: true })
+  await expect(page.getByRole('dialog').locator('.form-note')).toContainText('Adding a target saves its settings')
   await page.getByRole('checkbox', { name: 'Kimi', exact: true }).check()
   await page.getByRole('checkbox', { name: 'Claude', exact: true }).check()
   await page.getByRole('dialog').getByRole('button', { name: 'Add target', exact: true }).click()
@@ -78,7 +79,7 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
   if (backend === 'tmux' && tool === 'codex') {
     await page.setViewportSize({ width: 390, height: 844 })
     await expect.poll(() => page.getByRole('dialog').evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth)).toBe(true)
-    await page.screenshot({ path: 'test-results/session-options-mobile.png', fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath('session-options-mobile.png'), fullPage: true })
     await page.setViewportSize({ width: 1440, height: 1000 })
   }
   await page.getByRole('dialog').getByRole('button', { name: 'Create session', exact: true }).click()
@@ -108,7 +109,7 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
   }
   await expect(page.getByRole('dialog')).toContainText(`${toolLabel} keeps running`)
   await expect(page.getByRole('dialog')).toContainText(`Coding tool: ${toolLabel}`)
-  await page.screenshot({ path: 'test-results/connect.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('connect.png'), fullPage: true })
   await page.getByRole('button', { name: 'Done', exact: true }).click()
   await page.reload()
   await page.getByRole('button', { name: /^Connection options for / }).click()
@@ -121,11 +122,11 @@ for (const backend of ['tmux', 'dtach']) for (const [tool, toolLabel] of Object.
   await page.getByRole('textbox', { name: 'Search sessions' }).fill('nothing-matches')
   await expect(page.getByText('No sessions match')).toBeVisible()
   await page.getByRole('textbox', { name: 'Search sessions' }).fill('')
-  await page.screenshot({ path: 'test-results/workspace.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('workspace.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: 'test-results/mobile.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('mobile.png'), fullPage: true })
   expect(errors).toEqual([])
 })
 

@@ -1,12 +1,12 @@
 """Coding CLI contracts and bounded, read-only conversation discovery on the target."""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import datetime
 import json
 import os
 import re
 import time
 from outpost_coding_protocol import adapters
+from outpost_coding_activity import timestamp
 
 
 def clean(value, limit=280):
@@ -14,17 +14,6 @@ def clean(value, limit=280):
         return ''
     value = re.sub(r'\s+', ' ', value)
     return ''.join(c for c in value if ord(c) >= 32 and ord(c) != 127).strip()[:limit]
-
-
-def timestamp(value):
-    try:
-        if isinstance(value, (float, int)):
-            value = datetime.datetime.fromtimestamp(value / 1000 if value > 1e11 else value, datetime.timezone.utc)
-        else:
-            value = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
-        return value.astimezone(datetime.timezone.utc).isoformat()
-    except (ValueError, TypeError, AttributeError, OverflowError, OSError):
-        return None
 
 
 def strings(value, depth=0):

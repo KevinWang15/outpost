@@ -16,7 +16,7 @@ test('same-host targets show all backend badges and fetch live lists on navigati
     createdAt: '2026-09-29T00:00:00Z', lastConnectedAt: '2026-09-29T00:00:00Z',
     activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'detached', socketPath: `/root/.outpost/sockets/${backend}.sock`,
   }))
-  sessions.push({ ...codingIdentity((sessions[1]).tool, 'dtach-ready'), ...sessions[1], id: 'dtach-ready', name: 'dtach ready', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', lastConnectedAt: null })
+  sessions.push({ ...sessions[1], ...codingIdentity(sessions[1].tool, 'dtach-ready'), id: 'dtach-ready', name: 'dtach ready', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', lastConnectedAt: null })
   const reads: Record<string, number> = { tmux: 0, dtach: 0 }
   await page.route('**/api/**', async route => {
     if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })

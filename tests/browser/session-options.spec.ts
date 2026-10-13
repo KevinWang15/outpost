@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { healthySoftware } from './software-fixture'
+import { sessionFixture } from './session-fixture'
+import type { SessionInput } from '../../shared/session-manager'
 
 test('environment input rejects invalid and duplicate names without submitting, then preserves remaining rows', async ({
   page,
 }) => {
-  const created: Record<string, unknown>[] = []
+  const created: SessionInput[] = []
   await page.route('**/api/**', async (route) => {
     if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
@@ -31,12 +33,7 @@ test('environment input rejects invalid and duplicate names without submitting, 
       created.push(route.request().postDataJSON())
       return route.fulfill({
         status: 201,
-        json: {
-          ...created.at(-1),
-          id: 'work',
-          backend: 'tmux',
-          activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle',
-        },
+        json: sessionFixture({ ...created.at(-1), id: 'work' }),
       })
     }
     if (path.endsWith('/sessions'))

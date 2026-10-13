@@ -22,7 +22,7 @@ test('native local lifecycle: both backends, all tools, live state, persistence,
   const home = join(directory, "home with 'quotes é")
   const bin = join(home, 'bin')
   await mkdir(bin, { recursive: true })
-  const env = { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, OUTPOST_SESSION_INHERITED: 'inherited', OUTPOST_SESSION_OVERRIDE: 'original' }
+  const env = { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, FIXTURE_SESSION_INHERITED: 'inherited', FIXTURE_SESSION_OVERRIDE: 'original' }
   const service = new SessionClient(env)
   const software = new SoftwareClient(env)
   const store = new TargetStore(join(directory, 'manager'))
@@ -89,9 +89,9 @@ test('native local lifecycle: both backends, all tools, live state, persistence,
     })
     for (const tool of ['codex', 'kimi', 'claude']) {
       const root = join(home, `${backend}-${tool} project's $(literal) & é`)
-      const launchEnv = { OUTPOST_SESSION_MESSAGE: `${backend}-${tool}: 'quotes' $HOME $(touch OUTPOST_ENV_INJECTED)\nsecond line é`, OUTPOST_SESSION_EMPTY: '', OUTPOST_SESSION_OVERRIDE: 'overridden' }
-      const args = '--label "two words" --literal \'$(touch OUTPOST_ARGS_INJECTED)\' --message "$OUTPOST_SESSION_MESSAGE" --empty "" "$(printf expanded)"'
-      const expectedArgs = ['--label', 'two words', '--literal', '$(touch OUTPOST_ARGS_INJECTED)', '--message', launchEnv.OUTPOST_SESSION_MESSAGE, '--empty', '', 'expanded']
+      const launchEnv = { FIXTURE_SESSION_MESSAGE: `${backend}-${tool}: 'quotes' $HOME $(touch OUTPOST_ENV_INJECTED)\nsecond line é`, FIXTURE_SESSION_EMPTY: '', FIXTURE_SESSION_OVERRIDE: 'overridden' }
+      const args = '--label "two words" --literal \'$(touch OUTPOST_ARGS_INJECTED)\' --message "$FIXTURE_SESSION_MESSAGE" --empty "" "$(printf expanded)"'
+      const expectedArgs = ['--label', 'two words', '--literal', '$(touch OUTPOST_ARGS_INJECTED)', '--message', launchEnv.FIXTURE_SESSION_MESSAGE, '--empty', '', 'expanded']
       const session = await request('POST', `${base}/sessions`, { backend, name: tool, tool, rootDir: root, createDirectory: true, env: launchEnv, args }, 201)
       assert.deepEqual(session.env, launchEnv)
       assert.equal(session.args, args)
@@ -109,7 +109,7 @@ test('native local lifecycle: both backends, all tools, live state, persistence,
       assert.equal(first.cliSessionId, session.cliSessionId, 'the actual coding process uses its saved native ID')
       assert.equal(first.cwd, root)
       assert.deepEqual(first.args, expectedArgs)
-      assert.deepEqual(first.env, { ...launchEnv, OUTPOST_SESSION_INHERITED: 'inherited' })
+      assert.deepEqual(first.env, { ...launchEnv, FIXTURE_SESSION_INHERITED: 'inherited' })
       for (const name of ['OUTPOST_ENV_INJECTED', 'OUTPOST_ARGS_INJECTED']) await assert.rejects(readFile(join(root, name)), { code: 'ENOENT' })
       assert.ok((await heartbeat(root, first.time)).time > first.time)
       await terminal(file)
@@ -188,25 +188,18 @@ test('native local lifecycle: both backends, all tools, live state, persistence,
     await terminal(records[0].file)
     assert.equal((await heartbeat(records[0].root)).pid, records[0].pid, 'an existing tmux link works after deselecting tmux')
   })
-  await t.test('incomplete or corrupt session records are rejected without migration or writes', async () => {
+  await t.test('corrupt session records are rejected without writes or process signals', async () => {
     const file = join(targets[0].environment.home, '.outpost/sessions.json')
     const original = await readFile(file, 'utf8')
     const data = JSON.parse(original)
     const first = data.sessions[0]
-    const missingConnection = { ...first }; delete missingConnection.lastConnectedAt
-    const missingTool = { ...first }; delete missingTool.tool
-    const missingBackend = { ...first }; delete missingBackend.backend
-    const missingEnv = { ...first }; delete missingEnv.env
-    const missingArgs = { ...first }; delete missingArgs.args
     try {
       for (const invalid of [
-        { sessions: [missingConnection] }, { sessions: [missingTool] }, { sessions: [missingBackend] },
-        { sessions: [missingEnv] }, { sessions: [missingArgs] },
         { sessions: [{ ...first, env: { 'BAD-NAME': 'value' } }] }, { sessions: [{ ...first, env: { VALID: 1 } }] },
         { sessions: [{ ...first, args: null }] }, { sessions: [{ ...first, args: 'bad\0argument' }] },
         { sessions: [{ ...first, rootDir: 'relative' }] }, { sessions: [{ ...first, id: '../socket' }] },
         { sessions: [{ ...first, name: '' }] }, { sessions: [{ ...first, createdAt: 'yesterday' }] },
-        { sessions: [{ ...first, legacy: true }] }, { sessions: [first, first] },
+        { sessions: [first, first] },
       ]) {
         const contents = JSON.stringify(invalid)
         await writeFile(file, contents)

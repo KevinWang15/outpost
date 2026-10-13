@@ -23,7 +23,7 @@ class KimiSessionStore(CodingSessionStore):
             if not isinstance(root, str):
                 continue
             yield CodingSession(directory.name, root, clean(state.get('title') or state.get('lastPrompt')) or directory.name,
-                                timestamp(state.get('createdAt')), timestamp(state.get('updatedAt')),
+                                timestamp(state.get('createdAt'), unit='milliseconds'), timestamp(state.get('updatedAt'), unit='milliseconds'),
                                 history, self.adapter.storage(home))
 
     def text(self, record):
@@ -46,9 +46,9 @@ class KimiSessionStore(CodingSessionStore):
             return None
         kind = record.get('type')
         if kind in ('turn.prompt', 'turn.steer'):
-            return 'working', record.get('time')
+            return 'working', timestamp(record.get('time'), unit='milliseconds')
         if kind == 'turn.ended':
-            return ('finished' if record.get('reason') in ('completed', 'blocked') else 'idle'), record.get('time')
+            return ('finished' if record.get('reason') in ('completed', 'blocked') else 'idle'), timestamp(record.get('time'), unit='milliseconds')
         if kind == 'turn.cancel' and record.get('target') != 'queued':
-            return 'idle', record.get('time')
+            return 'idle', timestamp(record.get('time'), unit='milliseconds')
         return None

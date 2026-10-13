@@ -124,8 +124,8 @@ export default function InstallModal({
       title={`${job ? 'Installation log' : 'Install'} · ${softwareLabels[softwareId]}`}
       subtitle={
         job
-          ? 'The installation runs on this instance. You can close this window and reopen the log while it runs.'
-          : 'Review or edit this POSIX shell script. Submitting runs exactly this script on the instance as its execution user.'
+          ? 'The installation runs on this target. You can close this window and reopen the log while it runs.'
+          : 'Review or edit this POSIX shell script. Submitting runs exactly this script on the target as its execution user.'
       }
       onClose={onClose}
       className="install-modal"

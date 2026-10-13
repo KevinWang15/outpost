@@ -20,7 +20,6 @@ body.export { overflow: hidden; }
 .grain { position: absolute; inset: -40px; pointer-events: none; opacity: 0.05; mix-blend-mode: overlay; }
 .shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(4, 8, 20, 0.88) 0%, rgba(4, 8, 20, 0.55) 42%, rgba(4, 8, 20, 0.2) 100%); opacity: 0; }
 .dip { position: absolute; inset: 0; background: #02050c; opacity: 0; pointer-events: none; }
-.flash { position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, rgba(170, 210, 255, 0.9), rgba(80, 140, 255, 0.25) 45%, transparent 75%); opacity: 0; pointer-events: none; mix-blend-mode: screen; }
 
 /* Headings */
 .head .eyebrow { display: inline-flex; align-items: center; gap: 12px; font: 700 19px/1 var(--sans); letter-spacing: 0.22em; text-transform: uppercase; color: var(--cyan); }

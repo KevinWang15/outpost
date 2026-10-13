@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { CodingTool } from '../../shared/session-manager'
+import type { CodingTool, Session } from '../../shared/session-manager'
 
 export function codingIdentity(tool: CodingTool, managerId: string) {
   const hash = createHash('sha256').update(`${tool}:${managerId}`).digest('hex')
@@ -7,4 +7,15 @@ export function codingIdentity(tool: CodingTool, managerId: string) {
   const key = { codex: 'CODEX_HOME', claude: 'CLAUDE_CONFIG_DIR', kimi: 'KIMI_CODE_HOME' }[tool]
   const home = { codex: '.codex', claude: '.claude', kimi: '.kimi-code' }[tool]
   return { cliSessionId: tool === 'kimi' ? `session_${uuid.replaceAll('-', '')}` : uuid, cliSessionEnv: { [key]: `/root/${home}` } }
+}
+
+export function sessionFixture(input: Pick<Session, 'id'> & Partial<Session>): Session {
+  const tool = input.tool ?? 'codex'
+  return {
+    name: 'Work', backend: 'tmux', tool, rootDir: '/root/project', env: {}, args: '',
+    createdAt: '2026-09-30T00:00:00Z', lastConnectedAt: null, status: 'idle',
+    socketPath: `/root/.outpost/sockets/${input.id}.sock`,
+    activity: { state: 'idle', updatedAt: null, completionId: null, detail: null },
+    ...codingIdentity(tool, input.id), ...input,
+  }
 }

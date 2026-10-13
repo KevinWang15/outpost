@@ -32,8 +32,8 @@ test('target API requires explicit kinds and rejects transport-specific fields o
   t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true }) })
   const request = (method, url, payload) => app.inject({ method, url, payload, headers: { 'x-outpost-request': '1' } })
   for (const input of [
-    { name: 'Missing kind', backend: 'tmux', host: 'dev' },
-    { name: 'Unknown kind', backend: 'tmux', kind: 'et' },
+    { name: 'Missing kind', backends: ['tmux'], tools: ['codex'], host: 'dev' },
+    { name: 'Unknown kind', backends: ['tmux'], tools: ['codex'], host: 'dev', kind: 'et' },
     { name: 'Local with host', backends: ['tmux'], tools: ['codex', 'kimi', 'claude'], kind: 'local', host: 'dev' },
     { name: 'Local with key', backends: ['tmux'], tools: ['codex', 'kimi', 'claude'], kind: 'local', identityFile: '~/.ssh/id' },
     { name: 'Local with port', backends: ['tmux'], tools: ['codex', 'kimi', 'claude'], kind: 'local', port: 22 },

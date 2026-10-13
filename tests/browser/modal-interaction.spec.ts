@@ -1,5 +1,5 @@
 import { desktopAvailability } from './terminal-fixture'
-import { codingIdentity } from './session-fixture'
+import { sessionFixture } from './session-fixture'
 import { expect, test, type Page } from '@playwright/test'
 import { healthySoftware } from './software-fixture'
 
@@ -14,7 +14,7 @@ async function workspace(page: Page) {
       return route.fulfill({ json: [{ id: 'forms', kind: 'ssh', name: 'Development', host: 'dev.example.com', backends: ['tmux'], tools: ['codex', 'kimi', 'claude'], createdAt: '2026-09-30T00:00:00Z' }] })
     }
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware() })
-    if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions: [{ ...codingIdentity('codex', 'work'), id: 'work', name: 'Work', backend: 'tmux', tool: 'codex', rootDir: '/home/dev/project', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'detached', lastConnectedAt: null }], registryPath: '/home/dev/.outpost/sessions.json' } })
+    if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions: [sessionFixture({ id: 'work', rootDir: '/home/dev/project', status: 'detached' })], registryPath: '/home/dev/.outpost/sessions.json' } })
     if (path.endsWith('/directories')) return route.fulfill({ json: { directories: ['/home/dev/project/'], truncated: false } })
     if (path.endsWith('/connect')) return route.fulfill({ json: { commands: { bash: 'bash-command', powershell: 'powershell-command', cmd: 'cmd-command' }, expiresAt: '2026-09-30T23:59:59Z', mode: 'local', desktop: desktopAvailability() } })
     throw new Error(`Unexpected request: ${path}`)

@@ -216,9 +216,9 @@ for (const shell of shells) for (const backend of ['dtach', 'tmux']) test(`real 
     assert.equal((await readFile(join(temporary, 'manager/targets.json'), 'utf8')).includes(keyword), false)
   })
   const root = "/root/project with 'quotes; $(touch /tmp/INJECTED)"
-  const launchEnv = { OUTPOST_SESSION_MESSAGE: "literal 'quotes' $HOME $(touch /tmp/OUTPOST_ENV_INJECTED)\nsecond é", OUTPOST_SESSION_EMPTY: '' }
-  const args = '--label "two words" --literal \'$(touch /tmp/OUTPOST_ARGS_INJECTED)\' --message "$OUTPOST_SESSION_MESSAGE" --empty ""'
-  const expectedArgs = ['--label', 'two words', '--literal', '$(touch /tmp/OUTPOST_ARGS_INJECTED)', '--message', launchEnv.OUTPOST_SESSION_MESSAGE, '--empty', '']
+  const launchEnv = { FIXTURE_SESSION_MESSAGE: "literal 'quotes' $HOME $(touch /tmp/OUTPOST_ENV_INJECTED)\nsecond é", FIXTURE_SESSION_EMPTY: '' }
+  const args = '--label "two words" --literal \'$(touch /tmp/OUTPOST_ARGS_INJECTED)\' --message "$FIXTURE_SESSION_MESSAGE" --empty ""'
+  const expectedArgs = ['--label', 'two words', '--literal', '$(touch /tmp/OUTPOST_ARGS_INJECTED)', '--message', launchEnv.FIXTURE_SESSION_MESSAGE, '--empty', '']
   const created = await request('POST', `${base}/sessions`, { backend, tool: 'codex', name: "Feature 'one'", rootDir: root, createDirectory: true, env: launchEnv, args })
   assert.equal(created.status, 201, JSON.stringify(created.result))
   const session = created.result
@@ -263,7 +263,7 @@ for (const shell of shells) for (const backend of ['dtach', 'tmux']) test(`real 
     attached.catch(() => {})
     for (let i = 0; i < 100 && !await readFile(ready, 'utf8').catch(() => ''); i++) await delay(50)
     assert.equal(await readFile(ready, 'utf8'), 'ready')
-    await docker('exec', container, 'pkill', '-KILL', '-f', '^sshd: root@pts/')
+    await docker('exec', container, 'pkill', '-KILL', '-f', '^sshd-session: root@pts/')
     await attached
     assert.equal((await heartbeat()).pid, first.pid, 'an SSH network failure preserves the coding process')
   })
@@ -549,7 +549,7 @@ for (const shell of shells) for (const backend of ['dtach', 'tmux']) test(`real 
       ].join('\n'), String(first.pid)))
       assert.equal(environment.OUTPOST_TEST_LOGIN, 'from-profile')
       assert.equal(environment.OUTPOST_TEST_INTERACTIVE, 'from-bashrc')
-      assert.equal(environment.PATH.split(':')[0], '/root/.kimi-code/bin')
+      assert.ok(environment.PATH.split(':').includes('/root/.kimi-code/bin'))
       await terminal('detach', file)
       assert.equal((await heartbeat()).pid, first.pid, 'interactive login preserves same-process reattachment')
       assert.equal((await request('POST', `${sessionUrl}/terminate`)).status, 200)

@@ -53,7 +53,7 @@ systemd-run --scope -p CPUQuota=400% -p MemoryMax=4G \
   nice -n 15 npm run render -- --workers=1
 ```
 
-This caps combined CPU time at the equivalent of four logical CPUs and limits memory to 4 GB. It may require system-manager privileges. Refresh the app screenshots, stills, and poster before exporting the movie. See the [CPU-limited rendering guide](RENDERING.md) for process-wide limits, monitoring, the sharing-copy command, and the measured 1 hour 11 minute full render.
+This caps combined CPU time at the equivalent of four logical CPUs and limits memory to 4 GB. It may require system-manager privileges. Refresh the app screenshots, stills, and poster before exporting the movie. See the [CPU-limited rendering guide](RENDERING.md) for process-wide limits, monitoring, and the sharing-copy command.
 
 ## Brand
 

@@ -33,7 +33,7 @@ export default function ToolPicker({
       </div>
       <small>
         Select the coding tools you want to use for new sessions on this
-        instance.
+        target.
       </small>
     </fieldset>
   )

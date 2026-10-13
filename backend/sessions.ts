@@ -15,7 +15,6 @@ type SessionRequest = { action: 'list' }
   | ({ action: 'create' } & SessionInput)
   | { action: 'get' | 'terminate' | 'delete'; id: string }
   | { action: 'acknowledge'; id: string; completionId: string }
-  | { action: 'paste-image'; id: string; extension: string }
 
 const imageExtensions: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }
 

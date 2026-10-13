@@ -1,9 +1,9 @@
 import { desktopAvailability } from './terminal-fixture'
 import { expect, test, type Page, type Route } from '@playwright/test'
-import type { CodingSessionMatch, CodingTool, Session } from '../../shared/session-manager'
+import type { CodingSessionMatch, CodingTool, Session, SessionInput } from '../../shared/session-manager'
 import { codingToolLabels } from '../../shared/session-manager'
 import { healthySoftware } from './software-fixture'
-import { codingIdentity } from './session-fixture'
+import { codingIdentity, sessionFixture } from './session-fixture'
 
 function match(tool: CodingTool, managerId = 'external'): CodingSessionMatch {
   return { ...codingIdentity(tool, managerId), tool, rootDir: '/home/dev/project', title: `${codingToolLabels[tool]} investigation`,
@@ -20,9 +20,9 @@ async function workspace(page: Page, search: (route: Route) => Promise<unknown>,
     if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware(['tmux', 'dtach'], tools) })
     if (path.endsWith('/coding-sessions/search')) { await search(route); return }
     if (path.endsWith('/sessions') && route.request().method() === 'POST') {
-      const input = route.request().postDataJSON()
+      const input: SessionInput = route.request().postDataJSON()
       writes.push(input)
-      const created = { env: {}, args: '', ...input, id: 'linked-manager-session', createdAt: '2026-09-30T00:00:00Z', lastConnectedAt: null, activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', socketPath: '/home/dev/.outpost/sockets/linked.sock' }
+      const created = sessionFixture({ ...input, id: 'linked-manager-session' })
       sessions.push(created)
       return route.fulfill({ status: 201, json: created })
     }

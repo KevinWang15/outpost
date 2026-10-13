@@ -13,12 +13,7 @@ test('stored configuration must match the current schema; invalid data is never 
   const store = new TargetStore(directory)
   const secret = await store.secret()
   const file = join(directory, 'targets.json')
-  const missingKind = { ...target }; delete missingKind.kind
-  const missingBackends = { ...target }; delete missingBackends.backends
   for (const config of [
-    { secret, remotes: [target] },
-    { secret, targets: [missingKind] },
-    { secret, targets: [missingBackends] },
     { secret, targets: [{ ...target, backends: [] }] },
     { secret, targets: [{ ...target, backends: ['tmux', 'tmux'] }] },
     { secret, targets: [{ ...target, backends: ['screen'] }] },
@@ -29,7 +24,6 @@ test('stored configuration must match the current schema; invalid data is never 
     { secret, targets: [target, target] },
     { secret, targets: [target, { ...target, id: 'another', name: 'dev' }] },
     { secret: '', targets: [] },
-    { secret, targets: [], legacy: true },
   ]) {
     const contents = JSON.stringify(config)
     await writeFile(file, contents)

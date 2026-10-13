@@ -42,7 +42,7 @@ export function useSessionConnection(
             `/targets/${targetId}/sessions/${session.id}/launch`, 'POST', { preferences: terminalPreferences() }, controller.signal,
           )
           if (!controller.signal.aborted) {
-            setNotice({ id: ++noticeId.current, tone: 'success', message: `Opening ${session.name} in ${terminal.name} on the manager computer.` })
+            setNotice({ id: ++noticeId.current, tone: 'success', message: `Opening ${session.name} in ${terminal.name} on the Outpost computer.` })
           }
           return
         } catch (error) {

@@ -6,6 +6,6 @@ import test from 'node:test'
 
 test('native turn lifecycle, unread checkpoints, bounds, and terminal input semantics', { skip: process.platform === 'win32' }, async () => {
   const result = await promisify(execFile)('python3', [fileURLToPath(new URL('./fixtures/coding-activity.py', import.meta.url))])
-  assert.match(result.stderr, /Ran 11 tests/)
+  assert.match(result.stderr, /Ran 12 tests/)
   assert.match(result.stderr, /OK/)
 })

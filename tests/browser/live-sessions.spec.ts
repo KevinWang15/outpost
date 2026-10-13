@@ -31,7 +31,7 @@ test('every target click, manual refresh, and reload reads live without browser 
   await page.route('**/api/**', async route => {
     if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
-    if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware([path.includes('beta') || path.includes('dtach') ? 'dtach' : 'tmux']) })
+    if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware(['dtach']) })
     if (path === '/api/targets') return route.fulfill({ json: targets })
     const id = path.split('/')[3]
     await route.fulfill({ json: sessionList(`${id} live ${++reads[id]}`) })

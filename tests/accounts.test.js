@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash, createHmac } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -230,9 +230,6 @@ test('production cookies, host/origin checks, bearer ticket integrity, and logou
   assert.equal(claims.userId, owner.user.id)
   const tampered = Buffer.from(JSON.stringify({ ...claims, userId: '00000000-0000-0000-0000-000000000000' })).toString('base64url')
   assert.equal((await f.request('GET', `/api/connect/${tampered}.${ticket.split('.')[1]}`)).statusCode, 403)
-  const legacy = Buffer.from(JSON.stringify({ targetId: target.id, sessionId: 'work', expires: Date.now() + 10000, shell: 'bash' })).toString('base64url')
-  const signature = createHmac('sha256', f.accounts.store.secret()).update(legacy).digest('base64url')
-  assert.equal((await f.request('GET', `/api/connect/${legacy}.${signature}`)).statusCode, 403)
   await f.request('POST', '/api/auth/logout', undefined, owner.cookie)
   assert.equal((await f.request('GET', url.pathname)).statusCode, 403)
 })

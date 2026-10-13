@@ -201,7 +201,7 @@ export default function TargetWorkspace({
                 ? `${software.report.environment.home}/.outpost/sessions.json`
                 : '~/.outpost/sessions.json')}
           </code>
-          <small>All managed tmux and dtach sessions on this instance</small>
+          <small>All managed tmux and dtach sessions on this target</small>
         </div>
       </section>
       <SessionList sessions={sessions} error={sessionLoadError} refreshing={refreshing}

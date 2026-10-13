@@ -624,7 +624,7 @@ input[type='checkbox'] { width: 15px; height: 15px; margin: 0; accent-color: var
 .terminal-keyboard {
   position: relative; flex-shrink: 0;
   button { display: flex; align-items: center; justify-content: center; gap: 2px; min-width: 0; min-height: 44px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); padding: 6px 3px; font-size: 13px; white-space: nowrap; cursor: pointer; touch-action: manipulation;
-    &:hover:not(:disabled) { background: var(--surface-hover, #eef2f7); }
+    &:hover:not(:disabled) { background: var(--surface-muted); }
     &:active:not(:disabled) { transform: translateY(1px); }
     &[aria-pressed=true], &[aria-expanded=true] { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
     &:disabled { opacity: .45; cursor: not-allowed; }

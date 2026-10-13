@@ -467,14 +467,13 @@ def attach_session(session):
         # extended-keys=on forwards them to panes that requested them, extkeys
         # marks xterm* terminals as capable so tmux decodes them from the outer
         # terminal, and extended-keys-format pins the CSI u pane encoding on
-        # tmux 3.5+ (3.4 already delivers CSI u; unknown options are ignored
-        # via -q). terminal-features is an array: check before appending so
+        # tmux 3.5+. terminal-features is an array: check before appending so
         # repeated attaches do not grow it.
-        features = subprocess.run(tmux_command(session, 'show-options', '-gqv', 'terminal-features'),
+        features = subprocess.run(tmux_command(session, 'show-options', '-gv', 'terminal-features'),
                                   capture_output=True, text=True, env=tmux_environment())
         wanted = 'xterm*:clipboard:extkeys'
         chain = [] if features.returncode == 0 and wanted in features.stdout.split() \
-            else [';', 'set-option', '-gaq', 'terminal-features', ',' + wanted]
+            else [';', 'set-option', '-ga', 'terminal-features', ',' + wanted]
         # tmux only honors a modifyOtherKeys request (CSI >4;2m), but kitty-only
         # tools (codex, claude) push the kitty protocol tmux cannot parse and
         # actively disable modifyOtherKeys at startup. Poke the request into the
@@ -507,11 +506,11 @@ def attach_session(session):
                 if descriptor is not None:
                     os.close(descriptor)
         command = tmux_command(session, 'set-option', '-g', 'assume-paste-time', '0',
-                                       ';', 'set-option', '-gq', 'set-clipboard', 'on',
-                                       ';', 'set-option', '-gq', 'allow-passthrough', 'on',
-                                       ';', 'set-option', '-gq', 'extended-keys', 'on',
-                                       ';', 'set-option', '-gq', 'extended-keys-format', 'csi-u',
-                                       ';', 'set-option', '-gq', 'focus-events', 'on',
+                                       ';', 'set-option', '-g', 'set-clipboard', 'on',
+                                       ';', 'set-option', '-g', 'allow-passthrough', 'on',
+                                       ';', 'set-option', '-g', 'extended-keys', 'on',
+                                       ';', 'set-option', '-g', 'extended-keys-format', 'csi-u',
+                                       ';', 'set-option', '-g', 'focus-events', 'on',
                                        *chain,
                                        ';', 'attach-session', '-t', '=outpost')
     else:

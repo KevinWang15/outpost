@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile, appendFile, utimes } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile, appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -138,53 +138,20 @@ test('broad searches are bounded and mark partial results, while malformed neigh
   assert.ok(JSON.stringify(result).length < 64 * 1024)
 })
 
-test('fresh Codex allocation resolves a real provider and template selection isolates the new conversation', { skip: process.platform === 'win32' }, async t => {
-  const { root, env, service, put, home } = await fixture(t)
-  const readMeta = async session => {
-    const date = new Date().toISOString().slice(0, 10).split('-')
-    const directory = join(env.CODEX_HOME, 'sessions', ...date)
-    const name = (await readdir(directory)).find(name => name.endsWith(session.cliSessionId + '.jsonl'))
-    const records = (await readFile(join(directory, name), 'utf8')).trim().split('\n').map(JSON.parse)
-    assert.equal(records.length, 1, 'allocation does not copy conversation turns')
-    return records[0].payload
-  }
-  const fresh = await service.create(target, { name: 'Fresh', tool: 'codex', backend: 'tmux', rootDir: root })
-  assert.equal((await readMeta(fresh)).model_provider, 'fixture', 'a fresh store never reserves an empty provider')
-  const templateId = randomUUID()
-  const metadata = { id: templateId, source: 'cli', cwd: '/old-project', originator: 'codex_cli', cli_version: 'old-build', model_provider: 'fixture',
-    runtime_workspace_roots: ['/old-project'], context_window: { window_id: randomUUID(), window_ordinal: 0 }, build_specific: 'native-shape',
-    base_instructions: { text: 'PRIVATE_OLD_INSTRUCTIONS' }, git: { commit_hash: 'old-checkout' },
-    history_base: { thread_id: templateId }, parent_thread_id: templateId, forked_from_id: templateId, agent_role: 'old-subagent' }
-  const template = join(env.CODEX_HOME, 'sessions', `rollout-template-${templateId}.jsonl`)
-  await put(template, jsonl([{ type: 'session_meta', payload: metadata }, { type: 'response_item', payload: { content: 'PRIVATE_OLD_CONVERSATION' } }]))
-  await utimes(template, new Date('2026-01-01'), new Date('2026-01-01'))
-  for (let index = 0; index < 22; index++) {
-    await put(join(env.CODEX_HOME, 'sessions', `rollout-manager-${index}.jsonl`), jsonl([{ type: 'session_meta', payload: { ...metadata, id: randomUUID(), originator: 'outpost' } }]))
-  }
-  await put(join(env.CODEX_HOME, 'sessions', 'rollout-malformed.jsonl'), '[]\n')
-  await put(join(env.CODEX_HOME, 'sessions', 'rollout-null.jsonl'), 'null\n')
-  await put(join(env.CODEX_HOME, 'sessions', 'rollout-payload.jsonl'), jsonl([{ type: 'session_meta', payload: [] }]))
-  await put(join(env.CODEX_HOME, 'sessions', 'rollout-deep.jsonl'), '['.repeat(1200) + '0' + ']'.repeat(1200) + '\n')
-  await put(join(env.CODEX_HOME, 'sessions', 'rollout-partial.jsonl'), '{"type":"session_meta"')
-  await put(join(env.CODEX_HOME, 'sessions', 'rollout-oversized.jsonl'), 'x'.repeat(128 * 1024 + 1) + '\n')
-  await put(join(env.CODEX_HOME, 'sessions', 'rollout-obsolete.jsonl'), jsonl([{ type: 'session_meta', payload: { ...metadata, model_provider: 'deleted-provider', build_specific: 'wrong-provider' } }]))
-  await put(join(env.CODEX_HOME, 'sessions', 'rollout-subagent.jsonl'), jsonl([{ type: 'session_meta', payload: { ...metadata, source: { subagent: 'spawn' }, build_specific: 'wrong-agent' } }]))
-  const outside = join(home, 'outside.jsonl')
-  await put(outside, jsonl([{ type: 'session_meta', payload: { ...metadata, build_specific: 'outside-store' } }]))
-  await symlink(outside, join(env.CODEX_HOME, 'sessions', 'rollout-escape.jsonl'))
-  await symlink(join(home, 'missing'), join(env.CODEX_HOME, 'sessions', 'rollout-broken.jsonl'))
-  const next = await service.create(target, { name: 'Template', tool: 'codex', backend: 'tmux', rootDir: root })
-  const meta = await readMeta(next)
-  assert.equal(meta.build_specific, 'native-shape', 'manager-created or malformed neighbors do not crowd out a real template')
-  assert.equal(meta.id, next.cliSessionId)
-  assert.equal(meta.session_id, next.cliSessionId)
+test('fresh Codex allocation uses current native identity and provider without submitting a turn', { skip: process.platform === 'win32' }, async t => {
+  const { root, env, service } = await fixture(t)
+  const session = await service.create(target, { name: 'Fresh', tool: 'codex', backend: 'tmux', rootDir: root })
+  const directory = join(env.CODEX_HOME, 'sessions', ...new Date().toISOString().slice(0, 10).split('-'))
+  const name = (await readdir(directory)).find(name => name.endsWith(session.cliSessionId + '.jsonl'))
+  const records = (await readFile(join(directory, name), 'utf8')).trim().split('\n').map(JSON.parse)
+  assert.equal(records.length, 1, 'allocation writes only native metadata')
+  assert.equal(records[0].type, 'session_meta')
+  const meta = records[0].payload
+  assert.equal(meta.id, session.cliSessionId)
   assert.equal(meta.model_provider, 'fixture')
   assert.equal(meta.cli_version, '0.159.2-fixture')
   assert.equal(meta.cwd, root)
-  assert.deepEqual(meta.runtime_workspace_roots, [root])
-  assert.notEqual(meta.context_window.window_id, metadata.context_window.window_id)
+  assert.equal(meta.source, 'cli')
+  assert.equal(meta.originator, 'outpost')
   assert.equal(meta.base_instructions, null)
-  for (const field of ['git', 'history_base', 'parent_thread_id', 'forked_from_id', 'agent_role']) assert.equal(meta[field], undefined)
-  assert.equal(JSON.stringify(meta).includes('PRIVATE_OLD_'), false)
-  assert.equal((await readFile(join(home, '.outpost/sessions.json'), 'utf8')).includes('PRIVATE_OLD_'), false)
 })

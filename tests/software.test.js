@@ -80,6 +80,25 @@ test('completed version probes remain successful when watchdog startup is delaye
   for (const software of report.software) assert.equal(software.status, 'installed', JSON.stringify(software))
 })
 
+test('tmux inspection requires 3.5 and accepts newer major versions and patch suffixes', { skip: process.platform === 'win32' }, async t => {
+  const home = await mkdtemp(join(tmpdir(), 'outpost-tmux-version-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+  const bin = join(home, 'bin')
+  await mkdir(bin)
+  await writeFile(join(home, '.bash_profile'), `export PATH=${quote(bin)}:"$PATH"\n`)
+  for (const [id, version] of [['python3', 'Python 3.12.0'], ['codex', 'codex-cli 1.2.3']]) {
+    await writeFile(join(bin, id), `#!/bin/sh\nprintf '%s\\n' ${quote(version)}\n`, { mode: 0o700 })
+  }
+  const client = new SoftwareClient({ ...process.env, HOME: home, SHELL: '/bin/bash' })
+  for (const [version, expected] of [['tmux 2.9', 'broken'], ['tmux 3.4', 'broken'], ['unknown', 'broken'], ['tmux 3.5', 'installed'], ['tmux 3.5a', 'installed'], ['tmux 4.0', 'installed']]) {
+    await writeFile(join(bin, 'tmux'), `#!/bin/sh\nprintf '%s\\n' ${quote(version)}\n`, { mode: 0o700 })
+    const report = await client.inspect({ ...target, backends: ['tmux'], tools: ['codex'] })
+    const tmux = report.software.find(item => item.id === 'tmux')
+    assert.equal(tmux.status, expected, version)
+    assert.equal(tmux.detail, expected === 'broken' ? 'tmux 3.5 or newer is required.' : null)
+  }
+})
+
 test('all installation presets are valid POSIX shell; coding tool presets use official installers', { skip: process.platform === 'win32' }, async () => {
   for (const id of ['bash', 'python3', 'tmux', 'dtach', 'lsof', 'codex', 'kimi', 'claude']) {
     const child = execute('sh', ['-n'])

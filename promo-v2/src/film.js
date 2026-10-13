@@ -18,7 +18,6 @@ const stage = html(`<div class="stage">
   <canvas class="grain" width="480" height="270"></canvas>
   <div class="chapter"></div>
   <div class="captions"><div></div></div>
-  <div class="flash"></div>
   <div class="dip"></div>
   <div class="progress"></div>
 </div>`)
@@ -41,7 +40,6 @@ const chunks = captionChunks(timeline)
 const caption = stage.querySelector('.captions div')
 const chapter = stage.querySelector('.chapter')
 const dip = stage.querySelector('.dip')
-const flash = stage.querySelector('.flash')
 const shade = stage.querySelector('.shade')
 const progress = stage.querySelector('.progress')
 
@@ -82,7 +80,6 @@ function renderFrame(t) {
   dip.style.opacity = 1 - easeInOut(Math.min(inT, outT))
   if (scene.index === scenes.length - 1) dip.style.opacity = clamp((t - (timeline.duration - 1.4)) / 1.4)
   if (scene.index === 0) dip.style.opacity = Math.max(Number(dip.style.opacity), 1 - clamp(t / 0.8))
-  flash.style.opacity = 0
   shade.style.opacity = (shaded[scene.id] ?? 0) * clamp(local / 0.6)
   chapter.innerHTML = scene.chapter ? `<b>${String(scene.index + 1).padStart(2, '0')}</b>${scene.chapter}` : ''
   chapter.style.opacity = scene.chapter ? 0.9 * clamp((local - 0.5) / 0.6) * clamp(toEnd / 0.4) : 0

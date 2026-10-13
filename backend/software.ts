@@ -119,6 +119,11 @@ function status(
     if (!match || (Number(match[1]) === 0 && Number(match[2]) < 9))
       detail = 'dtach 0.9 or newer is required.'
   }
+  if (!detail && id === 'tmux') {
+    const match = version!.match(/^tmux (\d+)\.(\d+)/)
+    if (!match || Number(match[1]) < 3 || (Number(match[1]) === 3 && Number(match[2]) < 5))
+      detail = 'tmux 3.5 or newer is required.'
+  }
   return { id, status: detail ? 'broken' : 'installed', path, version, detail }
 }
 export interface SoftwareService {

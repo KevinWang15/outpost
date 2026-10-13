@@ -48,9 +48,9 @@ tests so `dist/client` is available. Platform and transport tests have additiona
 | --- | --- |
 | `npm run test:integration` | Docker; optionally `OUTPOST_PWSH=pwsh` for PowerShell coverage |
 | `npm run test:deployment` | Linux, Docker, Playwright Chromium, and a completed production build |
-| `npm run test:local` | Linux/macOS, Python, tmux, dtach; `lsof` on macOS |
+| `npm run test:local` | Linux/macOS, Python, tmux 3.5+, dtach; `lsof` on macOS |
 | `npm run test:desktop` | Linux, Xvfb, xauth, and XTerm |
-| `npm run test:coding` | Native Codex, Claude Code, and Kimi Code binaries, Python, tmux |
+| `npm run test:coding` | Native Codex, Claude Code, and Kimi Code binaries, Python, tmux 3.5+ |
 
 The native coding-tool tests use temporary homes and a loopback model fixture.
 They need no provider credentials. Set `OUTPOST_REQUIRE_CODING_TOOLS=1` to fail

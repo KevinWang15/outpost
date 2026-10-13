@@ -21,10 +21,6 @@ if '--version' in sys.argv:
     print(tool + ' test fixture')
     sys.exit(0)
 
-if '--help' in sys.argv:
-    print('Commands: acp session')
-    sys.exit(0)
-
 if tool == 'codex' and sys.argv[1:] == ['app-server']:
     for line in sys.stdin:
         request = json.loads(line)
@@ -133,7 +129,7 @@ while True:
         keyboard_reset_at = None
     temporary_heartbeat.write_text(json.dumps({'pid': pid, 'tool': tool, 'time': time.time(), 'cwd': os.getcwd(),
                                               'args': arguments, 'nativeArgs': native_arguments, 'cliSessionId': cli_session_id,
-                                              'env': {key: value for key, value in os.environ.items() if key.startswith('OUTPOST_SESSION_')}}))
+                                              'env': {key: value for key, value in os.environ.items() if key.startswith('FIXTURE_SESSION_')}}))
     temporary_heartbeat.replace(heartbeat)
     ready()
     if select.select([sys.stdin], [], [], 0.1)[0]:
@@ -154,6 +150,4 @@ while True:
             print('OUTPOST_KEYBOARD_COMPLETE:' + str(keyboard_probes) + '!', flush=True)
         if received(b'exit'):
             break
-        if received(b'ping'):
-            ready()
         input_tail = incoming[-(len(b'OUTPOST_KEYS_END') - 1):]

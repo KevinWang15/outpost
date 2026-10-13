@@ -25,7 +25,7 @@ class ClaudeSessionStore(CodingSessionStore):
                 if index >= 255 or (root and title):
                     break
             try:
-                updated = timestamp(path.stat().st_mtime)
+                updated = timestamp(path.stat().st_mtime, unit='seconds')
             except OSError:
                 scan.skipped += 1
                 continue
@@ -54,7 +54,7 @@ class ClaudeSessionStore(CodingSessionStore):
                 event = self.activity_event(record)
                 if event is None:
                     continue
-                created = timestamp(event[1])
+                created = event[1]
                 if selected is None:
                     selected, newest = (event, offset), created
                     if created is None:
@@ -72,7 +72,7 @@ class ClaudeSessionStore(CodingSessionStore):
         kind = record.get('type')
         message = record.get('message')
         if record.get('isApiErrorMessage') or (kind == 'system' and record.get('subtype') == 'api_error'):
-            return 'idle', record.get('timestamp')
+            return 'idle', timestamp(record.get('timestamp'))
         if not isinstance(message, dict):
             return None
         if kind == 'user':
@@ -81,9 +81,9 @@ class ClaudeSessionStore(CodingSessionStore):
             if isinstance(content, list) and any(isinstance(part, dict) and part.get('type') == 'text'
                 and part.get('text') in ('[Request interrupted by user]', '[Request interrupted by user for tool use]')
                 for part in content):
-                return 'idle', record.get('timestamp')
-            return 'working', record.get('timestamp')
+                return 'idle', timestamp(record.get('timestamp'))
+            return 'working', timestamp(record.get('timestamp'))
         if kind == 'assistant':
             reason = message.get('stop_reason')
-            return ('finished' if reason in ('end_turn', 'stop_sequence', 'max_tokens', 'refusal') else 'working'), record.get('timestamp')
+            return ('finished' if reason in ('end_turn', 'stop_sequence', 'max_tokens', 'refusal') else 'working'), timestamp(record.get('timestamp'))
         return None

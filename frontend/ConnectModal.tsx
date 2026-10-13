@@ -177,7 +177,7 @@ function LocalConnectModal({
         </select>
       </label>
       <p className="terminal-help" id="terminal-help">
-        Choices are ordered by OS, then recommendation. Selecting an app saves your preference for {terminalOSLabels[selected.os]}.
+        Choices are grouped by OS. Selecting an app saves your preference for {terminalOSLabels[selected.os]}.
       </p>
       <div className="desktop-launch">
         {available ? <>

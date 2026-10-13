@@ -80,7 +80,7 @@ class Panel {
     this.group.add(this.glow, this.mesh)
     parent.add(this.group)
   }
-  reset() { this.group.visible = false; this.opacity = 1; this.group.scale.setScalar(1); this.group.rotation.set(0, 0, 0) }
+  reset() { this.group.visible = false; this.group.scale.setScalar(1); this.group.rotation.set(0, 0, 0) }
   show(state, { opacity = 1, scale = 1, glow = 0.35, glowColor = '#3b82f6' } = {}) {
     this.group.visible = opacity > 0.002
     this.painted.update(state)
@@ -116,11 +116,9 @@ function serverTower() {
   const cap = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.5), new THREE.MeshBasicMaterial({ color: '#3b82f6', transparent: true, opacity: 0.35, toneMapped: false, blending: THREE.AdditiveBlending, depthWrite: false }))
   cap.rotation.x = -Math.PI / 2
   cap.position.y = 3.415
-  const shadow = new THREE.Sprite(new THREE.SpriteMaterial({ map: SHADOW, transparent: true, depthWrite: false }))
   const floorGlow = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), new THREE.MeshBasicMaterial({ map: GLOW, color: '#2563eb', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }))
   floorGlow.rotation.x = -Math.PI / 2
   floorGlow.position.y = 0.01
-  shadow.visible = false
   group.add(strip, strip2, cap, floorGlow)
   return { group, body, leds, strips: [strip, strip2], cap, floorGlow }
 }
@@ -204,7 +202,7 @@ function laptop() {
   shadow.rotation.x = -Math.PI / 2
   shadow.position.y = 0.005
   group.add(shadow, base, deck, pad, hinge)
-  return { group, hinge, screen, screenGlow, anchor: new THREE.Vector3(0, 2.2, -1.1) }
+  return { group, hinge, screen, screenGlow }
 }
 
 function desktop() {
@@ -226,7 +224,7 @@ function desktop() {
   shadow.rotation.x = -Math.PI / 2
   shadow.position.y = 0.005
   group.add(shadow, frame, display, neck, foot, screenGlow)
-  return { group, screen, screenGlow, anchor: new THREE.Vector3(0, 3.7, -0.1) }
+  return { group, screen, screenGlow }
 }
 
 // Deterministic particle bursts: positions are a pure function of age.
@@ -303,10 +301,8 @@ export function createWorld(canvas) {
   const dustPoints = dust()
   scene.add(dustPoints)
 
-  const hosts = ['atlas.example.com', 'lab.example.com', 'gpu.example.com']
-  const servers = hosts.map((host, i) => {
+  const servers = Array.from({ length: 3 }, (_, i) => {
     const tower = serverTower()
-    tower.host = host
     tower.home = new THREE.Vector3((i - 1) * 7, 0, 0)
     tower.group.position.copy(tower.home)
     tower.panels = [0, 1, 2].map(() => new Panel(scene))
@@ -385,7 +381,6 @@ export function createWorld(canvas) {
       server.group.position.copy(server.home)
       server.group.scale.setScalar(1)
       for (const panel of server.panels) panel.reset()
-      server.alert = false
     }
     for (const device of Object.values(devices)) { device.group.visible = false; device.group.rotation.set(0, 0, 0); device.group.scale.setScalar(1) }
     devices.laptop.hinge.rotation.x = -0.24

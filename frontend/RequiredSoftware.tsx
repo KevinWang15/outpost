@@ -96,7 +96,7 @@ export default function RequiredSoftware({
             <strong>Required Software</strong>
             <small>
               {checking
-                ? 'Checking this instance…'
+                ? 'Checking this target…'
                 : error
                   ? 'Could not check software'
                   : allGood
@@ -121,7 +121,7 @@ export default function RequiredSoftware({
       {open && (
         <div className="software-body">
           <p className="software-explanation">
-            Checks the instance’s interactive login PATH and executable
+            Checks the target’s interactive login PATH and executable
             versions. Authentication is handled by each coding tool when you
             connect.
           </p>
@@ -193,7 +193,7 @@ export default function RequiredSoftware({
             <span>
               {report
                 ? `Checked ${new Date(report.checkedAt).toLocaleTimeString()}`
-                : 'Software checks run live on this instance.'}
+                : 'Software checks run live on this target.'}
             </span>
             <button className="button secondary" onClick={editRequirements}>
               Configure required software

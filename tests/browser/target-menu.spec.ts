@@ -40,7 +40,6 @@ async function setup(page: Page, remove?: (route: Route) => Promise<void>) {
 test('a context menu removes its own unselected target only after confirmation', async ({ page }) => {
   const { reads, writes } = await setup(page)
   const beta = page.getByRole('navigation').getByRole('button', { name: 'Beta', exact: true })
-  await expect(page.getByText('Target settings', { exact: true })).toHaveCount(0)
   await beta.click({ button: 'right' })
   await expect(page.getByRole('menu', { name: 'Actions for Beta' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeVisible()

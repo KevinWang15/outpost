@@ -7,7 +7,6 @@ type Lookup = { targetId: string; path: string; data?: DirectorySuggestions; err
 
 export default function TargetDirectoryInput({ targetId }: { targetId: string }) {
   const id = useId()
-  const field = useRef<HTMLDivElement>(null)
   const control = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
   const [path, setPath] = useState('')
@@ -74,7 +73,7 @@ export default function TargetDirectoryInput({ targetId }: { targetId: string })
     }
   }
 
-  return <div ref={field} className="directory-field" onBlur={event => {
+  return <div className="directory-field" onBlur={event => {
     if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setActive(-1) }
   }}>
     <label id={`${id}-label`}>Root directory</label>

@@ -198,7 +198,7 @@ export default function SessionForm({
             </button>
             <small>
               Values are passed literally and saved with this session on the
-              instance.
+              target.
             </small>
           </fieldset>
         </details>

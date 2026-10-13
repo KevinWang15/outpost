@@ -69,7 +69,7 @@ for (const mode of [undefined, 'local']) test(`relocated production bundle in ${
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"\s]+)"/g)].map(match => match[1])
   assert.ok(assets.length >= 2)
   for (const path of assets) assert.equal((await fetch(`${address}${path}`)).status, 200)
-  for (const path of ['/api/missing', '/server/target.py', '/server/server.js.map']) assert.equal((await fetch(`${address}${path}`)).status, 404)
+  for (const path of ['/api/missing', '/server/session-runtime.py', '/server/signal-relay.py', '/server/coding_adapters/codex.py', '/server/server.js.map']) assert.equal((await fetch(`${address}${path}`)).status, 404)
 })
 
 test('explicit hosted startup enables accounts and protects workspaces without falling back to local mode', { timeout: 20_000 }, async t => {

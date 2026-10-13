@@ -1,6 +1,6 @@
 import { desktopAvailability } from './terminal-fixture'
 import { terminalApps, type DesktopTerminal, type DesktopLaunchInput } from '../../shared/terminals'
-import { codingIdentity } from './session-fixture'
+import { sessionFixture } from './session-fixture'
 import { healthySoftware } from './software-fixture'
 import { expect, test, type Page, type Route } from '@playwright/test'
 
@@ -16,7 +16,7 @@ async function workspace(page: Page, terminal: DesktopTerminal | null, launch: (
   await page.route('**/api/**', async route => {
     if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname
-    if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware([path.includes('beta') || path.includes('dtach') ? 'dtach' : 'tmux']) })
+    if (path.endsWith('/software')) return route.fulfill({ json: healthySoftware(['tmux']) })
     if (path.endsWith('/launch')) {
       expect(route.request().method()).toBe('POST')
       expect(route.request().headers()['x-outpost-request']).toBe('1')
@@ -25,7 +25,7 @@ async function workspace(page: Page, terminal: DesktopTerminal | null, launch: (
       return launch(route)
     }
     if (path === '/api/targets') return route.fulfill({ json: [{ id: 'desktop-target', name: 'Dev', tools: ['codex', 'kimi', 'claude'], kind: 'ssh', host: 'dev', backends: ['tmux'], createdAt: '2026-09-29T00:00:00Z', environment: { home: '/root', platform: 'linux', username: 'root', uid: 0, shell: '/bin/bash',  } }] })
-    if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions: [{ ...codingIdentity('kimi', 'session'), id: 'session', name: 'Desktop session', backend: 'tmux', tool: 'kimi', rootDir: '/root/projects/app', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', lastConnectedAt: null }], registryPath: '/root/.outpost/sessions.json' } })
+    if (path.endsWith('/sessions')) return route.fulfill({ json: { sessions: [sessionFixture({ id: 'session', name: 'Desktop session', tool: 'kimi', rootDir: '/root/projects/app' })], registryPath: '/root/.outpost/sessions.json' } })
     if (path.endsWith('/connect')) {
       connections.push(path)
       return route.fulfill({ json: { commands: { bash: 'bash-command', powershell: 'powershell-command', cmd: 'cmd-command' }, expiresAt: new Date(Date.now() + 900000).toISOString(), mode: 'local', desktop: desktopAvailability(terminal?.os ?? 'linux', terminal ? [terminal.id] : []) } })
@@ -62,7 +62,7 @@ test('Connect directly launches once without preparing commands or opening a mod
   expect(connections).toEqual([])
   await pending!.fulfill({ json: windowsTerminal })
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.locator('.toast')).toContainText('Opening Desktop session in Windows Terminal on the manager computer.')
+  await expect(page.locator('.toast')).toContainText('Opening Desktop session in Windows Terminal on the Outpost computer.')
   await expect(connect).toBeEnabled()
   await expect(options).toBeEnabled()
   expect(connections).toEqual([])
@@ -187,7 +187,7 @@ for (const [os, userAgent, terminal] of [
   ['macOS', 'Macintosh; Intel Mac OS X', terminalApps.find(app => app.id === 'macos-iterm2')!],
   ['Windows', 'Windows NT 10.0', windowsTerminal],
   ['Linux', 'X11; Linux x86_64', gnomeTerminal],
-] as const) test(`${os}: OS groups and recommendations come first while every supported terminal remains visible`, async ({ page }) => {
+] as const) test(`${os}: OS groups follow the browser and manager while available terminals are labeled`, async ({ page }) => {
   await page.addInitScript(agent => Object.defineProperty(navigator, 'userAgent', { value: agent }), userAgent)
   await workspace(page, terminal)
   await openOptions(page)

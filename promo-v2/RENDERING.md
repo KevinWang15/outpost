@@ -1,6 +1,6 @@
 # Rendering the movie with limited CPU
 
-The full movie rendered in **1 hour 11 minutes** on 2026-10-09 while CPU and memory use were capped. This guide records the commands and measurements so future renders can leave capacity for other work.
+Cap CPU and memory use during rendering to leave capacity for other work.
 
 ## Prepare the assets
 
@@ -23,7 +23,7 @@ npm run poster
 
 ## Cap the entire render process
 
-On Linux with systemd, run the following **from `promo-v2`**. It uses a system service, so the account needs permission to create systemd services; the recorded render ran as root.
+On Linux with systemd, run the following **from `promo-v2`**. It uses a system service, so the account needs permission to create systemd services.
 
 ```sh
 systemd-run --wait --pipe --collect --unit=outpost-promo-render \
@@ -53,28 +53,9 @@ systemctl show outpost-promo-render.service \
 
 The renderer prints its completed frame count, average frames per second, and estimated remaining time every 300 frames. CPU time sums work across threads, so it can exceed elapsed wall time.
 
-## Measured runtime
-
-The 2026-10-09 render used a Linux host with **48 logical CPUs and 62 GiB RAM**, one browser worker, a 4 GB memory ceiling, and priority 15. It began with `CPUQuota=400%` and was raised to `800%` after checking available host capacity. CPU affinity was also restricted during the run, first to four and then to eight logical CPUs. The timing therefore reflects a run with changing limits, not a fixed four- or eight-CPU benchmark.
-
-The output was **1920 × 1080 at 30 fps**, with **5,428 frames** and a duration of **180.93 seconds**. Existing narration and music were reused.
-
-| Measurement | Result |
-| --- | --- |
-| Full render, including audio mixing and setup | **1 h 11 min 15 s** |
-| Renderer's `Done in` time, measured after audio mixing | 4,241 s (1 h 10 min 41 s) |
-| Total CPU time across the render service | 4 h 49 min 14 s |
-| Peak memory / peak swap | 1.2 GB / 0 bytes |
-| Master MP4 size | 64,793,042 bytes (61.79 MiB) |
-| Creating the smaller sharing copy | **2 min 14 s** |
-| Sharing-copy peak memory | About 515 MB |
-| Sharing-copy size | 9,791,249 bytes (9.34 MiB) |
-
-The main render plus sharing encode took about **1 h 13 min 29 s**, excluding dependency installation, asset capture, validation, and upload. A lower CPU quota, a slower host, or changed scenes can increase the time. Check the renderer's progress estimate rather than assuming this measurement applies to every machine.
-
 ## Create a smaller sharing copy
 
-After the master finishes, run this **from `promo-v2`**. This is the same encoding configuration used for the measured sharing copy, with a four-CPU budget and a 2 GB memory ceiling:
+After the master finishes, run this **from `promo-v2`**. This uses a four-CPU budget and a 2 GB memory ceiling:
 
 ```sh
 systemd-run --wait --pipe --collect --unit=outpost-promo-share \
@@ -89,4 +70,4 @@ systemd-run --wait --pipe --collect --unit=outpost-promo-share \
   output/outpost-promo-v2-github.mp4
 ```
 
-This retains the resolution, frame rate, and subtitle track while lowering video and audio bitrates. Keep the master for higher-quality distribution. File size depends on the movie content; the recorded sharing copy was below 10 MiB. Both movie files remain local and are excluded from Git.
+This retains the resolution, frame rate, and subtitle track while lowering video and audio bitrates. Keep the master for higher-quality distribution. File size depends on the movie content. Both movie files remain local and are excluded from Git.

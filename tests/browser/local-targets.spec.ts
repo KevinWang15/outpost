@@ -1,5 +1,5 @@
-import { codingIdentity } from './session-fixture'
-import type { CodingTool } from '../../shared/session-manager'
+import { sessionFixture } from './session-fixture'
+import type { CodingTool, Session, SessionInput } from '../../shared/session-manager'
 import { healthySoftware } from './software-fixture'
 import { expect, test } from '@playwright/test'
 import { desktopAvailability } from './terminal-fixture'
@@ -10,7 +10,7 @@ for (const platform of ['linux', 'darwin', 'win32']) test(`${platform}: add a lo
   await page.addInitScript(() => localStorage.setItem('outpost-terminal-apps', JSON.stringify({ windows: 'windows-terminal', macos: 'macos-terminal', linux: 'linux-xterm' })))
   const terminal = terminalApps.find(app => app.id === (usesWsl ? 'windows-terminal' : platform === 'darwin' ? 'macos-terminal' : 'linux-xterm'))!
   let target: Record<string, unknown> | undefined
-  let session: Record<string, unknown> | undefined
+  let session: Session | undefined
   let reads = 0, launches = 0
   const commands = usesWsl ? { powershell: 'local-wsl-powershell', cmd: 'local-wsl-cmd' } : { bash: 'local-bash-command' }
   await page.route('**/api/**', async route => {
@@ -30,7 +30,8 @@ for (const platform of ['linux', 'darwin', 'win32']) test(`${platform}: add a lo
     if (path.endsWith('/software')) return route.fulfill({ json: { ...healthySoftware(['dtach'], target!.tools as CodingTool[]), environment: { home: '/home/dev', username: 'dev', uid: 1000, shell: '/bin/bash', platform: 'linux' } } })
     if (path.endsWith('/directories')) return route.fulfill({ json: { directories: ['~/projects/local/'], truncated: false } })
     if (path.endsWith('/sessions') && method === 'POST') {
-      session = { ...codingIdentity((route.request().postDataJSON()).tool, 'session'), ...route.request().postDataJSON(), id: 'session', backend: 'dtach', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', lastConnectedAt: null, createdAt: new Date().toISOString() }
+      const input: SessionInput = route.request().postDataJSON()
+      session = sessionFixture({ ...input, id: 'session' })
       return route.fulfill({ json: session })
     }
     if (path.endsWith('/sessions')) {

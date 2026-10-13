@@ -26,6 +26,7 @@ export default function TargetForm({
   const [kind, setKind] = useState<'ssh' | 'local'>('ssh')
   const [environment, setEnvironment] = useState<LocalEnvironment | null>(null)
   useEffect(() => {
+    if (hosted) return
     const controller = new AbortController()
     api<LocalEnvironment>('/environment', 'GET', undefined, controller.signal)
       .then(setEnvironment)
@@ -33,7 +34,7 @@ export default function TargetForm({
         if (!controller.signal.aborted) setError(error.message)
       })
     return () => controller.abort()
-  }, [])
+  }, [hosted])
   const [tools, setTools] = useState<CodingTool[]>(['codex'])
   const [backends, setBackends] = useState<SessionBackend[]>(['tmux'])
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -172,7 +173,7 @@ export default function TargetForm({
             {kind === 'ssh'
               ? hosted ? 'Uses your account’s Outpost SSH key.' : 'Uses your SSH config and agent.'
               : 'Uses your local account.'}{' '}
-            Adding an instance saves its settings and checks required software.
+            Adding a target saves its settings and checks required software.
             Install missing software from its detail page after reviewing the
             installation script.
           </p>

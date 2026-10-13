@@ -21,7 +21,7 @@ export default function AuthPage({ path }: { path: string }) {
   const [name, setName] = useState(''), [password, setPassword] = useState(''), [confirmation, setConfirmation] = useState('')
   const [showPassword, setShowPassword] = useState(false), [busy, setBusy] = useState(false)
   const [error, setError] = useState(''), [unverified, setUnverified] = useState(false)
-  const [message, setMessage] = useState(parameters.has('created') ? 'Account created. Check your email for a verification link.' : '')
+  const [message, setMessage] = useState('')
   const [devUrl, setDevUrl] = useState('')
   const [complete, setComplete] = useState(false)
   const titles = { login: 'Welcome back.', signup: 'Give your work a home.', verify: 'Verify your email.', forgot: 'Forgot your password?', reset: 'Choose a new password.' }

@@ -25,6 +25,7 @@ for name, path in [
 
 from outpost_activity_state import Activity
 from outpost_coding_protocol import adapters
+from outpost_coding_activity import timestamp
 from outpost_terminal_attachment import InputObserver
 
 ID = '12345678-1234-4123-8123-123456789012'
@@ -70,6 +71,20 @@ class ActivityTests(unittest.TestCase):
                                 'stop_reason': None if state == 'working' else 'end_turn', 'content': 'PRIVATE_TURN_CONTENT'}}
         return {'type': 'turn.prompt' if state == 'working' else 'turn.ended', 'time': 1790812800000,
                 'agentId': 'main', 'turnId': 0, 'reason': 'completed' if state == 'finished' else 'cancelled'}
+
+    def test_timestamps_use_explicit_units_and_timezone_aware_iso(self):
+        expected = '2026-10-01T00:00:00+00:00'
+        self.assertEqual(timestamp('2026-10-01T08:00:00+08:00'), expected)
+        self.assertEqual(timestamp(1790812800, unit='seconds'), expected)
+        self.assertEqual(timestamp(1790812800000, unit='milliseconds'), expected)
+        for value in (True, False, 1790812800, '2026-10-01T00:00:00', None, 'invalid'):
+            self.assertIsNone(timestamp(value))
+        for unit in ('seconds', 'milliseconds'):
+            for value in (True, False, float('nan'), float('inf'), '2026-10-01T00:00:00Z'):
+                self.assertIsNone(timestamp(value, unit=unit))
+        for tool, adapter in adapters().items():
+            event = adapter.activity_event(self.event(tool, 'finished'))
+            self.assertEqual(event[1], expected, tool)
 
     def test_lifecycle_checks_are_shared_and_new_completions_survive_stale_checks(self):
         for tool in adapters():

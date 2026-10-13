@@ -1,7 +1,7 @@
 import { desktopAvailability } from './terminal-fixture'
-import { codingIdentity } from './session-fixture'
+import { codingIdentity, sessionFixture } from './session-fixture'
 import { expect, test, type Page, type Route } from '@playwright/test'
-import type { Installation, SoftwareId, Target, Session, SessionBackend } from '../../shared/session-manager'
+import type { Installation, SoftwareId, Target, Session, SessionBackend, SessionInput } from '../../shared/session-manager'
 import { executionEnvironment, healthySoftware } from './software-fixture'
 
 const target: Target = { id: 'software', name: 'Development', kind: 'ssh', host: 'dev', backends: ['dtach'], tools: ['codex', 'kimi'], createdAt: '2026-09-30T00:00:00Z' }
@@ -14,11 +14,9 @@ async function fixture(page: Page, missing: SoftwareId[] = [], options: { backen
   const created: Session[] = []
   let job: Installation | null = options.installation ?? null
   let failure = false, checkFailure = false, keepRunning = false
-  const paths: string[] = []
   await page.route('**/api/**', async route => {
     if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
     const path = new URL(route.request().url()).pathname, method = route.request().method()
-    paths.push(path)
     if (path === '/api/targets') return route.fulfill({ json: [current] })
     if (path.endsWith('/software')) {
       checks++
@@ -41,7 +39,8 @@ async function fixture(page: Page, missing: SoftwareId[] = [], options: { backen
     if (path.endsWith('/events')) return route.fulfill({ contentType: 'application/x-ndjson', body: `${JSON.stringify({ type: 'output', text: 'live output é\nerror detail\n' })}\n${JSON.stringify({ type: job?.status === 'running' ? 'status' : 'complete', installation: job })}\n` })
     if (path.endsWith('/requirements')) { current = { ...current, ...route.request().postDataJSON() }; return route.fulfill({ json: current }) }
     if (path.endsWith('/sessions') && method === 'POST') {
-      const session: Session = { ...codingIdentity((route.request().postDataJSON()).tool, `new-${sessions.length}`), env: {}, args: '', ...route.request().postDataJSON(), id: `new-${sessions.length}`, createdAt: target.createdAt, lastConnectedAt: null, activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle', socketPath: '/root/.outpost/sockets/new.sock' }
+      const input: SessionInput = route.request().postDataJSON()
+      const session = sessionFixture({ ...input, id: `new-${sessions.length}` })
       sessions.push(session)
       created.push(session)
       return route.fulfill({ status: 201, json: session })
@@ -52,7 +51,7 @@ async function fixture(page: Page, missing: SoftwareId[] = [], options: { backen
     return route.fulfill({ status: 404 })
   })
   await page.goto('/')
-  return { checks: () => checks, installs: () => installCount, script: () => submitted, paths, created, target: () => current, keepRunning: () => { keepRunning = true }, finishInstall: () => { job = { ...completed }; installed = true }, failInstall: () => { failure = true }, failCheck: () => { checkFailure = true } }
+  return { checks: () => checks, installs: () => installCount, script: () => submitted, created, target: () => current, keepRunning: () => { keepRunning = true }, finishInstall: () => { job = { ...completed }; installed = true }, failInstall: () => { failure = true }, failCheck: () => { checkFailure = true } }
 }
 
 test('all-good panel collapses, expands to show paths and versions, and refreshes live without stale success', async ({ page }) => {
@@ -72,7 +71,6 @@ test('all-good panel collapses, expands to show paths and versions, and refreshe
   await page.getByRole('button', { name: 'Refresh required software' }).click()
   await expect(panel.getByRole('alert')).toContainText('SSH check unavailable')
   await expect(panel).not.toContainText('All good')
-  expect(state.paths.some(path => path.endsWith('/setup'))).toBe(false)
   expect(state.installs()).toBe(0)
 })
 

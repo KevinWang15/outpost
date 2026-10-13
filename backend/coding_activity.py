@@ -45,18 +45,20 @@ def reverse_records(stream, size):
         raise ValueError('No turn marker in the last 4 MiB of the native transcript.')
 
 
-def timestamp(value):
+def timestamp(value, *, unit=None):
+    """Normalize zoned ISO timestamps or numeric epochs with an explicit unit."""
     try:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return datetime.datetime.fromtimestamp(value / 1000, datetime.timezone.utc).isoformat()
-        if isinstance(value, str):
+        if unit in ('seconds', 'milliseconds'):
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                seconds = value / 1000 if unit == 'milliseconds' else value
+                return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).isoformat()
+        elif unit is None and isinstance(value, str):
             parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
             if parsed.tzinfo:
                 return parsed.astimezone(datetime.timezone.utc).isoformat()
     except (ValueError, OverflowError, OSError):
         pass
     return None
-
 
 
 def inspect(adapter, session, metadata, running):
@@ -79,7 +81,7 @@ def inspect(adapter, session, metadata, running):
                 state = 'idle'
             elif state == 'finished' and covered(metadata['checked'], stream, info, offset):
                 state = 'idle'
-            result.update(state=state, updatedAt=timestamp(updated), completionId=token if state == 'finished' else None)
+            result.update(state=state, updatedAt=updated, completionId=token if state == 'finished' else None)
             return result, point
         return result, None
 

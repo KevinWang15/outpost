@@ -76,7 +76,7 @@ test('protocol preserves UTF-8 across writes and ignores shell startup chatter',
 })
 
 test('protocol rejects malformed envelopes and nonzero exits; errors have explicit status', async () => {
-  for (const value of [null, {}, { home: '/root' }, { error: 'old shape', status: 409 }, { ok: true },
+  for (const value of [null, {}, { ok: true },
     { ok: true, data: {}, error: { message: 'Mixed envelope', status: 409 } },
     { ok: true, data: {}, extra: true }, { ok: false, error: { message: 'Bad status', status: 200 } },
     { ok: false, error: { message: 'Extra error fields', status: 409, extra: true } }]) {

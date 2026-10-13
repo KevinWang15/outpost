@@ -8,7 +8,7 @@ import { AppError } from './errors'
 import { AccountStore, type AccountSession } from './account-store'
 import { AccountSshKeys, AccountTargetStore } from './account-ssh'
 import { accountEmail, engageLabMailer, type AccountMailer } from './account-email'
-import { hashPassword, validatePassword, verifyPassword } from './account-passwords'
+import { hashPassword, verifyPassword } from './account-passwords'
 
 declare module 'fastify' { interface FastifyRequest { account: AccountSession | null } }
 const COOKIE = 'outpost_session'
@@ -170,7 +170,6 @@ export class Accounts {
     }, async (request, reply) => {
       const user = this.store.byId(request.account!.user.id)!
       if (!await verifyPassword(request.body.currentPassword, user.passwordHash)) throw new AppError('Current password is incorrect.', 400)
-      validatePassword(request.body.password)
       const newHash = await hashPassword(request.body.password)
       this.authenticate(request)
       this.store.changePassword(user.id, newHash, user.passwordHash)

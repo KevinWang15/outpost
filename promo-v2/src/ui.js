@@ -1,12 +1,12 @@
 // DOM building blocks: headings, cursor, and faithful replicas of the app's UI.
 import {
   createElement, Server, Laptop, Monitor, Check, CircleCheck, Search, Bell, Puzzle, SquareTerminal, WifiOff, Unplug,
-  ImageOff, ImagePlus, Image, TriangleAlert, ChevronDown, Plus, ArrowRight, Link, X, CornerDownRight, PanelsTopLeft,
+  ImageOff, ImagePlus, TriangleAlert, ChevronDown, Plus, ArrowRight, Link, X, CornerDownRight, PanelsTopLeft,
   CircleHelp, LoaderCircle, Clock, ShieldCheck, Sparkles, Zap,
 } from 'lucide'
 import { clamp, easeOut, easeOutBack, prog, style, track } from './util.js'
 
-const ICONS = { Server, Laptop, Monitor, Check, CircleCheck, Search, Bell, Puzzle, SquareTerminal, WifiOff, Unplug, ImageOff, ImagePlus, Image, TriangleAlert, ChevronDown, Plus, ArrowRight, Link, X, CornerDownRight, PanelsTopLeft, CircleHelp, LoaderCircle, Clock, ShieldCheck, Sparkles, Zap }
+const ICONS = { Server, Laptop, Monitor, Check, CircleCheck, Search, Bell, Puzzle, SquareTerminal, WifiOff, Unplug, ImageOff, ImagePlus, TriangleAlert, ChevronDown, Plus, ArrowRight, Link, X, CornerDownRight, PanelsTopLeft, CircleHelp, LoaderCircle, Clock, ShieldCheck, Sparkles, Zap }
 export function icon(name, size = 24, stroke = 2) {
   const el = createElement(ICONS[name])
   el.setAttribute('width', size)

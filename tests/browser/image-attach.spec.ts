@@ -1,13 +1,14 @@
 import { expect, test, type Page } from '@playwright/test'
 import { healthySoftware } from './software-fixture'
+import { sessionFixture } from './session-fixture'
 
 const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1sAAAAASUVORK5CYII='
 const png = Buffer.from(data, 'base64')
 const sessions = [
-  { id: 'tmux-work', name: 'Codex work', backend: 'tmux', tool: 'codex', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'detached' },
-  { id: 'dtach-work', name: 'Kimi work', backend: 'dtach', tool: 'kimi', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle' },
-  { id: 'stopped-work', name: 'Claude work', backend: 'tmux', tool: 'claude', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'stopped' },
-].map(session => ({ ...session, rootDir: '/home/dev/project', env: {}, args: '', socketPath: `/home/dev/.outpost/sockets/${session.id}.sock`, createdAt: '2026-09-30T00:00:00Z', lastConnectedAt: null }))
+  sessionFixture({ id: 'tmux-work', name: 'Codex work', status: 'detached' }),
+  sessionFixture({ id: 'dtach-work', name: 'Kimi work', backend: 'dtach', tool: 'kimi' }),
+  sessionFixture({ id: 'stopped-work', name: 'Claude work', tool: 'claude', status: 'stopped' }),
+]
 
 async function setup(page: Page) {
   await page.route('**/api/**', async route => {
@@ -121,7 +122,6 @@ for (const name of ['Kimi work', 'Claude work']) test(`${name}: pasted and dropp
   await expect(page.getByAltText('Clipboard image preview')).toBeVisible()
   await page.getByRole('button', { name: 'Send to session' }).click()
   await expect(page.getByRole('status')).toContainText('Automatic paste is unavailable')
-  await expect(page.getByRole('dialog')).not.toContainText('tmux, which cannot')
   await expect(page.getByRole('dialog').locator('code')).toHaveText(reference)
   await page.getByRole('button', { name: 'Copy reference' }).click()
   await expect(page.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()

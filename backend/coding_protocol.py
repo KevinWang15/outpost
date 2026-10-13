@@ -84,7 +84,7 @@ class CodingSessionAdapter(ABC):
         """Native main-agent event logs for this exact conversation and store."""
 
     def activity_event(self, record):
-        """Return (working/idle/finished, native timestamp), or None for non-turn events."""
+        """Return (working/idle/finished, normalized UTC timestamp or None), or None for non-turn events."""
         return self.sessions.activity_event(record)
 
     def activity_marker(self, records):

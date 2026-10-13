@@ -1,8 +1,10 @@
 import { healthySoftware } from './software-fixture'
+import { sessionFixture } from './session-fixture'
+import type { SessionInput } from '../../shared/session-manager'
 import { expect, test, type Page, type Route } from '@playwright/test'
 
 async function workspace(page: Page, directories: (route: Route, path: string) => Promise<void>) {
-  const created: Record<string, unknown>[] = []
+  const created: SessionInput[] = []
   const requested: string[] = []
   await page.route('**/api/**', async route => {
     if (new URL(route.request().url()).pathname === '/api/auth/session') return route.fulfill({ json: { mode: 'local', user: null } })
@@ -20,7 +22,7 @@ async function workspace(page: Page, directories: (route: Route, path: string) =
     if (url.pathname.endsWith('/sessions')) {
       if (route.request().method() === 'POST') {
         created.push(route.request().postDataJSON())
-        return route.fulfill({ status: 201, json: { ...created.at(-1), id: 'new-session', backend: 'tmux', activity: { state: 'idle', updatedAt: null, completionId: null, detail: null }, status: 'idle' } })
+        return route.fulfill({ status: 201, json: sessionFixture({ ...created.at(-1), id: 'new-session' }) })
       }
       return route.fulfill({ json: { sessions: [], registryPath: '/root/.outpost/sessions.json' } })
     }

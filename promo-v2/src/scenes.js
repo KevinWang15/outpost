@@ -169,7 +169,7 @@ function friction(cue) {
       laptop.group.rotation.y = 0.5
       laptop.hinge.rotation.x = -0.24
       laptop.screen.update({ mode: 'terminal', lines: [['$ ssh atlas.example.com', C.dim], ['› Build the dashboard', '#fff'], ['• Preparing summary cards'], t > cue.drop ? ['Connection closed.', C.red] : ['• Adding a progress chart']], status: t > cue.stop ? 'stopped' : 'working', phase: t * 5, dim: act === 2 ? 0.25 : 0 })
-      server.group.visible = act < 3 || true
+      server.group.visible = true
       server.group.position.set(act < 3 ? 9.6 : server.home.x, 0, act < 3 ? -1 : 0)
       server.group.scale.setScalar(1)
       w.animateServer(server, t, { alert: act === 1 && t > cue.stop })
@@ -382,7 +382,7 @@ function connect(cue) {
       const ds = lerp(1.15, 1.6, zoom) * (1 + launch * 0.4)
       const dx = lerp(560, 960 - btn.x * 1.6, zoom)
       const dy = lerp(300, 540 - btn.y * 1.6, zoom)
-      style(r.dash, { o: 1 - launch, x: dx - (ds - 1) * 632 + (ds - 1) * 632, y: dy, s: ds, origin: '0 0', blur: launch * 10 })
+      style(r.dash, { o: 1 - launch, x: dx, y: dy, s: ds, origin: '0 0', blur: launch * 10 })
       const term = easeOutBack(prog(t, cue.terminal - 0.1, 0.9), 1.1)
       style(r.term, { o: clamp(term * 1.5), x: lerp(dx + btn.x * ds - 500, 790, term), y: lerp(dy + btn.y * ds - 330, 210, term), s: lerp(0.1, 1, term), ry: -8 * term, rx: 4 * (1 - term) })
       const lines = [

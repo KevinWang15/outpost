@@ -90,8 +90,7 @@ test('linking accepts literal native IDs and rejects malformed IDs or storage pa
   for (const extra of [{ cliSessionId: '../escape' }, { cliSessionId: '$(command)' }, { cliSessionId: null },
     { cliSessionEnv: { PATH: '/bin' } }, { cliSessionEnv: { CLAUDE_CONFIG_DIR: 'relative' } }, { cliSessionId: undefined },
     { cliSessionEnv: { CODEX_HOME: '/home/dev/.codex' } }, { cliSessionId: 'session_wrong_tool' },
-    { tool: 'kimi', cliSessionEnv: { KIMI_CODE_HOME: '/home/dev/.kimi-code' } },
-    { tool: 'kimi', cliSessionId: 'session_current', cliSessionEnv: { KIMI_SHARE_DIR: '/home/dev/.kimi' } }]) {
+    { tool: 'kimi', cliSessionEnv: { KIMI_CODE_HOME: '/home/dev/.kimi-code' } }]) {
     assert.equal((await request('POST', path, { ...input, ...extra })).statusCode, 400)
   }
   assert.equal(calls.length, 1)

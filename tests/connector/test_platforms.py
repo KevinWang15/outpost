@@ -1,20 +1,23 @@
 """Real OS integrations, run on macOS and Windows CI runners (skipped elsewhere)."""
+
 import base64
 import json
-from pathlib import Path
 import plistlib
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'connector'))
 from outpost_connector import terminals  # noqa: E402
 from outpost_connector.platforms import WINDOWS_CLIPBOARD, WSL, MacOS  # noqa: E402
 from outpost_connector.terminals import iterm2, windows_terminal  # noqa: E402
 
-PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==')
+PNG = base64.b64decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+)
 
 
 def run(command):
@@ -69,8 +72,10 @@ class WindowsTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, directory, True)
         image = Path(directory) / 'image.png'
         image.write_bytes(PNG)
-        WSL().powershell("Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; "
-                         "[System.Windows.Forms.Clipboard]::SetImage([System.Drawing.Image]::FromFile('" + str(image) + "'))")
+        WSL().powershell(
+            'Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; '
+            "[System.Windows.Forms.Clipboard]::SetImage([System.Drawing.Image]::FromFile('" + str(image) + "'))"
+        )
         result = WSL().read_clipboard(images_only=True)
         self.assertEqual(result.kind, 'image')
         self.assertTrue(result.value.startswith(b'\x89PNG'))
@@ -78,9 +83,13 @@ class WindowsTest(unittest.TestCase):
 
     def test_terminal_setup_script_parses(self):
         script = windows_terminal.SETUP % base64.b64encode(b'{}').decode()
-        check = ('$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput('
-                 '[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("' + base64.b64encode(script.encode()).decode() + '")), [ref]$null, [ref]$errors); '
-                 'if ($errors.Count) { exit 1 }')
+        check = (
+            '$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput('
+            '[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("'
+            + base64.b64encode(script.encode()).decode()
+            + '")), [ref]$null, [ref]$errors); '
+            'if ($errors.Count) { exit 1 }'
+        )
         WSL().powershell(check)
 
 

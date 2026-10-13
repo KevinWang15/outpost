@@ -1,5 +1,7 @@
 """Codex coding-session adapter; history access is loaded only for management operations."""
+
 from functools import cached_property
+
 from outpost_harness import CodingSessionAdapter
 
 
@@ -12,6 +14,7 @@ class CodexAdapter(CodingSessionAdapter):
     @cached_property
     def sessions(self):
         from outpost_codex_store import CodexSessionStore
+
         return CodexSessionStore(self)
 
     def arguments(self, session):

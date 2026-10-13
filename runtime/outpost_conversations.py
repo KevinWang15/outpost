@@ -1,11 +1,13 @@
 """Coding CLI contracts and bounded, read-only conversation discovery on the target."""
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+
 import datetime
 import json
 import os
 import re
 import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
 from outpost_harness import adapters
 
 
@@ -41,10 +43,33 @@ def strings(value, depth=0):
         if value.get('type') in ('image', 'image_url', 'input_image', 'base64', 'audio', 'input_audio'):
             return
         for key, item in value.items():
-            if key not in {'type', 'role', 'id', 'uuid', 'timestamp', 'time', 'mime_type', 'mimeType',
-                           'image_url', 'image', 'source', 'blob', 'blobId', 'signature', 'encrypted_content',
-                           'sessionId', 'session_id', 'agentId', 'toolCallId', 'parent_tool_use_id', 'call_id',
-                           'cwd', 'workDir', 'createdAt', 'updatedAt'}:
+            if key not in {
+                'type',
+                'role',
+                'id',
+                'uuid',
+                'timestamp',
+                'time',
+                'mime_type',
+                'mimeType',
+                'image_url',
+                'image',
+                'source',
+                'blob',
+                'blobId',
+                'signature',
+                'encrypted_content',
+                'sessionId',
+                'session_id',
+                'agentId',
+                'toolCallId',
+                'parent_tool_use_id',
+                'call_id',
+                'cwd',
+                'workDir',
+                'createdAt',
+                'updatedAt',
+            }:
                 yield from strings(item, depth + 1)
 
 
@@ -136,6 +161,7 @@ class CodingSession:
 
 class CodingSessionStore(ABC):
     """Native discovery, conversation parsing, and allocation, separate from terminal attachment."""
+
     def __init__(self, adapter):
         self.adapter = adapter
 
@@ -171,7 +197,9 @@ class CodingSessionStore(ABC):
                 if session.id == session_id:
                     return session
         except SearchLimit:
-            raise ValueError('Session discovery exceeded its limit. Retry with a narrower CLI storage directory.')
+            raise ValueError(
+                'Session discovery exceeded its limit. Retry with a narrower CLI storage directory.'
+            ) from None
         raise ValueError('Coding CLI session was not found on this target. Search again to refresh its metadata.')
 
 
@@ -189,7 +217,12 @@ def store_paths(directory, pattern, scan, within=None):
 
 
 def search(query, tool=None, environments=None):
-    if not isinstance(query, str) or not query.strip() or len(query) > 256 or any(ord(c) < 32 or ord(c) == 127 for c in query):
+    if (
+        not isinstance(query, str)
+        or not query.strip()
+        or len(query) > 256
+        or any(ord(c) < 32 or ord(c) == 127 for c in query)
+    ):
         raise ValueError('Enter a search keyword of 1–256 characters.')
     query = query.strip().casefold()
     implementations = adapters()
@@ -222,7 +255,7 @@ def search(query, tool=None, environments=None):
                                             position = index
                                             break
                                         length += len(character.casefold())
-                                    excerpt = clean(text[max(0, position - 70):position + len(query) + 180])
+                                    excerpt = clean(text[max(0, position - 70) : position + len(query) + 180])
                                     break
                             if excerpt is not None:
                                 break
@@ -230,17 +263,29 @@ def search(query, tool=None, environments=None):
                             break
                     if excerpt is None and query not in session.title.casefold() and query not in session.id.casefold():
                         continue
-                    results.append({'tool': adapter.tool, 'cliSessionId': session.id, 'rootDir': session.root,
-                                    'title': clean(session.title, 160), 'createdAt': session.created,
-                                    'updatedAt': session.updated, 'excerpt': excerpt,
-                                    'cliSessionEnv': session.storage})
-                    results.sort(key=lambda item: (item['updatedAt'] or '', item['tool'], item['cliSessionId']), reverse=True)
+                    results.append(
+                        {
+                            'tool': adapter.tool,
+                            'cliSessionId': session.id,
+                            'rootDir': session.root,
+                            'title': clean(session.title, 160),
+                            'createdAt': session.created,
+                            'updatedAt': session.updated,
+                            'excerpt': excerpt,
+                            'cliSessionEnv': session.storage,
+                        }
+                    )
+                    results.sort(
+                        key=lambda item: (item['updatedAt'] or '', item['tool'], item['cliSessionId']), reverse=True
+                    )
                     if len(results) > 50:
                         results.pop()
                         truncated = True
     except SearchLimit:
         truncated = True
-        warnings.append('Search reached its time, file, or byte limit. Results are partial; choose one coding tool to narrow the search.')
+        warnings.append(
+            'Search reached its time, file, or byte limit. Results are partial; choose one coding tool to narrow the search.'
+        )
     if scan.skipped:
         warnings.append(f'{scan.skipped} unreadable, incomplete, or oversized records were skipped.')
     return {'sessions': results, 'truncated': truncated, 'warnings': warnings}

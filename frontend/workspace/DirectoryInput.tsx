@@ -15,8 +15,9 @@ export default function DirectoryInput({ targetId }: { targetId: string }) {
   const [active, setActive] = useState(-1)
   const [attempt, setAttempt] = useState(0)
   const [lookup, setLookup] = useState<Lookup | null>(null)
-  const valid = (path === '' || path === '~' || path.startsWith('~/') || path.startsWith('/'))
-    && !Array.from(path).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+  const valid =
+    (path === '' || path === '~' || path.startsWith('~/') || path.startsWith('/')) &&
+    !Array.from(path).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
   const current = lookup?.targetId === targetId && lookup.path === path ? lookup : null
   const directories = current?.data?.directories ?? []
   const visible = open && valid
@@ -26,11 +27,23 @@ export default function DirectoryInput({ targetId }: { targetId: string }) {
     if (!open || !valid) return
     const controller = new AbortController()
     const timer = setTimeout(() => {
-      api<DirectorySuggestions>(`/targets/${targetId}/directories?path=${encodeURIComponent(path)}`, 'GET', undefined, controller.signal)
-        .then(data => { if (!controller.signal.aborted) setLookup({ targetId, path, data }) })
-        .catch(error => { if (!controller.signal.aborted) setLookup({ targetId, path, error: (error as Error).message }) })
+      api<DirectorySuggestions>(
+        `/targets/${targetId}/directories?path=${encodeURIComponent(path)}`,
+        'GET',
+        undefined,
+        controller.signal,
+      )
+        .then(data => {
+          if (!controller.signal.aborted) setLookup({ targetId, path, data })
+        })
+        .catch(error => {
+          if (!controller.signal.aborted) setLookup({ targetId, path, error: (error as Error).message })
+        })
     }, 250)
-    return () => { clearTimeout(timer); controller.abort() }
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
   }, [targetId, path, open, valid, attempt])
 
   useEffect(() => {
@@ -53,53 +66,131 @@ export default function DirectoryInput({ targetId }: { targetId: string }) {
   }, [open])
 
   function choose(directory: string) {
-    setPath(directory); setLookup(null); setActive(-1); setOpen(true)
+    setPath(directory)
+    setLookup(null)
+    setActive(-1)
+    setOpen(true)
   }
   function reopen() {
-    setLookup(null); setActive(-1); setOpen(true); setAttempt(value => value + 1)
+    setLookup(null)
+    setActive(-1)
+    setOpen(true)
+    setAttempt(value => value + 1)
   }
   function keyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape' && open) {
-      event.preventDefault(); event.stopPropagation(); setOpen(false); setActive(-1)
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
+      setActive(-1)
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
-      if (!open) { reopen(); return }
-      if (directories.length) setActive(index => event.key === 'ArrowDown'
-        ? (index + 1) % directories.length
-        : index <= 0 ? directories.length - 1 : index - 1)
-    } else if (visible && ((event.key === 'Enter' && directories[active])
-      || (event.key === 'Tab' && !event.shiftKey && (directories[active] || directories.length === 1)))) {
+      if (!open) {
+        reopen()
+        return
+      }
+      if (directories.length)
+        setActive(index =>
+          event.key === 'ArrowDown'
+            ? (index + 1) % directories.length
+            : index <= 0
+              ? directories.length - 1
+              : index - 1,
+        )
+    } else if (
+      visible &&
+      ((event.key === 'Enter' && directories[active]) ||
+        (event.key === 'Tab' && !event.shiftKey && (directories[active] || directories.length === 1)))
+    ) {
       event.preventDefault()
       choose(directories[active] ?? directories[0])
     }
   }
 
-  return <div ref={field} className="field directory-field" onBlur={event => {
-    if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setActive(-1) }
-  }}>
-    <span className="label" id={`${id}-label`}>Project directory</span>
-    <div className="directory-control" ref={control}>
-      <input ref={input} id={id} name="rootDir" placeholder="~/projects/my-app" required maxLength={4096}
-        value={path} onChange={event => choose(event.target.value)} onFocus={reopen} onClick={() => { if (!open) reopen() }} onKeyDown={keyDown}
-        spellCheck={false} autoComplete="off" role="combobox" aria-autocomplete="list" aria-labelledby={`${id}-label`}
-        aria-expanded={visible} aria-controls={visible ? `${id}-list` : undefined}
-        aria-activedescendant={activeId} aria-describedby={`${id}-help`}/>
-      {visible && <div className="directory-popup">
-        <ul id={`${id}-list`} role="listbox" aria-label="Target directories">
-          {directories.map((directory, index) => <li key={directory} role="presentation">
-            <button type="button" role="option" id={`${id}-option-${index}`} tabIndex={-1}
-              aria-selected={active === index} onPointerDown={event => event.preventDefault()}
-              onClick={() => choose(directory)}><CornerDownRight size={14} aria-hidden="true" /><code>{directory}</code></button>
-          </li>)}
-        </ul>
-        <p className="directory-status" role="status">{!current ? 'Looking up target directories…'
-          : current.error ? `Could not load suggestions: ${current.error}. You can still enter a path.`
-          : !directories.length ? 'No matching directories. You can still enter a new path.'
-          : current.data?.truncated ? 'Showing 50 matches. Keep typing to narrow the list.'
-          : 'Use ↑ / ↓ and Enter to select. Tab completes a single match.'}</p>
-        {current?.error && <button type="button" className="directory-retry" onPointerDown={event => event.preventDefault()} onClick={reopen}>Retry lookup</button>}
-      </div>}
+  return (
+    <div
+      ref={field}
+      className="field directory-field"
+      onBlur={event => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false)
+          setActive(-1)
+        }
+      }}
+    >
+      <span className="label" id={`${id}-label`}>
+        Project directory
+      </span>
+      <div className="directory-control" ref={control}>
+        <input
+          ref={input}
+          id={id}
+          name="rootDir"
+          placeholder="~/projects/my-app"
+          required
+          maxLength={4096}
+          value={path}
+          onChange={event => choose(event.target.value)}
+          onFocus={reopen}
+          onClick={() => {
+            if (!open) reopen()
+          }}
+          onKeyDown={keyDown}
+          spellCheck={false}
+          autoComplete="off"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-labelledby={`${id}-label`}
+          aria-expanded={visible}
+          aria-controls={visible ? `${id}-list` : undefined}
+          aria-activedescendant={activeId}
+          aria-describedby={`${id}-help`}
+        />
+        {visible && (
+          <div className="directory-popup">
+            <ul id={`${id}-list`} role="listbox" aria-label="Target directories">
+              {directories.map((directory, index) => (
+                <li key={directory} role="presentation">
+                  <button
+                    type="button"
+                    role="option"
+                    id={`${id}-option-${index}`}
+                    tabIndex={-1}
+                    aria-selected={active === index}
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={() => choose(directory)}
+                  >
+                    <CornerDownRight size={14} aria-hidden="true" />
+                    <code>{directory}</code>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="directory-status" role="status">
+              {!current
+                ? 'Looking up target directories…'
+                : current.error
+                  ? `Could not load suggestions: ${current.error}. You can still enter a path.`
+                  : !directories.length
+                    ? 'No matching directories. You can still enter a new path.'
+                    : current.data?.truncated
+                      ? 'Showing 50 matches. Keep typing to narrow the list.'
+                      : 'Use ↑ / ↓ and Enter to select. Tab completes a single match.'}
+            </p>
+            {current?.error && (
+              <button
+                type="button"
+                className="directory-retry"
+                onPointerDown={event => event.preventDefault()}
+                onClick={reopen}
+              >
+                Retry lookup
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <small id={`${id}-help`}>An absolute or ~/ path on the target. Suggestions are live.</small>
     </div>
-    <small id={`${id}-help`}>An absolute or ~/ path on the target. Suggestions are live.</small>
-  </div>
+  )
 }

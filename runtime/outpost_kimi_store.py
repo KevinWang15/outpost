@@ -1,5 +1,6 @@
 """Current Kimi Code session discovery and ACP allocation."""
-from outpost_conversations import CodingSession, CodingSessionStore, timestamp, strings, clean, store_paths
+
+from outpost_conversations import CodingSession, CodingSessionStore, clean, store_paths, strings, timestamp
 from outpost_rpc import JsonRpcProcess
 
 
@@ -22,9 +23,15 @@ class KimiSessionStore(CodingSessionStore):
             history = list(store_paths(directory / 'agents', '*/wire.jsonl', scan, within=home))
             if not isinstance(root, str):
                 continue
-            yield CodingSession(directory.name, root, clean(state.get('title') or state.get('lastPrompt')) or directory.name,
-                                timestamp(state.get('createdAt')), timestamp(state.get('updatedAt')),
-                                history, self.adapter.storage(home))
+            yield CodingSession(
+                directory.name,
+                root,
+                clean(state.get('title') or state.get('lastPrompt')) or directory.name,
+                timestamp(state.get('createdAt')),
+                timestamp(state.get('updatedAt')),
+                history,
+                self.adapter.storage(home),
+            )
 
     def text(self, record):
         if record.get('type') in ('context.append_message', 'turn.prompt', 'turn.steer', 'context.append_loop_event'):
@@ -33,8 +40,10 @@ class KimiSessionStore(CodingSessionStore):
     def create(self, root, environment, executable):
         storage = self.adapter.storage(self.adapter.home(environment, root))
         with JsonRpcProcess([executable, 'acp'], {**environment, **storage}, root) as process:
-            process.call('initialize', {'protocolVersion': 1, 'clientCapabilities': {},
-                                        'clientInfo': {'name': 'outpost', 'version': '0.1.0'}})
+            process.call(
+                'initialize',
+                {'protocolVersion': 1, 'clientCapabilities': {}, 'clientInfo': {'name': 'outpost', 'version': '0.1.0'}},
+            )
             result = process.call('session/new', {'cwd': root, 'mcpServers': []})
             session_id = result.get('sessionId')
             if not self.adapter.valid_id(session_id):

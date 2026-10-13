@@ -1,4 +1,5 @@
 """A small RFC 6455 client: blocking handshake, then non-blocking frames for a select loop."""
+
 import base64
 import hashlib
 import os
@@ -38,10 +39,12 @@ class WebSocket:
             host = parts.hostname if parts.port is None else parts.hostname + ':' + str(parts.port)
             if ':' in parts.hostname:
                 host = '[' + parts.hostname + ']' + ('' if parts.port is None else ':' + str(parts.port))
-            request = ('GET ' + (parts.path or '/') + ('?' + parts.query if parts.query else '') + ' HTTP/1.1\r\n'
-                       'Host: ' + host + '\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
-                       'Sec-WebSocket-Key: ' + key + '\r\nSec-WebSocket-Version: 13\r\n'
-                       'User-Agent: ' + user_agent + '\r\n\r\n')
+            request = (
+                'GET ' + (parts.path or '/') + ('?' + parts.query if parts.query else '') + ' HTTP/1.1\r\n'
+                'Host: ' + host + '\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                'Sec-WebSocket-Key: ' + key + '\r\nSec-WebSocket-Version: 13\r\n'
+                'User-Agent: ' + user_agent + '\r\n\r\n'
+            )
             sock.sendall(request.encode())
             response = b''
             while b'\r\n\r\n' not in response:
@@ -54,7 +57,9 @@ class WebSocket:
             head, rest = response.split(b'\r\n\r\n', 1)
             lines = head.decode('latin-1').split('\r\n')
             status = lines[0].split(' ')
-            headers = {name.strip().lower(): value.strip() for name, _, value in (line.partition(':') for line in lines[1:])}
+            headers = {
+                name.strip().lower(): value.strip() for name, _, value in (line.partition(':') for line in lines[1:])
+            }
             if len(status) < 2 or status[1] != '101':
                 raise WebSocketError('The Outpost server refused the terminal (' + ' '.join(status[1:]) + ').')
             accept = base64.b64encode(hashlib.sha1((key + GUID).encode()).digest()).decode()
@@ -79,8 +84,13 @@ class WebSocket:
         else:
             header += bytes([0x80 | 127]) + struct.pack('>Q', length)
         mask = os.urandom(4)
-        masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload)) if length < 4096 else \
-            (int.from_bytes(payload, 'big') ^ int.from_bytes((mask * (length // 4 + 1))[:length], 'big')).to_bytes(length, 'big')
+        masked = (
+            bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+            if length < 4096
+            else (int.from_bytes(payload, 'big') ^ int.from_bytes((mask * (length // 4 + 1))[:length], 'big')).to_bytes(
+                length, 'big'
+            )
+        )
         self.outgoing += header + mask + masked
 
     def send_text(self, text):
@@ -156,8 +166,8 @@ class WebSocket:
                 raise WebSocketError('The Outpost server sent an oversized message.')
             if len(data) < offset + length:
                 return None
-            payload = bytes(data[offset:offset + length])
-            del data[:offset + length]
+            payload = bytes(data[offset : offset + length])
+            del data[: offset + length]
             if opcode >= 0x8:
                 return opcode, payload
             if opcode != 0:

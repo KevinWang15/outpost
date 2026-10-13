@@ -4,11 +4,12 @@ Add a harness: an adapter module (identity, launch arguments, activity files),
 a store module (discovery, search text, allocation, turn markers), an entry in
 adapters() below, and an entry in shared/harnesses.ts.
 """
-from abc import ABC, abstractmethod
+
 import os
-from pathlib import Path
 import re
 import shlex
+from abc import ABC, abstractmethod
+from pathlib import Path
 
 
 def storage_home(environment, key, default, cwd=None):
@@ -22,6 +23,7 @@ def storage_home(environment, key, default, cwd=None):
 
 class CodingSessionAdapter(ABC):
     """Own native identity, creation, discovery, text decoding, and exact-ID attachment for one CLI."""
+
     tool = ''
     id_pattern = r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
     storage_key = ''
@@ -35,8 +37,12 @@ class CodingSessionAdapter(ABC):
         if not isinstance(storage, dict) or set(storage) != {self.storage_key}:
             return False
         value = storage[self.storage_key]
-        return isinstance(value, str) and 0 < len(value) <= 4096 and os.path.isabs(value) \
+        return (
+            isinstance(value, str)
+            and 0 < len(value) <= 4096
+            and os.path.isabs(value)
             and all(ord(c) >= 32 and ord(c) != 127 for c in value)
+        )
 
     def home(self, environment, cwd=None):
         return storage_home(environment, self.storage_key, self.storage_directory, cwd)
@@ -48,24 +54,35 @@ class CodingSessionAdapter(ABC):
         for argument in arguments:
             if argument == '--':
                 break
-            if any(argument == option or argument.startswith(option + '=')
-                   or (len(option) == 2 and argument.startswith(option))
-                   for option in self.selection_options):
+            if any(
+                argument == option
+                or argument.startswith(option + '=')
+                or (len(option) == 2 and argument.startswith(option))
+                for option in self.selection_options
+            ):
                 return True
         return False
 
     def argument_guard(self):
         """Check expanded Bash arguments before launching the pinned conversation."""
-        patterns = '|'.join(shlex.quote(option) + ('*' if len(option) == 2 else '|' + shlex.quote(option + '=') + '*')
-                            for option in self.selection_options)
-        return ('for argument in "$@"; do\n'
-                '  case "$argument" in\n'
-                '    --) break ;;\n'
-                '    ' + patterns + ') printf "%s\\n" '
-                + shlex.quote('Outpost controls the coding CLI session ID. Remove session-selection arguments and use Find conversations.')
-                + ' >&2; exit 64 ;;\n'
-                '  esac\n'
-                'done')
+        patterns = '|'.join(
+            shlex.quote(option) + ('*' if len(option) == 2 else '|' + shlex.quote(option + '=') + '*')
+            for option in self.selection_options
+        )
+        return (
+            'for argument in "$@"; do\n'
+            '  case "$argument" in\n'
+            '    --) break ;;\n'
+            '    '
+            + patterns
+            + ') printf "%s\\n" '
+            + shlex.quote(
+                'Outpost controls the coding CLI session ID. Remove session-selection arguments and use Find conversations.'
+            )
+            + ' >&2; exit 64 ;;\n'
+            '  esac\n'
+            'done'
+        )
 
     @property
     @abstractmethod
@@ -106,7 +123,8 @@ class CodingSessionAdapter(ABC):
 
 
 def adapters():
-    from outpost_codex import CodexAdapter
     from outpost_claude import ClaudeAdapter
+    from outpost_codex import CodexAdapter
     from outpost_kimi import KimiAdapter
+
     return {adapter.tool: adapter for adapter in (CodexAdapter(), ClaudeAdapter(), KimiAdapter())}

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A visible interactive test process, standing in for the selected coding tool."""
+
 import json
 import os
-from pathlib import Path
 import select
 import signal
 import subprocess
@@ -10,6 +10,7 @@ import sys
 import time
 import tty
 import uuid
+from pathlib import Path
 
 if Path('capture-input').exists():
     tty.setraw(sys.stdin.fileno())
@@ -35,7 +36,12 @@ if tool == 'codex' and sys.argv[1:] == ['app-server']:
         elif request['method'] == 'thread/start':
             result = {'thread': {'id': str(uuid.uuid4()), 'cliVersion': '0.159.2-fixture'}, 'modelProvider': 'fixture'}
         else:
-            print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'error': {'code': -32601, 'message': 'Unsupported method'}}), flush=True)
+            print(
+                json.dumps(
+                    {'jsonrpc': '2.0', 'id': request['id'], 'error': {'code': -32601, 'message': 'Unsupported method'}}
+                ),
+                flush=True,
+            )
             continue
         print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
     sys.exit(0)
@@ -52,13 +58,25 @@ if tool == 'kimi' and sys.argv[1:] == ['acp']:
             directory.mkdir(parents=True)
             (directory / 'agents' / 'main').mkdir(parents=True)
             (directory / 'agents' / 'main' / 'wire.jsonl').touch()
-            state = {'id': session_id, 'cwd': request['params']['cwd'], 'createdAt': time.time() * 1000, 'updatedAt': time.time() * 1000}
+            state = {
+                'id': session_id,
+                'cwd': request['params']['cwd'],
+                'createdAt': time.time() * 1000,
+                'updatedAt': time.time() * 1000,
+            }
             (directory / 'state.json').write_text(json.dumps(state))
             with (home / 'session_index.jsonl').open('a') as stream:
-                stream.write(json.dumps({'sessionId': session_id, 'sessionDir': str(directory), 'workDir': state['cwd']}) + '\n')
+                stream.write(
+                    json.dumps({'sessionId': session_id, 'sessionDir': str(directory), 'workDir': state['cwd']}) + '\n'
+                )
             result = {'sessionId': session_id}
         else:
-            print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'error': {'code': -32601, 'message': 'Unsupported method'}}), flush=True)
+            print(
+                json.dumps(
+                    {'jsonrpc': '2.0', 'id': request['id'], 'error': {'code': -32601, 'message': 'Unsupported method'}}
+                ),
+                flush=True,
+            )
             continue
         print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
     sys.exit(0)
@@ -73,10 +91,24 @@ elif tool == 'claude' and len(native_arguments) >= 2 and native_arguments[0] in 
     reference = native_arguments[1]
     cli_session_id = Path(reference).stem if native_arguments[0] == '--resume' else reference
     arguments = native_arguments[2:]
-    history = Path(reference) if native_arguments[0] == '--resume' else Path(os.environ['CLAUDE_CONFIG_DIR']) / 'projects' / 'fixture' / (cli_session_id + '.jsonl')
+    history = (
+        Path(reference)
+        if native_arguments[0] == '--resume'
+        else Path(os.environ['CLAUDE_CONFIG_DIR']) / 'projects' / 'fixture' / (cli_session_id + '.jsonl')
+    )
     history.parent.mkdir(parents=True, exist_ok=True)
     if not history.exists():
-        history.write_text(json.dumps({'type': 'user', 'sessionId': cli_session_id, 'cwd': str(Path.cwd()), 'message': {'role': 'user', 'content': 'Fixture conversation'}}) + '\n')
+        history.write_text(
+            json.dumps(
+                {
+                    'type': 'user',
+                    'sessionId': cli_session_id,
+                    'cwd': str(Path.cwd()),
+                    'message': {'role': 'user', 'content': 'Fixture conversation'},
+                }
+            )
+            + '\n'
+        )
 elif tool == 'kimi' and len(native_arguments) >= 2 and native_arguments[0] == '--session':
     cli_session_id = native_arguments[1]
     assert any((Path(os.environ['KIMI_CODE_HOME']) / 'sessions').glob('*/' + cli_session_id + '/state.json'))
@@ -91,15 +123,24 @@ with open('starts.log', 'a') as stream:
 # Exercise child-process cleanup, including a child that ignores TERM and HUP.
 if Path('spawn-child').exists():
     Path('child.pid').unlink(missing_ok=True)
-    subprocess.Popen([sys.executable, '-c', '''
+    subprocess.Popen(
+        [
+            sys.executable,
+            '-c',
+            """
 import os, signal, time
 from pathlib import Path
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 signal.signal(signal.SIGHUP, signal.SIG_IGN)
 Path('child.pid').write_text(str(os.getpid()))
 while True: time.sleep(1)
-'''], start_new_session=True, stdin=subprocess.DEVNULL,
-       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+""",
+        ],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     while not Path('child.pid').exists():
         time.sleep(0.01)
 
@@ -121,6 +162,7 @@ def ready(*_):
         stream.write(str(size.columns) + 'x' + str(size.lines) + '\n')
     print('OUTPOST_FIXTURE_READY ' + str(pid) + ' ' + str(size.columns) + 'x' + str(size.lines), flush=True)
 
+
 signal.signal(signal.SIGWINCH, ready)
 heartbeat = Path('heartbeat.json')
 temporary_heartbeat = Path('.heartbeat-' + str(pid) + '.tmp')
@@ -131,9 +173,20 @@ while True:
         print('\x1b[>4;0m', end='', flush=True)
         Path('keyboard-reset-done').write_text('done')
         keyboard_reset_at = None
-    temporary_heartbeat.write_text(json.dumps({'pid': pid, 'tool': tool, 'time': time.time(), 'cwd': os.getcwd(),
-                                              'args': arguments, 'nativeArgs': native_arguments, 'cliSessionId': cli_session_id,
-                                              'env': {key: value for key, value in os.environ.items() if key.startswith('OUTPOST_SESSION_')}}))
+    temporary_heartbeat.write_text(
+        json.dumps(
+            {
+                'pid': pid,
+                'tool': tool,
+                'time': time.time(),
+                'cwd': os.getcwd(),
+                'args': arguments,
+                'nativeArgs': native_arguments,
+                'cliSessionId': cli_session_id,
+                'env': {key: value for key, value in os.environ.items() if key.startswith('OUTPOST_SESSION_')},
+            }
+        )
+    )
     temporary_heartbeat.replace(heartbeat)
     ready()
     if select.select([sys.stdin], [], [], 0.1)[0]:
@@ -143,9 +196,9 @@ while True:
                 stream.write(command)
         incoming = input_tail + command
 
-        def received(marker):
+        def received(marker, incoming=incoming, input_tail=input_tail):
             # Match newly completed controls, including ones split across reads.
-            return marker in incoming[max(0, len(input_tail) - len(marker) + 1):]
+            return marker in incoming[max(0, len(input_tail) - len(marker) + 1) :]
 
         if received(b'clipboard'):
             print('\x1b]52;c;T1VUUE9TVF9DTElQQk9BUkRfVEVTVA==\x07', end='', flush=True)
@@ -156,4 +209,4 @@ while True:
             break
         if received(b'ping'):
             ready()
-        input_tail = incoming[-(len(b'OUTPOST_KEYS_END') - 1):]
+        input_tail = incoming[-(len(b'OUTPOST_KEYS_END') - 1) :]

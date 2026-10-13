@@ -3,6 +3,7 @@
 Only key presses are interpreted. Bracketed pastes and terminal replies (OSC,
 DCS and other strings) are opaque, so pasted text can never trigger a paste.
 """
+
 import re
 import time
 
@@ -27,8 +28,13 @@ class InputRouter:
         actions = []
         while self.pending:
             if self.mode != 'normal':
-                end = re.compile(rb'\x1b\[201~') if self.mode == 'paste' else \
-                    re.compile(rb'\x07|\x1b\\|[\x18\x1a]') if self.mode == 'osc' else re.compile(rb'\x1b\\|[\x18\x1a]')
+                end = (
+                    re.compile(rb'\x1b\[201~')
+                    if self.mode == 'paste'
+                    else re.compile(rb'\x07|\x1b\\|[\x18\x1a]')
+                    if self.mode == 'osc'
+                    else re.compile(rb'\x1b\\|[\x18\x1a]')
+                )
                 found = end.search(self.pending)
                 if not found:
                     # Keep only a possible split terminator, even for large pastes.
@@ -37,8 +43,8 @@ class InputRouter:
                         actions.append(('data', self.pending[:-keep]))
                         self.pending = self.pending[-keep:]
                     break
-                actions.append(('data', self.pending[:found.end()]))
-                self.pending = self.pending[found.end():]
+                actions.append(('data', self.pending[: found.end()]))
+                self.pending = self.pending[found.end() :]
                 self.mode = 'normal'
                 continue
             special = re.search(rb'[\x16\x1b]', self.pending)
@@ -47,8 +53,8 @@ class InputRouter:
                 self.pending = b''
                 break
             if special.start():
-                actions.append(('data', self.pending[:special.start()]))
-                self.pending = self.pending[special.start():]
+                actions.append(('data', self.pending[: special.start()]))
+                self.pending = self.pending[special.start() :]
             if self.pending.startswith(b'\x16'):
                 actions.append(('paste', 'image', b'\x16'))
                 self.pending = self.pending[1:]
@@ -69,7 +75,7 @@ class InputRouter:
                     self.pending = b''
                     break
                 sequence = match.group()
-                self.pending = self.pending[len(sequence):]
+                self.pending = self.pending[len(sequence) :]
                 if sequence == PASTE_KEY:
                     actions.append(('paste', 'any', b''))
                 else:

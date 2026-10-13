@@ -1,9 +1,11 @@
 """Bounded native turn-marker readers; loaded only for management requests."""
+
 import datetime
 import hashlib
 import json
 import os
-from outpost_activity_state import latest_file, checkpoint, covered
+
+from outpost_activity_state import checkpoint, covered, latest_file
 
 MAX_TAIL = 4 * 1024 * 1024
 
@@ -24,17 +26,17 @@ def reverse_records(stream, size):
             newline = buffer.rfind(b'\n')
             if newline < 0:
                 continue
-            buffer = buffer[:newline + 1]
+            buffer = buffer[: newline + 1]
             end = position + len(buffer)
             trim_partial = False
         while buffer:
             separator = buffer[:-1].rfind(b'\n')
             if separator < 0 and position:
                 break
-            line = buffer[separator + 1:]
+            line = buffer[separator + 1 :]
             offset = end
             end -= len(line)
-            buffer = buffer[:separator + 1]
+            buffer = buffer[: separator + 1]
             try:
                 record = json.loads(line)
             except (ValueError, UnicodeDecodeError, RecursionError):
@@ -58,7 +60,6 @@ def timestamp(value):
     return None
 
 
-
 def inspect(adapter, session, metadata, running):
     result = {'state': 'idle', 'updatedAt': None, 'completionId': None, 'detail': None}
     found = latest_file(adapter, session)
@@ -79,7 +80,9 @@ def inspect(adapter, session, metadata, running):
                 state = 'idle'
             elif state == 'finished' and covered(metadata['checked'], stream, info, offset):
                 state = 'idle'
-            result.update(state=state, updatedAt=timestamp(updated), completionId=token if state == 'finished' else None)
+            result.update(
+                state=state, updatedAt=timestamp(updated), completionId=token if state == 'finished' else None
+            )
             return result, point
         return result, None
 
@@ -88,8 +91,12 @@ def describe(activity, running):
     try:
         return inspect(activity.adapter, activity.session, activity.read(), running)[0]
     except (OSError, ValueError) as error:
-        return {'state': 'idle', 'updatedAt': None, 'completionId': None,
-                'detail': 'Activity unavailable: ' + str(error)}
+        return {
+            'state': 'idle',
+            'updatedAt': None,
+            'completionId': None,
+            'detail': 'Activity unavailable: ' + str(error),
+        }
 
 
 def acknowledge(activity, token, running):

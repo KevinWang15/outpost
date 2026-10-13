@@ -23,5 +23,8 @@ await build({
 const python = source => !source.includes('__pycache__')
 for (const directory of ['runtime', 'connector']) {
   await rm(new URL(`${directory}/`, dist), { recursive: true, force: true })
-  await cp(new URL(`../${directory}/`, import.meta.url), new URL(`${directory}/`, dist), { recursive: true, filter: python })
+  await cp(new URL(`../${directory}/`, import.meta.url), new URL(`${directory}/`, dist), {
+    recursive: true,
+    filter: python,
+  })
 }

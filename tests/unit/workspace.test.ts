@@ -6,7 +6,16 @@ import test from 'node:test'
 import type { Target } from '../../shared/model'
 import { importV1, Workspace } from '../../backend/workspace'
 
-const target = (fields: Partial<Target> = {}) => ({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), kind: 'ssh', name: 'dev', host: 'dev.example.com', tools: ['claude'], ...fields }) as Target
+const target = (fields: Partial<Target> = {}) =>
+  ({
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    kind: 'ssh',
+    name: 'dev',
+    host: 'dev.example.com',
+    tools: ['claude'],
+    ...fields,
+  }) as Target
 
 test('workspace stores targets atomically with a strict schema', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-workspace-'))
@@ -33,18 +42,54 @@ test('v1 targets.json is imported once and left untouched', async t => {
   const v1 = {
     secret: 'f'.repeat(64),
     targets: [
-      { id: 'a', name: 'Server', createdAt: '2026-01-01', kind: 'ssh', host: 'dev', port: 2222, backends: ['tmux', 'dtach'], tools: ['codex'],
-        environment: { home: '/root', platform: 'linux', username: 'root', uid: 0, shell: '/bin/bash' } },
-      { id: 'b', name: 'Windows box', createdAt: '2026-01-01', kind: 'local', distribution: 'Ubuntu', backends: ['tmux'], tools: ['claude'] },
-      { id: 'c', name: 'Mac', createdAt: '2026-01-01', kind: 'local', backends: ['dtach'], tools: ['kimi'],
-        environment: { home: '/Users/me', platform: 'darwin', username: 'me', uid: 501, shell: '/bin/zsh' } },
+      {
+        id: 'a',
+        name: 'Server',
+        createdAt: '2026-01-01',
+        kind: 'ssh',
+        host: 'dev',
+        port: 2222,
+        backends: ['tmux', 'dtach'],
+        tools: ['codex'],
+        environment: { home: '/root', platform: 'linux', username: 'root', uid: 0, shell: '/bin/bash' },
+      },
+      {
+        id: 'b',
+        name: 'Windows box',
+        createdAt: '2026-01-01',
+        kind: 'local',
+        distribution: 'Ubuntu',
+        backends: ['tmux'],
+        tools: ['claude'],
+      },
+      {
+        id: 'c',
+        name: 'Mac',
+        createdAt: '2026-01-01',
+        kind: 'local',
+        backends: ['dtach'],
+        tools: ['kimi'],
+        environment: { home: '/Users/me', platform: 'darwin', username: 'me', uid: 501, shell: '/bin/zsh' },
+      },
     ],
   }
   await writeFile(join(directory, 'targets.json'), JSON.stringify(v1))
   const workspace = new Workspace(directory)
   const targets = await workspace.list()
-  assert.deepEqual(targets.map(item => item.id), ['a', 'c'])
-  assert.deepEqual(targets[0], { id: 'a', name: 'Server', createdAt: '2026-01-01', kind: 'ssh', host: 'dev', port: 2222, tools: ['codex'], environment: { home: '/root', username: 'root', uid: 0, shell: '/bin/bash' } })
+  assert.deepEqual(
+    targets.map(item => item.id),
+    ['a', 'c'],
+  )
+  assert.deepEqual(targets[0], {
+    id: 'a',
+    name: 'Server',
+    createdAt: '2026-01-01',
+    kind: 'ssh',
+    host: 'dev',
+    port: 2222,
+    tools: ['codex'],
+    environment: { home: '/root', username: 'root', uid: 0, shell: '/bin/bash' },
+  })
   assert.equal(targets[1].environment, undefined, 'macOS execution details are dropped')
   await workspace.add(target({ name: 'New' }))
   assert.deepEqual(JSON.parse(await readFile(join(directory, 'targets.json'), 'utf8')), v1)

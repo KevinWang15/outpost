@@ -3,14 +3,15 @@
 Terminal adapters (terminals/) build on these, so supporting another terminal
 on an existing OS never touches clipboard code.
 """
+
 import base64
 import json
 import os
-from pathlib import Path
 import shutil
 import ssl
 import subprocess
 import sys
+from pathlib import Path
 
 MAX_IMAGE = 16 * 1024 * 1024
 MAX_TEXT = 1024 * 1024
@@ -23,6 +24,7 @@ class ClipboardError(OSError):
 
 class Clipboard:
     """What a paste gesture found: ('image', png bytes) | ('text', str) | ('empty', None)."""
+
     def __init__(self, kind, value=None):
         self.kind = kind
         self.value = value
@@ -32,7 +34,7 @@ def parse_clipboard(output):
     try:
         result = json.loads(output)
     except ValueError:
-        raise ClipboardError('Invalid clipboard response.')
+        raise ClipboardError('Invalid clipboard response.') from None
     kind = result.get('kind') if isinstance(result, dict) else None
     if kind == 'empty':
         return Clipboard('empty')
@@ -62,7 +64,7 @@ class Platform:
 
 
 # Read only on a paste gesture; never polls or writes. PNG travels as base64.
-MAC_CLIPBOARD = r'''ObjC.import('AppKit');
+MAC_CLIPBOARD = r"""ObjC.import('AppKit');
 function present(value) { return value && !value.isNil(); }
 var board = $.NSPasteboard.generalPasteboard;
 var data = board.dataForType($.NSPasteboardTypePNG);
@@ -82,7 +84,7 @@ if (present(data)) {
 } else {
   var text = board.stringForType($.NSPasteboardTypeString);
   JSON.stringify(present(text) ? { kind: 'text', text: ObjC.unwrap(text) } : { kind: 'empty' });
-}'''
+}"""
 
 
 class MacOS(Platform):
@@ -90,13 +92,19 @@ class MacOS(Platform):
 
     def read_clipboard(self, images_only=False):
         script = MAC_CLIPBOARD % {'max_image': MAX_IMAGE, 'images_only': 'true' if images_only else 'false'}
-        result = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script], capture_output=True, timeout=10)
+        result = subprocess.run(
+            ['/usr/bin/osascript', '-l', 'JavaScript', '-e', script], capture_output=True, timeout=10
+        )
         if result.returncode:
-            raise ClipboardError('Could not read the clipboard: ' + result.stderr.decode(errors='replace').strip()[:300])
+            raise ClipboardError(
+                'Could not read the clipboard: ' + result.stderr.decode(errors='replace').strip()[:300]
+            )
         return parse_clipboard(result.stdout.decode())
 
     def write_clipboard(self, text):
-        subprocess.run(['/usr/bin/pbcopy'], input=text.encode(), env={**os.environ, 'LANG': 'en_US.UTF-8'}, timeout=10, check=True)
+        subprocess.run(
+            ['/usr/bin/pbcopy'], input=text.encode(), env={**os.environ, 'LANG': 'en_US.UTF-8'}, timeout=10, check=True
+        )
 
     def open_url(self, url):
         subprocess.run(['/usr/bin/open', url], timeout=10, check=True)
@@ -108,15 +116,25 @@ class MacOS(Platform):
         if context.cert_store_stats().get('x509_ca') or (capath and os.path.isdir(capath) and os.listdir(capath)):
             return context
         # Some Python builds ship without a CA bundle; trust the system keychain roots.
-        roots = subprocess.run(['/usr/bin/security', 'find-certificate', '-a', '-p',
-                                '/System/Library/Keychains/SystemRootCertificates.keychain', '/Library/Keychains/System.keychain'],
-                               capture_output=True, text=True, timeout=20)
+        roots = subprocess.run(
+            [
+                '/usr/bin/security',
+                'find-certificate',
+                '-a',
+                '-p',
+                '/System/Library/Keychains/SystemRootCertificates.keychain',
+                '/Library/Keychains/System.keychain',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
         if roots.returncode == 0 and 'BEGIN CERTIFICATE' in roots.stdout:
             context.load_verify_locations(cadata=roots.stdout)
         return context
 
 
-WINDOWS_CLIPBOARD = r'''$ErrorActionPreference = 'Stop'
+WINDOWS_CLIPBOARD = r"""$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $result = @{ kind = 'empty' }
@@ -132,10 +150,10 @@ if ($null -ne $image) {
   $result = @{ kind = 'text'; text = [System.Windows.Forms.Clipboard]::GetText() }
 }
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
-[Console]::Write(($result | ConvertTo-Json -Compress -Depth 3))'''
-WINDOWS_WRITE = r'''$ErrorActionPreference = 'Stop'
+[Console]::Write(($result | ConvertTo-Json -Compress -Depth 3))"""
+WINDOWS_WRITE = r"""$ErrorActionPreference = 'Stop'
 $text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd()))
-Set-Clipboard -Value $text'''
+Set-Clipboard -Value $text"""
 
 
 def encoded(script):
@@ -144,6 +162,7 @@ def encoded(script):
 
 class WSL(Platform):
     """WSL on Windows: Windows clipboard and browser through interop."""
+
     name = 'wsl'
 
     def windows(self, name, fallback):
@@ -152,25 +171,38 @@ class WSL(Platform):
     def powershell(self, script, stdin=None, timeout=15):
         executable = self.windows('powershell.exe', '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe')
         # STA is required by the Windows clipboard API.
-        result = subprocess.run([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', encoded(script)],
-                                input=stdin, capture_output=True, timeout=timeout)
+        result = subprocess.run(
+            [executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', encoded(script)],
+            input=stdin,
+            capture_output=True,
+            timeout=timeout,
+        )
         if result.returncode:
             raise ClipboardError('Windows PowerShell failed: ' + result.stderr.decode(errors='replace').strip()[:300])
         return result.stdout.decode('utf-8', 'replace')
 
     def read_clipboard(self, images_only=False):
-        return parse_clipboard(self.powershell(WINDOWS_CLIPBOARD % {'max_image': MAX_IMAGE, 'images_only': '$true' if images_only else '$false'}).strip())
+        return parse_clipboard(
+            self.powershell(
+                WINDOWS_CLIPBOARD % {'max_image': MAX_IMAGE, 'images_only': '$true' if images_only else '$false'}
+            ).strip()
+        )
 
     def write_clipboard(self, text):
         self.powershell(WINDOWS_WRITE, stdin=base64.b64encode(text.encode()))
 
     def open_url(self, url):
         # No shell parses the URL: rundll32 receives it as a single argument.
-        subprocess.run([self.windows('rundll32.exe', '/mnt/c/Windows/System32/rundll32.exe'), 'url.dll,FileProtocolHandler', url], timeout=10, check=True)
+        subprocess.run(
+            [self.windows('rundll32.exe', '/mnt/c/Windows/System32/rundll32.exe'), 'url.dll,FileProtocolHandler', url],
+            timeout=10,
+            check=True,
+        )
 
 
 class Fake(Platform):
     """Test seam: OUTPOST_CONNECTOR_FAKE=<directory> uses files instead of the OS."""
+
     name = 'fake'
 
     def __init__(self, directory):

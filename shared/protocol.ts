@@ -18,8 +18,11 @@ export type ClientMessage =
   | { type: 'paste-image'; id: string; mediaType: ImageMediaType; data: string }
 
 export const closeReasons = ['detached', 'ended', 'expired', 'outdated', 'error'] as const
-export type CloseReason = typeof closeReasons[number]
-export interface SignalMessage { type: string; payload: unknown }
+export type CloseReason = (typeof closeReasons)[number]
+export interface SignalMessage {
+  type: string
+  payload: unknown
+}
 export type ServerMessage =
   | { type: 'hello'; resume: string; session: { id: string; name: string }; target: { id: string; name: string } }
   | { type: 'ready' }
@@ -32,8 +35,15 @@ export type ServerMessage =
 export const serverMessageTypes = ['hello', 'ready', 'result', 'signal', 'closed'] as const
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Assert<T extends true> = T
-export type ServerMessageTypesCovered = Assert<Same<ServerMessage['type'], typeof serverMessageTypes[number]>>
+export type ServerMessageTypesCovered = Assert<Same<ServerMessage['type'], (typeof serverMessageTypes)[number]>>
 
 export type ConnectRequest = Static<typeof connectInput>
-export interface ConnectResponse { id: string; token: string; expiresAt: string; url: string | null }
-export interface ConnectionStatus { status: 'pending' | 'connected' }
+export interface ConnectResponse {
+  id: string
+  token: string
+  expiresAt: string
+  url: string | null
+}
+export interface ConnectionStatus {
+  status: 'pending' | 'connected'
+}

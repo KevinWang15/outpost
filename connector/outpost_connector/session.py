@@ -5,6 +5,7 @@ run in short worker threads; their results come back through a wake pipe. A
 paste gesture holds later keystrokes until the clipboard decision is made, so
 typing order is preserved.
 """
+
 import base64
 import json
 import os
@@ -24,8 +25,10 @@ from .screen import OutputFilter
 from .websocket import BINARY, CLOSE, TEXT, WebSocket, WebSocketError
 
 # Leave alternate screens and input protocols behind after a connection ends.
-RESET = ('\x1b7\x1b[?1049l\x1b8\x1b[0m\x1b[?25h\x1b[?1l\x1b[?1000l\x1b[?1002l\x1b[?1003l'
-         '\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b[>4;0m')
+RESET = (
+    '\x1b7\x1b[?1049l\x1b8\x1b[0m\x1b[?25h\x1b[?1l\x1b[?1000l\x1b[?1002l\x1b[?1003l'
+    '\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b[>4;0m'
+)
 RETRIES = 8
 # How each close reason in shared/protocol.ts ends a connection:
 # (banner heading, keys line, Enter reconnects). 'error' retries on its own.
@@ -64,7 +67,7 @@ class Session:
         data = data.encode() if isinstance(data, str) else data
         while data:
             try:
-                data = data[os.write(self.output, data):]
+                data = data[os.write(self.output, data) :]
             except BlockingIOError:
                 select.select([], [self.output], [], 1)
 
@@ -93,6 +96,7 @@ class Session:
             except Exception as error:  # Reported back to the loop, never raised in a thread.
                 self.events.put((work.__name__, args, None, error))
             self.wake()
+
         threading.Thread(target=run, daemon=True).start()
 
     # Lifecycle ----------------------------------------------------------------
@@ -131,8 +135,11 @@ class Session:
                     failures = 0
                     continue
                 delay = min(10, 2 ** (failures - 1))
-                self.banner('Connection lost', outcome.message,
-                            'Reconnecting in ' + str(delay) + 's   Enter  now      Ctrl+C  close')
+                self.banner(
+                    'Connection lost',
+                    outcome.message,
+                    'Reconnecting in ' + str(delay) + 's   Enter  now      Ctrl+C  close',
+                )
                 if self.read_key(delay) == 'quit':
                     return 0
         finally:
@@ -147,7 +154,7 @@ class Session:
     def banner(self, heading, message, keys):
         lines = [heading, *[line for line in (message or '').split('\n') if line], '', keys]
         width = min(max(len(line) for line in lines) + 4, max(20, self.size()[0] - 2))
-        body = ['│ ' + line[:width - 4].ljust(width - 4) + ' │' for line in lines]
+        body = ['│ ' + line[: width - 4].ljust(width - 4) + ' │' for line in lines]
         self.write('\r\n'.join(['', '╭' + '─' * (width - 2) + '╮', *body, '╰' + '─' * (width - 2) + '╯', '']) + '\r\n')
 
     def read_key(self, timeout=None):
@@ -171,8 +178,11 @@ class Session:
     def connect(self):
         cols, rows = self.size()
         try:
-            socket = WebSocket.connect(self.link.websocket_url(self.token, cols, rows), self.platform.ssl_context(),
-                                       user_agent='outpost-connector/' + VERSION)
+            socket = WebSocket.connect(
+                self.link.websocket_url(self.token, cols, rows),
+                self.platform.ssl_context(),
+                user_agent='outpost-connector/' + VERSION,
+            )
         except (OSError, WebSocketError) as error:
             return Outcome('error', 'Could not reach ' + urlsplit(self.link.server).netloc + ': ' + str(error))
         try:
@@ -187,7 +197,7 @@ class Connection:
         self.socket = socket
         self.router = InputRouter()
         self.screen = OutputFilter(self.copy)
-        self.held = []          # Keystrokes waiting for a clipboard decision.
+        self.held = []  # Keystrokes waiting for a clipboard decision.
         self.blocked = False
         self.connected = False
         self.outcome = None
@@ -211,7 +221,7 @@ class Connection:
             _, kind, original = action
             self.blocked = True
             # Everything after the gesture waits, in order, and is parsed again later.
-            rest = b''.join(item[1] if item[0] == 'data' else (item[2] or PASTE_KEY) for item in actions[index + 1:])
+            rest = b''.join(item[1] if item[0] == 'data' else (item[2] or PASTE_KEY) for item in actions[index + 1 :])
             self.held.append(rest + self.router.pending)
             self.router.reset()
             self.session.background(self.clipboard, kind, original)
@@ -226,8 +236,14 @@ class Connection:
                 self.socket.send_binary(original)
             self.session.title('Clipboard unavailable: ' + str(error)[:80])
         elif result.kind == 'image':
-            self.send({'type': 'paste-image', 'id': uuid.uuid4().hex, 'mediaType': 'image/png',
-                       'data': base64.b64encode(result.value).decode()})
+            self.send(
+                {
+                    'type': 'paste-image',
+                    'id': uuid.uuid4().hex,
+                    'mediaType': 'image/png',
+                    'data': base64.b64encode(result.value).decode(),
+                }
+            )
             self.session.title('Uploading image…', seconds=30)
         elif result.kind == 'text' and kind == 'any':
             self.socket.send_binary(bracketed(result.value, self.screen.bracketed_paste).encode())
@@ -302,7 +318,10 @@ class Connection:
                         if name == 'clipboard':
                             self.pasted(*args, result, error)
                         elif error is not None:
-                            session.title(('Copy failed: ' if name == 'write_clipboard' else 'Could not open the link: ') + str(error)[:60])
+                            session.title(
+                                ('Copy failed: ' if name == 'write_clipboard' else 'Could not open the link: ')
+                                + str(error)[:60]
+                            )
                 if session.input in ready:
                     data = os.read(session.input, 65536)
                     if not data:
@@ -326,11 +345,18 @@ class Connection:
                     session.write(self.screen.flush())
                 self.socket.flush()
             except (OSError, WebSocketError, ValueError) as error:
-                return self.outcome or Outcome('error', str(error) or 'The connection to Outpost was lost.', self.connected)
+                return self.outcome or Outcome(
+                    'error', str(error) or 'The connection to Outpost was lost.', self.connected
+                )
 
 
 # One handler per server message type and per signal type; tests/unit/contracts
 # checks these against shared/protocol.ts and shared/signals.ts.
-HANDLERS = {'hello': Connection.hello, 'ready': Connection.ready, 'result': Connection.result,
-            'signal': Connection.signal, 'closed': Connection.closed}
+HANDLERS = {
+    'hello': Connection.hello,
+    'ready': Connection.ready,
+    'result': Connection.result,
+    'signal': Connection.signal,
+    'closed': Connection.closed,
+}
 SIGNALS = {'browser.open': Connection.open_link}

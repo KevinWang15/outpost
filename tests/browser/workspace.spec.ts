@@ -55,7 +55,10 @@ test('add a target, create a session, and work in the web terminal', async ({ pa
 
   await row.getByRole('button', { name: `More actions for Browser session` }).click()
   await page.getByRole('menuitem', { name: 'Terminate' }).click()
-  await page.getByRole('dialog', { name: /Terminate/ }).getByRole('button', { name: 'Terminate' }).click()
+  await page
+    .getByRole('dialog', { name: /Terminate/ })
+    .getByRole('button', { name: 'Terminate' })
+    .click()
   await expect(row).toContainText('Stopped')
 })
 
@@ -64,25 +67,40 @@ test('choosing a native terminal opens the link and confirms when the connector 
   await createSession(page, 'Native session', '~/native-project')
   await page.getByRole('row').filter({ hasText: 'Native session' }).getByRole('button', { name: 'Connect' }).click()
   const connect = page.getByRole('dialog', { name: 'Connect to Native session' })
-  const response = page.waitForResponse(response => response.url().endsWith('/connect') && response.request().method() === 'POST')
+  const response = page.waitForResponse(
+    response => response.url().endsWith('/connect') && response.request().method() === 'POST',
+  )
   await connect.getByRole('button', { name: /iTerm2/ }).click()
   const { url } = await (await response).json()
   expect(url).toMatch(/^outpost:\/\/connect\//)
   await expect(connect.getByText('Opening iTerm2…')).toBeVisible()
   await expect(connect.getByText('Nothing opened?')).toBeVisible({ timeout: 12_000 })
-  await expect(connect.getByLabel('Connector install command')).toContainText(/^curl -fsSL 'http:\/\/127\.0\.0\.1:\d+\/connector\/install\.sh' \| bash$/)
+  await expect(connect.getByLabel('Connector install command')).toContainText(
+    /^curl -fsSL 'http:\/\/127\.0\.0\.1:\d+\/connector\/install\.sh' \| bash$/,
+  )
 
   // Play the part of the outpost:// handler: run the served connector on this link.
   const home = await mkdtemp(join(tmpdir(), 'outpost-connector-ui-'))
   const archive = join(home, 'outpost-connector.pyz')
   await writeFile(archive, Buffer.from(await (await page.request.get('/connector/outpost-connector.pyz')).body()))
-  await writeFile(join(home, 'config.json'), JSON.stringify({ servers: [JSON.parse(Buffer.from(url.slice(18), 'base64url').toString()).server] }))
-  const connector = spawn('python3', [join(fixtures, 'pty_driver.py'), '100', '30', '--', 'python3', archive, 'attach', url],
-    { env: { ...process.env, OUTPOST_CONNECTOR_HOME: home, OUTPOST_CONNECTOR_FAKE: home } })
+  await writeFile(
+    join(home, 'config.json'),
+    JSON.stringify({ servers: [JSON.parse(Buffer.from(url.slice(18), 'base64url').toString()).server] }),
+  )
+  const connector = spawn(
+    'python3',
+    [join(fixtures, 'pty_driver.py'), '100', '30', '--', 'python3', archive, 'attach', url],
+    { env: { ...process.env, OUTPOST_CONNECTOR_HOME: home, OUTPOST_CONNECTOR_FAKE: home } },
+  )
   try {
     await expect(connect.getByText('Connected in iTerm2')).toBeVisible()
-    await expect(page.getByRole('row').filter({ hasText: 'Native session' })).toContainText('Attached', { timeout: 20_000 })
-  } finally { connector.kill(); await rm(home, { recursive: true, force: true }) }
+    await expect(page.getByRole('row').filter({ hasText: 'Native session' })).toContainText('Attached', {
+      timeout: 20_000,
+    })
+  } finally {
+    connector.kill()
+    await rm(home, { recursive: true, force: true })
+  }
 })
 
 test('phones get on-screen keys and a message box', async ({ browser }) => {

@@ -1,6 +1,8 @@
 """Claude Code project transcripts and native session-id/resume flags."""
+
 import uuid
-from outpost_conversations import CodingSession, CodingSessionStore, timestamp, strings, clean, store_paths
+
+from outpost_conversations import CodingSession, CodingSessionStore, clean, store_paths, strings, timestamp
 
 
 class ClaudeSessionStore(CodingSessionStore):
@@ -21,7 +23,9 @@ class ClaudeSessionStore(CodingSessionStore):
                     title = clean(record.get('customTitle'), 160)
                 elif not title and record.get('type') == 'user':
                     message = record.get('message')
-                    title = clean(' '.join(strings(message.get('content', ''))), 160) if isinstance(message, dict) else ''
+                    title = (
+                        clean(' '.join(strings(message.get('content', ''))), 160) if isinstance(message, dict) else ''
+                    )
                 if index >= 255 or (root and title):
                     break
             try:
@@ -32,8 +36,9 @@ class ClaudeSessionStore(CodingSessionStore):
             # Subagent conversations belong to this native session, so matches
             # in their transcripts should link back to its resumable identity.
             history = [path, *store_paths(path.with_suffix('') / 'subagents', 'agent-*.jsonl', scan, within=home)]
-            yield CodingSession(path.stem, root, title or path.stem, created, updated,
-                                history, self.adapter.storage(home))
+            yield CodingSession(
+                path.stem, root, title or path.stem, created, updated, history, self.adapter.storage(home)
+            )
 
     def text(self, record):
         if record.get('type') in ('user', 'assistant'):
@@ -78,12 +83,17 @@ class ClaudeSessionStore(CodingSessionStore):
         if kind == 'user':
             # These are native interrupt records, not a new human prompt.
             content = message.get('content')
-            if isinstance(content, list) and any(isinstance(part, dict) and part.get('type') == 'text'
+            if isinstance(content, list) and any(
+                isinstance(part, dict)
+                and part.get('type') == 'text'
                 and part.get('text') in ('[Request interrupted by user]', '[Request interrupted by user for tool use]')
-                for part in content):
+                for part in content
+            ):
                 return 'idle', record.get('timestamp')
             return 'working', record.get('timestamp')
         if kind == 'assistant':
             reason = message.get('stop_reason')
-            return ('finished' if reason in ('end_turn', 'stop_sequence', 'max_tokens', 'refusal') else 'working'), record.get('timestamp')
+            return (
+                'finished' if reason in ('end_turn', 'stop_sequence', 'max_tokens', 'refusal') else 'working'
+            ), record.get('timestamp')
         return None

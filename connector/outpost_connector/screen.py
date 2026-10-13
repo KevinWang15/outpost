@@ -3,6 +3,7 @@
 Copies are written to the local clipboard directly, so no terminal permission
 prompt is needed. Clipboard *read* requests are dropped (principle 6).
 """
+
 import base64
 import binascii
 import re
@@ -41,8 +42,8 @@ class OutputFilter:
                 else:
                     self.held = data[start:]
                 break
-            self.copy(data[start + len(OSC52):end.start()])
-            data = data[end.end():]
+            self.copy(data[start + len(OSC52) : end.start()])
+            data = data[end.end() :]
         self.track(bytes(output))
         return bytes(output)
 

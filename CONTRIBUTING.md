@@ -6,7 +6,8 @@ terminal state, modes that differ only in identity, agentless targets).
 
 ## Local setup
 
-Use Node.js 24+, npm 11+, Python 3.9+, tmux 3.2+ and an OpenSSH client.
+Use Node.js 24+, npm 11+, Python 3.9+, tmux 3.2+, an OpenSSH client and
+[ruff](https://docs.astral.sh/ruff/) (`pipx install ruff` or `uv tool install ruff`).
 
 ```sh
 npm ci
@@ -32,10 +33,15 @@ credentials, hosted development shows verification links in the UI.
 Python code must stay compatible with Python 3.9 (macOS Command Line Tools) and
 use only the standard library.
 
+Formatting is automatic: `npm run format` runs Prettier on TypeScript, SCSS and
+JSON and ruff on Python; `npm run lint` and `npm run lint:python` check it.
+Contracts shared by TypeScript and Python are tested in
+`tests/unit/contracts.test.ts`; extend it when you add one.
+
 ## Checks
 
 ```sh
-npm run check             # lint, typecheck, build, Node unit tests, Python tests
+npm run check             # lint (incl. ruff), typecheck, build, Node unit tests, Python tests
 npm run test:integration  # real tmux; the SSH test also needs Docker
 npx playwright install chromium
 npm run test:ui           # browser tests against a real local backend

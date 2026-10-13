@@ -13,12 +13,12 @@
     "build:client": "vite build",
     "build:server": "node scripts/build-server.mjs",
     "start": "node --enable-source-maps dist/server/server.js",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint . --max-warnings 0 && prettier --check .",
     "test": "node --import tsx --test 'tests/unit/*.test.ts' && npm run test:python",
     "test:python": "python3 -m unittest discover -s tests/connector && python3 -m unittest discover -s tests/runtime",
     "test:integration": "node --import tsx --test 'tests/integration/*.test.ts'",
     "test:ui": "playwright test",
-    "check": "npm run lint && npm run build && npm test",
+    "check": "npm run lint && npm run lint:python && npm run build && npm test",
     "logo:generate": "node scripts/logo/generate.mjs",
     "promo:capture": "npm --prefix promo-v2 run capture",
     "promo:narrate": "npm --prefix promo-v2 run narrate",
@@ -27,7 +27,9 @@
     "promo:render": "npm --prefix promo-v2 run render --",
     "promo:preview": "npm --prefix promo-v2 run preview --",
     "docs:capture": "node scripts/screenshots.mjs",
-    "dev:debug": "tsx watch --inspect=127.0.0.1:9229 --include=backend/** --include=runtime/** --include=connector/** backend/server.ts"
+    "dev:debug": "tsx watch --inspect=127.0.0.1:9229 --include=backend/** --include=runtime/** --include=connector/** backend/server.ts",
+    "lint:python": "ruff check runtime connector tests && ruff format --check runtime connector tests",
+    "format": "prettier --write . && ruff format runtime connector tests && ruff check --fix runtime connector tests"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.4",
@@ -69,6 +71,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.12.0",
+    "prettier": "^3.9.10",
     "sass": "^1.105.0",
     "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2",

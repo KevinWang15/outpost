@@ -1,4 +1,5 @@
 """Target runtime. Executed per operation, locally or through SSH; never installed as an agent."""
+
 import base64
 import binascii
 import datetime
@@ -7,11 +8,10 @@ import fcntl
 import heapq
 import json
 import os
-from pathlib import Path
 import pwd
 import re
-import shutil
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -19,8 +19,10 @@ import sys
 import tempfile
 import time
 import uuid
-from outpost_harness import adapters
+from pathlib import Path
+
 from outpost_activity_state import Activity
+from outpost_harness import adapters
 
 CODING_ADAPTERS = adapters()
 
@@ -29,7 +31,18 @@ STATE = Path.home() / '.outpost'
 REGISTRY = STATE / 'registry.json'
 LEGACY_REGISTRY = STATE / 'sessions.json'
 HELPERS = STATE / 'bin'
-FIELDS = {'id', 'name', 'rootDir', 'createdAt', 'lastConnectedAt', 'tool', 'env', 'args', 'cliSessionId', 'cliSessionEnv'}
+FIELDS = {
+    'id',
+    'name',
+    'rootDir',
+    'createdAt',
+    'lastConnectedAt',
+    'tool',
+    'env',
+    'args',
+    'cliSessionId',
+    'cliSessionEnv',
+}
 IMAGE_EXTENSIONS = ('png', 'jpg', 'gif', 'webp')
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
 
@@ -122,8 +135,12 @@ def save(data):
 
 
 def validate(data):
-    if not isinstance(data, dict) or set(data) != {'version', 'sessions'} or data['version'] != 2 \
-            or not isinstance(data['sessions'], list):
+    if (
+        not isinstance(data, dict)
+        or set(data) != {'version', 'sessions'}
+        or data['version'] != 2
+        or not isinstance(data['sessions'], list)
+    ):
         raise ValueError()
     ids, names, conversations = set(), set(), set()
     for entry in data['sessions']:
@@ -132,7 +149,11 @@ def validate(data):
         if not text(entry['id'], 36) or str(uuid.UUID(entry['id'])) != entry['id'] or entry['id'] in ids:
             raise ValueError()
         adapter = CODING_ADAPTERS.get(entry['tool'])
-        if adapter is None or not adapter.valid_id(entry['cliSessionId']) or not adapter.valid_storage(entry['cliSessionEnv']):
+        if (
+            adapter is None
+            or not adapter.valid_id(entry['cliSessionId'])
+            or not adapter.valid_storage(entry['cliSessionEnv'])
+        ):
             raise ValueError()
         if not valid_launch_options(entry['env'], entry['args']):
             raise ValueError()
@@ -140,7 +161,9 @@ def validate(data):
             raise ValueError()
         if not text(entry['rootDir'], 4096) or not os.path.isabs(entry['rootDir']):
             raise ValueError()
-        if not timestamp(entry['createdAt']) or (entry['lastConnectedAt'] is not None and not timestamp(entry['lastConnectedAt'])):
+        if not timestamp(entry['createdAt']) or (
+            entry['lastConnectedAt'] is not None and not timestamp(entry['lastConnectedAt'])
+        ):
             raise ValueError()
         conversation = (entry['tool'], entry['cliSessionId'], tuple(sorted(entry['cliSessionEnv'].items())))
         if conversation in conversations:
@@ -157,14 +180,17 @@ def legacy_sessions():
     try:
         legacy = json.loads(LEGACY_REGISTRY.read_text())
         entries = legacy['sessions']
-        imported = [{key: entry[key] for key in FIELDS} for entry in entries
-                    if isinstance(entry, dict) and entry.get('backend') == 'tmux' and FIELDS <= set(entry)]
+        imported = [
+            {key: entry[key] for key in FIELDS}
+            for entry in entries
+            if isinstance(entry, dict) and entry.get('backend') == 'tmux' and FIELDS <= set(entry)
+        ]
         names = set()
         for entry in imported:
             # v1 names were unique per backend; v2 names are unique per target.
             name, suffix = entry['name'], 2
             while entry['name'].casefold() in names:
-                entry['name'] = (name[:74] + ' (' + str(suffix) + ')')
+                entry['name'] = name[:74] + ' (' + str(suffix) + ')'
                 suffix += 1
             names.add(entry['name'].casefold())
         return validate({'version': 2, 'sessions': imported})['sessions']
@@ -186,10 +212,24 @@ def valid_launch_options(environment, arguments):
         return False
     if not isinstance(environment, dict) or len(environment) > 32:
         return False
-    if any(not isinstance(key, str) or len(key) > 128 or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key)
-           or not isinstance(value, str) or len(value) > 4096 or '\0' in value for key, value in environment.items()):
+    if any(
+        not isinstance(key, str)
+        or len(key) > 128
+        or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key)
+        or not isinstance(value, str)
+        or len(value) > 4096
+        or '\0' in value
+        for key, value in environment.items()
+    ):
         return False
-    return len(json.dumps({'env': environment, 'args': arguments}, ensure_ascii=False, separators=(',', ':')).encode('utf-8')) <= 16 * 1024
+    return (
+        len(
+            json.dumps({'env': environment, 'args': arguments}, ensure_ascii=False, separators=(',', ':')).encode(
+                'utf-8'
+            )
+        )
+        <= 16 * 1024
+    )
 
 
 def install_helpers():
@@ -209,10 +249,14 @@ def install_helpers():
 
 def launch_script(session, executable):
     # Environment values and paths are literal; only the argument string is shell text.
-    steps = ['cd -- ' + shlex.quote(session['rootDir']),
-             'export PATH=' + shlex.quote(str(HELPERS)) + ':"$PATH"',
-             'export -- COLORTERM=truecolor OUTPOST_SESSION_ID=' + shlex.quote(session['id'])
-             + ' BROWSER=' + shlex.quote(str(HELPERS / 'outpost-browser'))]
+    steps = [
+        'cd -- ' + shlex.quote(session['rootDir']),
+        'export PATH=' + shlex.quote(str(HELPERS)) + ':"$PATH"',
+        'export -- COLORTERM=truecolor OUTPOST_SESSION_ID='
+        + shlex.quote(session['id'])
+        + ' BROWSER='
+        + shlex.quote(str(HELPERS / 'outpost-browser')),
+    ]
     environment = {**session['env'], **session['cliSessionEnv']}
     if environment:
         steps.append('export -- ' + ' '.join(key + '=' + shlex.quote(value) for key, value in environment.items()))
@@ -220,8 +264,16 @@ def launch_script(session, executable):
     flags = ' '.join(shlex.quote(value) for value in adapter.arguments(session))
     # Bash expands the call's arguments once. The function checks that exact
     # argv and execs the CLI, preserving exec's behavior for shell operators.
-    steps.append('launch_coding_tool() {\n' + adapter.argument_guard() + '\n'
-                 + 'exec ' + shlex.quote(executable) + ' ' + flags + ' "$@"\n}')
+    steps.append(
+        'launch_coding_tool() {\n'
+        + adapter.argument_guard()
+        + '\n'
+        + 'exec '
+        + shlex.quote(executable)
+        + ' '
+        + flags
+        + ' "$@"\n}'
+    )
     steps.append('launch_coding_tool ' + session['args'])
     return ' &&\n'.join(steps)
 
@@ -248,7 +300,9 @@ def directory_suggestions(prefix):
                 if not entry.name.startswith(name) or (entry.name.startswith('.') and not name.startswith('.')):
                     continue
                 candidate = parent + entry.name + '/'
-                if len(candidate) > 4096 or any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in candidate):
+                if len(candidate) > 4096 or any(
+                    ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in candidate
+                ):
                     continue
                 try:
                     if entry.is_dir():
@@ -281,8 +335,13 @@ def tmux_environment():
 
 
 def tmux(session, *arguments):
-    return subprocess.run(tmux_command(session, *arguments), capture_output=True, text=True, env=tmux_environment(),
-                          stdin=subprocess.DEVNULL)
+    return subprocess.run(
+        tmux_command(session, *arguments),
+        capture_output=True,
+        text=True,
+        env=tmux_environment(),
+        stdin=subprocess.DEVNULL,
+    )
 
 
 def tmux_query(session, template):
@@ -352,7 +411,7 @@ def decode_image(extension, encoded):
     try:
         data = base64.b64decode(encoded, validate=True)
     except binascii.Error:
-        raise ValueError('Invalid image data')
+        raise ValueError('Invalid image data') from None
     if not data or base64.b64encode(data) != encoded:
         raise ValueError('Invalid image data')
     if len(data) > MAX_IMAGE_BYTES:
@@ -363,8 +422,9 @@ def decode_image(extension, encoded):
 def save_image(session, extension, data):
     directory = STATE / 'clipboard' / session['id']
     directory.mkdir(parents=True, exist_ok=True)
-    destination = directory / (datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S-%f-')
-                               + uuid.uuid4().hex + '.' + extension)
+    destination = directory / (
+        datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S-%f-') + uuid.uuid4().hex + '.' + extension
+    )
     with destination.open('xb') as stream:
         stream.write(data)
     # Keep only the newest uploads per session.
@@ -378,8 +438,22 @@ def save_image(session, extension, data):
 
 def paste_reference(session, reference):
     # tmux writes to the pane directly; bracketed paste delivers one paste, not keystrokes.
-    result = tmux(session, 'set-buffer', '-b', 'outpost-image', '--', reference,
-                  ';', 'paste-buffer', '-p', '-d', '-b', 'outpost-image', '-t', '=outpost:')
+    result = tmux(
+        session,
+        'set-buffer',
+        '-b',
+        'outpost-image',
+        '--',
+        reference,
+        ';',
+        'paste-buffer',
+        '-p',
+        '-d',
+        '-b',
+        'outpost-image',
+        '-t',
+        '=outpost:',
+    )
     if result.returncode:
         raise ValueError('The image was saved to ' + reference + ' but could not be pasted: ' + result.stderr.strip())
     try:
@@ -479,8 +553,13 @@ def start_session(session, cols, rows):
     tool = session['tool']
     executable = shutil.which(tool, path=session['env'].get('PATH', os.environ.get('PATH')))
     if not executable:
-        fail(tool + " is not on " + pwd.getpwuid(os.getuid()).pw_name
-             + "'s interactive login PATH. Check that user's shell startup files before connecting.", 409)
+        fail(
+            tool
+            + ' is not on '
+            + pwd.getpwuid(os.getuid()).pw_name
+            + "'s interactive login PATH. Check that user's shell startup files before connecting.",
+            409,
+        )
     command_shell = shutil.which('bash')
     if not command_shell:
         fail('Bash is missing on this target. Open Required Software to install it.', 409)
@@ -489,14 +568,46 @@ def start_session(session, cols, rows):
     activity(session).initialize()
     # The tmux server owns the PTY independently of any connection. Options
     # that only apply to new panes must be set before the session exists.
-    result = subprocess.run(tmux_command(session, 'start-server', ';', 'set-option', '-g', 'history-limit', '50000',
-                                         ';', 'new-session', '-d', '-s', 'outpost', '-c', session['rootDir'],
-                                         '-x', str(cols), '-y', str(rows),
-                                         command_shell, '-c', launch_script(session, executable),
-                                         ';', 'set-option', '-g', 'status', 'off',
-                                         ';', 'bind-key', '-n', 'C-\\', 'detach-client'),
-                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                            text=True, env=tmux_environment())
+    result = subprocess.run(
+        tmux_command(
+            session,
+            'start-server',
+            ';',
+            'set-option',
+            '-g',
+            'history-limit',
+            '50000',
+            ';',
+            'new-session',
+            '-d',
+            '-s',
+            'outpost',
+            '-c',
+            session['rootDir'],
+            '-x',
+            str(cols),
+            '-y',
+            str(rows),
+            command_shell,
+            '-c',
+            launch_script(session, executable),
+            ';',
+            'set-option',
+            '-g',
+            'status',
+            'off',
+            ';',
+            'bind-key',
+            '-n',
+            'C-\\',
+            'detach-client',
+        ),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=tmux_environment(),
+    )
     if result.returncode:
         fail('Could not start tmux: ' + result.stderr.strip(), 409)
     for _ in range(50):
@@ -523,11 +634,21 @@ def negotiate_keys(session):
         descriptor = os.open(pane_tty, os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
         current = tmux(session, 'display-message', '-p', '-t', '=outpost:', '#{pane_tty}')
         if current.returncode == 0 and current.stdout.strip() == pane_tty:
-            pokes = 'exec 3>&' + str(descriptor) + '; ' + '; '.join(
-                'sleep ' + str(delay) + '; printf "\\033[>4;2m" >&3 || exit' for delay in (1, 2, 3))
-            subprocess.Popen(['bash', '-c', pokes], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, env=tmux_environment(), start_new_session=True,
-                             pass_fds=(descriptor,))
+            pokes = (
+                'exec 3>&'
+                + str(descriptor)
+                + '; '
+                + '; '.join('sleep ' + str(delay) + '; printf "\\033[>4;2m" >&3 || exit' for delay in (1, 2, 3))
+            )
+            subprocess.Popen(
+                ['bash', '-c', pokes],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=tmux_environment(),
+                start_new_session=True,
+                pass_fds=(descriptor,),
+            )
     except OSError:
         pass  # A disappearing pane must not prevent attachment.
     finally:
@@ -555,18 +676,59 @@ def attach_session(session, cols, rows):
     # through tmux, OSC 52 copy, Shift+Enter via extended keys, truecolor.
     features = tmux(session, 'show-options', '-sqv', 'terminal-features')
     wanted = 'xterm*:clipboard:extkeys:RGB:focus'
-    chain = [] if features.returncode == 0 and wanted in features.stdout.split() \
+    chain = (
+        []
+        if features.returncode == 0 and wanted in features.stdout.split()
         else [';', 'set-option', '-saq', 'terminal-features', wanted]
-    tmux(session, 'set-option', '-s', 'escape-time', '10',
-         ';', 'set-option', '-g', 'assume-paste-time', '0',
-         ';', 'set-option', '-sq', 'set-clipboard', 'on',
-         ';', 'set-option', '-gq', 'allow-passthrough', 'on',
-         ';', 'set-option', '-sq', 'extended-keys', 'on',
-         ';', 'set-option', '-sq', 'extended-keys-format', 'csi-u',
-         ';', 'set-option', '-sq', 'focus-events', 'on',
-         ';', 'set-option', '-g', 'mouse', 'on',
-         ';', 'set-option', '-gq', 'window-size', 'latest',
-         *chain)
+    )
+    tmux(
+        session,
+        'set-option',
+        '-s',
+        'escape-time',
+        '10',
+        ';',
+        'set-option',
+        '-g',
+        'assume-paste-time',
+        '0',
+        ';',
+        'set-option',
+        '-sq',
+        'set-clipboard',
+        'on',
+        ';',
+        'set-option',
+        '-gq',
+        'allow-passthrough',
+        'on',
+        ';',
+        'set-option',
+        '-sq',
+        'extended-keys',
+        'on',
+        ';',
+        'set-option',
+        '-sq',
+        'extended-keys-format',
+        'csi-u',
+        ';',
+        'set-option',
+        '-sq',
+        'focus-events',
+        'on',
+        ';',
+        'set-option',
+        '-g',
+        'mouse',
+        'on',
+        ';',
+        'set-option',
+        '-gq',
+        'window-size',
+        'latest',
+        *chain,
+    )
     negotiate_keys(session)
     observer = activity(session)
     try:
@@ -574,9 +736,9 @@ def attach_session(session, cols, rows):
     except (OSError, ValueError):
         pass  # Missing activity signals must not prevent attachment.
     from outpost_relay import Relay
+
     command = tmux_command(session, 'attach-session', '-t', '=outpost')
-    return Relay(command, tmux_environment(), cols, rows, AttachHooks(session),
-                 'run/' + session['id'] + '.sock').run()
+    return Relay(command, tmux_environment(), cols, rows, AttachHooks(session), 'run/' + session['id'] + '.sock').run()
 
 
 def terminal_size(request):
@@ -597,6 +759,7 @@ def main():
         return
     if action == 'coding-search':
         from outpost_conversations import search as search_coding_sessions
+
         # Search never initializes the registry. Atomic registry replacement
         # makes this read safe without holding the lock through a long scan.
         sessions = read_registry()['sessions'] if STATE.is_dir() else []
@@ -606,9 +769,13 @@ def main():
         except ValueError as error:
             fail(str(error))
         for match in result['sessions']:
-            match['managedSessionIds'] = [s['id'] for s in sessions if s['tool'] == match['tool']
-                                         and s['cliSessionId'] == match['cliSessionId']
-                                         and s['cliSessionEnv'] == match['cliSessionEnv']]
+            match['managedSessionIds'] = [
+                s['id']
+                for s in sessions
+                if s['tool'] == match['tool']
+                and s['cliSessionId'] == match['cliSessionId']
+                and s['cliSessionEnv'] == match['cliSessionEnv']
+            ]
         respond(result)
         return
     if action == 'create':
@@ -666,7 +833,9 @@ def main():
                     requested_storage = request.get('cliSessionEnv', {})
                     if requested_storage and not adapter.valid_storage(requested_storage):
                         fail('Invalid coding CLI storage directory')
-                    native = adapter.find(request['cliSessionId'], {**launch_environment, **requested_storage}, str(root))
+                    native = adapter.find(
+                        request['cliSessionId'], {**launch_environment, **requested_storage}, str(root)
+                    )
                     cli_id, cli_environment = native.id, native.storage
                     if not native.root or Path(native.root).resolve() != root:
                         fail('Use the conversation’s working directory when linking it to a session.')
@@ -674,11 +843,23 @@ def main():
                     cli_id, cli_environment = adapter.create(str(root), launch_environment, executable)
             except (ValueError, subprocess.TimeoutExpired) as error:
                 fail(str(error), 409)
-            if any(s['tool'] == tool and s['cliSessionId'] == cli_id and s['cliSessionEnv'] == cli_environment for s in sessions):
+            if any(
+                s['tool'] == tool and s['cliSessionId'] == cli_id and s['cliSessionEnv'] == cli_environment
+                for s in sessions
+            ):
                 fail('This conversation already has an Outpost session on this target.', 409)
-            session = {'id': str(uuid.uuid4()), 'name': name, 'rootDir': str(root), 'createdAt': now(),
-                       'lastConnectedAt': None, 'tool': tool, 'env': environment, 'args': arguments,
-                       'cliSessionId': cli_id, 'cliSessionEnv': cli_environment}
+            session = {
+                'id': str(uuid.uuid4()),
+                'name': name,
+                'rootDir': str(root),
+                'createdAt': now(),
+                'lastConnectedAt': None,
+                'tool': tool,
+                'env': environment,
+                'args': arguments,
+                'cliSessionId': cli_id,
+                'cliSessionEnv': cli_environment,
+            }
             activity(session).initialize()
             sessions.append(session)
             save(data)
@@ -697,7 +878,11 @@ def main():
                 result = describe(session)
             elif action == 'paste-image':
                 try:
-                    result = paste_image(session, request.get('extension'), sys.stdin.buffer.read(((MAX_IMAGE_BYTES + 2) // 3) * 4 + 2).strip())
+                    result = paste_image(
+                        session,
+                        request.get('extension'),
+                        sys.stdin.buffer.read(((MAX_IMAGE_BYTES + 2) // 3) * 4 + 2).strip(),
+                    )
                 except ValueError as error:
                     fail(str(error), 413 if 'limited' in str(error) else 400)
             elif action == 'terminate':

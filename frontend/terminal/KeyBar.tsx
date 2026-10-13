@@ -1,6 +1,11 @@
 import type { TerminalModifiers } from './keys'
 
-interface Key { label: string; key: string; title: string; modifiers?: TerminalModifiers }
+interface Key {
+  label: string
+  key: string
+  title: string
+  modifiers?: TerminalModifiers
+}
 const keys: Key[] = [
   { label: 'Esc', key: 'Escape', title: 'Escape' },
   { label: 'Tab', key: 'Tab', title: 'Tab' },
@@ -14,7 +19,14 @@ const keys: Key[] = [
 ]
 
 /** On-screen keys for phones and tablets. Ctrl and Alt apply to the next key. */
-export default function KeyBar({ enabled, modifiers, onModifiers, onKey, onCopy, onPaste }: {
+export default function KeyBar({
+  enabled,
+  modifiers,
+  onModifiers,
+  onKey,
+  onCopy,
+  onPaste,
+}: {
   enabled: boolean
   modifiers: TerminalModifiers
   onModifiers: (modifiers: TerminalModifiers) => void
@@ -24,13 +36,46 @@ export default function KeyBar({ enabled, modifiers, onModifiers, onKey, onCopy,
 }) {
   // Keep focus (and the phone keyboard) on the terminal while tapping keys.
   const hold = (event: React.PointerEvent) => event.preventDefault()
-  return <div className="key-bar" role="group" aria-label="Terminal keys">
-    {(['ctrl', 'alt'] as const).map(name => <button key={name} type="button" disabled={!enabled} aria-pressed={Boolean(modifiers[name])}
-      title={`${name === 'ctrl' ? 'Ctrl' : 'Alt'} for the next key`} onPointerDown={hold}
-      onClick={() => onModifiers({ ...modifiers, [name]: !modifiers[name] })}>{name === 'ctrl' ? 'Ctrl' : 'Alt'}</button>)}
-    {keys.map(item => <button key={item.title} type="button" disabled={!enabled} title={item.title} aria-label={item.title}
-      onPointerDown={hold} onClick={() => onKey(item.key, item.modifiers)}>{item.label}</button>)}
-    <button type="button" title="Copy selection" onPointerDown={hold} onClick={onCopy}>Copy</button>
-    <button type="button" disabled={!enabled} title="Paste from your clipboard" onPointerDown={hold} onClick={onPaste}>Paste</button>
-  </div>
+  return (
+    <div className="key-bar" role="group" aria-label="Terminal keys">
+      {(['ctrl', 'alt'] as const).map(name => (
+        <button
+          key={name}
+          type="button"
+          disabled={!enabled}
+          aria-pressed={Boolean(modifiers[name])}
+          title={`${name === 'ctrl' ? 'Ctrl' : 'Alt'} for the next key`}
+          onPointerDown={hold}
+          onClick={() => onModifiers({ ...modifiers, [name]: !modifiers[name] })}
+        >
+          {name === 'ctrl' ? 'Ctrl' : 'Alt'}
+        </button>
+      ))}
+      {keys.map(item => (
+        <button
+          key={item.title}
+          type="button"
+          disabled={!enabled}
+          title={item.title}
+          aria-label={item.title}
+          onPointerDown={hold}
+          onClick={() => onKey(item.key, item.modifiers)}
+        >
+          {item.label}
+        </button>
+      ))}
+      <button type="button" title="Copy selection" onPointerDown={hold} onClick={onCopy}>
+        Copy
+      </button>
+      <button
+        type="button"
+        disabled={!enabled}
+        title="Paste from your clipboard"
+        onPointerDown={hold}
+        onClick={onPaste}
+      >
+        Paste
+      </button>
+    </div>
+  )
 }

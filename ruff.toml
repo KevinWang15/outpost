@@ -1,0 +1,18 @@
+# Python runs on targets and on users' computers: keep it 3.9-compatible.
+target-version = "py39"
+line-length = 120
+
+[lint]
+select = ["E", "F", "W", "B", "I"]
+# The formatter owns line length.
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# Tests put the code under test on sys.path before importing it.
+"tests/**/*.py" = ["E402"]
+
+[lint.isort]
+known-first-party = ["outpost_connector"]
+
+[format]
+quote-style = "single"

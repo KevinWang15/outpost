@@ -45,11 +45,19 @@ export async function createApp(options: AppOptions) {
   const tokens = new ConnectTokens(deployment.secret)
   const broker = new TerminalBroker({ tokens, deployment, sessions, resolve, env: options.env })
   const services: Services = {
-    deployment, sessions, software, tokens, broker, resolve,
+    deployment,
+    sessions,
+    software,
+    tokens,
+    broker,
+    resolve,
     installations: new Installations(software),
     context: (request, targetId) => resolve(deployment.owner(request), targetId),
   }
-  app.addHook('preClose', async () => { broker.close(); await services.installations.close() })
+  app.addHook('preClose', async () => {
+    broker.close()
+    await services.installations.close()
+  })
   app.addHook('onClose', async () => deployment.close())
 
   app.addHook('onRequest', async (request, reply) => {
@@ -64,14 +72,22 @@ export async function createApp(options: AppOptions) {
     reply.header('X-Frame-Options', 'DENY')
     if (deployment.mode === 'hosted') {
       const origin = deployment.origin(request)
-      reply.header('Content-Security-Policy', `default-src 'self'; connect-src 'self' ${origin.replace(/^http/, 'ws')}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`)
+      reply.header(
+        'Content-Security-Policy',
+        `default-src 'self'; connect-src 'self' ${origin.replace(/^http/, 'ws')}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+      )
     }
   })
   app.setErrorHandler((error, _request, reply) => {
     const problem = error as Error & { statusCode?: number }
     const status = problem.statusCode ?? 500
     if (status >= 500) app.log.error(problem)
-    reply.code(status).send({ message: deployment.mode === 'hosted' && status >= 500 ? 'Something went wrong. Please try again later.' : problem.message })
+    reply.code(status).send({
+      message:
+        deployment.mode === 'hosted' && status >= 500
+          ? 'Something went wrong. Please try again later.'
+          : problem.message,
+    })
   })
 
   app.get('/health', async () => ({ status: 'ok' }))
@@ -84,7 +100,8 @@ export async function createApp(options: AppOptions) {
     await app.register(staticFiles, { root: options.frontendRoot })
     const pages = new Set(['/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'])
     app.setNotFoundHandler((request, reply) => {
-      if (['GET', 'HEAD'].includes(request.method) && pages.has(request.url.split('?')[0])) return reply.sendFile('index.html')
+      if (['GET', 'HEAD'].includes(request.method) && pages.has(request.url.split('?')[0]))
+        return reply.sendFile('index.html')
       return reply.code(404).send({ message: 'Not found' })
     })
   }

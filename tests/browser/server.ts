@@ -10,5 +10,10 @@ const app = await createApp({ deployment: await LocalDeployment.open(join(direct
 await app.listen({ host: '127.0.0.1', port: Number(process.env.PORT ?? 4179) })
 console.log(`browser test backend ready; home ${directory}`)
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => { void app.close().then(() => removeHome(directory, home)).finally(() => process.exit(0)) })
+  process.once(signal, () => {
+    void app
+      .close()
+      .then(() => removeHome(directory, home))
+      .finally(() => process.exit(0))
+  })
 }

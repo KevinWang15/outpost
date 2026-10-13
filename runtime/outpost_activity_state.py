@@ -1,5 +1,5 @@
 """Target-owned acknowledgement checkpoints; never persist terminal input or transcripts."""
-from contextlib import contextmanager
+
 import fcntl
 import hashlib
 import json
@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 import time
+from contextlib import contextmanager
 
 MAX_PATHS = 4096
 
@@ -49,6 +50,7 @@ def covered(point, stream, info, offset):
 
 class Activity:
     """Target-owned check state shared by browsers and terminal connections."""
+
     def __init__(self, directory, adapter, session):
         self.directory = directory
         self.adapter = adapter
@@ -65,10 +67,16 @@ class Activity:
         if not isinstance(data, dict) or set(data) != {'baseline', 'checked'}:
             raise ValueError('Invalid activity metadata; expected the current schema.')
         for point in data.values():
-            if point is not None and (not isinstance(point, dict) or set(point) != {'source', 'offset', 'anchor'}
-                                      or not isinstance(point['source'], str) or not re.fullmatch(r'\d+:\d+', point['source'])
-                                      or type(point['offset']) is not int or point['offset'] < 0
-                                      or not isinstance(point['anchor'], str) or not re.fullmatch(r'[0-9a-f]{64}', point['anchor'])):
+            if point is not None and (
+                not isinstance(point, dict)
+                or set(point) != {'source', 'offset', 'anchor'}
+                or not isinstance(point['source'], str)
+                or not re.fullmatch(r'\d+:\d+', point['source'])
+                or type(point['offset']) is not int
+                or point['offset'] < 0
+                or not isinstance(point['anchor'], str)
+                or not re.fullmatch(r'[0-9a-f]{64}', point['anchor'])
+            ):
                 raise ValueError('Invalid activity acknowledgement.')
         return data
 
@@ -106,10 +114,12 @@ class Activity:
 
     def describe(self, running):
         from outpost_activity import describe
+
         return describe(self, running)
 
     def acknowledge(self, token, running):
         from outpost_activity import acknowledge
+
         acknowledge(self, token, running)
 
     def input(self):

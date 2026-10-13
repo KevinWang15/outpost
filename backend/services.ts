@@ -28,6 +28,14 @@ export function targetResolver(deployment: Deployment, multiplex: boolean) {
     const workspace = deployment.workspace(owner)
     const target = await workspace.get(targetId)
     const identity = target.kind === 'ssh' ? await deployment.identity(owner) : null
-    return { owner, target, workspace, transport: transportFor(target, identity, { scope: owner.userId, ...(multiplex ? { multiplex: directory } : {}) }) }
+    return {
+      owner,
+      target,
+      workspace,
+      transport: transportFor(target, identity, {
+        scope: owner.userId,
+        ...(multiplex ? { multiplex: directory } : {}),
+      }),
+    }
   }
 }

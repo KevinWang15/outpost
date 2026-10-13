@@ -10,6 +10,5 @@ export function isLoopbackAddress(address: string): boolean {
   if (address === '::1') return true
   const ipv4 = address.replace(/^::ffff:/, '')
   const parts = ipv4.split('.')
-  return parts.length === 4 && parts[0] === '127'
-    && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+  return parts.length === 4 && parts[0] === '127' && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255)
 }

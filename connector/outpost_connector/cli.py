@@ -1,4 +1,5 @@
 """outpost-connector install | uninstall | open URL | attach URL | version"""
+
 import argparse
 import os
 import sys
@@ -21,7 +22,9 @@ def attach(url):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='outpost-connector', description='Outpost native terminal connector ' + VERSION)
+    parser = argparse.ArgumentParser(
+        prog='outpost-connector', description='Outpost native terminal connector ' + VERSION
+    )
     commands = parser.add_subparsers(dest='command', required=True)
     setup = commands.add_parser('install', help='install or update, and trust an Outpost server')
     setup.add_argument('--server', required=True, help='Outpost server origin, e.g. https://outpost.example.com')

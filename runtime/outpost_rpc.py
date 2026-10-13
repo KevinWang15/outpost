@@ -1,4 +1,5 @@
 """Bounded JSON-RPC over a short-lived coding CLI process."""
+
 import json
 import os
 import selectors
@@ -9,10 +10,18 @@ import time
 
 class JsonRpcProcess:
     """A bounded, short-lived local CLI protocol connection; no target-side agent."""
+
     def __init__(self, command, environment, cwd):
-        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.DEVNULL, env=environment, cwd=cwd, bufsize=0,
-                                        start_new_session=True)
+        self.process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+            cwd=cwd,
+            bufsize=0,
+            start_new_session=True,
+        )
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
         self.buffer = b''
@@ -29,7 +38,9 @@ class JsonRpcProcess:
         try:
             self.process.stdin.write((json.dumps(message) + '\n').encode())
         except (BrokenPipeError, OSError) as error:
-            raise ValueError('Coding CLI exited during session initialization. Check its configuration and login.') from error
+            raise ValueError(
+                'Coding CLI exited during session initialization. Check its configuration and login.'
+            ) from error
 
     def receive(self):
         while time.monotonic() < self.deadline:
@@ -38,7 +49,9 @@ class JsonRpcProcess:
                     continue
                 chunk = os.read(self.process.stdout.fileno(), 65536)
                 if not chunk:
-                    raise ValueError('Coding CLI exited during session initialization. Check its configuration and login.')
+                    raise ValueError(
+                        'Coding CLI exited during session initialization. Check its configuration and login.'
+                    )
                 self.buffer += chunk
                 if len(self.buffer) > 1024 * 1024:
                     raise ValueError('Coding CLI protocol response exceeded the size limit')
@@ -72,7 +85,13 @@ class JsonRpcProcess:
                     raise ValueError('Coding CLI returned an invalid protocol result')
                 return message['result']
             if 'id' in message and 'method' in message:
-                self.send({'jsonrpc': '2.0', 'id': message['id'], 'error': {'code': -32601, 'message': 'No interactive client during initialization'}})
+                self.send(
+                    {
+                        'jsonrpc': '2.0',
+                        'id': message['id'],
+                        'error': {'code': -32601, 'message': 'No interactive client during initialization'},
+                    }
+                )
             elif 'method' in message:
                 self.notification(message)
 

@@ -1,12 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": [
-      "node"
-    ]
+    "types": ["node"]
   },
-  "include": [
-    "tests/browser",
-    "shared"
-  ]
+  "include": ["tests/browser", "shared"]
 }

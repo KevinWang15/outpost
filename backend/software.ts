@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import type { ExecutionEnvironment, InstallationPlan, SoftwareId, SoftwareReport, SoftwareStatus } from '../shared/model'
+import type {
+  ExecutionEnvironment,
+  InstallationPlan,
+  SoftwareId,
+  SoftwareReport,
+  SoftwareStatus,
+} from '../shared/model'
 import { requiredSoftware } from '../shared/model'
 import { harnesses } from '../shared/harnesses'
 import { AppError } from './errors'
@@ -62,14 +68,25 @@ printf 'END\\000'
 }
 
 function status(id: SoftwareId, path: string, code: number, output: string): SoftwareStatus {
-  if (!path) return { id, status: 'missing', path: null, version: null, detail: 'Not found on the interactive login PATH.' }
-  const version = output.split(/\r?\n/).map(line => line.trim()).find(Boolean) ?? null
-  let detail = code !== 0 ? output.trim() || `Version check exited with status ${code}.` : !version ? 'The version command returned no version.' : null
+  if (!path)
+    return { id, status: 'missing', path: null, version: null, detail: 'Not found on the interactive login PATH.' }
+  const version =
+    output
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .find(Boolean) ?? null
+  let detail =
+    code !== 0
+      ? output.trim() || `Version check exited with status ${code}.`
+      : !version
+        ? 'The version command returned no version.'
+        : null
   const minimum = minimums[id]
   if (!detail && minimum) {
     const match = version!.match(minimum.pattern)
     const [major, minor] = match ? [Number(match[1]), Number(match[2])] : [0, 0]
-    if (major < minimum.version[0] || (major === minimum.version[0] && minor < minimum.version[1])) detail = `${minimum.label} or newer is required.`
+    if (major < minimum.version[0] || (major === minimum.version[0] && minor < minimum.version[1]))
+      detail = `${minimum.label} or newer is required.`
   }
   return { id, status: detail ? 'broken' : 'installed', path, version, detail }
 }
@@ -100,7 +117,8 @@ const packages = `install_packages() {
 /** Editable presets: shown to the user, and run only as submitted. */
 export function installationScript(id: SoftwareId): string {
   const harness = harnesses.find(harness => harness.id === id)
-  if (harness) return `#!/bin/sh
+  if (harness)
+    return `#!/bin/sh
 set -eu
 # Install ${harness.label} using its official installer, as the execution user.
 ${packages}
@@ -122,7 +140,12 @@ echo '${id} installation finished.'
 
 export interface SoftwareService {
   inspect(context: TargetContext, signal?: AbortSignal): Promise<Omit<SoftwareReport, 'installation'>>
-  install(context: TargetContext, script: string, output: (text: string) => void, signal: AbortSignal): Promise<number | null>
+  install(
+    context: TargetContext,
+    script: string,
+    output: (text: string) => void,
+    signal: AbortSignal,
+  ): Promise<number | null>
 }
 
 export class SoftwareClient implements SoftwareService {
@@ -130,25 +153,45 @@ export class SoftwareClient implements SoftwareService {
   async inspect({ target, transport }: TargetContext, signal?: AbortSignal) {
     const marker = `OUTPOST_SOFTWARE_${randomUUID()}`
     const ids = requiredSoftware(target)
-    const { code, stdout, stderr } = await runCommand(transport.management(), inspectionScript(ids, marker, target.kind === 'ssh'), { env: this.env, signal, timeoutMs: 45_000 })
+    const { code, stdout, stderr } = await runCommand(
+      transport.management(),
+      inspectionScript(ids, marker, target.kind === 'ssh'),
+      { env: this.env, signal, timeoutMs: 45_000 },
+    )
     const start = stdout.indexOf(`\0${marker}\0`)
-    if (code !== 0 || start < 0) throw new AppError(`Software check failed. ${stderr.trim() || 'Check access to the target.'}`, 502)
+    if (code !== 0 || start < 0)
+      throw new AppError(`Software check failed. ${stderr.trim() || 'Check access to the target.'}`, 502)
     const fields = stdout.slice(start + marker.length + 2).split('\0')
     const [home, uid, username, shell] = fields.splice(0, 4)
     const environment: ExecutionEnvironment = { home, uid: Number(uid), username, shell }
     const software: SoftwareStatus[] = []
     for (let index = 0; index < ids.length; index++) {
       const [id, path, exit, output] = fields.splice(0, 4)
-      if ([id, path, exit, output].some(value => typeof value !== 'string') || !ids.includes(id as SoftwareId)
-        || software.some(item => item.id === id) || !/^\d+$/.test(exit)) throw new AppError('Invalid software check response', 502)
+      if (
+        [id, path, exit, output].some(value => typeof value !== 'string') ||
+        !ids.includes(id as SoftwareId) ||
+        software.some(item => item.id === id) ||
+        !/^\d+$/.test(exit)
+      )
+        throw new AppError('Invalid software check response', 502)
       software.push(status(id as SoftwareId, path, Number(exit), output))
     }
-    if (fields[0] !== 'END' || !home?.startsWith('/') || !/^\d+$/.test(uid) || !username || !shell?.startsWith('/')) throw new AppError('Invalid execution environment response', 502)
-    return { environment, checkedAt: new Date().toISOString(), software: ids.map(id => software.find(item => item.id === id)!) }
+    if (fields[0] !== 'END' || !home?.startsWith('/') || !/^\d+$/.test(uid) || !username || !shell?.startsWith('/'))
+      throw new AppError('Invalid execution environment response', 502)
+    return {
+      environment,
+      checkedAt: new Date().toISOString(),
+      software: ids.map(id => software.find(item => item.id === id)!),
+    }
   }
   async install({ transport }: TargetContext, script: string, onOutput: (text: string) => void, signal: AbortSignal) {
-    return (await runCommand(transport.management(), script, { env: this.env, signal, onOutput, timeoutMs: 15 * 60_000 })).code
+    return (
+      await runCommand(transport.management(), script, { env: this.env, signal, onOutput, timeoutMs: 15 * 60_000 })
+    ).code
   }
 }
 
-export const planInstallation = (id: SoftwareId): InstallationPlan => ({ softwareId: id, script: installationScript(id) })
+export const planInstallation = (id: SoftwareId): InstallationPlan => ({
+  softwareId: id,
+  script: installationScript(id),
+})

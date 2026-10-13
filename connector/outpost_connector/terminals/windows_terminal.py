@@ -5,6 +5,7 @@ bind keys, so the connector handles Alt+V and Ctrl+V-with-an-image itself) and
 an `outpost://` handler in HKCU that opens a WSL tab directly, without a
 console window flashing first.
 """
+
 import base64
 import json
 import os
@@ -24,26 +25,53 @@ def distribution():
 
 
 def fragment(distro):
-    return {'profiles': [{
-        'name': PROFILE_NAME,
-        'commandline': 'wsl.exe -d ' + distro,
-        'hidden': True,
-        'closeOnExit': 'graceful',
-        'tabTitle': 'Outpost',
-        'suppressApplicationTitle': False,
-    }]}
+    return {
+        'profiles': [
+            {
+                'name': PROFILE_NAME,
+                'commandline': 'wsl.exe -d ' + distro,
+                'hidden': True,
+                'closeOnExit': 'graceful',
+                'tabTitle': 'Outpost',
+                'suppressApplicationTitle': False,
+            }
+        ]
+    }
 
 
 def tab_arguments(distro, launcher, url):
-    return ['-w', '0', 'new-tab', '--profile', PROFILE_NAME, 'wsl.exe', '-d', distro, '--exec', str(launcher), 'attach', url]
+    return [
+        '-w',
+        '0',
+        'new-tab',
+        '--profile',
+        PROFILE_NAME,
+        'wsl.exe',
+        '-d',
+        distro,
+        '--exec',
+        str(launcher),
+        'attach',
+        url,
+    ]
 
 
 def handler_command(wt, distro, launcher):
     # CreateProcess-style command line; the URL contains only base64url characters.
-    return '"' + wt + '" -w 0 new-tab --profile "' + PROFILE_NAME + '" wsl.exe -d "' + distro + '" --exec "' + str(launcher) + '" attach "%1"'
+    return (
+        '"'
+        + wt
+        + '" -w 0 new-tab --profile "'
+        + PROFILE_NAME
+        + '" wsl.exe -d "'
+        + distro
+        + '" --exec "'
+        + str(launcher)
+        + '" attach "%1"'
+    )
 
 
-SETUP = r'''$ErrorActionPreference = 'Stop'
+SETUP = r"""$ErrorActionPreference = 'Stop'
 $settings = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')))
 $local = [Environment]::GetFolderPath('LocalApplicationData')
 $wt = Join-Path $local 'Microsoft\WindowsApps\wt.exe'
@@ -63,7 +91,7 @@ if ($settings.action -eq 'install') {
   Remove-Item -Path 'HKCU:\Software\Classes\outpost' -Recurse -Force -ErrorAction SilentlyContinue
 }
 [Console]::Write($wt)
-'''
+"""
 
 
 def powershell(context, settings):
@@ -75,10 +103,18 @@ def powershell(context, settings):
 
 def install(context):
     distro = distribution()
-    powershell(context, {'action': 'install', 'fragment': json.dumps(fragment(distro), indent=2),
-                         'command': handler_command('{wt}', distro, context.launcher)})
-    return ['Windows Terminal: added the Outpost profile (Alt+V pastes images, Ctrl+Enter inserts a newline)',
-            'Registered outpost:// links for the ' + distro + ' distribution']
+    powershell(
+        context,
+        {
+            'action': 'install',
+            'fragment': json.dumps(fragment(distro), indent=2),
+            'command': handler_command('{wt}', distro, context.launcher),
+        },
+    )
+    return [
+        'Windows Terminal: added the Outpost profile (Alt+V pastes images, Ctrl+Enter inserts a newline)',
+        'Registered outpost:// links for the ' + distro + ' distribution',
+    ]
 
 
 def uninstall(context):

@@ -14,7 +14,9 @@ export interface NativeTerminal {
 
 export const nativeTerminals = [
   {
-    id: 'iterm2', name: 'iTerm2', os: 'macos',
+    id: 'iterm2',
+    name: 'iTerm2',
+    os: 'macos',
     summary: 'Opens a tab with the Outpost profile',
     requirements: ['iTerm2 3.4 or newer', 'Python 3.9+ (Xcode Command Line Tools)'],
     shortcuts: [
@@ -24,7 +26,9 @@ export const nativeTerminals = [
     ],
   },
   {
-    id: 'windows-terminal', name: 'Windows Terminal', os: 'windows',
+    id: 'windows-terminal',
+    name: 'Windows Terminal',
+    os: 'windows',
     summary: 'Opens a WSL tab with the Outpost profile',
     requirements: ['Windows Terminal', 'WSL with Bash and Python 3'],
     shortcuts: [
@@ -35,10 +39,11 @@ export const nativeTerminals = [
   },
 ] as const satisfies readonly NativeTerminal[]
 
-export type NativeTerminalId = typeof nativeTerminals[number]['id']
+export type NativeTerminalId = (typeof nativeTerminals)[number]['id']
 export type TerminalChoice = 'web' | NativeTerminalId
 export const terminalChoices: TerminalChoice[] = ['web', ...nativeTerminals.map(terminal => terminal.id)]
-export const terminalName = (id: TerminalChoice) => id === 'web' ? 'Web terminal' : nativeTerminals.find(terminal => terminal.id === id)!.name
+export const terminalName = (id: TerminalChoice) =>
+  id === 'web' ? 'Web terminal' : nativeTerminals.find(terminal => terminal.id === id)!.name
 
 export function clientOS(userAgent: string): ClientOS | null {
   // iPadOS can identify as a Mac; the web terminal is always available.

@@ -12,19 +12,23 @@ try {
   const page = await browser.newPage()
   const icons = new Map()
   for (const size of [16, 32, 48, 180, 512]) {
-    const data = await page.evaluate(async ({ svg, size }) => {
-      const image = new Image()
-      image.src = `data:image/svg+xml;base64,${btoa(svg)}`
-      await image.decode()
-      const canvas = document.createElement('canvas')
-      canvas.width = canvas.height = size
-      const context = canvas.getContext('2d')
-      context.drawImage(image, 0, 0, size, size)
-      return canvas.toDataURL('image/png').split(',')[1]
-    }, { svg, size })
+    const data = await page.evaluate(
+      async ({ svg, size }) => {
+        const image = new Image()
+        image.src = `data:image/svg+xml;base64,${btoa(svg)}`
+        await image.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = canvas.height = size
+        const context = canvas.getContext('2d')
+        context.drawImage(image, 0, 0, size, size)
+        return canvas.toDataURL('image/png').split(',')[1]
+      },
+      { svg, size },
+    )
     const pixels = Buffer.from(data, 'base64')
     icons.set(size, pixels)
-    const filename = size === 512 ? 'outpost.png' : size === 180 ? 'apple-touch-icon.png' : `favicon-${size}x${size}.png`
+    const filename =
+      size === 512 ? 'outpost.png' : size === 180 ? 'apple-touch-icon.png' : `favicon-${size}x${size}.png`
     if (size !== 48) await writeFile(new URL(filename, publicDirectory), pixels)
   }
 
@@ -44,7 +48,10 @@ try {
     directory.writeUInt32LE(offset, entry + 12)
     offset += pixels.length
   }
-  await writeFile(new URL('favicon.ico', publicDirectory), Buffer.concat([directory, ...sizes.map(size => icons.get(size))]))
+  await writeFile(
+    new URL('favicon.ico', publicDirectory),
+    Buffer.concat([directory, ...sizes.map(size => icons.get(size))]),
+  )
   console.log(`Generated logo PNG, Apple touch icon, and PNG/ICO favicons in ${fileURLToPath(publicDirectory)}`)
 } finally {
   await browser.close()

@@ -1,10 +1,21 @@
 """Codex native rollout metadata, textual Responses items, and exact-ID resume."""
+
 import datetime
 import json
 import os
 import uuid
+
+from outpost_conversations import (
+    CodingSession,
+    CodingSessionStore,
+    Scan,
+    SearchLimit,
+    clean,
+    store_paths,
+    strings,
+    timestamp,
+)
 from outpost_rpc import JsonRpcProcess
-from outpost_conversations import CodingSession, CodingSessionStore, Scan, SearchLimit, timestamp, strings, clean, store_paths
 
 
 class CodexSessionStore(CodingSessionStore):
@@ -33,8 +44,15 @@ class CodexSessionStore(CodingSessionStore):
                 except OSError:
                     scan.skipped += 1
                     continue
-                yield CodingSession(meta['id'], root, titles.get(meta['id']) or 'Codex conversation ' + meta['id'][:8], timestamp(meta.get('timestamp')),
-                                    updated, [path], self.adapter.storage(home))
+                yield CodingSession(
+                    meta['id'],
+                    root,
+                    titles.get(meta['id']) or 'Codex conversation ' + meta['id'][:8],
+                    timestamp(meta.get('timestamp')),
+                    updated,
+                    [path],
+                    self.adapter.storage(home),
+                )
 
     def text(self, record):
         if record.get('type') == 'response_item':
@@ -67,9 +85,19 @@ class CodexSessionStore(CodingSessionStore):
         meta['originator'] = 'outpost'
         # A new conversation must not inherit another thread's ancestry,
         # instructions, tools, git checkout, or subagent identity.
-        for key in ('git', 'forked_from_id', 'forked_from_ordinal_exclusive', 'parent_thread_id',
-                    'history_base', 'subagent_history_start_ordinal', 'agent_nickname',
-                    'agent_role', 'agent_path', 'thread_source', 'dynamic_tools'):
+        for key in (
+            'git',
+            'forked_from_id',
+            'forked_from_ordinal_exclusive',
+            'parent_thread_id',
+            'history_base',
+            'subagent_history_start_ordinal',
+            'agent_nickname',
+            'agent_role',
+            'agent_path',
+            'thread_source',
+            'dynamic_tools',
+        ):
             meta.pop(key, None)
         meta['base_instructions'] = None
         meta['selected_capability_roots'] = []
@@ -118,9 +146,13 @@ class CodexSessionStore(CodingSessionStore):
             if not isinstance(record, dict) or record.get('type') != 'session_meta':
                 continue
             meta = record.get('payload')
-            if isinstance(meta, dict) and meta.get('originator') != 'outpost' \
-                    and self.adapter.valid_id(meta.get('id')) and meta.get('source') == 'cli' \
-                    and meta.get('model_provider') == provider:
+            if (
+                isinstance(meta, dict)
+                and meta.get('originator') != 'outpost'
+                and self.adapter.valid_id(meta.get('id'))
+                and meta.get('source') == 'cli'
+                and meta.get('model_provider') == provider
+            ):
                 return record
         return None
 
@@ -133,12 +165,16 @@ class CodexSessionStore(CodingSessionStore):
             result = process.call('thread/start', {'cwd': root})
         thread = result.get('thread')
         provider = result.get('modelProvider')
-        if not isinstance(thread, dict) or not self.adapter.valid_id(thread.get('id')) \
-                or not isinstance(provider, str) or not provider.strip() \
-                or not isinstance(thread.get('cliVersion'), str) or not thread['cliVersion']:
+        if (
+            not isinstance(thread, dict)
+            or not self.adapter.valid_id(thread.get('id'))
+            or not isinstance(provider, str)
+            or not provider.strip()
+            or not isinstance(thread.get('cliVersion'), str)
+            or not thread['cliVersion']
+        ):
             raise ValueError('Codex returned invalid new-thread metadata.')
-        return {'id': thread['id'], 'cli_version': thread['cliVersion'],
-                'source': 'cli', 'model_provider': provider}
+        return {'id': thread['id'], 'cli_version': thread['cliVersion'], 'source': 'cli', 'model_provider': provider}
 
     def activity_event(self, record):
         payload = record.get('payload')

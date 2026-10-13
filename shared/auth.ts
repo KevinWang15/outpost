@@ -5,6 +5,16 @@ export interface AccountUser {
   emailVerifiedAt: string | null
   createdAt: string
 }
-export interface AuthState { mode: 'local' | 'hosted'; user: AccountUser | null }
-export interface AuthMessage { message: string; email?: string; devUrl?: string }
-export interface AccountSshKey { publicKey: string; fingerprint: string }
+export interface AuthState {
+  mode: 'local' | 'hosted'
+  user: AccountUser | null
+}
+export interface AuthMessage {
+  message: string
+  email?: string
+  devUrl?: string
+}
+export interface AccountSshKey {
+  publicKey: string
+  fingerprint: string
+}

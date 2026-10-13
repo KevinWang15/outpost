@@ -1,6 +1,7 @@
 export const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
-export const supportingPath = 'export PATH="$PATH:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin"'
+export const supportingPath =
+  'export PATH="$PATH:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin"'
 
 // Inspection and installation use the attachment's interactive login environment.
 // POSIX sh remains usable before Bash or Python is installed.

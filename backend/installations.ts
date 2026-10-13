@@ -26,19 +26,27 @@ export class Installations {
   private queues = new Map<string, Promise<void>>()
   private closed = false
   constructor(private software: SoftwareService) {}
-  latest(owner: Owner, targetId: string) { return this.jobs.get(key(owner, targetId))?.installation ?? null }
+  latest(owner: Owner, targetId: string) {
+    return this.jobs.get(key(owner, targetId))?.installation ?? null
+  }
   private serialize<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const result = (this.queues.get(id) ?? Promise.resolve()).then(operation)
-    const finished = result.then(() => {}, () => {})
+    const finished = result.then(
+      () => {},
+      () => {},
+    )
     this.queues.set(id, finished)
-    void finished.then(() => { if (this.queues.get(id) === finished) this.queues.delete(id) })
+    void finished.then(() => {
+      if (this.queues.get(id) === finished) this.queues.delete(id)
+    })
     return result
   }
   /** Run a target removal unless an installation is running on it. */
   removeTarget(owner: Owner, targetId: string, remove: () => Promise<void>) {
     const id = key(owner, targetId)
     return this.serialize(id, async () => {
-      if (this.jobs.get(id)?.installation.status === 'running') throw new AppError('Wait for the installation to finish before removing this target.', 409)
+      if (this.jobs.get(id)?.installation.status === 'running')
+        throw new AppError('Wait for the installation to finish before removing this target.', 409)
       await remove()
       this.jobs.delete(id)
     })
@@ -49,10 +57,27 @@ export class Installations {
       if (this.closed) throw new AppError('Outpost is shutting down. No new installations can start.', 503)
       const target = await context.workspace.get(context.target.id)
       if (!target.environment) throw new AppError('Check Required Software before installing.', 409)
-      if (!requiredSoftware(target).includes(softwareId)) throw new AppError('Software is not required by this target', 400)
-      if (this.jobs.get(id)?.installation.status === 'running') throw new AppError('An installation is already running on this target. Open its log to follow progress.', 409)
-      const installation: Installation = { id: randomUUID(), softwareId, status: 'running', startedAt: new Date().toISOString(), finishedAt: null, exitCode: null, error: null }
-      const job: Job = { installation, output: '', omitted: false, subscribers: new Set(), controller: new AbortController(), completion: Promise.resolve() }
+      if (!requiredSoftware(target).includes(softwareId))
+        throw new AppError('Software is not required by this target', 400)
+      if (this.jobs.get(id)?.installation.status === 'running')
+        throw new AppError('An installation is already running on this target. Open its log to follow progress.', 409)
+      const installation: Installation = {
+        id: randomUUID(),
+        softwareId,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        exitCode: null,
+        error: null,
+      }
+      const job: Job = {
+        installation,
+        output: '',
+        omitted: false,
+        subscribers: new Set(),
+        controller: new AbortController(),
+        completion: Promise.resolve(),
+      }
       this.jobs.set(id, job)
       const emit = (event: InstallationEvent) => {
         // A slow viewer must not accumulate unbounded output or block an installer.
@@ -68,7 +93,8 @@ export class Installations {
           const code = await this.software.install(context, script, output, job.controller.signal)
           installation.exitCode = code
           installation.status = code === 0 ? 'succeeded' : 'failed'
-          if (code !== 0) installation.error = `Installation exited with ${code === null ? 'a disconnected process' : `status ${code}`}.`
+          if (code !== 0)
+            installation.error = `Installation exited with ${code === null ? 'a disconnected process' : `status ${code}`}.`
         } catch (error) {
           installation.status = 'failed'
           installation.error = (error as Error).message
@@ -84,7 +110,8 @@ export class Installations {
   }
   events(owner: Owner, targetId: string, installationId: string) {
     const job = this.jobs.get(key(owner, targetId))
-    if (!job || job.installation.id !== installationId) throw new AppError('Installation log is no longer available', 404)
+    if (!job || job.installation.id !== installationId)
+      throw new AppError('Installation log is no longer available', 404)
     const stream = new PassThrough({ highWaterMark: 1024 * 1024 })
     const send = (event: InstallationEvent) => stream.write(`${JSON.stringify(event)}\n`)
     if (job.output) send({ type: 'output', text: `${job.omitted ? '[Earlier output omitted]\n' : ''}${job.output}` })

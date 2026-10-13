@@ -1,10 +1,11 @@
 """Install, update and remove the connector on this computer."""
+
 import os
-from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 from . import VERSION, link, terminals
 from .platforms import detect
@@ -28,8 +29,10 @@ def supported_platform():
     platform = detect()
     adapters = terminals.for_platform(platform.name)
     if not adapters:
-        raise OSError('Outpost native terminals support macOS with iTerm2 and Windows Terminal with WSL. '
-                      'Use the web terminal on this computer.')
+        raise OSError(
+            'Outpost native terminals support macOS with iTerm2 and Windows Terminal with WSL. '
+            'Use the web terminal on this computer.'
+        )
     return platform, adapters
 
 
@@ -68,5 +71,11 @@ def open_link(url):
     adapter = next((item for item in adapters if item.ID == target.terminal), None)
     if adapter is None:
         names = ', '.join(item.NAME for item in adapters)
-        raise link.LinkError('This link opens ' + target.terminal + ', which is not available here. On this computer, choose ' + names + ' in Outpost.')
+        raise link.LinkError(
+            'This link opens '
+            + target.terminal
+            + ', which is not available here. On this computer, choose '
+            + names
+            + ' in Outpost.'
+        )
     adapter.open(url, context())

@@ -20,7 +20,9 @@ test('tampered, foreign and expired tokens are refused', t => {
   const tokens = new ConnectTokens('a'.repeat(64))
   const { token } = tokens.issue(grant)
   const [payload, signature] = token.split('.')
-  const changed = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(payload, 'base64url').toString()), s: 'other' })).toString('base64url')
+  const changed = Buffer.from(
+    JSON.stringify({ ...JSON.parse(Buffer.from(payload, 'base64url').toString()), s: 'other' }),
+  ).toString('base64url')
   assert.equal(tokens.redeem(`${changed}.${signature}`), null)
   assert.equal(new ConnectTokens('b'.repeat(64)).redeem(token), null)
   assert.equal(tokens.redeem('garbage'), null)

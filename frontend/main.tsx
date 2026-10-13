@@ -8,7 +8,9 @@ import './styles/main.scss'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ToastProvider>
-      <AuthGate><App /></AuthGate>
+      <AuthGate>
+        <App />
+      </AuthGate>
     </ToastProvider>
   </StrictMode>,
 )

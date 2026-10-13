@@ -13,13 +13,19 @@ export type SessionInput = Static<typeof schemas.sessionInput>
 export type SessionImageInput = Static<typeof schemas.imageInput>
 export type ConversationSearch = Static<typeof schemas.conversationSearch>
 export type ImageMediaType = SessionImageInput['mediaType']
-export type SoftwareId = typeof schemas.softwareIds[number]
+export type SoftwareId = (typeof schemas.softwareIds)[number]
 // Runtime constants stay here so the browser bundle never loads TypeBox.
 export const imageMediaTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 
-export interface Environment { mode: 'local' | 'hosted'; localTargets: boolean }
+export interface Environment {
+  mode: 'local' | 'hosted'
+  localTargets: boolean
+}
 
-export interface SessionLaunchOptions { env: Record<string, string>; args: string }
+export interface SessionLaunchOptions {
+  env: Record<string, string>
+  args: string
+}
 export interface SessionActivity {
   state: 'working' | 'idle' | 'finished'
   updatedAt: string | null
@@ -39,7 +45,10 @@ export interface Session extends SessionLaunchOptions {
   status: SessionStatus
   activity: SessionActivity
 }
-export interface SessionList { sessions: Session[]; registryPath: string }
+export interface SessionList {
+  sessions: Session[]
+  registryPath: string
+}
 
 export interface ConversationMatch {
   tool: HarnessId
@@ -52,14 +61,35 @@ export interface ConversationMatch {
   excerpt: string | null
   managedSessionIds: string[]
 }
-export interface ConversationResults { sessions: ConversationMatch[]; truncated: boolean; warnings: string[] }
-export interface DirectorySuggestions { directories: string[]; truncated: boolean }
+export interface ConversationResults {
+  sessions: ConversationMatch[]
+  truncated: boolean
+  warnings: string[]
+}
+export interface DirectorySuggestions {
+  directories: string[]
+  truncated: boolean
+}
 
-export const imageExtensions: Record<ImageMediaType, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }
+export const imageExtensions: Record<ImageMediaType, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+}
 export const maxImageBytes = 16 * 1024 * 1024
-export interface SessionImage { path: string; reference: string; injected: boolean }
+export interface SessionImage {
+  path: string
+  reference: string
+  injected: boolean
+}
 
-export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => ['bash', 'python3', 'tmux', ...target.tools]
+export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => [
+  'bash',
+  'python3',
+  'tmux',
+  ...target.tools,
+]
 export interface SoftwareStatus {
   id: SoftwareId
   status: 'installed' | 'missing' | 'broken'
@@ -76,6 +106,15 @@ export interface Installation {
   exitCode: number | null
   error: string | null
 }
-export interface SoftwareReport { environment: ExecutionEnvironment; checkedAt: string; software: SoftwareStatus[]; installation: Installation | null }
-export interface InstallationPlan { softwareId: SoftwareId; script: string }
-export type InstallationEvent = { type: 'output'; text: string } | { type: 'status' | 'complete'; installation: Installation }
+export interface SoftwareReport {
+  environment: ExecutionEnvironment
+  checkedAt: string
+  software: SoftwareStatus[]
+  installation: Installation | null
+}
+export interface InstallationPlan {
+  softwareId: SoftwareId
+  script: string
+}
+export type InstallationEvent =
+  { type: 'output'; text: string } | { type: 'status' | 'complete'; installation: Installation }

@@ -9,12 +9,16 @@ export function imageProblem(file: Blob): string | null {
 
 /** Browser clipboard shims for the web terminal (principle 6): reads only on a
  * local paste gesture; OSC 52 lets remote programs copy to your clipboard. */
-export function attachClipboard(term: Terminal, options: {
-  connected: () => boolean
-  pasteImage: (file: File) => void
-  status: (message: string) => void
-}) {
-  let disposed = false, pendingCopy: string | null = null
+export function attachClipboard(
+  term: Terminal,
+  options: {
+    connected: () => boolean
+    pasteImage: (file: File) => void
+    status: (message: string) => void
+  },
+) {
+  let disposed = false,
+    pendingCopy: string | null = null
   const element = term.element!
   const writeClipboard = async (text: string, remote: boolean) => {
     pendingCopy = text
@@ -29,10 +33,13 @@ export function attachClipboard(term: Terminal, options: {
     }
   }
   const nativePaste = (event: ClipboardEvent) => {
-    const images = [...(event.clipboardData?.items ?? [])].filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+    const images = [...(event.clipboardData?.items ?? [])].filter(
+      item => item.kind === 'file' && item.type.startsWith('image/'),
+    )
     if (!images.length) return
     // Take the image before xterm turns the same clipboard item into text.
-    event.preventDefault(); event.stopImmediatePropagation()
+    event.preventDefault()
+    event.stopImmediatePropagation()
     if (images.length > 1) return options.status('Paste one image at a time.')
     const file = images[0].getAsFile()
     if (file) options.pasteImage(file)
@@ -40,7 +47,8 @@ export function attachClipboard(term: Terminal, options: {
   const nativeCopy = (event: ClipboardEvent) => {
     if (!term.hasSelection() || !event.clipboardData) return
     event.clipboardData.setData('text/plain', term.getSelection())
-    event.preventDefault(); event.stopImmediatePropagation()
+    event.preventDefault()
+    event.stopImmediatePropagation()
     pendingCopy = null
     options.status('Copied to your clipboard')
   }
@@ -51,9 +59,15 @@ export function attachClipboard(term: Terminal, options: {
     if (!options.connected() || separator < 0 || !/^[cpqs0-7]*$/.test(data.slice(0, separator))) return true
     const encoded = data.slice(separator + 1)
     // Never answer clipboard queries; bound copies to 1 MiB.
-    if (encoded === '?' || encoded.length > Math.ceil(1024 * 1024 / 3) * 4) return true
-    try { void writeClipboard(new TextDecoder().decode(Uint8Array.from(atob(encoded), character => character.charCodeAt(0))), true) }
-    catch { /* Malformed copies must not interrupt the terminal. */ }
+    if (encoded === '?' || encoded.length > Math.ceil((1024 * 1024) / 3) * 4) return true
+    try {
+      void writeClipboard(
+        new TextDecoder().decode(Uint8Array.from(atob(encoded), character => character.charCodeAt(0))),
+        true,
+      )
+    } catch {
+      /* Malformed copies must not interrupt the terminal. */
+    }
     return true
   })
   return {
@@ -69,22 +83,29 @@ export function attachClipboard(term: Terminal, options: {
           const items = await navigator.clipboard.read()
           const image = items.find(item => item.types.some(type => type.startsWith('image/')))
           if (image) {
-            const type = image.types.find(type => type === 'image/png') ?? image.types.find(type => type.startsWith('image/'))!
+            const type =
+              image.types.find(type => type === 'image/png') ?? image.types.find(type => type.startsWith('image/'))!
             return options.pasteImage(new File([await image.getType(type)], 'clipboard-image', { type }))
           }
           const text = items.find(item => item.types.includes('text/plain'))
           if (text) term.paste(await (await text.getType('text/plain')).text())
         } else term.paste(await navigator.clipboard.readText())
         term.focus()
-      } catch { options.status('Paste was blocked. Use your paste shortcut instead.') }
+      } catch {
+        options.status('Paste was blocked. Use your paste shortcut instead.')
+      }
     },
     /** Let the browser deliver Cmd/Ctrl+V as a paste event instead of sending ^V. */
     handleKey(event: KeyboardEvent) {
       if (event.isComposing || event.altKey) return true
-      const key = event.key.toLowerCase(), modifier = event.ctrlKey || event.metaKey
+      const key = event.key.toLowerCase(),
+        modifier = event.ctrlKey || event.metaKey
       if ((modifier && key === 'v') || (event.shiftKey && key === 'insert')) return false
       if (modifier && key === 'c' && (term.hasSelection() || event.metaKey || event.shiftKey)) {
-        if (event.type === 'keydown' && !term.hasSelection()) { event.preventDefault(); void this.copy() }
+        if (event.type === 'keydown' && !term.hasSelection()) {
+          event.preventDefault()
+          void this.copy()
+        }
         return false
       }
       return true

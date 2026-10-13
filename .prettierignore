@@ -1,0 +1,9 @@
+dist
+node_modules
+package-lock.json
+promo-v2
+public
+test-results
+playwright-report
+*.md
+*.html

@@ -14,5 +14,9 @@ export function relativeTime(value: string | null) {
   return new Date(value).toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-export const address = (target: Target) => target.kind === 'ssh' ? `root@${target.host}${target.port ? `:${target.port}` : ''}`
-  : target.environment?.username ? `${target.environment.username} on this computer` : 'This computer'
+export const address = (target: Target) =>
+  target.kind === 'ssh'
+    ? `root@${target.host}${target.port ? `:${target.port}` : ''}`
+    : target.environment?.username
+      ? `${target.environment.username} on this computer`
+      : 'This computer'

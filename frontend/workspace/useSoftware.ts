@@ -17,12 +17,7 @@ export function useSoftware(targetId: string, requirementsKey: string) {
     setChecking(true)
     setError('')
     try {
-      const result = await api<SoftwareReport>(
-        `/targets/${targetId}/software`,
-        'GET',
-        undefined,
-        controller.signal,
-      )
+      const result = await api<SoftwareReport>(`/targets/${targetId}/software`, 'GET', undefined, controller.signal)
       if (!controller.signal.aborted) setReport(result)
     } catch (error) {
       if (!controller.signal.aborted) setError((error as Error).message)
@@ -53,12 +48,8 @@ export function useSoftware(targetId: string, requirementsKey: string) {
         undefined,
         controller.signal,
       )
-        .then((result) => {
-          if (
-            result.installation?.status !== 'running' &&
-            !controller.signal.aborted
-          )
-            void refresh()
+        .then(result => {
+          if (result.installation?.status !== 'running' && !controller.signal.aborted) void refresh()
         })
         .catch(() => {
           if (!controller.signal.aborted) void refresh()

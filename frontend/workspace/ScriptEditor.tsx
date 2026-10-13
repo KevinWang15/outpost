@@ -38,7 +38,7 @@ export default function ScriptEditor({
           EditorView.contentAttributes.of({
             'aria-label': 'Installation script',
           }),
-          EditorView.updateListener.of((update) => {
+          EditorView.updateListener.of(update => {
             if (update.docChanged) onChange(update.state.doc.toString())
           }),
           EditorView.theme({

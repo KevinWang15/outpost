@@ -4,6 +4,7 @@ Installs a dynamic profile named Outpost (inheriting your default profile) that
 maps ⌘V to the Outpost paste key, ⇧↩ to CSI u and left Option to Meta, plus a
 small `outpost://` handler app that opens links in iTerm2.
 """
+
 import json
 import plistlib
 import shlex
@@ -20,21 +21,25 @@ LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/Launc
 
 # Keys: "0x<character>-0x<modifier flags>". Action 10 sends ESC + Text.
 KEYS = {
-    '0x76-0x100000': {'Action': 10, 'Text': '[9001~'},   # ⌘V → Outpost paste (text or image)
-    '0xd-0x20000': {'Action': 10, 'Text': '[13;2u'},     # ⇧↩ → newline in coding tools
+    '0x76-0x100000': {'Action': 10, 'Text': '[9001~'},  # ⌘V → Outpost paste (text or image)
+    '0xd-0x20000': {'Action': 10, 'Text': '[13;2u'},  # ⇧↩ → newline in coding tools
 }
 
 
 def profile():
-    return {'Profiles': [{
-        'Name': PROFILE_NAME,
-        'Guid': PROFILE_GUID,
-        'Keyboard Map': KEYS,
-        'Option Key Sends': 2,         # Left Option acts as Meta (Esc+).
-        'Right Option Key Sends': 0,   # Right Option still types special characters.
-        'Close Sessions On End': True,
-        'Mouse Reporting': True,
-    }]}
+    return {
+        'Profiles': [
+            {
+                'Name': PROFILE_NAME,
+                'Guid': PROFILE_GUID,
+                'Keyboard Map': KEYS,
+                'Option Key Sends': 2,  # Left Option acts as Meta (Esc+).
+                'Right Option Key Sends': 0,  # Right Option still types special characters.
+                'Close Sessions On End': True,
+                'Mouse Reporting': True,
+            }
+        ]
+    }
 
 
 def profile_path(context):
@@ -48,22 +53,27 @@ def handler_path(context):
 def handler_script(launcher):
     # AppleScript string literals escape backslashes and quotes like JSON.
     command = json.dumps(shlex.quote(str(launcher)) + ' open ', ensure_ascii=False)
-    return '\n'.join([
-        'on open location theURL',
-        '\ttry',
-        '\t\tdo shell script ' + command + ' & quoted form of theURL',
-        '\ton error message',
-        '\t\tdisplay alert "Outpost" message message as critical',
-        '\tend try',
-        'end open location',
-        'on run',
-        '\tdisplay dialog "Outpost Connector opens your Outpost sessions in iTerm2. Click Connect in Outpost to use it."'
-        ' buttons {"OK"} default button "OK" with title "Outpost Connector"',
-        'end run',
-    ]) + '\n'
+    return (
+        '\n'.join(
+            [
+                'on open location theURL',
+                '\ttry',
+                '\t\tdo shell script ' + command + ' & quoted form of theURL',
+                '\ton error message',
+                '\t\tdisplay alert "Outpost" message message as critical',
+                '\tend try',
+                'end open location',
+                'on run',
+                '\tdisplay dialog "Outpost Connector opens your Outpost sessions in iTerm2. Click Connect in Outpost to use it."'
+                ' buttons {"OK"} default button "OK" with title "Outpost Connector"',
+                'end run',
+            ]
+        )
+        + '\n'
+    )
 
 
-OPEN_SCRIPT = '''on run argv
+OPEN_SCRIPT = """on run argv
 \tset theCommand to item 1 of argv
 \ttell application id "com.googlecode.iterm2"
 \t\tactivate
@@ -82,7 +92,7 @@ OPEN_SCRIPT = '''on run argv
 \t\tend try
 \tend tell
 end run
-'''
+"""
 
 
 def install(context):
@@ -99,19 +109,23 @@ def install(context):
     info = app / 'Contents' / 'Info.plist'
     with info.open('rb') as stream:
         plist = plistlib.load(stream)
-    plist.update({
-        'CFBundleIdentifier': 'dev.outpost.connector',
-        'CFBundleName': 'Outpost Connector',
-        'CFBundleURLTypes': [{'CFBundleURLName': 'Outpost connect link', 'CFBundleURLSchemes': ['outpost']}],
-        'LSUIElement': True,
-    })
+    plist.update(
+        {
+            'CFBundleIdentifier': 'dev.outpost.connector',
+            'CFBundleName': 'Outpost Connector',
+            'CFBundleURLTypes': [{'CFBundleURLName': 'Outpost connect link', 'CFBundleURLSchemes': ['outpost']}],
+            'LSUIElement': True,
+        }
+    )
     with info.open('wb') as stream:
         plistlib.dump(plist, stream)
     # Editing Info.plist invalidates the applet's signature; re-sign it ad hoc.
     context.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)])
     context.run([LSREGISTER, '-f', str(app)])
-    return ['iTerm2: added the Outpost profile (⌘V pastes images, ⇧↩ inserts a newline)',
-            'Registered outpost:// links with ' + str(app)]
+    return [
+        'iTerm2: added the Outpost profile (⌘V pastes images, ⇧↩ inserts a newline)',
+        'Registered outpost:// links with ' + str(app),
+    ]
 
 
 def uninstall(context):

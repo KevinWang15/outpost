@@ -1,11 +1,12 @@
 """Native turn semantics and cross-terminal acknowledgement races, without provider calls."""
-from contextlib import contextmanager
+
 import json
-from pathlib import Path
 import shutil
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'runtime'))
 
@@ -27,11 +28,17 @@ class ActivityTests(unittest.TestCase):
         adapter = adapters()[tool]
         home = self.home / tool
         cli_id = 'session_fixture' if tool == 'kimi' else ID
-        session = {'id': tool, 'rootDir': str(self.home), 'cliSessionId': cli_id,
-                   'cliSessionEnv': adapter.storage(home)}
-        relative = {'codex': 'sessions/2026/10/01/rollout-test-' + ID + '.jsonl',
-                    'claude': 'projects/project/' + ID + '.jsonl',
-                    'kimi': 'sessions/project/session_fixture/agents/main/wire.jsonl'}[tool]
+        session = {
+            'id': tool,
+            'rootDir': str(self.home),
+            'cliSessionId': cli_id,
+            'cliSessionEnv': adapter.storage(home),
+        }
+        relative = {
+            'codex': 'sessions/2026/10/01/rollout-test-' + ID + '.jsonl',
+            'claude': 'projects/project/' + ID + '.jsonl',
+            'kimi': 'sessions/project/session_fixture/agents/main/wire.jsonl',
+        }[tool]
         path = home / relative
         path.parent.mkdir(parents=True)
         path.touch()
@@ -45,17 +52,37 @@ class ActivityTests(unittest.TestCase):
 
     def event(self, tool, state):
         if tool == 'codex':
-            return {'type': 'event_msg', 'timestamp': TIME, 'payload': {
-                'type': {'working': 'task_started', 'finished': 'task_complete', 'idle': 'turn_aborted'}[state], 'turn_id': 'turn'}}
+            return {
+                'type': 'event_msg',
+                'timestamp': TIME,
+                'payload': {
+                    'type': {'working': 'task_started', 'finished': 'task_complete', 'idle': 'turn_aborted'}[state],
+                    'turn_id': 'turn',
+                },
+            }
         if tool == 'claude':
             if state == 'idle':
-                return {'type': 'user', 'timestamp': TIME, 'message': {'role': 'user', 'content': [
-                    {'type': 'text', 'text': '[Request interrupted by user]'}]}}
-            return {'type': 'user' if state == 'working' else 'assistant', 'timestamp': TIME,
-                    'message': {'role': 'user' if state == 'working' else 'assistant',
-                                'stop_reason': None if state == 'working' else 'end_turn', 'content': 'PRIVATE_TURN_CONTENT'}}
-        return {'type': 'turn.prompt' if state == 'working' else 'turn.ended', 'time': 1790812800000,
-                'agentId': 'main', 'turnId': 0, 'reason': 'completed' if state == 'finished' else 'cancelled'}
+                return {
+                    'type': 'user',
+                    'timestamp': TIME,
+                    'message': {'role': 'user', 'content': [{'type': 'text', 'text': '[Request interrupted by user]'}]},
+                }
+            return {
+                'type': 'user' if state == 'working' else 'assistant',
+                'timestamp': TIME,
+                'message': {
+                    'role': 'user' if state == 'working' else 'assistant',
+                    'stop_reason': None if state == 'working' else 'end_turn',
+                    'content': 'PRIVATE_TURN_CONTENT',
+                },
+            }
+        return {
+            'type': 'turn.prompt' if state == 'working' else 'turn.ended',
+            'time': 1790812800000,
+            'agentId': 'main',
+            'turnId': 0,
+            'reason': 'completed' if state == 'finished' else 'cancelled',
+        }
 
     def test_lifecycle_checks_are_shared_and_new_completions_survive_stale_checks(self):
         for tool in adapters():
@@ -106,7 +133,7 @@ class ActivityTests(unittest.TestCase):
                 original_lock = observer.lock
 
                 @contextmanager
-                def after_another_terminal():
+                def after_another_terminal(path=path, tool=tool, other=other, original_lock=original_lock):
                     # The first input waits for the lock while another terminal
                     # checks a completion which just arrived.
                     self.append(path, self.event(tool, 'finished'))
@@ -116,8 +143,9 @@ class ActivityTests(unittest.TestCase):
 
                 observer.lock = after_another_terminal
                 observer.input()
-                self.assertEqual(observer.describe(True)['state'], 'idle',
-                                 'an older input must not restore an already checked badge')
+                self.assertEqual(
+                    observer.describe(True)['state'], 'idle', 'an older input must not restore an already checked badge'
+                )
 
     def test_restarting_and_importing_dont_replay_old_turns(self):
         for tool in adapters():
@@ -133,18 +161,29 @@ class ActivityTests(unittest.TestCase):
         for tool in adapters():
             observer, path = self.fixture(tool)
             self.append(path, self.event(tool, 'working'))
-            ignored = {'codex': {'type': 'event_msg', 'payload': {'type': 'agent_message', 'message': 'task_complete'}},
-                       'claude': {**self.event(tool, 'finished'), 'isSidechain': True},
-                       'kimi': {**self.event(tool, 'finished'), 'agentId': 'subagent'}}[tool]
+            ignored = {
+                'codex': {'type': 'event_msg', 'payload': {'type': 'agent_message', 'message': 'task_complete'}},
+                'claude': {**self.event(tool, 'finished'), 'isSidechain': True},
+                'kimi': {**self.event(tool, 'finished'), 'agentId': 'subagent'},
+            }[tool]
             self.append(path, ignored)
             self.assertEqual(observer.describe(True)['state'], 'working')
             self.append(path, self.event(tool, 'idle'))
             self.assertEqual(observer.describe(True)['state'], 'idle')
         claude = adapters()['claude']
-        self.assertEqual(claude.activity_event({'type': 'assistant', 'message': {'stop_reason': 'tool_use'}})[0], 'working')
-        self.assertEqual(claude.activity_event({'type': 'user', 'message': {'content': [{'type': 'tool_result'}]}})[0], 'working')
+        self.assertEqual(
+            claude.activity_event({'type': 'assistant', 'message': {'stop_reason': 'tool_use'}})[0], 'working'
+        )
+        self.assertEqual(
+            claude.activity_event({'type': 'user', 'message': {'content': [{'type': 'tool_result'}]}})[0], 'working'
+        )
         self.assertEqual(claude.activity_event({'type': 'system', 'subtype': 'api_error'})[0], 'idle')
-        self.assertEqual(claude.activity_event({'type': 'assistant', 'isApiErrorMessage': True, 'message': {'stop_reason': None}})[0], 'idle')
+        self.assertEqual(
+            claude.activity_event({'type': 'assistant', 'isApiErrorMessage': True, 'message': {'stop_reason': None}})[
+                0
+            ],
+            'idle',
+        )
 
     def test_claude_delayed_prompts_do_not_hide_newer_completion_or_errors(self):
         observer, path = self.fixture('claude')
@@ -210,8 +249,14 @@ class ActivityTests(unittest.TestCase):
     def test_terminal_replies_and_focus_out_dont_ack_but_typing_paste_and_focus_in_do(self):
         seen = []
         observer = InputObserver(lambda: seen.append(True))
-        for data in (b'\x1b[?1;2c', b'\x1b[>0;276;0c', b'\x1b[1;2R', b'\x1b[?7u', b'\x1b[O',
-                     b'\x1b]11;rgb:0000/0000/0000\x07'):
+        for data in (
+            b'\x1b[?1;2c',
+            b'\x1b[>0;276;0c',
+            b'\x1b[1;2R',
+            b'\x1b[?7u',
+            b'\x1b[O',
+            b'\x1b]11;rgb:0000/0000/0000\x07',
+        ):
             observer.feed(data)
         observer.feed(b'\x1b[?')
         observer.feed(b'1;2c')
@@ -221,5 +266,5 @@ class ActivityTests(unittest.TestCase):
         self.assertGreaterEqual(len(seen), 5)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

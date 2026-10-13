@@ -1,9 +1,9 @@
 """Connector shims and terminal integrations, without a real terminal app."""
+
 import atexit
 import base64
 import json
 import os
-from pathlib import Path
 import plistlib
 import shlex
 import shutil
@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,7 +28,14 @@ from outpost_connector.websocket import BINARY, TEXT, WebSocket  # noqa: E402
 
 
 def outpost_link(**fields):
-    data = {'v': 1, 'server': 'https://outpost.example.com', 'token': 'abc.DEF-_1', 'terminal': 'iterm2', 'title': 'Build · dev', **fields}
+    data = {
+        'v': 1,
+        'server': 'https://outpost.example.com',
+        'token': 'abc.DEF-_1',
+        'terminal': 'iterm2',
+        'title': 'Build · dev',
+        **fields,
+    }
     return 'outpost://connect/' + base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip('=')
 
 
@@ -103,20 +111,34 @@ class OutputFilterTest(unittest.TestCase):
 class LinkTest(unittest.TestCase):
     def test_parse_and_trust(self):
         parsed = link.parse(outpost_link())
-        self.assertEqual((parsed.server, parsed.terminal, parsed.title), ('https://outpost.example.com', 'iterm2', 'Build · dev'))
-        self.assertEqual(parsed.websocket_url('t', 80, 24), 'wss://outpost.example.com/api/terminal?token=t&cols=80&rows=24'
-                         '&client=connector&protocol=2&version=' + VERSION)
+        self.assertEqual(
+            (parsed.server, parsed.terminal, parsed.title), ('https://outpost.example.com', 'iterm2', 'Build · dev')
+        )
+        self.assertEqual(
+            parsed.websocket_url('t', 80, 24),
+            'wss://outpost.example.com/api/terminal?token=t&cols=80&rows=24'
+            '&client=connector&protocol=2&version=' + VERSION,
+        )
         with self.assertRaisesRegex(link.LinkError, 'does not trust'):
             link.trusted(parsed)
         link.trust('https://OUTPOST.example.com/')
         self.assertIs(link.trusted(parsed), parsed)
 
     def test_rejects_bad_links(self):
-        for bad in ('https://example.com', 'outpost://connect/%%%', outpost_link(v=2), outpost_link(server='file:///etc'),
-                    outpost_link(server='https://user:pw@example.com'), outpost_link(token='a b')):
+        for bad in (
+            'https://example.com',
+            'outpost://connect/%%%',
+            outpost_link(v=2),
+            outpost_link(server='file:///etc'),
+            outpost_link(server='https://user:pw@example.com'),
+            outpost_link(token='a b'),
+        ):
             with self.assertRaises(link.LinkError, msg=bad):
                 link.parse(bad)
-        self.assertEqual(link.parse(outpost_link(server='http://127.0.0.1:3000')).websocket_url('t', 1, 1)[:22], 'ws://127.0.0.1:3000/ap')
+        self.assertEqual(
+            link.parse(outpost_link(server='http://127.0.0.1:3000')).websocket_url('t', 1, 1)[:22],
+            'ws://127.0.0.1:3000/ap',
+        )
 
 
 class WebSocketTest(unittest.TestCase):
@@ -131,14 +153,28 @@ class WebSocketTest(unittest.TestCase):
             request = b''
             while b'\r\n\r\n' not in request:
                 request += connection.recv(4096)
-            key = next(line.split(': ')[1] for line in request.decode().split('\r\n') if line.startswith('Sec-WebSocket-Key'))
+            key = next(
+                line.split(': ')[1] for line in request.decode().split('\r\n') if line.startswith('Sec-WebSocket-Key')
+            )
             import hashlib
-            accept = base64.b64encode(hashlib.sha1((key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
-            connection.sendall(('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
-                                'Sec-WebSocket-Accept: ' + accept + '\r\n\r\n').encode()
-                               + bytes([0x01, 3]) + b'hel' + bytes([0x80, 2]) + b'lo' + bytes([0x82, 1]) + b'\x00')
+
+            accept = base64.b64encode(
+                hashlib.sha1((key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()
+            ).decode()
+            connection.sendall(
+                (
+                    'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                    'Sec-WebSocket-Accept: ' + accept + '\r\n\r\n'
+                ).encode()
+                + bytes([0x01, 3])
+                + b'hel'
+                + bytes([0x80, 2])
+                + b'lo'
+                + bytes([0x82, 1])
+                + b'\x00'
+            )
             data = connection.recv(4096)
-            mask, payload = data[2:6], data[6:6 + (data[1] & 0x7F)]
+            mask, payload = data[2:6], data[6 : 6 + (data[1] & 0x7F)]
             received['text'] = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
             connection.close()
 
@@ -147,6 +183,7 @@ class WebSocketTest(unittest.TestCase):
         client = WebSocket.connect('ws://127.0.0.1:' + str(server.getsockname()[1]) + '/api/terminal?token=x')
         messages = []
         import select
+
         while len(messages) < 2:
             select.select([client], [], [], 2)
             messages += client.read()
@@ -173,7 +210,9 @@ class WebSocketTest(unittest.TestCase):
 class ClipboardTest(unittest.TestCase):
     def test_parses_helper_output(self):
         png = b'\x89PNG\r\n\x1a\n' + b'0' * 10
-        self.assertEqual(parse_clipboard(json.dumps({'kind': 'image', 'data': base64.b64encode(png).decode()})).value, png)
+        self.assertEqual(
+            parse_clipboard(json.dumps({'kind': 'image', 'data': base64.b64encode(png).decode()})).value, png
+        )
         self.assertEqual(parse_clipboard('{"kind":"text","text":"hi"}').value, 'hi')
         self.assertEqual(parse_clipboard('{"kind":"empty"}').kind, 'empty')
         with self.assertRaises(ClipboardError):
@@ -185,7 +224,9 @@ class TerminalTest(unittest.TestCase):
         self.home = Path(tempfile.mkdtemp(prefix='outpost-terminal-'))
         self.addCleanup(shutil.rmtree, self.home, True)
         self.commands = []
-        self.context = terminals.Context(self.home, self.home / '.outpost-connector' / 'bin' / 'outpost-connector', self.execute)
+        self.context = terminals.Context(
+            self.home, self.home / '.outpost-connector' / 'bin' / 'outpost-connector', self.execute
+        )
 
     def execute(self, command):
         self.commands.append(command)
@@ -208,9 +249,13 @@ class TerminalTest(unittest.TestCase):
         self.assertEqual(info['CFBundleExecutable'], 'applet', 'keeps osacompile settings')
         self.assertIn('on open location theURL', self.handler)
         self.assertIn(json.dumps(shlex.quote(str(self.context.launcher)) + ' open '), self.handler)
-        self.assertEqual([command[0] for command in self.commands], ['/usr/bin/osacompile', '/usr/bin/codesign', iterm2.LSREGISTER])
+        self.assertEqual(
+            [command[0] for command in self.commands], ['/usr/bin/osacompile', '/usr/bin/codesign', iterm2.LSREGISTER]
+        )
         iterm2.open(outpost_link(), self.context)
-        self.assertEqual(self.commands[-1][-1], shlex.quote(str(self.context.launcher)) + ' attach ' + shlex.quote(outpost_link()))
+        self.assertEqual(
+            self.commands[-1][-1], shlex.quote(str(self.context.launcher)) + ' attach ' + shlex.quote(outpost_link())
+        )
 
     def test_windows_terminal_fragment_and_handler(self):
         with mock.patch.dict(os.environ, {'WSL_DISTRO_NAME': 'Ubuntu'}):
@@ -219,9 +264,13 @@ class TerminalTest(unittest.TestCase):
         settings = json.loads(base64.b64decode(script.split("FromBase64String('")[1].split("'")[0]))
         fragment = json.loads(settings['fragment'])
         self.assertEqual(fragment['profiles'][0]['commandline'], 'wsl.exe -d Ubuntu')
-        self.assertEqual(settings['command'], '"{wt}" -w 0 new-tab --profile "Outpost" wsl.exe -d "Ubuntu" --exec "'
-                         + str(self.context.launcher) + '" attach "%1"')
-        self.assertIn("HKCU:\\Software\\Classes\\outpost", script)
+        self.assertEqual(
+            settings['command'],
+            '"{wt}" -w 0 new-tab --profile "Outpost" wsl.exe -d "Ubuntu" --exec "'
+            + str(self.context.launcher)
+            + '" attach "%1"',
+        )
+        self.assertIn('HKCU:\\Software\\Classes\\outpost', script)
 
 
 if __name__ == '__main__':

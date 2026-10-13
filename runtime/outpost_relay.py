@@ -4,6 +4,7 @@ stdin and stdout carry relay-protocol frames (docs/ARCHITECTURE.md). The relay
 owns the PTY for `tmux attach`; persistence belongs to tmux. When this process
 ends, only the tmux client detaches.
 """
+
 import errno
 import fcntl
 import json
@@ -47,13 +48,14 @@ class FrameDecoder:
             end = HEADER.size + length
             if len(self.buffer) < end:
                 break
-            frames.append((kind, bytes(self.buffer[HEADER.size:end])))
+            frames.append((kind, bytes(self.buffer[HEADER.size : end])))
             del self.buffer[:end]
         return frames
 
 
 class InputObserver:
     """Ignore automatic terminal replies; acknowledge actual input and focus-in."""
+
     replies = re.compile(rb'\x1b\[(?:[?>]?[0-9;]*[cRn]|\?[0-9;]*u|\??[0-9;]*\$y|O)$')
 
     def __init__(self, callback):
@@ -71,7 +73,7 @@ class InputObserver:
                     sequence = match.group()
                     if not self.replies.fullmatch(sequence):
                         self.callback()
-                    data = data[len(sequence):]
+                    data = data[len(sequence) :]
                     continue
                 if len(data) < 256:
                     self.pending, self.deadline = data, time.monotonic() + 0.1
@@ -79,7 +81,7 @@ class InputObserver:
             elif data.startswith(b'\x1b]'):
                 match = re.match(rb'\x1b\].*?(?:\x07|\x1b\\)', data, re.DOTALL)
                 if match:
-                    data = data[len(match.group()):]
+                    data = data[len(match.group()) :]
                     continue
                 if len(data) < 4096:
                     self.pending, self.deadline = data, time.monotonic() + 0.1
@@ -327,7 +329,7 @@ class Relay:
                 for descriptor in writable:
                     buffer = self.incoming if descriptor == master else self.outgoing
                     try:
-                        del buffer[:os.write(descriptor, buffer)]
+                        del buffer[: os.write(descriptor, buffer)]
                     except BlockingIOError:
                         pass
                     except OSError as error:

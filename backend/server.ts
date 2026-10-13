@@ -1,29 +1,35 @@
 import 'dotenv/config'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp } from './app'
+import { LocalDeployment, type Deployment } from './deployment'
+import { HostedDeployment } from './hosted/deployment'
 import { loopbackHost } from '../shared/loopback'
-import { Accounts } from './accounts'
 
 const port = Number(process.env.PORT ?? 3000)
-if (!Number.isInteger(port) || port < 0 || port > 65535) {
-  throw new Error('PORT must be an integer between 0 and 65535')
-}
+if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('PORT must be an integer between 0 and 65535')
 const mode = process.env.OUTPOST_MODE ?? 'local'
 if (!['local', 'hosted'].includes(mode)) throw new Error('OUTPOST_MODE must be local or hosted')
-// Relative to dist/server/server.js, independent of the process working directory.
+const directory = process.env.OUTPOST_DATA_DIR ?? join(homedir(), '.outpost')
+// Relative to dist/server/server.js, independent of the working directory.
 const frontendRoot = fileURLToPath(new URL('../client/', import.meta.url))
-const accounts = mode === 'hosted' ? await Accounts.open({ publicUrl: process.env.PUBLIC_APP_URL ?? (existsSync(frontendRoot) ? `http://127.0.0.1:${port}` : 'http://127.0.0.1:5173') }) : undefined
-const host = accounts?.production ? (process.env.HOST ?? '0.0.0.0') : loopbackHost(process.env.HOST)
+const built = existsSync(frontendRoot)
+
+const deployment: Deployment = mode === 'hosted'
+  ? await HostedDeployment.open({ directory, publicUrl: process.env.PUBLIC_APP_URL ?? (built ? `http://127.0.0.1:${port}` : 'http://127.0.0.1:5173') })
+  : await LocalDeployment.open(directory)
+const production = deployment instanceof HostedDeployment && deployment.production
 const app = await createApp({
+  deployment,
   logger: true,
-  accounts,
+  multiplex: process.env.OUTPOST_SSH_MULTIPLEX !== '0',
   ...(process.env.OUTPOST_TRUST_PROXY ? { trustProxy: process.env.OUTPOST_TRUST_PROXY.split(',').map(value => value.trim()).filter(Boolean) } : {}),
-  ...(existsSync(frontendRoot) ? { frontendRoot } : {}),
+  ...(built ? { frontendRoot } : {}),
 })
-const address = await app.listen({ port, host })
-console.log(`Outpost deployment mode: ${mode}`)
-console.log(`Server listening at ${address}`)
+const address = await app.listen({ port, host: production ? (process.env.HOST ?? '0.0.0.0') : loopbackHost(process.env.HOST) })
+console.log(`Outpost ${mode} mode listening at ${address}`)
 
 let stopping = false
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

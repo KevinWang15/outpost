@@ -2,96 +2,65 @@
 
 ## Report a vulnerability
 
-Email [me@ke.wang](mailto:me@ke.wang) with a description, affected version or
-commit, reproduction steps, and expected impact. Use synthetic targets and
-temporary data when preparing a reproduction. Keep credentials, private keys,
-and conversation contents out of the report.
+Email [me@ke.wang](mailto:me@ke.wang) with a description, the affected commit,
+reproduction steps and expected impact. Use synthetic targets and temporary
+data; keep credentials, private keys and conversation contents out of the
+report. If GitHub private vulnerability reporting is enabled, you can also use
+**Security → Report a vulnerability**.
 
-When this repository has GitHub private vulnerability reporting enabled, you
-can also use **Security → Report a vulnerability**. Please report exploitable
-issues privately so a fix can be prepared before disclosure.
-
-## Supported versions
-
-Security fixes currently target the `main` branch. Supported release versions
-will be listed here when tagged releases are published.
+Security fixes target the latest release branch.
 
 ## Security boundaries
 
-Outpost defaults to `OUTPOST_MODE=local`: a personal, loopback-only tool without
-authentication or accounts. Opt into `OUTPOST_MODE=hosted` for the multi-user
-service. Deployment mode is chosen at startup; installing a production build
-does not enable hosted mode. See the README's deployment comparison and setup.
+**Deployment modes.** `OUTPOST_MODE=local` (default) is a personal tool without
+accounts that accepts only loopback peers with a loopback `Host` header, also
+when reached through an SSH tunnel. `OUTPOST_MODE=hosted` is a multi-user
+service; production requires an HTTPS `PUBLIC_APP_URL` and verification email.
+Host and Origin must match the configured address, writes require the
+`X-Outpost-Request` header, and forwarding headers are trusted only from
+`OUTPOST_TRUST_PROXY`.
 
-Hosted mode requires verified accounts for target and account APIs. Targets,
-private Ed25519 SSH keys, and known-host files belong to individual accounts.
-Manager SSH connections disable shared configuration and agents and use only
-that account's key. Hosted users cannot execute commands on the manager through
-local targets or desktop launching. Authorize account keys only on servers the
-account owner should control: SSH currently runs as root. Users granted access
-to the same remote root account share that server's sessions and conversation
-history according to its SSH permissions.
+**Accounts.** Passwords use salted scrypt. Login cookies are HttpOnly,
+SameSite=Lax, Secure over HTTPS, and last 30 days; only token hashes are
+stored. Verification links last 24 hours and reset links one hour, both single
+use. Password changes and resets revoke every login; logout revokes its own.
 
-Hosted production requires an HTTPS `PUBLIC_APP_URL` and configured verification
-email delivery. Run the built app behind an HTTPS reverse proxy. Host and Origin must
-match the configured address; writes require a custom header. Trust forwarding
-headers only from explicitly configured proxy addresses. Development email
-simulation, local mode, Vite, and preview remain loopback-only.
+**SSH.** Hosted SSH uses only the account's Ed25519 key and known-hosts file
+(`-F none`, no agent, no passwords), and rejects changed host keys. Local mode
+uses your OpenSSH configuration and agent. SSH targets run commands as root;
+authorize an account key only on servers that account's owner should control.
+Connection-sharing sockets are kept under the data directory and scoped per
+owner and identity, so a connection opened with one credential is never reused
+by another.
 
-Passwords use salted scrypt. Login cookies are HttpOnly, SameSite=Lax, Secure
-over HTTPS, and expire after 30 days. Only token hashes are stored. Verification
-links expire after 24 hours, reset links after one hour; both are single use.
-Password changes and resets revoke every login session and connection ticket.
-Logout revokes its session and its tickets. Rate limits bound account attempts.
+**Terminals.** A terminal connection starts with a launch token: HMAC-signed,
+bound to one owner, login, target and session, valid for five minutes and
+usable once. The first message returns a resume token (30 days) that only
+travels inside the WebSocket; both are checked against the live login, so
+signing out closes open terminals within seconds and invalidates their tokens.
+Input rate, message size, unacknowledged output and terminals per account are
+bounded. Closing a terminal never stops the tmux session.
 
-Hosted web terminals launch explicitly with **Connect using web terminal** and
-use the owner’s account SSH key by default. Local web terminals launch through
-the session menu and require an uploaded key. Hosted uploads are an explicit
-alternative; browsing a workspace never opens a terminal. Uploaded private
-keys are scoped to a target within its hosted account or local workspace,
-normalized after bounded parsing in a worker, and encrypted with AES-256-GCM
-authenticated against that ownership.
-Upload passphrases are discarded after decryption. Files are mode 0600 in a
-0700 directory; metadata APIs never return key material. In every mode, Outpost
-generates a persistent 32-byte key at `terminal-keys/master-key` with mode 0600
-on the first upload when no override is configured. Account-key terminals do
-not use the upload vault or generate its encryption key.
-The optional 32-byte base64 `OUTPOST_TERMINAL_ENCRYPTION_KEY` takes precedence
-and allows separate key management. Protect and back up the data directory and
-any override; encrypted uploads require the same key throughout their lifetime.
-A trusted backend operator can access keys in memory; encryption does not protect against a
-compromised running server.
+**The connector.** It runs on your computer and only talks to Outpost servers
+you trusted by running their installer. `outpost://` links for other servers
+are refused before any network access. It reads your clipboard only on a paste
+gesture (⌘V/Ctrl+V/Alt+V); remote programs can write to your clipboard through
+OSC 52 but clipboard queries are never answered. It opens only `http(s)` links
+without credentials, and never through a shell. A trusted server can open
+terminals into its own sessions on your computer; only trust servers you would
+let run your coding sessions. The launch token in an `outpost://` link is
+visible to local processes for the few seconds before it is used.
 
-Account-key terminals require the host key pinned by account management.
-Uploaded-key terminals must match any account management known-host record;
-otherwise they pin the host on first use. Changed keys fail closed. Hosted
-WebSocket upgrades require the permitted browser Origin and a verified login;
-local upgrades require a loopback peer and an Origin matching the exact Host
-and port. Terminal IDs are scoped to the originating login or local workspace
-and are not bearer credentials. Hosted login revocation is checked on input
-and every second. Uploaded-key replacement/removal closes terminals using that
-upload, while account-key terminals stay connected. Target deletion closes all
-its terminals. Terminal output is held only
-in bounded memory; reconnect restores a screen snapshot, not an unbounded log.
-Input, output backpressure, uploads and concurrent terminal counts are bounded.
-Disconnected attachments expire after 10 minutes. Closing an attachment does
-not terminate the remote tmux/dtach session.
+**Signals.** Programs in a session can ask the attached client to open a link
+(`outpost-browser`). The helper talks to the relay over a Unix socket in a
+0700 directory; the broker validates each request, limits it to 120 per minute
+per connection, and delivers it at most once.
 
-Local mode uses the manager's existing SSH configuration, agent, and identity
-files; desktop launch opens an app on the manager computer. Its API
-requires a loopback peer, including when accessed through an SSH localhost
-tunnel. A localhost Host header does not authorize a remote peer.
+**Targets.** Nothing runs on a target between operations. Installation scripts
+run only as reviewed and submitted. Conversation search returns bounded
+metadata and excerpts; history files are never copied to the server. Pasted
+images are kept under `~/.outpost/clipboard/` (newest 20 per session).
 
-Commands run as the manager's account for local targets and as root for SSH
-targets. Reviewed installation scripts deliberately execute shell commands.
-Coding tools retain their own authentication, approval, and sandbox settings.
-
-Account data, target settings, SSH keys, and connection-signing keys are stored
-in `~/.outpost` on the manager. Protect and back up this directory as credentials;
-run one manager process per directory. Session registries and activity checkpoints stay on the execution
-host. Conversation search returns bounded metadata and excerpts to the open
-dialog; it does not copy entire history files to the manager.
-
-Keep manager state, SSH credentials, and session environment values out of
-commits and public issues. `OUTPOST_DATA_DIR` can select a temporary state
-directory for development and tests.
+**State.** The data directory (`~/.outpost` by default) holds the signing
+secret, workspaces, and in hosted mode the account database and SSH keys.
+Protect and back it up like credentials, and run one server per directory.

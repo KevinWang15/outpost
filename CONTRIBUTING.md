@@ -1,81 +1,61 @@
 # Contributing to Outpost
 
+Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: it explains the
+principles every change should keep (one connection path, tmux as the only
+terminal state, modes that differ only in identity, agentless targets).
+
 ## Local setup
 
-Use Node.js 24+, npm 11+, Git, and Python 3.9+ for the runtime tests. Install an
-OpenSSH client when working with SSH targets. Hosted accounts use Node's built-in
-SQLite; no separate database service is needed.
+Use Node.js 24+, npm 11+, Python 3.9+, tmux 3.2+ and an OpenSSH client.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`; Vite forwards API requests to
-`http://127.0.0.1:3000`. The API uses `tsx watch`, including changes to the Python
-runtime files. `npm run dev:debug` starts the backend watcher with the
-inspector on loopback port 9229; the VS Code attach configuration reconnects
-after restarts.
+Open http://127.0.0.1:5173. Vite forwards `/api` and `/connector` to the API on
+`127.0.0.1:3000`, which restarts on changes to `backend/`, `runtime/` and
+`connector/`. Use `OUTPOST_DATA_DIR` for a separate development store, and a
+different one for hosted work (`OUTPOST_MODE=hosted` in `.env`). Without mail
+credentials, hosted development shows verification links in the UI.
 
-Use `OUTPOST_DATA_DIR` for a separate development store. Keep API and frontend
-listeners on loopback. See [SECURITY.md](SECURITY.md) for private vulnerability
-reporting and the supported security boundaries.
+## Layout
 
-The default local mode opens the personal workspace without login and supports
-local targets, existing SSH credentials, and desktop terminal launching. To work
-on the hosted service, copy `.env.example` to `.env` and set `OUTPOST_MODE=hosted`.
-Hosted mode has signup, verification, password recovery, per-user server SSH,
-and an explicitly selected web terminal for phone access; desktop launching is
-disabled. Without mail credentials, hosted development shows simulated email
-links in the UI. Use separate `OUTPOST_DATA_DIR` values for local and hosted work.
-Tests inject mail stubs and temporary account databases; never use real mail
-credentials or production SSH keys in fixtures.
+| Directory | Language | Runs on |
+| --- | --- | --- |
+| `backend/` | TypeScript | Outpost server |
+| `frontend/` | React + SCSS | Browser |
+| `shared/` | TypeScript | Both; includes the harness and native-terminal registries |
+| `runtime/` | Python 3.9 | Targets, sent with each operation |
+| `connector/` | Python 3.9 | Your computer (macOS, WSL) |
 
-## Validation
+Python code must stay compatible with Python 3.9 (macOS Command Line Tools) and
+use only the standard library.
+
+## Checks
 
 ```sh
-npm run check
+npm run check             # lint, typecheck, build, Node unit tests, Python tests
+npm run test:integration  # real tmux; the SSH test also needs Docker
 npx playwright install chromium
-npm run test:ui
+npm run test:ui           # browser tests against a real local backend
 ```
 
-`check` runs lint, type checks, a production build, and unit tests. The
-workspace browser tests mock the API; account tests start the real backend with
-temporary users and mock target services. Build before running those browser
-tests so `dist/client` is available. Platform and transport tests have additional prerequisites:
+Integration and browser tests use disposable homes with fixture coding tools
+(`tests/fixtures/coding-tool-fixture.py`); they never use your real home,
+SSH known hosts or provider credentials. The connector runs with
+`OUTPOST_CONNECTOR_FAKE=<dir>`, which replaces the OS clipboard and browser
+with files. Native terminal integrations (iTerm2 profiles, the Windows
+registry) are checked as generated artifacts; please test those changes by hand
+on a Mac or on Windows and describe what you tried.
 
-| Command | Prerequisites |
-| --- | --- |
-| `npm run test:integration` | Docker; optionally `OUTPOST_PWSH=pwsh` for PowerShell coverage |
-| `npm run test:deployment` | Linux, Docker, Playwright Chromium, and a completed production build |
-| `npm run test:local` | Linux/macOS, Python, tmux, dtach; `lsof` on macOS |
-| `npm run test:desktop` | Linux, Xvfb, xauth, and XTerm |
-| `npm run test:coding` | Native Codex, Claude Code, and Kimi Code binaries, Python, tmux |
+## Pull requests
 
-The native coding-tool tests use temporary homes and a loopback model fixture.
-They need no provider credentials. Set `OUTPOST_REQUIRE_CODING_TOOLS=1` to fail
-when a tool is missing. `OUTPOST_CODEX_BINARY`, `OUTPOST_CLAUDE_BINARY`, and
-`OUTPOST_KIMI_BINARY` can select specific executables. CI installs the pinned
-versions documented in [README.md](README.md) and requires all three tests.
+Keep changes focused and describe the user-visible behavior, how you validated
+it, and any limitations. Add a regression test when changing runtime behavior,
+the terminal or relay protocol, or a security boundary. Use synthetic data in
+screenshots (`npm run docs:capture`) and fixtures.
 
-## Changes and pull requests
-
-Keep changes focused and explain the user-visible behavior, relevant validation,
-and any limitations in the pull request. Include a regression test when changing
-runtime behavior or security boundaries. Use synthetic data in screenshots and
-fixtures, and preserve target-side conversation storage.
-
-Report ordinary bugs through GitHub issues with reproduction steps, the commit
-or version, operating system, backend, and coding-tool version. Remove private
-paths and credentials from logs before sharing them.
-
-## Documentation and media
-
-Run `npm run docs:capture` to refresh the README banner and screenshots using the
-local application with mock services. Run `npm run promo:capture` to refresh
-promo screenshots. See [promo-v2/README.md](promo-v2/README.md) for the film source.
-
-Generated audio and video stay outside Git. Confirm redistribution rights before
-publishing media through release assets or another host. Preserve bundled font
-licenses and dependency notices described in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Report bugs through GitHub issues with reproduction steps, the commit, your
+operating system and terminal app, and the coding tool version. Remove private
+paths and credentials from logs first.

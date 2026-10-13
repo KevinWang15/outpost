@@ -1,39 +1,37 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { deflateSync } from 'node:zlib'
-import { quote } from './shell'
+import { quote, supportingPath } from './shell'
 
-const modules = [
-  ['outpost_coding_protocol', './coding_protocol.py'],
-  ['outpost_activity_state', './activity_state.py'],
-  ['outpost_coding_activity', './coding_activity.py'],
-  ['outpost_terminal_attachment', './terminal_attachment.py'],
-  ['outpost_coding_sessions', './coding_sessions.py'],
-  ['outpost_coding_rpc', './coding_rpc.py'],
-  ['outpost_codex_store', './coding_adapters/codex_store.py'],
-  ['outpost_claude_store', './coding_adapters/claude_store.py'],
-  ['outpost_kimi_store', './coding_adapters/kimi_store.py'],
-  ['outpost_codex_adapter', './coding_adapters/codex.py'],
-  ['outpost_claude_adapter', './coding_adapters/claude.py'],
-  ['outpost_kimi_adapter', './coding_adapters/kimi.py'],
-].map(([name, path]) => [name, readFileSync(new URL(path, import.meta.url), 'utf8')])
-const runtime = readFileSync(new URL('./session-runtime.py', import.meta.url), 'utf8')
+// The target runtime is sent with every operation (principle: agentless
+// targets). Modules are registered under their file names, then the entry runs.
+const directory = new URL('../runtime/', import.meta.url)
+const read = (name: string) => readFileSync(new URL(name, directory), 'utf8')
+const modules = readdirSync(directory).filter(name => /^outpost_\w+\.py$/.test(name) && name !== 'outpost_runtime.py').sort()
+
 function sourceLiteral(source: string) {
-  // Raw Python strings preserve source escapes and compress better alongside
-  // the unescaped runtime. Fall back when neither delimiter is safe.
+  // Raw strings preserve source escapes and compress well; fall back when unsafe.
   const delimiter = ["'''", '"""'].find(value => !source.includes(value))
-  return delimiter && source.endsWith('\n') ? `r${delimiter}${source}${delimiter}` : JSON.stringify(source)
+  return delimiter && source.endsWith('\n') && !source.endsWith('\\\n') ? `r${delimiter}${source}${delimiter}` : JSON.stringify(source)
 }
-function encodeProgram(sources: string[][]) {
-  const modules = `[${sources.map(([name, source]) => `[${JSON.stringify(name)},${sourceLiteral(source)}]`).join(',')}]`
-  const program = `import sys, types\nfor name, source in ${modules}:\n    module = types.ModuleType(name)\n    sys.modules[name] = module\n    exec(compile(source, name, 'exec'), module.__dict__)\n${runtime}`
-  return deflateSync(program, { level: 9 }).toString('base64')
-}
-const managementProgram = encodeProgram(modules)
-const attachProgram = encodeProgram(modules.filter(([name]) => ['outpost_coding_protocol', 'outpost_activity_state', 'outpost_terminal_attachment'].includes(name) || name.endsWith('_adapter')))
-export function pythonCommand(request: Record<string, unknown>) {
+
+// Modules load on first import, so operations never execute code they do not use.
+const program = deflateSync([
+  'import importlib.util, sys',
+  `_sources = {${modules.map(name => `${JSON.stringify(name.slice(0, -3))}:${sourceLiteral(read(name))}`).join(',')}}`,
+  'class _Runtime:',
+  '    def find_spec(self, name, path=None, target=None):',
+  '        return importlib.util.spec_from_loader(name, self) if name in _sources else None',
+  '    def create_module(self, spec):',
+  '        return None',
+  '    def exec_module(self, module):',
+  "        exec(compile(_sources[module.__name__], module.__name__, 'exec'), module.__dict__)",
+  'sys.meta_path.insert(0, _Runtime())',
+  read('outpost_runtime.py'),
+].join('\n'), { level: 9 }).toString('base64')
+
+/** Shell text that runs one runtime request on the target. */
+export function runtimeOperation(request: Record<string, unknown>) {
   const payload = Buffer.from(JSON.stringify(request)).toString('base64')
-  // Keep the attach command below Windows' native command-line length limit.
-  const program = request.action === 'attach' ? attachProgram : managementProgram
   const bootstrap = `import base64,zlib;exec(zlib.decompress(base64.b64decode("${program}")))`
-  return `python3 -c ${quote(bootstrap)} ${quote(payload)}`
+  return `${supportingPath}; exec python3 -c ${quote(bootstrap)} ${quote(payload)}`
 }

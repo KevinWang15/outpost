@@ -15,7 +15,7 @@ export default defineConfig([
     linterOptions: { reportUnusedDisableDirectives: 'error' },
   },
   {
-    files: ['*.{js,ts}', 'backend/**/*.ts', 'tests/**/*.js', 'scripts/**/*.mjs', 'promo-v2/scripts/**/*.mjs'],
+    files: ['*.{js,ts}', 'backend/**/*.ts', 'tests/**/*.{js,ts}', 'scripts/**/*.mjs', 'promo-v2/scripts/**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
   {

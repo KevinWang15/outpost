@@ -1,42 +1,48 @@
-export type TerminalOS = 'macos' | 'windows' | 'linux'
-export const terminalOSLabels: Record<TerminalOS, string> = { macos: 'macOS', windows: 'Windows', linux: 'Linux' }
+// Native terminal registry. Each entry has a connector adapter in
+// connector/outpost_connector/terminals/; see docs/ARCHITECTURE.md.
+export type ClientOS = 'macos' | 'windows'
+export const clientOSLabels: Record<ClientOS, string> = { macos: 'macOS', windows: 'Windows' }
 
-// Order within each OS is also the automatic launch fallback order.
-export const terminalApps = [
-  { id: 'macos-iterm2', os: 'macos', name: 'iTerm2', shell: 'bash' },
-  { id: 'macos-terminal', os: 'macos', name: 'Terminal', shell: 'bash' },
-  { id: 'macos-wezterm', os: 'macos', name: 'WezTerm', shell: 'bash' },
-  { id: 'macos-kitty', os: 'macos', name: 'kitty', shell: 'bash' },
-  { id: 'macos-alacritty', os: 'macos', name: 'Alacritty', shell: 'bash' },
-  { id: 'windows-terminal', os: 'windows', name: 'Windows Terminal', shell: 'powershell' },
-  { id: 'windows-console', os: 'windows', name: 'System terminal', shell: 'powershell' },
-  { id: 'windows-wezterm', os: 'windows', name: 'WezTerm', shell: 'powershell' },
-  { id: 'windows-alacritty', os: 'windows', name: 'Alacritty', shell: 'powershell' },
-  { id: 'linux-gnome', os: 'linux', name: 'GNOME Terminal', shell: 'bash' },
-  { id: 'linux-ptyxis', os: 'linux', name: 'Ptyxis', shell: 'bash' },
-  { id: 'linux-konsole', os: 'linux', name: 'Konsole', shell: 'bash' },
-  { id: 'linux-wezterm', os: 'linux', name: 'WezTerm', shell: 'bash' },
-  { id: 'linux-kitty', os: 'linux', name: 'kitty', shell: 'bash' },
-  { id: 'linux-alacritty', os: 'linux', name: 'Alacritty', shell: 'bash' },
-  { id: 'linux-xfce', os: 'linux', name: 'Xfce Terminal', shell: 'bash' },
-  { id: 'linux-xterm', os: 'linux', name: 'XTerm', shell: 'bash' },
-] as const
-
-export type TerminalId = typeof terminalApps[number]['id']
-export interface DesktopTerminal {
-  id: TerminalId
-  os: TerminalOS
+export interface NativeTerminal {
+  id: string
   name: string
-  shell: 'bash' | 'powershell'
+  os: ClientOS
+  summary: string
+  requirements: readonly string[]
+  shortcuts: readonly { keys: string; action: string }[]
 }
-export interface DesktopAvailability {
-  os: TerminalOS | null
-  terminals: DesktopTerminal[]
-  recommendedId: TerminalId | null
-}
-export type TerminalPreferences = Partial<Record<TerminalOS, TerminalId>>
-export interface DesktopLaunchInput { terminalId?: TerminalId; preferences?: TerminalPreferences }
 
-export function terminalOS(platform: string): TerminalOS | null {
-  return ({ darwin: 'macos', win32: 'windows', linux: 'linux' } as Record<string, TerminalOS>)[platform] ?? null
+export const nativeTerminals = [
+  {
+    id: 'iterm2', name: 'iTerm2', os: 'macos',
+    summary: 'Opens a tab with the Outpost profile',
+    requirements: ['iTerm2 3.4 or newer', 'Python 3.9+ (Xcode Command Line Tools)'],
+    shortcuts: [
+      { keys: '⌘V', action: 'Paste text or an image' },
+      { keys: '⇧↩', action: 'New line' },
+      { keys: '⌥', action: 'Meta, for Alt shortcuts' },
+    ],
+  },
+  {
+    id: 'windows-terminal', name: 'Windows Terminal', os: 'windows',
+    summary: 'Opens a WSL tab with the Outpost profile',
+    requirements: ['Windows Terminal', 'WSL with Bash and Python 3'],
+    shortcuts: [
+      { keys: 'Ctrl+V', action: 'Paste text' },
+      { keys: 'Alt+V', action: 'Paste an image' },
+      { keys: 'Ctrl+Enter', action: 'New line' },
+    ],
+  },
+] as const satisfies readonly NativeTerminal[]
+
+export type NativeTerminalId = typeof nativeTerminals[number]['id']
+export type TerminalChoice = 'web' | NativeTerminalId
+export const terminalChoices: TerminalChoice[] = ['web', ...nativeTerminals.map(terminal => terminal.id)]
+export const terminalName = (id: TerminalChoice) => id === 'web' ? 'Web terminal' : nativeTerminals.find(terminal => terminal.id === id)!.name
+
+export function clientOS(userAgent: string): ClientOS | null {
+  // iPadOS can identify as a Mac; the web terminal is always available.
+  if (/Windows/i.test(userAgent)) return 'windows'
+  if (/Macintosh|Mac OS X/i.test(userAgent) && !/iPhone|iPad/i.test(userAgent)) return 'macos'
+  return null
 }

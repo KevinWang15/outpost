@@ -1,0 +1,265 @@
+"""Target runtime and relay against real tmux, in a disposable home."""
+import base64
+import json
+import os
+from pathlib import Path
+import select
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+import uuid
+
+ROOT = Path(__file__).resolve().parents[2]
+RUNTIME = ROOT / 'runtime'
+FIXTURE = ROOT / 'tests' / 'fixtures' / 'coding-tool-fixture.py'
+sys.path.insert(0, str(RUNTIME))
+from outpost_relay import FrameDecoder, MAGIC, control, encode  # noqa: E402
+
+PNG = base64.b64encode(b'\x89PNG\r\n\x1a\n' + b'0' * 64).decode()
+
+
+@unittest.skipUnless(shutil.which('tmux'), 'tmux is required')
+class RuntimeTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = Path(tempfile.mkdtemp(prefix='outpost-runtime-'))
+        self.home = self.directory / "home with 'quotes"
+        self.bin = self.home / 'bin'
+        self.bin.mkdir(parents=True)
+        for tool in ('claude', 'codex', 'kimi'):
+            target = self.bin / tool
+            shutil.copy(FIXTURE, target)
+            target.chmod(0o700)
+        self.project = self.home / 'project'
+        self.project.mkdir()
+        self.env = {**os.environ, 'HOME': str(self.home), 'PATH': str(self.bin) + ':' + os.environ['PATH'],
+                    'PYTHONPATH': str(RUNTIME)}
+        self.env.pop('TMUX', None)
+
+    def tearDown(self):
+        for session in self.call({'action': 'list'}).get('sessions', []):
+            self.call({'action': 'terminate', 'id': session['id']})
+        shutil.rmtree(self.directory, ignore_errors=True)
+
+    def command(self, request):
+        payload = base64.b64encode(json.dumps(request).encode()).decode()
+        return [sys.executable, str(RUNTIME / 'outpost_runtime.py'), payload]
+
+    def call(self, request, stdin=b'', expect_ok=True):
+        result = subprocess.run(self.command(request), input=stdin, capture_output=True, env=self.env, timeout=30)
+        line = next(line for line in reversed(result.stdout.decode().splitlines()) if line.startswith('OUTPOST_RESULT:'))
+        envelope = json.loads(line[len('OUTPOST_RESULT:'):])
+        if expect_ok:
+            self.assertTrue(envelope['ok'], envelope)
+            return envelope['data']
+        self.assertFalse(envelope['ok'])
+        return envelope['error']
+
+    def create(self, name='Build', tool='claude'):
+        return self.call({'action': 'create', 'name': name, 'rootDir': str(self.project), 'tool': tool, 'env': {}, 'args': ''})
+
+    def attach(self, session, cols=100, rows=30):
+        process = subprocess.Popen(self.command({'action': 'attach', 'id': session['id'], 'cols': cols, 'rows': rows}),
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=self.env)
+        def cleanup():
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            for stream in (process.stdin, process.stdout):
+                stream.close()
+        self.addCleanup(cleanup)
+        return Connection(self, process)
+
+    def test_lifecycle_through_the_framed_relay(self):
+        session = self.create()
+        self.assertEqual(session['status'], 'ready')
+        self.assertEqual(session['tool'], 'claude')
+        (self.project / 'capture-input').write_text('')  # Raw-mode fixture records its input.
+        connection = self.attach(session)
+        connection.expect_control('ready')
+        connection.expect_output(b'OUTPOST_FIXTURE_READY')
+        connection.expect_output(b'100x30')
+
+        connection.send(control({'type': 'resize', 'cols': 90, 'rows': 25}))
+        connection.expect_output(b'90x25')
+        self.assertEqual(self.call({'action': 'get', 'id': session['id']})['status'], 'attached')
+
+        # Images travel over the open connection and are pasted into tmux once.
+        connection.send(control({'type': 'paste-image', 'id': 'p1', 'extension': 'png', 'data': PNG}))
+        result = connection.expect_control('paste-result')
+        self.assertTrue(result['ok'], result)
+        reference = result['reference']
+        self.assertTrue(reference.startswith(str(self.home / '.outpost' / 'clipboard' / session['id'])))
+        self.assertTrue(Path(reference).read_bytes().startswith(b'\x89PNG'))
+        wait_for(lambda: reference.encode() in read(self.project / 'input.bin'))
+
+        # Typed bytes are opaque data, including a bogus frame-like sequence.
+        connection.send(encode(b'I', b'Cxxxx-not-a-frame'))
+        wait_for(lambda: b'Cxxxx-not-a-frame' in read(self.project / 'input.bin'))
+
+        # A remote browser request reaches the attached connection and is answered.
+        helper = subprocess.Popen([str(self.home / '.outpost' / 'bin' / 'outpost-browser'), 'https://example.com/x'],
+                                  env={**self.env, 'OUTPOST_SESSION_ID': session['id']}, stderr=subprocess.PIPE)
+        self.addCleanup(helper.stderr.close)
+        signal = connection.expect_control('signal')
+        self.assertEqual(signal['signal'], {'type': 'browser.open', 'payload': {'url': 'https://example.com/x'}})
+        connection.send(control({'type': 'signal-result', 'id': signal['id'], 'ok': True}))
+        self.assertEqual(helper.wait(timeout=10), 0, helper.stderr.read())
+
+        # Closing the connection detaches; the coding process keeps running.
+        pid = json.loads((self.project / 'heartbeat.json').read_text())['pid']
+        connection.close()
+        self.assertEqual(self.call({'action': 'get', 'id': session['id']})['status'], 'detached')
+        again = self.attach(session)
+        again.expect_output(b'OUTPOST_FIXTURE_READY ' + str(pid).encode())
+
+        # Detaching with Ctrl+\ reports why the client ended.
+        again.send(encode(b'I', b'\x1c'))
+        self.assertEqual(again.expect_control('exit')['reason'], 'detached')
+        self.assertEqual(again.process.wait(timeout=10), 0)
+
+        stopped = self.call({'action': 'terminate', 'id': session['id']})
+        self.assertEqual(stopped['status'], 'stopped')
+        error = self.call({'action': 'attach', 'id': session['id'], 'cols': 1}, expect_ok=False)
+        self.assertEqual(error['message'], 'Invalid terminal size')
+        self.call({'action': 'delete', 'id': session['id']})
+        self.assertEqual(self.call({'action': 'list'})['sessions'], [])
+
+    def test_signals_fail_clearly_without_a_terminal(self):
+        session = self.create()
+        connection = self.attach(session)
+        connection.expect_output(b'OUTPOST_FIXTURE_READY')
+        connection.close()
+        helper = subprocess.run([str(self.home / '.outpost' / 'bin' / 'outpost-signal'), 'work.progress', '{}'],
+                                env={**self.env, 'OUTPOST_SESSION_ID': session['id']}, capture_output=True, text=True)
+        self.assertEqual(helper.returncode, 1)
+        self.assertIn('No Outpost terminal is connected', helper.stderr)
+
+    def test_names_are_unique_and_registry_is_validated(self):
+        self.create('Same')
+        error = self.call({'action': 'create', 'name': 'same', 'rootDir': str(self.project), 'tool': 'codex',
+                           'env': {}, 'args': ''}, expect_ok=False)
+        self.assertEqual(error['status'], 409)
+        registry = self.home / '.outpost' / 'registry.json'
+        data = json.loads(registry.read_text())
+        self.assertEqual(data['version'], 2)
+        registry.write_text(json.dumps({**data, 'extra': True}))
+        error = self.call({'action': 'list'}, expect_ok=False)
+        self.assertIn('Invalid session registry', error['message'])
+        self.assertIn('"extra": true', registry.read_text())
+        registry.write_text(json.dumps(data))
+
+    def test_imports_v1_tmux_sessions_once(self):
+        state = self.home / '.outpost'
+        state.mkdir(mode=0o700)
+        base = {'rootDir': str(self.project), 'createdAt': '2026-01-01T00:00:00+00:00', 'lastConnectedAt': None,
+                'tool': 'claude', 'env': {}, 'args': '', 'cliSessionEnv': {'CLAUDE_CONFIG_DIR': str(self.home / '.claude')}}
+        legacy = {'sessions': [
+            {**base, 'id': str(uuid.uuid4()), 'name': 'Kept', 'backend': 'tmux', 'cliSessionId': str(uuid.uuid4())},
+            {**base, 'id': str(uuid.uuid4()), 'name': 'Kept', 'backend': 'tmux', 'cliSessionId': str(uuid.uuid4())},
+            {**base, 'id': str(uuid.uuid4()), 'name': 'Old dtach', 'backend': 'dtach', 'cliSessionId': str(uuid.uuid4())},
+        ]}
+        (state / 'sessions.json').write_text(json.dumps(legacy))
+        names = [session['name'] for session in self.call({'action': 'list'})['sessions']]
+        self.assertEqual(names, ['Kept', 'Kept (2)'])
+        self.assertFalse((state / 'registry.json').exists(), 'listing never writes')
+        self.create('New')
+        self.assertEqual(json.loads((state / 'sessions.json').read_text()), legacy, 'v1 file is untouched')
+        self.assertEqual(len(json.loads((state / 'registry.json').read_text())['sessions']), 3)
+
+    def test_management_image_upload_pastes_into_a_running_session(self):
+        session = self.create()
+        stopped = self.call({'action': 'paste-image', 'id': session['id'], 'extension': 'png'}, PNG.encode())
+        self.assertFalse(stopped['injected'])
+        bad = self.call({'action': 'paste-image', 'id': session['id'], 'extension': 'png'}, b'not base64!', expect_ok=False)
+        self.assertEqual(bad['message'], 'Invalid image data')
+
+
+class Connection:
+    def __init__(self, test, process):
+        self.test = test
+        self.process = process
+        self.decoder = FrameDecoder()
+        self.output = b''
+        self.controls = []
+        self.started = False
+        self.prefix = b''
+
+    def send(self, data):
+        self.process.stdin.write(data)
+        self.process.stdin.flush()
+
+    def pump(self, timeout=0.2):
+        if not select.select([self.process.stdout], [], [], timeout)[0]:
+            return
+        data = os.read(self.process.stdout.fileno(), 65536)
+        if not data:
+            raise AssertionError('Relay ended: ' + repr(self.prefix + self.output))
+        if not self.started:
+            self.prefix += data
+            if MAGIC not in self.prefix:
+                return
+            self.started = True
+            data = self.prefix.split(MAGIC, 1)[1]
+        for kind, payload in self.decoder.feed(data):
+            if kind == b'O':
+                self.output += payload
+            else:
+                self.controls.append(json.loads(payload))
+
+    def expect_output(self, marker, timeout=15):
+        deadline = time.monotonic() + timeout
+        while marker not in self.output:
+            if time.monotonic() > deadline:
+                raise AssertionError('Missing ' + repr(marker) + ' in ' + repr(self.output[-2000:]))
+            self.pump()
+
+    def expect_control(self, kind, timeout=15):
+        deadline = time.monotonic() + timeout
+        while True:
+            for index, message in enumerate(self.controls):
+                if message['type'] == kind:
+                    return self.controls.pop(index)
+            if time.monotonic() > deadline:
+                raise AssertionError('Missing control ' + kind + ' in ' + repr(self.controls))
+            self.pump()
+
+    def close(self):
+        self.process.stdin.close()
+        self.test.assertEqual(self.process.wait(timeout=10), 0)
+
+
+def read(path):
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return b''
+
+
+def wait_for(condition, timeout=10):
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError('Timed out')
+        time.sleep(0.05)
+
+
+class FrameTest(unittest.TestCase):
+    def test_frames_split_across_reads(self):
+        decoder = FrameDecoder()
+        data = encode(b'I', b'hello') + control({'type': 'resize'})
+        frames = []
+        for index in range(len(data)):
+            frames += decoder.feed(data[index:index + 1])
+        self.assertEqual(frames, [(b'I', b'hello'), (b'C', b'{"type":"resize"}')])
+
+    def test_oversized_frames_are_rejected(self):
+        with self.assertRaises(ValueError):
+            FrameDecoder().feed(struct.pack('>cI', b'I', 64 * 1024 * 1024))
+
+
+if __name__ == '__main__':
+    unittest.main()

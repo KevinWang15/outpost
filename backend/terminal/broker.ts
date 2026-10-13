@@ -1,0 +1,286 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { WebSocket } from 'ws'
+import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
+import { maxInputMessage } from '../../shared/protocol'
+import { signalValidators } from '../../shared/signals'
+import type { Deployment, Owner } from '../deployment'
+import { AppError } from '../errors'
+import { protocolResult } from '../process'
+import { imageData, type SessionService, type TargetContext } from '../sessions'
+import type { ConnectTokens, Grant } from './tokens'
+
+// Relay protocol, see docs/ARCHITECTURE.md and runtime/outpost_relay.py.
+export const relayMagic = Buffer.from('\0OUTPOST-RELAY-2\0', 'latin1')
+const maxFrame = 32 * 1024 * 1024
+export function relayFrame(kind: 'I' | 'C', payload: Buffer | string) {
+  const body = typeof payload === 'string' ? Buffer.from(payload) : payload
+  const header = Buffer.alloc(5)
+  header.write(kind, 0, 'latin1')
+  header.writeUInt32BE(body.length, 1)
+  return Buffer.concat([header, body])
+}
+export class RelayDecoder {
+  private buffer: Buffer = Buffer.alloc(0)
+  feed(chunk: Buffer) {
+    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk
+    const frames: { kind: string; payload: Buffer }[] = []
+    while (this.buffer.length >= 5) {
+      const length = this.buffer.readUInt32BE(1)
+      if (length > maxFrame) throw new Error('Relay frame exceeds its size limit')
+      if (this.buffer.length < 5 + length) break
+      frames.push({ kind: this.buffer.toString('latin1', 0, 1), payload: this.buffer.subarray(5, 5 + length) })
+      this.buffer = this.buffer.subarray(5 + length)
+    }
+    return frames
+  }
+}
+
+const highWater = 1024 * 1024
+const closedMessages: Record<Exclude<CloseReason, 'error'>, string> = {
+  detached: 'Detached. The session keeps running.',
+  ended: 'The coding tool exited. Connect again to start it in the same conversation.',
+  expired: 'This connection expired. Click Connect in Outpost to open a new terminal.',
+}
+
+interface Dependencies {
+  tokens: ConnectTokens
+  deployment: Deployment
+  sessions: SessionService
+  resolve(owner: Owner, targetId: string): Promise<TargetContext>
+  env?: NodeJS.ProcessEnv
+}
+
+/** One client socket attached to one relay process. Stateless by design
+ * (principle 1): closing either end ends both, and tmux keeps the session. */
+class Connection {
+  private child: ChildProcessWithoutNullStreams | null = null
+  private decoder = new RelayDecoder()
+  private prelude: Buffer = Buffer.alloc(0)
+  private stderr = ''
+  private started = false
+  private pending: Buffer[] = []
+  private unacked = 0
+  private exitReason: 'detached' | 'ended' | null = null
+  private finished = false
+  private signals = { count: 0, until: 0 }
+  private window = { messages: 0, bytes: 0, until: 0 }
+  private heartbeat: NodeJS.Timeout
+  private alive = true
+
+  constructor(readonly grant: Grant, private socket: WebSocket, private broker: TerminalBroker) {
+    socket.on('message', (data, binary) => this.receive(data as Buffer, binary))
+    socket.on('close', () => this.finish())
+    socket.on('error', () => socket.terminate())
+    socket.on('pong', () => { this.alive = true })
+    this.heartbeat = setInterval(() => {
+      if (!this.alive) return socket.terminate()
+      this.alive = false
+      socket.ping()
+    }, 30_000).unref()
+  }
+
+  send(message: ServerMessage) { if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message)) }
+
+  start(child: ChildProcessWithoutNullStreams) {
+    if (this.finished) { child.kill(); return }
+    this.child = child
+    child.stdin.on('error', () => {})
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (text: string) => { this.stderr = (this.stderr + text).slice(-4096) })
+    child.stdout.on('data', (chunk: Buffer) => this.output(chunk))
+    child.on('error', error => this.close('error', `Could not reach the target: ${error.message}`))
+    child.on('close', () => {
+      if (this.exitReason) return this.close(this.exitReason, closedMessages[this.exitReason])
+      if (!this.started) {
+        let message = this.stderr.trim().split('\n').at(-1) || 'Could not attach to the session.'
+        try {
+          const result = protocolResult(this.prelude.toString('utf8'))
+          if (result && !result.ok) message = result.error.message
+        } catch { /* Keep the transport's own message. */ }
+        return this.close('error', message)
+      }
+      this.close('error', 'The connection to the target was lost.')
+    })
+  }
+
+  private output(chunk: Buffer) {
+    if (!this.started && !this.prelude.includes(relayMagic)) {
+      // Login shells may print before the relay starts; keep a bounded tail for errors.
+      this.prelude = Buffer.concat([this.prelude, chunk]).subarray(-64 * 1024)
+      const start = this.prelude.indexOf(relayMagic)
+      if (start < 0) return
+      chunk = this.prelude.subarray(start + relayMagic.length)
+      this.prelude = Buffer.from(relayMagic)
+    }
+    let frames
+    try { frames = this.decoder.feed(chunk) }
+    catch { return this.close('error', 'The target sent an invalid terminal stream.') }
+    for (const { kind, payload } of frames) {
+      if (kind === 'O') {
+        if (this.socket.readyState !== WebSocket.OPEN) continue
+        this.unacked += payload.length
+        this.socket.send(payload)
+        if (this.unacked > highWater) this.child?.stdout.pause()
+      } else if (kind === 'C') {
+        let message
+        try { message = JSON.parse(payload.toString('utf8')) } catch { return this.close('error', 'The target sent an invalid control message.') }
+        this.control(message)
+      }
+    }
+  }
+
+  private control(message: { type?: string; [key: string]: unknown }) {
+    if (message.type === 'ready') {
+      this.started = true
+      for (const frame of this.pending) this.child!.stdin.write(frame)
+      this.pending = []
+      this.send({ type: 'ready' })
+    } else if (message.type === 'paste-result' && typeof message.id === 'string') {
+      this.send({ type: 'result', id: message.id, ok: message.ok === true,
+        ...(typeof message.reference === 'string' ? { reference: message.reference } : {}),
+        ...(typeof message.message === 'string' ? { message: message.message } : {}) })
+    } else if (message.type === 'signal' && typeof message.id === 'string') {
+      const reply = (ok: boolean, text?: string) => this.relay({ type: 'signal-result', id: message.id, ok, ...(text ? { message: text } : {}) })
+      const signal = message.signal as { type?: unknown; payload?: unknown } | undefined
+      const validate = typeof signal?.type === 'string' ? signalValidators[signal.type] : undefined
+      if (!validate) return reply(false, 'Outpost does not handle this signal type.')
+      const now = Date.now()
+      if (this.signals.until <= now) this.signals = { count: 0, until: now + 60_000 }
+      if (++this.signals.count > 120) return reply(false, 'Too many signals from this session. Try again in a minute.')
+      let payload
+      try { payload = validate(signal!.payload) } catch (error) { return reply(false, (error as Error).message) }
+      if (this.socket.readyState !== WebSocket.OPEN) return reply(false, 'The Outpost terminal disconnected.')
+      this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
+      reply(true)
+    } else if (message.type === 'exit' && (message.reason === 'detached' || message.reason === 'ended')) {
+      this.exitReason = message.reason
+    }
+  }
+
+  private relay(message: unknown, frame = relayFrame('C', JSON.stringify(message))) {
+    // Until the relay is ready (or even started), keep frames in order.
+    if (this.started && this.child) this.child.stdin.write(frame)
+    else if (this.pending.length < 256) this.pending.push(frame)
+  }
+
+  private receive(data: Buffer, binary: boolean) {
+    const now = Date.now()
+    if (this.window.until <= now) this.window = { messages: 0, bytes: 0, until: now + 1000 }
+    if (++this.window.messages > 300) return this.socket.close(1008, 'Message rate exceeded')
+    if (binary) {
+      if (data.length > maxInputMessage || (this.window.bytes += data.length) > 1024 * 1024) return this.socket.close(1008, 'Input rate exceeded')
+      return this.relay(null, relayFrame('I', data))
+    }
+    let message: ClientMessage
+    try { message = JSON.parse(data.toString('utf8')) } catch { return this.socket.close(1008, 'Invalid terminal message') }
+    const id = (message as { id?: unknown }).id
+    if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id))) return this.socket.close(1008, 'Invalid terminal message')
+    switch (message.type) {
+      case 'resize':
+        if (Number.isInteger(message.cols) && Number.isInteger(message.rows) && message.cols >= 2 && message.cols <= 1000 && message.rows >= 2 && message.rows <= 1000) {
+          this.relay({ type: 'resize', cols: message.cols, rows: message.rows })
+        }
+        return
+      case 'ack':
+        if (Number.isSafeInteger(message.bytes) && message.bytes >= 0) {
+          this.unacked = Math.max(0, this.unacked - message.bytes)
+          if (this.unacked <= highWater / 2) this.child?.stdout.resume()
+        }
+        return
+      case 'send': {
+        if (typeof message.data !== 'string' || Buffer.byteLength(message.data) > maxInputMessage) return this.send({ type: 'result', id: message.id, ok: false, message: 'Input must fit within 64 KiB. Send smaller sections.' })
+        if (!this.started || !this.child?.stdin.writable) return this.send({ type: 'result', id: message.id, ok: false, message: 'The terminal is not ready. Your draft is kept.' })
+        this.child.stdin.write(relayFrame('I', message.data), error => this.send({ type: 'result', id: message.id, ok: !error, ...(error ? { message: 'Delivery was not confirmed. Check the terminal before retrying.' } : {}) }))
+        return
+      }
+      case 'paste-image': {
+        let image
+        try { image = imageData({ data: message.data, mediaType: message.mediaType }) }
+        catch (error) { return this.send({ type: 'result', id: message.id, ok: false, message: (error as Error).message }) }
+        if (!this.started) return this.send({ type: 'result', id: message.id, ok: false, message: 'The terminal is not ready yet. Try again.' })
+        return this.relay({ type: 'paste-image', id: message.id, ...image })
+      }
+      default:
+        return this.socket.close(1008, 'Invalid terminal message')
+    }
+  }
+
+  close(reason: CloseReason, message: string) {
+    this.send({ type: 'closed', reason, message })
+    if (this.socket.readyState === WebSocket.OPEN) this.socket.close(1000, reason)
+    this.finish()
+  }
+
+  private finish() {
+    if (this.finished) return
+    this.finished = true
+    clearInterval(this.heartbeat)
+    this.broker.forget(this)
+    const child = this.child
+    if (child && child.exitCode === null && child.signalCode === null) {
+      // EOF lets the relay detach tmux cleanly; force it if the transport hangs.
+      child.stdin.end()
+      const timer = setTimeout(() => child.kill('SIGKILL'), 5000).unref()
+      child.once('close', () => clearTimeout(timer))
+    }
+  }
+}
+
+export class TerminalBroker {
+  private connections = new Set<Connection>()
+  private sweep: NodeJS.Timeout
+  private stopped = false
+  constructor(private dependencies: Dependencies) {
+    this.sweep = setInterval(() => {
+      for (const connection of this.connections) {
+        if (!dependencies.deployment.active(connection.grant.owner)) connection.close('expired', 'Sign-in ended. Sign in and connect again.')
+      }
+    }, 5000).unref()
+  }
+  forget(connection: Connection) { this.connections.delete(connection) }
+
+  async accept(socket: WebSocket, query: { token?: string; cols?: string; rows?: string }) {
+    const reject = (reason: CloseReason, message: string) => {
+      socket.send(JSON.stringify({ type: 'closed', reason, message } satisfies ServerMessage))
+      socket.close(1000, reason)
+    }
+    const redeemed = this.stopped ? null : this.dependencies.tokens.redeem(query.token ?? '')
+    if (!redeemed || !this.dependencies.deployment.active(redeemed.grant.owner)) return reject('expired', closedMessages.expired)
+    const { grant } = redeemed
+    if ([...this.connections].filter(connection => connection.grant.owner.userId === grant.owner.userId).length >= 16) {
+      return reject('error', 'Too many open terminals. Close one and try again.')
+    }
+    const cols = Number(query.cols ?? 80), rows = Number(query.rows ?? 24)
+    const connection = new Connection(grant, socket, this)
+    this.connections.add(connection)
+    try {
+      const context = await this.dependencies.resolve(grant.owner, grant.targetId)
+      const session = await this.dependencies.sessions.get(context, grant.sessionId)
+      if (socket.readyState !== WebSocket.OPEN) return
+      if (redeemed.kind === 'launch') this.dependencies.tokens.markConnected(redeemed.id, grant.owner)
+      connection.send({ type: 'hello', resume: this.dependencies.tokens.resume(redeemed.id, grant),
+        session: { id: session.id, name: session.name }, target: { id: context.target.id, name: context.target.name } })
+      const command = this.dependencies.sessions.attach(context, grant.sessionId,
+        Number.isInteger(cols) ? Math.min(1000, Math.max(2, cols)) : 80, Number.isInteger(rows) ? Math.min(1000, Math.max(2, rows)) : 24)
+      connection.start(spawn(command.executable, command.args, { stdio: 'pipe', env: this.dependencies.env ?? process.env }))
+    } catch (error) {
+      connection.close(error instanceof AppError && error.statusCode === 404 ? 'ended' : 'error', (error as Error).message)
+    }
+  }
+
+  /** Close connections after a session is terminated or deleted, or a target removed. */
+  closeTarget(owner: Owner, targetId: string, sessionId?: string) {
+    for (const connection of this.connections) {
+      const { grant } = connection
+      if (grant.owner.userId === owner.userId && grant.targetId === targetId && (!sessionId || grant.sessionId === sessionId)) {
+        connection.close('ended', 'This session was stopped from Outpost.')
+      }
+    }
+  }
+
+  close() {
+    this.stopped = true
+    clearInterval(this.sweep)
+    for (const connection of this.connections) connection.close('error', 'Outpost is restarting. Reconnecting…')
+  }
+}

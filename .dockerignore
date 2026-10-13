@@ -8,11 +8,14 @@
 !backend/**
 !shared/
 !shared/**
+!runtime/
+!runtime/**
+!connector/
+!connector/**
 !frontend/
 !frontend/**
 !public/
 !public/**
 !scripts/
 !scripts/build-server.mjs
-!tests/
-!tests/**
+**/__pycache__

@@ -1,44 +1,35 @@
 import { spawn } from 'node:child_process'
-import { join } from 'node:path'
 import { AppError } from './errors'
 
-export interface Command { executable: string; args: string[]; label: string; expandHome?: boolean }
+export interface Command { executable: string; args: string[]; label: string }
 interface CommandOptions {
   signal?: AbortSignal
   env?: NodeJS.ProcessEnv
   timeoutMs?: number
   onOutput?: (text: string) => void
 }
+
 export function runCommand(command: Command, script: string, options: CommandOptions = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const aborted = () => new AppError(`${command.label} operation aborted`, 502)
     if (options.signal?.aborted) return reject(aborted())
-    // Give short-lived workers their own POSIX group. Persistence servers are
-    // launched independently by the runtime and never belong to these groups.
-    const child = spawn(command.executable, command.args, { stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: options.env, windowsHide: true })
+    // Give short-lived workers their own process group. tmux servers are
+    // started independently by the runtime and never belong to these groups.
+    const child = spawn(command.executable, command.args, { stdio: ['pipe', 'pipe', 'pipe'], detached: true, env: options.env })
     let stdout = '', stderr = '', settled = false
     const cleanup = () => { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel) }
     const stop = () => {
       if (!child.pid || child.exitCode !== null || child.signalCode !== null) return
-      if (process.platform === 'win32') {
-        const executable = process.env.SystemRoot ? join(process.env.SystemRoot, 'System32', 'taskkill.exe') : 'taskkill.exe'
-        const killer = spawn(executable, ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
-        const deadline = setTimeout(() => { killer.kill(); child.kill('SIGKILL') }, 5000).unref()
-        killer.once('error', () => { clearTimeout(deadline); child.kill('SIGKILL') })
-        killer.once('exit', code => { clearTimeout(deadline); if (code !== 0) child.kill('SIGKILL') })
-        killer.unref()
-      } else {
-        try { process.kill(-child.pid, 'SIGKILL') }
-        catch { child.kill('SIGKILL') }
-      }
+      try { process.kill(-child.pid, 'SIGKILL') }
+      catch { child.kill('SIGKILL') }
     }
     const fail = (error: AppError) => {
       if (settled) return
       settled = true
       cleanup()
       stop()
-      // Descendants may retain these pipes even after their parent is dead.
-      // Request deadlines must not wait for the child's eventual close event.
+      // Descendants may retain these pipes after their parent is dead; request
+      // deadlines must not wait for the child's eventual close event.
       child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy()
       reject(error)
     }
@@ -71,22 +62,29 @@ export function runCommand(command: Command, script: string, options: CommandOpt
     child.stdin.end(script)
   })
 }
+
+/** Parse the runtime's `OUTPOST_RESULT:` envelope from a command's output. */
+export function protocolResult<T>(stdout: string): { ok: true; data: T } | { ok: false; error: AppError } | null {
+  const line = stdout.split('\n').reverse().find(line => line.startsWith('OUTPOST_RESULT:'))
+  if (!line) return null
+  let result
+  try { result = JSON.parse(line.slice('OUTPOST_RESULT:'.length)) } catch { throw new AppError('Invalid response from target', 502) }
+  if (!result || typeof result !== 'object' || Array.isArray(result) || Object.keys(result).length !== 2) {
+    throw new AppError('Invalid response from target', 502)
+  }
+  if (result.ok === false && result.error && typeof result.error === 'object'
+    && Object.keys(result.error).length === 2 && typeof result.error.message === 'string'
+    && Number.isInteger(result.error.status) && result.error.status >= 400 && result.error.status <= 599) {
+    return { ok: false, error: new AppError(result.error.message, result.error.status) }
+  }
+  if (result.ok !== true || !Object.hasOwn(result, 'data')) throw new AppError('Invalid response from target', 502)
+  return { ok: true, data: result.data }
+}
+
 export async function runProtocol<T>(command: Command, script: string, options: CommandOptions = {}): Promise<T> {
   const { code, stdout, stderr } = await runCommand(command, script, options)
-  const line = stdout.split('\n').reverse().find(line => line.startsWith('OUTPOST_RESULT:'))
-  if (line) {
-    let result
-    try { result = JSON.parse(line.slice('OUTPOST_RESULT:'.length)) } catch { throw new AppError('Invalid response from target', 502) }
-    if (!result || typeof result !== 'object' || Array.isArray(result) || Object.keys(result).length !== 2) {
-      throw new AppError('Invalid response from target', 502)
-    }
-    if (result.ok === false && result.error && typeof result.error === 'object'
-      && Object.keys(result.error).length === 2 && typeof result.error.message === 'string'
-      && Number.isInteger(result.error.status) && result.error.status >= 400 && result.error.status <= 599) {
-      throw new AppError(result.error.message, result.error.status)
-    }
-    if (result.ok !== true || !Object.hasOwn(result, 'data')) throw new AppError('Invalid response from target', 502)
-    if (code === 0) return result.data
-  }
+  const result = protocolResult<T>(stdout)
+  if (result && !result.ok) throw result.error
+  if (result?.ok && code === 0) return result.data
   throw new AppError(`${command.label} failed (${code ?? 'disconnected'}). ${stderr.trim() || 'No response. Check access and Required Software.'}`, 502)
 }

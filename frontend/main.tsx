@@ -1,14 +1,14 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { LucideProvider } from 'lucide-react'
 import App from './App'
-import AuthGate from './AuthGate'
-import './style.scss'
+import AuthGate from './auth/AuthGate'
+import { ToastProvider } from './ui/Toast'
+import './styles/main.scss'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <LucideProvider size={18}>
+    <ToastProvider>
       <AuthGate><App /></AuthGate>
-    </LucideProvider>
+    </ToastProvider>
   </StrictMode>,
 )

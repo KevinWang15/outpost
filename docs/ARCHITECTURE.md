@@ -131,9 +131,17 @@ JSON control messages (`shared/protocol.ts`):
 | ← client | `ready` | Attached to tmux |
 | ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
-| ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `error` |
+| ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |
 
 The server pauses the transport when more than 1 MiB is unacknowledged.
+
+**Compatibility.** Connectors are installed on users' computers and lag behind
+servers, so every client sends `?protocol=<version>` (`protocolVersion` in
+`shared/protocol.ts`, `PROTOCOL` in the connector). The server accepts only its
+own version and otherwise closes with `outdated`: connectors are shown the
+install command, browsers are asked to reload. The check happens before the
+launch token is redeemed. Additive changes that old clients ignore keep the
+version; anything an old client would misread bumps it.
 
 ### Relay protocol (broker ⇄ relay, stdio)
 

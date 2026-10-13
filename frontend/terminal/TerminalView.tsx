@@ -6,6 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ImagePlus, Keyboard, LoaderCircle, MessageSquareText, RotateCw, X } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 import type { ImageMediaType } from '../../shared/model'
+import type { CloseReason } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
 import { readImage } from '../api'
@@ -16,6 +17,7 @@ import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
 
 const touch = () => window.matchMedia('(pointer: coarse)').matches
+const closedTitles: Record<CloseReason, string> = { detached: 'Detached', ended: 'Session ended', expired: 'Connection expired', outdated: 'Update required', error: 'Disconnected' }
 const theme = {
   background: '#0f172a', foreground: '#e2e8f0', cursor: '#93c5fd', cursorAccent: '#0f172a', selectionBackground: '#334155',
   black: '#1e293b', red: '#f87171', green: '#4ade80', yellow: '#facc15', blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e2e8f0',
@@ -166,10 +168,11 @@ export default function TerminalView({ token, title, onClose }: { token: string;
     <div className="terminal-body">
       <div className="terminal-surface" ref={surface} />
       {state.kind === 'closed' && <div className="terminal-closed">
-        <h3>{state.reason === 'detached' ? 'Detached' : state.reason === 'ended' ? 'Session ended' : state.reason === 'expired' ? 'Connection expired' : 'Disconnected'}</h3>
+        <h3>{closedTitles[state.reason]}</h3>
         <p>{state.message}</p>
         <div>
-          {state.reason !== 'expired' && <button className="button primary" onClick={() => socket.current?.reconnect()}><RotateCw size={15} />Reconnect</button>}
+          {state.reason === 'outdated' ? <button className="button primary" onClick={() => window.location.reload()}><RotateCw size={15} />Reload</button>
+            : state.reason !== 'expired' && <button className="button primary" onClick={() => socket.current?.reconnect()}><RotateCw size={15} />Reconnect</button>}
           <button className="button" onClick={onClose}>Close</button>
         </div>
       </div>}

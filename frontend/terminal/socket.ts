@@ -1,4 +1,5 @@
 import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
+import { protocolVersion } from '../../shared/protocol'
 import type { ImageMediaType } from '../../shared/model'
 
 export type SocketState =
@@ -36,7 +37,7 @@ export class TerminalSocket {
     const { cols, rows } = this.size()
     const url = new URL('/api/terminal', window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-    url.search = new URLSearchParams({ token: this.token, cols: String(cols), rows: String(rows), client: 'web' }).toString()
+    url.search = new URLSearchParams({ token: this.token, cols: String(cols), rows: String(rows), client: 'web', protocol: String(protocolVersion) }).toString()
     const socket = new WebSocket(url)
     socket.binaryType = 'arraybuffer'
     this.socket = socket

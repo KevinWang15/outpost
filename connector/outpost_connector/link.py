@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import PROTOCOL, VERSION
+
 HOME = Path(os.environ.get('OUTPOST_CONNECTOR_HOME') or Path.home() / '.outpost-connector')
 CONFIG = HOME / 'config.json'
 
@@ -27,7 +29,8 @@ class Link:
 
     def websocket_url(self, token, cols, rows):
         scheme = 'wss' if self.server.startswith('https:') else 'ws'
-        query = 'token=' + token + '&cols=' + str(cols) + '&rows=' + str(rows) + '&client=connector'
+        query = ('token=' + token + '&cols=' + str(cols) + '&rows=' + str(rows)
+                 + '&client=connector&protocol=' + str(PROTOCOL) + '&version=' + VERSION)
         return scheme + self.server[self.server.index(':'):] + '/api/terminal?' + query
 
 

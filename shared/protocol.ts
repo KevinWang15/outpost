@@ -4,6 +4,9 @@
 import type { ImageMediaType } from './model'
 import type { TerminalChoice } from './terminals'
 
+// Clients send ?protocol=<version>. The server accepts only its own version and
+// closes others with `outdated`. Bump it for changes old clients would misread;
+// additive fields that old clients ignore keep the version.
 export const protocolVersion = 2
 export const maxInputMessage = 64 * 1024
 
@@ -13,7 +16,8 @@ export type ClientMessage =
   | { type: 'send'; id: string; data: string }
   | { type: 'paste-image'; id: string; mediaType: ImageMediaType; data: string }
 
-export type CloseReason = 'detached' | 'ended' | 'expired' | 'error'
+export const closeReasons = ['detached', 'ended', 'expired', 'outdated', 'error'] as const
+export type CloseReason = typeof closeReasons[number]
 export interface SignalMessage { type: string; payload: unknown }
 export type ServerMessage =
   | { type: 'hello'; resume: string; session: { id: string; name: string }; target: { id: string; name: string } }

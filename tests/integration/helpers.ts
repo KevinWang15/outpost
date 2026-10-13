@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
 import type { ServerMessage } from '../../shared/protocol'
+import { protocolVersion } from '../../shared/protocol'
 import { quote } from '../../backend/shell'
 
 export const fixtures = fileURLToPath(new URL('../fixtures/', import.meta.url))
@@ -54,7 +55,7 @@ export class TerminalClient {
   opened: Promise<void>
   closed: Promise<void>
   constructor(url: string) {
-    this.socket = new WebSocket(url)
+    this.socket = new WebSocket(url.includes('protocol=') ? url : `${url}&protocol=${protocolVersion}`)
     this.opened = new Promise((resolve, reject) => { this.socket.once('open', () => resolve()); this.socket.once('error', reject) })
     this.closed = new Promise(resolve => this.socket.once('close', () => resolve()))
     this.socket.on('message', (data, binary) => {

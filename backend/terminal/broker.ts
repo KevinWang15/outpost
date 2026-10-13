@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { WebSocket } from 'ws'
 import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
-import { maxInputMessage } from '../../shared/protocol'
+import { maxInputMessage, protocolVersion } from '../../shared/protocol'
 import { signalValidators } from '../../shared/signals'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
@@ -36,11 +36,13 @@ export class RelayDecoder {
 }
 
 const highWater = 1024 * 1024
-const closedMessages: Record<Exclude<CloseReason, 'error'>, string> = {
+const closedMessages: Record<'detached' | 'ended' | 'expired', string> = {
   detached: 'Detached. The session keeps running.',
   ended: 'The coding tool exited. Connect again to start it in the same conversation.',
   expired: 'This connection expired. Click Connect in Outpost to open a new terminal.',
 }
+
+export interface TerminalQuery { token?: string; cols?: string; rows?: string; protocol?: string; client?: string }
 
 interface Dependencies {
   tokens: ConnectTokens
@@ -239,10 +241,15 @@ export class TerminalBroker {
   }
   forget(connection: Connection) { this.connections.delete(connection) }
 
-  async accept(socket: WebSocket, query: { token?: string; cols?: string; rows?: string }) {
+  async accept(socket: WebSocket, query: TerminalQuery, client: { install: string }) {
     const reject = (reason: CloseReason, message: string) => {
       socket.send(JSON.stringify({ type: 'closed', reason, message } satisfies ServerMessage))
       socket.close(1000, reason)
+    }
+    // Checked before the token is redeemed, so the same link works after updating.
+    if (query.protocol !== String(protocolVersion)) {
+      return reject('outdated', query.client === 'web' ? 'Outpost was updated. Reload this page to reconnect.'
+        : `This Outpost Connector is out of date. Update it, then connect again:\n  ${client.install}`)
     }
     const redeemed = this.stopped ? null : this.dependencies.tokens.redeem(query.token ?? '')
     if (!redeemed || !this.dependencies.deployment.active(redeemed.grant.owner)) return reject('expired', closedMessages.expired)

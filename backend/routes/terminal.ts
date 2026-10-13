@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { connectorArchive, connectorVersion, installCommand, installScript } from '../connector'
 import type { Services } from '../services'
+import type { TerminalQuery } from '../terminal/broker'
 
 export function terminalRoutes(app: FastifyInstance, services: Services) {
   // Authenticated by the connect token, so native clients need no browser cookie.
-  app.get<{ Querystring: { token?: string; cols?: string; rows?: string } }>('/api/terminal', { websocket: true }, (socket, request) => {
-    void services.broker.accept(socket, request.query)
+  app.get<{ Querystring: TerminalQuery }>('/api/terminal', { websocket: true }, (socket, request) => {
+    void services.broker.accept(socket, request.query, { install: installCommand(services.deployment.origin(request)) })
   })
   app.get('/api/connector', async request => ({
     version: connectorVersion, install: installCommand(services.deployment.origin(request)),

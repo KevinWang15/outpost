@@ -114,3 +114,22 @@ test('the connector is served with an installer for this server', async t => {
   const archive = await app.inject({ url: '/connector/outpost-connector.pyz', headers: { host: `127.0.0.1:${port}` } })
   assert.equal(archive.rawPayload.subarray(0, 2).toString(), 'PK')
 })
+
+test('clients speaking another protocol version are told to update, without spending the launch token', async t => {
+  const { port, call } = await setup(t)
+  const { body: target } = await call('POST', '/targets', { kind: 'ssh', name: 'dev', host: 'dev.example.com', tools: ['claude'] }) as { body: Target }
+  const { body: session } = await call('POST', `/targets/${target.id}/sessions`, { name: 'Build', rootDir: '~/p', tool: 'claude' }) as { body: Session }
+  const { token } = (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: 'iterm2' })).body as ConnectResponse
+  const base = `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`
+  const connector = new TerminalClient(`${base}&client=connector&protocol=1`)
+  t.after(() => connector.socket.terminate())
+  const outdated = await connector.message('closed')
+  assert.equal(outdated.reason, 'outdated')
+  assert.match(outdated.message, new RegExp(`curl -fsSL 'http://127.0.0.1:${port}/connector/install.sh' \\| bash`))
+  const page = new TerminalClient(`${base}&client=web&protocol=`)
+  t.after(() => page.socket.terminate())
+  assert.equal((await page.message('closed')).message, 'Outpost was updated. Reload this page to reconnect.')
+  const current = new TerminalClient(base)
+  t.after(() => current.socket.terminate())
+  await current.message('ready')
+})

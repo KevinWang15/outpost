@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'connector'))
 os.environ['OUTPOST_CONNECTOR_HOME'] = tempfile.mkdtemp(prefix='outpost-connector-')
 atexit.register(shutil.rmtree, os.environ['OUTPOST_CONNECTOR_HOME'], True)
-from outpost_connector import link, terminals  # noqa: E402
+from outpost_connector import VERSION, link, terminals  # noqa: E402
 from outpost_connector.keys import InputRouter, bracketed  # noqa: E402
 from outpost_connector.platforms import ClipboardError, parse_clipboard  # noqa: E402
 from outpost_connector.screen import OutputFilter  # noqa: E402
@@ -104,7 +104,8 @@ class LinkTest(unittest.TestCase):
     def test_parse_and_trust(self):
         parsed = link.parse(outpost_link())
         self.assertEqual((parsed.server, parsed.terminal, parsed.title), ('https://outpost.example.com', 'iterm2', 'Build · dev'))
-        self.assertEqual(parsed.websocket_url('t', 80, 24), 'wss://outpost.example.com/api/terminal?token=t&cols=80&rows=24&client=connector')
+        self.assertEqual(parsed.websocket_url('t', 80, 24), 'wss://outpost.example.com/api/terminal?token=t&cols=80&rows=24'
+                         '&client=connector&protocol=2&version=' + VERSION)
         with self.assertRaisesRegex(link.LinkError, 'does not trust'):
             link.trusted(parsed)
         link.trust('https://OUTPOST.example.com/')

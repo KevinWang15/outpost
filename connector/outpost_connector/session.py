@@ -104,8 +104,9 @@ class Session:
                     failures = 0
                 if outcome.reason == 'quit':
                     return 0
-                if outcome.reason == 'expired':
-                    self.banner('Connection expired', outcome.message, 'Press any key to close')
+                if outcome.reason in ('expired', 'outdated'):
+                    heading = 'Connection expired' if outcome.reason == 'expired' else 'Outpost Connector needs an update'
+                    self.banner(heading, outcome.message, 'Press any key to close')
                     self.read_key()
                     return 1
                 if outcome.reason in ('detached', 'ended'):

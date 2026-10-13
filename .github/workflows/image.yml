@@ -2,7 +2,7 @@ name: Container image
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - name: Build and publish main image
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -33,6 +35,20 @@ jobs:
           tags: |
             ghcr.io/kevinwang15/outpost:${{ github.sha }}
             ghcr.io/kevinwang15/outpost:latest
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build and publish v2 image
+        if: github.ref == 'refs/heads/v2'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/kevinwang15/outpost:${{ github.sha }}
+            ghcr.io/kevinwang15/outpost:v2
+            ghcr.io/kevinwang15/outpost:v2-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

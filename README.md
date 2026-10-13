@@ -38,7 +38,9 @@ For development, `npm run dev` serves the UI at http://127.0.0.1:5173 with hot r
 Local mode needs no account and accepts connections only from this computer.
 SSH targets use your own OpenSSH configuration, agent and keys. Data lives in
 `~/.outpost` (set `OUTPOST_DATA_DIR` to change it). On Windows, run Outpost
-inside WSL.
+inside WSL and open http://localhost:3000 in your Windows browser: in WSL,
+Outpost listens on all interfaces so Windows' localhost forwarding reaches it,
+and still accepts only connections that arrive through localhost.
 
 To use Outpost running on another machine, forward its port to the **same**
 port locally (`ssh -L 3000:127.0.0.1:3000 that-machine`) and open

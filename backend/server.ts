@@ -28,7 +28,12 @@ const app = await createApp({
   ...(process.env.OUTPOST_TRUST_PROXY ? { trustProxy: process.env.OUTPOST_TRUST_PROXY.split(',').map(value => value.trim()).filter(Boolean) } : {}),
   ...(built ? { frontendRoot } : {}),
 })
-const address = await app.listen({ port, host: production ? (process.env.HOST ?? '0.0.0.0') : loopbackHost(process.env.HOST) })
+// WSL forwards Windows' localhost only to wildcard listeners. Forwarded
+// connections arrive from 127.0.0.1, and the request guard still admits only
+// loopback peers, so the WSL network address itself stays unusable.
+const wsl = Boolean(process.env.WSL_DISTRO_NAME) || existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')
+const host = production ? (process.env.HOST ?? '0.0.0.0') : process.env.HOST ? loopbackHost(process.env.HOST) : wsl ? '0.0.0.0' : '127.0.0.1'
+const address = await app.listen({ port, host })
 console.log(`Outpost ${mode} mode listening at ${address}`)
 
 let stopping = false

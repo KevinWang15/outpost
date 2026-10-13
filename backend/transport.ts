@@ -13,7 +13,6 @@ export interface SshIdentity { identityFile: string; knownHostsFile: string }
  * stdin; attachments run one runtime operation with stdio as the relay channel. */
 export interface Transport {
   readonly label: string
-  readonly context?: { home: string; uid: number }
   management(): Command
   attach(operation: string): Command
 }
@@ -57,17 +56,14 @@ class SshTransport implements Transport {
   }
 }
 
+/** The same commands as SSH, run as the Outpost server's own user. */
 class LocalTransport implements Transport {
   readonly label = 'Local shell'
-  get context() { return this.target.environment && { home: this.target.environment.home, uid: this.target.environment.uid } }
   constructor(private target: Extract<Target, { kind: 'local' }>) {
     if (process.platform !== 'linux') throw new AppError('Local targets require the Outpost server to run on Linux.', 409)
   }
   management(): Command { return { executable: 'sh', args: ['-c', loginScriptShell], label: this.label } }
-  attach(operation: string): Command {
-    if (!this.target.environment) throw new AppError('Check Required Software before connecting to a local session.', 409)
-    return { executable: this.target.environment.shell, args: ['-lic', operation], label: this.label }
-  }
+  attach(operation: string): Command { return { executable: this.target.environment?.shell ?? 'bash', args: ['-lic', operation], label: this.label } }
 }
 
 export function transportFor(target: Target, identity: SshIdentity | null, options: TransportOptions): Transport {

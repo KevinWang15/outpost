@@ -107,3 +107,20 @@ test('local target: create, connect from a web client, paste, signal, reconnect,
     await request('DELETE', `/targets/${target.id}/sessions/${session.id}`, undefined, 204)
   })
 })
+
+test('local sessions connect without a prior software check', { timeout: 60_000, skip: process.platform !== 'linux' }, async t => {
+  const { directory, home, env } = await fixtureHome('outpost-local-')
+  const app = await createApp({ deployment: await LocalDeployment.open(join(directory, 'data')), env, multiplex: false })
+  await app.listen({ host: '127.0.0.1', port: 0 })
+  const port = (app.server.address() as { port: number }).port
+  const request = api(`http://127.0.0.1:${port}`)
+  let client: TerminalClient | undefined
+  t.after(async () => { client?.socket.terminate(); await app.close(); await removeHome(directory, home) })
+  const target = await request<Target>('POST', '/targets', { kind: 'local', name: 'Fresh', tools: ['codex'] }, 201)
+  assert.equal(target.environment, undefined)
+  const session = await request<Session>('POST', `/targets/${target.id}/sessions`, { name: 'First', rootDir: '~/first', tool: 'codex', createDirectory: true }, 201)
+  const { token } = await request<ConnectResponse>('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: 'web' })
+  client = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`)
+  await client.message('ready')
+  await client.text('OUTPOST_FIXTURE_READY')
+})

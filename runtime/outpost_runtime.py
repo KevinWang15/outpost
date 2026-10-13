@@ -590,9 +590,6 @@ def main():
     request = json.loads(base64.b64decode(sys.argv[1]))
     if not sys.platform.startswith('linux'):
         fail('Outpost targets must run Linux.', 409)
-    context = request.get('context')
-    if context and (context['home'] != str(Path.home()) or context['uid'] != os.getuid()):
-        fail('Run this on the Outpost computer as the user who added this target.', 409)
     action = request['action']
     if action == 'directories':
         # Discovery is read-only and independent of the session registry and lock.

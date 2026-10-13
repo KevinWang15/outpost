@@ -144,9 +144,6 @@ export class SoftwareClient implements SoftwareService {
       software.push(status(id as SoftwareId, path, Number(exit), output))
     }
     if (fields[0] !== 'END' || !home?.startsWith('/') || !/^\d+$/.test(uid) || !username || !shell?.startsWith('/')) throw new AppError('Invalid execution environment response', 502)
-    if (target.environment && (target.environment.home !== home || target.environment.uid !== environment.uid || target.environment.username !== username)) {
-      throw new AppError('The execution user or home changed. Add a new target for this account.', 409)
-    }
     return { environment, checkedAt: new Date().toISOString(), software: ids.map(id => software.find(item => item.id === id)!) }
   }
   async install({ transport }: TargetContext, script: string, onOutput: (text: string) => void, signal: AbortSignal) {

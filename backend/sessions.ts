@@ -50,7 +50,7 @@ export interface SessionService {
 export class SessionClient implements SessionService {
   constructor(private env: NodeJS.ProcessEnv = process.env) {}
   private run<T>({ transport }: TargetContext, request: Request, signal?: AbortSignal, stdin = '') {
-    const operation = runtimeOperation({ ...request, context: transport.context })
+    const operation = runtimeOperation(request)
     return runProtocol<T>(transport.management(), `set -eu\n${operation}${stdin}\n`, { signal, env: this.env })
   }
   list(context: TargetContext, signal?: AbortSignal) { return this.run<SessionList>(context, { action: 'list' }, signal) }
@@ -67,6 +67,6 @@ export class SessionClient implements SessionService {
     return this.run<SessionImage>(context, { action: 'paste-image', id, extension }, undefined, ` <<'OUTPOST_IMAGE'\n${data}\nOUTPOST_IMAGE`)
   }
   attach({ transport }: TargetContext, id: string, cols: number, rows: number) {
-    return transport.attach(runtimeOperation({ action: 'attach', id, cols, rows, context: transport.context }))
+    return transport.attach(runtimeOperation({ action: 'attach', id, cols, rows }))
   }
 }

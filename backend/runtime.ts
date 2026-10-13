@@ -30,7 +30,7 @@ const program = deflateSync([
 ].join('\n'), { level: 9 }).toString('base64')
 
 /** Shell text that runs one runtime request on the target. */
-export function runtimeOperation(request: Record<string, unknown>) {
+export function runtimeOperation(request: object) {
   const payload = Buffer.from(JSON.stringify(request)).toString('base64')
   const bootstrap = `import base64,zlib;exec(zlib.decompress(base64.b64decode("${program}")))`
   return `${supportingPath}; exec python3 -c ${quote(bootstrap)} ${quote(payload)}`

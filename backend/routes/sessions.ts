@@ -1,46 +1,13 @@
 import type { FastifyInstance } from 'fastify'
 import type { ConversationSearch, SessionImageInput, SessionInput } from '../../shared/model'
-import { imageMediaTypes } from '../../shared/model'
-import { harnesses, harnessIds } from '../../shared/harnesses'
 import type { ConnectRequest, ConnectResponse, ConnectionStatus } from '../../shared/protocol'
-import { terminalChoices } from '../../shared/terminals'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
 import { launchOptions } from '../sessions'
-import { nameField } from '../workspace'
+import { acknowledgeInput, connectInput, conversationSearch, directoryQuery, imageInput, sessionInput } from '../../shared/schemas'
 
 type Params = { targetId: string; sessionId: string }
-const textField = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
-const sessionInput = {
-  // Each harness pins its own native ID format and storage variable.
-  oneOf: harnesses.map(harness => ({ properties: {
-    tool: { const: harness.id },
-    cliSessionId: { type: 'string', pattern: harness.nativeId },
-    cliSessionEnv: { type: 'object', propertyNames: { const: harness.storageKey } },
-  } })),
-  dependencies: { cliSessionEnv: ['cliSessionId'] },
-  type: 'object', additionalProperties: false, required: ['name', 'rootDir', 'tool'],
-  properties: {
-    name: nameField,
-    rootDir: { ...textField(4096), pattern: '^(~/|/)[^\\u0000-\\u001f\\u007f]*$' },
-    createDirectory: { type: 'boolean' },
-    tool: { enum: harnessIds },
-    cliSessionId: { type: 'string', maxLength: 128 },
-    cliSessionEnv: { type: 'object', minProperties: 1, maxProperties: 1, additionalProperties: { ...textField(4096), pattern: '^/[^\\u0000-\\u001f\\u007f]*$' } },
-    args: { type: 'string', maxLength: 8192, pattern: '^[^\\u0000]*$' },
-    env: {
-      type: 'object', maxProperties: 32,
-      propertyNames: { maxLength: 128, pattern: '^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])' },
-      additionalProperties: { type: 'string', maxLength: 4096, pattern: '^[^\\u0000]*$' },
-    },
-  },
-}
-const imageInput = {
-  type: 'object', additionalProperties: false, required: ['data', 'mediaType'],
-  properties: { data: { type: 'string', minLength: 8, maxLength: 24 * 1024 * 1024, pattern: '^[A-Za-z0-9+/]+={0,2}$' }, mediaType: { enum: imageMediaTypes } },
-}
-
 export function sessionRoutes(app: FastifyInstance, services: Services) {
   const { sessions, broker, tokens, deployment } = services
   const base = '/api/targets/:targetId/sessions'
@@ -67,12 +34,12 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
     return session
   })
   app.post<{ Params: Params; Body: { completionId: string } }>(`${base}/:sessionId/acknowledge`, {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['completionId'], properties: { completionId: { type: 'string', pattern: '^[0-9a-f]{64}$' } } } },
+    schema: { body: acknowledgeInput },
   }, async request => sessions.acknowledge(await services.context(request, request.params.targetId), request.params.sessionId, request.body.completionId))
   app.post<{ Params: Params; Body: SessionImageInput }>(`${base}/:sessionId/image`, { bodyLimit: 24 * 1024 * 1024, schema: { body: imageInput } }, async request =>
     sessions.pasteImage(await services.context(request, request.params.targetId), request.params.sessionId, request.body))
   app.post<{ Params: Params; Body: ConnectRequest }>(`${base}/:sessionId/connect`, {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['terminal'], properties: { terminal: { enum: terminalChoices } } } },
+    schema: { body: connectInput },
   }, async (request, reply) => withRequestSignal(reply, async signal => {
     const context = await services.context(request, request.params.targetId)
     const session = await sessions.get(context, request.params.sessionId, signal)
@@ -84,15 +51,11 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
   app.get<{ Params: { id: string } }>('/api/connections/:id', async request =>
     ({ status: tokens.status(deployment.owner(request), request.params.id) }) satisfies ConnectionStatus)
   app.post<{ Params: Params; Body: ConversationSearch }>('/api/targets/:targetId/conversations/search', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['query'], properties: {
-      query: { type: 'string', minLength: 1, maxLength: 256, pattern: '^(?=.*\\S)[^\\u0000-\\u001f\\u007f]+$' }, tool: { enum: harnessIds },
-    } } },
+    schema: { body: conversationSearch },
   }, async (request, reply) => withRequestSignal(reply, async signal =>
     sessions.search(await services.context(request, request.params.targetId), request.body, signal)))
   app.get<{ Params: Params; Querystring: { path: string } }>('/api/targets/:targetId/directories', {
-    schema: { querystring: { type: 'object', additionalProperties: false, required: ['path'], properties: {
-      path: { type: 'string', maxLength: 4096, pattern: '^(|~|(?:~/|/)[^\\u0000-\\u001f\\u007f]*)$' },
-    } } },
+    schema: { querystring: directoryQuery },
   }, async (request, reply) => withRequestSignal(reply, async signal =>
     sessions.directories(await services.context(request, request.params.targetId), request.query.path, signal)))
 }

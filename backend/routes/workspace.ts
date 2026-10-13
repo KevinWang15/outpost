@@ -2,15 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { Environment, SoftwareId, Target, TargetInput, TargetUpdate } from '../../shared/model'
 import { requiredSoftware } from '../../shared/model'
-import { harnessIds } from '../../shared/harnesses'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
 import { planInstallation } from '../software'
-import { targetInput, targetUpdate } from '../workspace'
+import { installationInput, targetInput, targetUpdate } from '../../shared/schemas'
 
 type Params = { targetId: string }
-const softwareIds = ['bash', 'python3', 'tmux', ...harnessIds]
 
 export function workspaceRoutes(app: FastifyInstance, services: Services) {
   const { deployment, software, installations } = services
@@ -47,10 +45,7 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
     return planInstallation(request.params.softwareId)
   })
   app.post<{ Params: Params; Body: { softwareId: SoftwareId; script: string } }>('/api/targets/:targetId/installations', {
-    schema: { body: {
-      type: 'object', additionalProperties: false, required: ['softwareId', 'script'],
-      properties: { softwareId: { enum: softwareIds }, script: { type: 'string', minLength: 1, maxLength: 64 * 1024, pattern: '^[^\\u0000]+$' } },
-    } },
+    schema: { body: installationInput },
   }, async (request, reply) => {
     const context = await services.context(request, request.params.targetId)
     return reply.code(202).send(await installations.start(context, request.body.softwareId, request.body.script))

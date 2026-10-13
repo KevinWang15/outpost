@@ -3,46 +3,14 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Ajv } from 'ajv'
 import type { ExecutionEnvironment, Target, TargetUpdate } from '../shared/model'
-import { harnessIds } from '../shared/harnesses'
+import Type from 'typebox'
+import { targetRecord } from '../shared/schemas'
 import { AppError } from './errors'
 
-const textField = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
-const absolutePath = { ...textField(4096), pattern: '^/[^\\u0000-\\u001f\\u007f]*$' }
-export const nameField = { ...textField(80), pattern: '^(?=.*\\S)[^\\u0000-\\u001f\\u007f]+$' }
-export const toolsField = { type: 'array', minItems: 1, maxItems: harnessIds.length, uniqueItems: true, items: { enum: harnessIds } }
-const sshFields = {
-  host: { type: 'string', minLength: 1, maxLength: 253, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._:-]*$' },
-  port: { type: 'integer', minimum: 1, maximum: 65535 },
-  identityFile: { ...textField(1024), pattern: '^(~/|/)[^\\u0000-\\u001f\\u007f]+$' },
-}
-export const targetInput = {
-  oneOf: [
-    { properties: { kind: { const: 'ssh' } }, required: ['host'] },
-    { properties: { kind: { const: 'local' } }, not: { anyOf: [{ required: ['host'] }, { required: ['port'] }, { required: ['identityFile'] }] } },
-  ],
-  type: 'object', additionalProperties: false, required: ['name', 'kind', 'tools'],
-  properties: { name: nameField, kind: { enum: ['ssh', 'local'] }, tools: toolsField, ...sshFields },
-}
-export const targetUpdate = {
-  type: 'object', additionalProperties: false, minProperties: 1,
-  properties: { name: nameField, tools: toolsField },
-}
-const environment = {
-  type: 'object', additionalProperties: false, required: ['home', 'username', 'uid', 'shell'],
-  properties: { home: absolutePath, username: textField(256), uid: { type: 'integer', minimum: 0 }, shell: absolutePath },
-}
-const targetRecord = {
-  ...targetInput,
-  required: [...targetInput.required, 'id', 'createdAt'],
-  properties: { ...targetInput.properties, id: textField(80), createdAt: textField(80), environment },
-}
 interface WorkspaceFile { version: 2; targets: Target[] }
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false })
 const validTarget = ajv.compile<Target>(targetRecord)
-const validFile = ajv.compile<WorkspaceFile>({
-  type: 'object', additionalProperties: false, required: ['version', 'targets'],
-  properties: { version: { const: 2 }, targets: { type: 'array', items: targetRecord } },
-})
+const validFile = ajv.compile<WorkspaceFile>(Type.Object({ version: Type.Literal(2), targets: Type.Array(targetRecord) }, { additionalProperties: false }))
 
 /** Convert an Outpost v1 `targets.json` once. Windows/WSL targets cannot run on v2. */
 export function importV1(config: unknown): Target[] {

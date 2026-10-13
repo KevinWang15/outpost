@@ -197,11 +197,6 @@ class TerminalTest(unittest.TestCase):
             self.handler = Path(command[3]).read_text()
         return 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe'
 
-    def test_registry_matches_the_ui(self):
-        source = (ROOT / 'shared' / 'terminals.ts').read_text()
-        for adapter in terminals.ADAPTERS.values():
-            self.assertIn("id: '" + adapter.ID + "', name: '" + adapter.NAME + "'", source)
-
     def test_iterm2_profile_and_handler(self):
         iterm2.install(self.context)
         profile = json.loads(iterm2.profile_path(self.context).read_text())['Profiles'][0]

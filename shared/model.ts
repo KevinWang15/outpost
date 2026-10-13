@@ -1,16 +1,21 @@
+import type { Static } from 'typebox'
 import type { HarnessId } from './harnesses'
+import type * as schemas from './schemas'
 
-export interface ExecutionEnvironment { home: string; username: string; uid: number; shell: string }
-
-interface TargetBase { name: string; tools: HarnessId[] }
-export interface SshTargetInput extends TargetBase { kind: 'ssh'; host: string; port?: number; identityFile?: string }
-export interface LocalTargetInput extends TargetBase { kind: 'local' }
-export type TargetInput = SshTargetInput | LocalTargetInput
-export interface TargetUpdate { name?: string; tools?: HarnessId[] }
-interface TargetMetadata { id: string; createdAt: string; environment?: ExecutionEnvironment }
-export type SshTarget = SshTargetInput & TargetMetadata
-export type LocalTarget = LocalTargetInput & TargetMetadata
-export type Target = SshTarget | LocalTarget
+// Inputs and stored records are derived from their validation schemas.
+export type ExecutionEnvironment = Static<typeof schemas.environment>
+export type TargetInput = Static<typeof schemas.targetInput>
+export type TargetUpdate = Static<typeof schemas.targetUpdate>
+export type Target = Static<typeof schemas.targetRecord>
+export type SshTarget = Extract<Target, { kind: 'ssh' }>
+export type LocalTarget = Extract<Target, { kind: 'local' }>
+export type SessionInput = Static<typeof schemas.sessionInput>
+export type SessionImageInput = Static<typeof schemas.imageInput>
+export type ConversationSearch = Static<typeof schemas.conversationSearch>
+export type ImageMediaType = SessionImageInput['mediaType']
+export type SoftwareId = typeof schemas.softwareIds[number]
+// Runtime constants stay here so the browser bundle never loads TypeBox.
+export const imageMediaTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 
 export interface Environment { mode: 'local' | 'hosted'; localTargets: boolean }
 
@@ -34,13 +39,8 @@ export interface Session extends SessionLaunchOptions {
   status: SessionStatus
   activity: SessionActivity
 }
-export interface SessionInput extends Partial<SessionLaunchOptions> {
-  name: string; rootDir: string; tool: HarnessId; createDirectory?: boolean
-  cliSessionId?: string; cliSessionEnv?: Record<string, string>
-}
 export interface SessionList { sessions: Session[]; registryPath: string }
 
-export interface ConversationSearch { query: string; tool?: HarnessId }
 export interface ConversationMatch {
   tool: HarnessId
   cliSessionId: string
@@ -55,14 +55,10 @@ export interface ConversationMatch {
 export interface ConversationResults { sessions: ConversationMatch[]; truncated: boolean; warnings: string[] }
 export interface DirectorySuggestions { directories: string[]; truncated: boolean }
 
-export const imageMediaTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
-export type ImageMediaType = typeof imageMediaTypes[number]
 export const imageExtensions: Record<ImageMediaType, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }
 export const maxImageBytes = 16 * 1024 * 1024
-export interface SessionImageInput { data: string; mediaType: ImageMediaType }
 export interface SessionImage { path: string; reference: string; injected: boolean }
 
-export type SoftwareId = HarnessId | 'bash' | 'python3' | 'tmux'
 export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => ['bash', 'python3', 'tmux', ...target.tools]
 export interface SoftwareStatus {
   id: SoftwareId

@@ -1,8 +1,9 @@
 // Terminal protocol between clients (web terminal, native connector) and the
 // broker. Binary WebSocket frames carry raw terminal bytes; text frames carry
 // these JSON messages. See docs/ARCHITECTURE.md → "Terminal protocol".
+import type { Static } from 'typebox'
 import type { ImageMediaType } from './model'
-import type { TerminalChoice } from './terminals'
+import type { connectInput } from './schemas'
 
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Bump it for changes old clients would misread;
@@ -26,6 +27,13 @@ export type ServerMessage =
   | { type: 'signal'; signal: SignalMessage }
   | { type: 'closed'; reason: CloseReason; message: string }
 
-export interface ConnectRequest { terminal: TerminalChoice }
+// Runtime list for clients in other languages (tests/unit/contracts.test.ts);
+// the alias below fails to compile if it misses a ServerMessage type.
+export const serverMessageTypes = ['hello', 'ready', 'result', 'signal', 'closed'] as const
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+type Assert<T extends true> = T
+export type ServerMessageTypesCovered = Assert<Same<ServerMessage['type'], typeof serverMessageTypes[number]>>
+
+export type ConnectRequest = Static<typeof connectInput>
 export interface ConnectResponse { id: string; token: string; expiresAt: string; url: string | null }
 export interface ConnectionStatus { status: 'pending' | 'connected' }

@@ -71,6 +71,13 @@ comments refer back to the principles below by name.
 | `connector/` | Your computer | Native terminal client, installer, terminal adapters |
 | `shared/` | Browser + server | Types, harness and native-terminal registries, protocol |
 
+**One definition per contract.** Request and stored-record shapes are TypeBox
+schemas in `shared/schemas.ts`; the server validates with them and the types in
+`shared/model.ts` are derived from them. Contracts that also exist in Python —
+the harness and terminal registries, the terminal protocol's version, message
+types, close reasons and signals, and the relay framing — are checked against
+each other by `tests/unit/contracts.test.ts`.
+
 ## Supported platforms
 
 | Role | Supported |
@@ -266,7 +273,7 @@ the broker, and handle it in both clients.
 | Layer | Tests |
 | --- | --- |
 | Runtime and relay | `tests/runtime/` — real tmux in a disposable home: lifecycle, framing, resize, image paste, signals, v1 import, activity semantics |
-| Server | `tests/unit/` — tokens, workspace and import, API validation and network policy, hosted isolation and revocation, broker against a fake relay |
+| Server | `tests/unit/` — tokens, workspace and import, API validation and network policy, hosted isolation and revocation, broker against a fake relay, TypeScript ⇄ Python contracts |
 | Whole path | `tests/integration/` — local targets over WebSocket; the served connector in a PTY (paste, OSC 52, links, detach, automatic reconnect); SSH in Docker with tmux 3.2 in both modes; conversation discovery |
 | Browser | `tests/browser/` — real backend: add target, create session, web terminal, native connect confirmed by a real connector, phone layout |
 | Platforms | `tests/connector/` — shims and generated terminal integrations everywhere; real iTerm2 handler build and clipboards on macOS and Windows CI runners |

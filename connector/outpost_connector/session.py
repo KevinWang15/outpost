@@ -27,6 +27,15 @@ from .websocket import BINARY, CLOSE, TEXT, WebSocket, WebSocketError
 RESET = ('\x1b7\x1b[?1049l\x1b8\x1b[0m\x1b[?25h\x1b[?1l\x1b[?1000l\x1b[?1002l\x1b[?1003l'
          '\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b[>4;0m')
 RETRIES = 8
+# How each close reason in shared/protocol.ts ends a connection:
+# (banner heading, keys line, Enter reconnects). 'error' retries on its own.
+CLOSE_REASONS = {
+    'detached': ('Detached from {name}', 'Enter  reconnect      Ctrl+C  close', True),
+    'ended': ('{name} ended', 'Enter  reconnect      Ctrl+C  close', True),
+    'expired': ('Connection expired', 'Press any key to close', False),
+    'outdated': ('Outpost Connector needs an update', 'Press any key to close', False),
+    'error': None,
+}
 
 
 class Outcome:
@@ -104,15 +113,14 @@ class Session:
                     failures = 0
                 if outcome.reason == 'quit':
                     return 0
-                if outcome.reason in ('expired', 'outdated'):
-                    heading = 'Connection expired' if outcome.reason == 'expired' else 'Outpost Connector needs an update'
-                    self.banner(heading, outcome.message, 'Press any key to close')
-                    self.read_key()
-                    return 1
-                if outcome.reason in ('detached', 'ended'):
-                    heading = 'Detached from ' + self.name if outcome.reason == 'detached' else self.name + ' ended'
-                    self.banner(heading, outcome.message, 'Enter  reconnect      Ctrl+C  close')
-                    if self.read_key() != 'enter':
+                final = CLOSE_REASONS.get(outcome.reason)
+                if final:
+                    heading, keys, resumable = final
+                    self.banner(heading.format(name=self.name), outcome.message, keys)
+                    key = self.read_key()
+                    if not resumable:
+                        return 1
+                    if key != 'enter':
                         return 0
                     continue
                 failures += 1
@@ -182,7 +190,7 @@ class Connection:
         self.held = []          # Keystrokes waiting for a clipboard decision.
         self.blocked = False
         self.connected = False
-        self.closed = None
+        self.outcome = None
         self.quiet_since = time.monotonic()
 
     def copy(self, text):
@@ -232,30 +240,43 @@ class Connection:
         if held:
             self.keystrokes(held)
 
+    # Server messages (shared/protocol.ts) ------------------------------------
     def message(self, message):
-        kind = message.get('type')
-        if kind == 'hello':
-            # Reconnects use the resume token; the launch token was single use.
-            self.session.token = message['resume']
-            self.session.resumable = True
-            self.session.name = message['session']['name'] + ' · ' + message['target']['name']
-            self.session.title()
-        elif kind == 'ready':
-            self.connected = True
-        elif kind == 'result':
-            if message.get('ok'):
-                self.session.title('Image pasted' if message.get('reference') else None)
-            else:
-                self.session.write('\x07')
-                self.session.title('Paste failed: ' + str(message.get('message', ''))[:80], seconds=8)
-        elif kind == 'signal':
-            signal_message = message.get('signal') or {}
-            url = (signal_message.get('payload') or {}).get('url') if signal_message.get('type') == 'browser.open' else None
-            if isinstance(url, str) and urlsplit(url).scheme in ('http', 'https'):
-                self.session.background(self.session.platform.open_url, url)
-                self.session.title('Opened a link in your browser')
-        elif kind == 'closed':
-            self.closed = Outcome(message.get('reason', 'error'), message.get('message', ''), self.connected)
+        handler = HANDLERS.get(message.get('type'))
+        if handler:
+            handler(self, message)
+
+    def hello(self, message):
+        # Reconnects use the resume token; the launch token was single use.
+        self.session.token = message['resume']
+        self.session.resumable = True
+        self.session.name = message['session']['name'] + ' · ' + message['target']['name']
+        self.session.title()
+
+    def ready(self, _message):
+        self.connected = True
+
+    def result(self, message):
+        if message.get('ok'):
+            self.session.title('Image pasted' if message.get('reference') else None)
+        else:
+            self.session.write('\x07')
+            self.session.title('Paste failed: ' + str(message.get('message', ''))[:80], seconds=8)
+
+    def signal(self, message):
+        signal_message = message.get('signal') or {}
+        handler = SIGNALS.get(signal_message.get('type'))
+        if handler:
+            handler(self, signal_message.get('payload') or {})
+
+    def open_link(self, payload):
+        url = payload.get('url')
+        if isinstance(url, str) and urlsplit(url).scheme in ('http', 'https'):
+            self.session.background(self.session.platform.open_url, url)
+            self.session.title('Opened a link in your browser')
+
+    def closed(self, message):
+        self.outcome = Outcome(message.get('reason', 'error'), message.get('message', ''), self.connected)
 
     def loop(self):
         session = self.session
@@ -297,7 +318,7 @@ class Connection:
                             self.message(json.loads(payload))
                         elif opcode == CLOSE:
                             self.socket.flush()
-                            return self.closed or Outcome('error', 'Outpost closed the connection.', self.connected)
+                            return self.outcome or Outcome('error', 'Outpost closed the connection.', self.connected)
                 if not self.blocked:
                     for action in self.router.flush():
                         self.socket.send_binary(action[1])
@@ -305,4 +326,11 @@ class Connection:
                     session.write(self.screen.flush())
                 self.socket.flush()
             except (OSError, WebSocketError, ValueError) as error:
-                return self.closed or Outcome('error', str(error) or 'The connection to Outpost was lost.', self.connected)
+                return self.outcome or Outcome('error', str(error) or 'The connection to Outpost was lost.', self.connected)
+
+
+# One handler per server message type and per signal type; tests/unit/contracts
+# checks these against shared/protocol.ts and shared/signals.ts.
+HANDLERS = {'hello': Connection.hello, 'ready': Connection.ready, 'result': Connection.result,
+            'signal': Connection.signal, 'closed': Connection.closed}
+SIGNALS = {'browser.open': Connection.open_link}

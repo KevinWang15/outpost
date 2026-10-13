@@ -30,12 +30,10 @@ export default function TargetView({
   target,
   onUpdated,
   onRemoved,
-  onWebTerminal,
 }: {
   target: Target
   onUpdated: (target: Target) => void
   onRemoved: (target: Target) => void
-  onWebTerminal: (token: string, title: string) => void
 }) {
   const toast = useToast()
   const { sessions, error, refreshing, refresh } = useSessions(target.id)
@@ -157,10 +155,6 @@ export default function TargetView({
           onClose={() => {
             close()
             void refresh()
-          }}
-          onWeb={(token, title) => {
-            close()
-            onWebTerminal(token, title)
           }}
         />
       )}

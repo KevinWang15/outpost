@@ -33,12 +33,10 @@ function lastChoice(): TerminalChoice | null {
 export default function ConnectDialog({
   target,
   session,
-  onWeb,
   onClose,
 }: {
   target: Target
   session: Session
-  onWeb: (token: string, title: string) => void
   onClose: () => void
 }) {
   const detected = clientOS(navigator.userAgent)
@@ -67,12 +65,28 @@ export default function ConnectDialog({
     } catch {
       /* Preference is optional. */
     }
+    if (terminal === 'web') {
+      // Open during the click; the new page requests its own connection token.
+      const query = new URLSearchParams({
+        target: target.id,
+        session: session.id,
+        title: `${session.name} · ${target.name}`,
+      })
+      const popup = window.open(`/terminal?${query}`, '_blank', 'popup,width=1200,height=800')
+      if (!popup) {
+        setError('Allow pop-ups for Outpost, then try opening the web terminal again.')
+        setPhase({ kind: 'choose' })
+        return
+      }
+      popup.opener = null
+      onClose()
+      return
+    }
     try {
       const connection = await api<ConnectResponse>(`/targets/${target.id}/sessions/${session.id}/connect`, 'POST', {
         terminal,
       })
       if (!alive.current) return
-      if (terminal === 'web') return onWeb(connection.token, `${session.name} · ${target.name}`)
       setPhase({ kind: 'opening', terminal, id: connection.id, url: connection.url!, slow: false })
       window.location.href = connection.url!
     } catch (problem) {
@@ -199,7 +213,7 @@ export default function ConnectDialog({
         <Choice
           icon={<AppWindow size={20} />}
           title="Web terminal"
-          detail="Opens here, in your browser. Works on phones too."
+          detail="Opens in a new window. Works on phones too."
           last={last === 'web'}
           busy={busy === 'web'}
           disabled={Boolean(busy)}

@@ -98,7 +98,7 @@ export async function createApp(options: AppOptions) {
 
   if (options.frontendRoot) {
     await app.register(staticFiles, { root: options.frontendRoot })
-    const pages = new Set(['/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'])
+    const pages = new Set(['/terminal', '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'])
     app.setNotFoundHandler((request, reply) => {
       if (['GET', 'HEAD'].includes(request.method) && pages.has(request.url.split('?')[0]))
         return reply.sendFile('index.html')

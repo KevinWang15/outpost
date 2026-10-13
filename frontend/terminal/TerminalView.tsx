@@ -79,6 +79,14 @@ export default function TerminalView({ token, title, onClose }: { token: string;
   const statusTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const connected = state.kind === 'connected'
 
+  useEffect(() => {
+    const previous = document.title
+    document.title = `${name} · Outpost`
+    return () => {
+      document.title = previous
+    }
+  }, [name])
+
   const notify = useCallback((message: string, sticky = false) => {
     setStatus(message)
     clearTimeout(statusTimer.current)

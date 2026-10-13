@@ -9,7 +9,7 @@ import TargetDialog from './workspace/TargetDialog'
 import TargetView from './workspace/TargetView'
 import { address } from './workspace/labels'
 
-const TerminalView = lazy(() => import('./terminal/TerminalView'))
+const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
 
 interface Workspace {
   targets: Target[] | null
@@ -52,12 +52,27 @@ function reducer(state: Workspace, action: Action): Workspace {
 }
 
 export default function App() {
+  if (window.location.pathname === '/terminal')
+    return (
+      <Suspense
+        fallback={
+          <div className="auth-loading" role="status">
+            Opening terminal…
+          </div>
+        }
+      >
+        <TerminalPage />
+      </Suspense>
+    )
+  return <WorkspaceView />
+}
+
+function WorkspaceView() {
   const { mode, user, signOut } = useAuth()
   const [{ targets, selected, visit }, dispatch] = useReducer(reducer, { targets: null, selected: '', visit: 0 })
   const [error, setError] = useState('')
   const [adding, setAdding] = useState(false),
     [account, setAccount] = useState(false)
-  const [terminal, setTerminal] = useState<{ token: string; title: string } | null>(null)
   const target = targets?.find(item => item.id === selected)
 
   useEffect(() => {
@@ -162,7 +177,6 @@ export default function App() {
             target={target}
             onUpdated={updated => dispatch({ type: 'updated', target: updated })}
             onRemoved={removed => dispatch({ type: 'removed', id: removed.id })}
-            onWebTerminal={(token, title) => setTerminal({ token, title })}
           />
         ) : (
           <section className="welcome">
@@ -207,11 +221,6 @@ export default function App() {
         />
       )}
       {account && <AccountDialog onClose={() => setAccount(false)} />}
-      {terminal && (
-        <Suspense fallback={<div className="terminal-view" />}>
-          <TerminalView token={terminal.token} title={terminal.title} onClose={() => setTerminal(null)} />
-        </Suspense>
-      )}
     </div>
   )
 }

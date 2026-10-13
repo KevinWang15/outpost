@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -265,4 +265,29 @@ test('clients speaking another protocol version are told to update, without spen
   const current = new TerminalClient(base)
   t.after(() => current.socket.terminate())
   await current.message('ready')
+})
+
+test('the production server serves the terminal page on direct navigation and refresh', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-terminal-page-'))
+  await writeFile(join(directory, 'index.html'), '<!doctype html><title>Outpost</title>')
+  const app = await createApp({
+    deployment: await LocalDeployment.open(join(directory, 'data')),
+    frontendRoot: directory,
+  })
+  t.after(async () => {
+    await app.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  await app.listen({ host: '127.0.0.1', port: 0 })
+  const port = (app.server.address() as { port: number }).port
+  for (const method of ['GET', 'HEAD'] as const) {
+    const response = await app.inject({
+      method,
+      url: '/terminal?target=box&session=session',
+      headers: { host: `127.0.0.1:${port}` },
+    })
+    assert.equal(response.statusCode, 200)
+    assert.match(response.headers['content-type']!, /text\/html/)
+    if (method === 'GET') assert.match(response.body, /<title>Outpost<\/title>/)
+  }
 })

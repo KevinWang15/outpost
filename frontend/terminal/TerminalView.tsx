@@ -29,7 +29,8 @@ import KeyBar from './KeyBar'
 import ScrollbackBar from './ScrollbackBar'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
-import { notificationLabels, notificationSetupPath, useBellNotifications } from './useBellNotifications'
+import { notificationSetupPath } from '../../shared/terminals'
+import { notificationLabels, useBellNotifications } from './useBellNotifications'
 
 const touch = () => window.matchMedia('(pointer: coarse)').matches
 const closedTitles: Record<CloseReason, string> = {

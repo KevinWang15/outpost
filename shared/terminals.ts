@@ -3,6 +3,8 @@
 export type ClientOS = 'macos' | 'windows'
 export const clientOSLabels: Record<ClientOS, string> = { macos: 'macOS', windows: 'Windows' }
 export const terminalAppPath = '/terminal/app'
+// Outside the terminal manifest's scope so permission setup opens a browser tab.
+export const notificationSetupPath = '/notifications'
 
 export interface ConnectorTerminal {
   id: string

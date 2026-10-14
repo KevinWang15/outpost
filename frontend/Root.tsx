@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react'
 import App from './App'
 import AuthGate from './auth/AuthGate'
-import { notificationSetupPath } from './terminal/useBellNotifications'
+import { notificationSetupPath } from '../shared/terminals'
 
 const TerminalAppPage = lazy(() => import('./terminal/TerminalAppPage'))
 const TerminalPage = lazy(() => import('./terminal/TerminalPage'))

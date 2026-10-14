@@ -12,7 +12,7 @@ import { ConnectTokens } from './terminal/tokens'
 import { sessionRoutes } from './routes/sessions'
 import { terminalRoutes } from './routes/terminal'
 import { workspaceRoutes } from './routes/workspace'
-import { terminalAppPath } from '../shared/terminals'
+import { notificationSetupPath, terminalAppPath } from '../shared/terminals'
 
 export interface AppOptions {
   deployment: Deployment
@@ -102,6 +102,7 @@ export async function createApp(options: AppOptions) {
     const pages = new Set([
       '/terminal',
       terminalAppPath,
+      notificationSetupPath,
       '/login',
       '/signup',
       '/verify-email',

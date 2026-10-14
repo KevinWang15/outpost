@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { bellNotificationPermission, type BellNotificationPermission } from './bell'
 
-// Outside the terminal manifest's scope so an installed PWA opens a browser tab.
-export const notificationSetupPath = '/notifications'
 export const notificationLabels: Record<BellNotificationPermission, string> = {
   default: 'Enable desktop notifications',
   granted: 'Desktop notifications enabled',

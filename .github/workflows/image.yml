@@ -1,8 +1,6 @@
 name: Container image
 
 on:
-  push:
-    branches: [main, v2]
   workflow_dispatch:
 
 permissions:

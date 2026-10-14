@@ -165,7 +165,12 @@ class WindowsTest(unittest.TestCase):
         wt.touch()
         key = 'HKCU:\\Software\\Classes\\outpost-test-' + uuid.uuid4().hex
         self.addCleanup(
-            WSL().powershell, "Remove-Item -LiteralPath '" + key + "' -Recurse -Force -ErrorAction SilentlyContinue"
+            WSL().powershell,
+            "$ErrorActionPreference = 'Stop'; if (Test-Path -LiteralPath '"
+            + key
+            + "') { Remove-Item -LiteralPath '"
+            + key
+            + "' -Recurse -Force }",
         )
         # Exercise the real setup under a legacy code page, isolating only its
         # Windows paths and registry key from the user's actual installation.

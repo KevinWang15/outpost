@@ -101,6 +101,20 @@ export const directoryQuery = Type.Object(
 )
 export const connectInput = Type.Object({ terminal: Type.Enum(terminalChoices) }, strict)
 
+// Harness-owned navigation for application history without a measurable extent.
+const historyKey = Type.Object(
+  { key: Type.Enum(['Home', 'End', 'PageUp', 'PageDown']), ctrl: Type.Optional(Type.Boolean()) },
+  strict,
+)
+export const historyNavigation = Type.Object(
+  {
+    label: text(80),
+    help: text(500),
+    keys: Type.Object({ oldest: historyKey, pageUp: historyKey, pageDown: historyKey, latest: historyKey }, strict),
+  },
+  strict,
+)
+
 // Software ----------------------------------------------------------------------
 export const softwareIds = ['bash', 'python3', 'tmux', ...harnessIds] as const
 export const installationInput = Type.Object(

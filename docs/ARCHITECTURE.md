@@ -76,7 +76,9 @@ schemas in `shared/schemas.ts`; the server validates with them and the types in
 `shared/model.ts` are derived from them. Contracts that also exist in Python —
 the harness and terminal registries, the terminal protocol's version, message
 types, close reasons and signals, and the relay framing — are checked against
-each other by `tests/unit/contracts.test.ts`.
+each other by `tests/unit/contracts.test.ts`. Browser entry paths live in
+`shared/pages.ts`, shared by navigation and the production SPA fallback. A new
+browser page must be registered there so development and production agree.
 
 ## Supported platforms
 
@@ -177,8 +179,15 @@ Native clients do not subscribe. Compatibility remains tmux 3.2+.
 Metadata reads are triggered by input/output/resize, capped at two per second
 and skipped when idle. Drag destinations are coalesced, capped at ten per
 second in the relay, and executed by one background worker with command
-timeouts so history controls cannot block terminal traffic. Copy-mode history
-size is remembered on older tmux releases which do not expose the snapshot's
+timeouts. A bounded FIFO orders seeks, input, composer drafts and image pastes.
+Metadata reads do not block typing; a seek holds subsequent input until tmux
+confirms the mode change. Only adjacent seeks can coalesce, preserving input
+between them. Each seek with an ID receives fresh metadata followed by a
+`result`, including when its position did not change. Failed seeks reject queued
+requests and discard buffered typing with a visible error, instead of sending
+it into an uncertain pane mode. Drafts are confirmed only after their bytes are
+written to the PTY. No queued input is replayed across reconnects. Copy-mode
+history size is remembered on older tmux releases which do not expose the snapshot's
 size; newer releases expose it directly. This stores no terminal content.
 The scrollbar follows the pane's shared copy mode, including mouse-wheel
 changes and changes made by other attached clients. The runtime also reports
@@ -189,9 +198,13 @@ The Codex adapter defaults `tui.alternate_screen` to `never`, preserving output
 in tmux's normal history. This is a per-launch CLI configuration override, not
 a change to the user's Codex config; an explicit later `-c` can override it.
 Existing processes retain their launch mode. For full-screen Codex the runtime
-reports `application: codex` and the sidebar sends its Page Up/Down and
-Ctrl+Home/End keys through the existing input path. Shift+Page Up/Down maps to
-the same page keys. Copy mode still takes precedence when explicitly entered.
+advertises the adapter's `history_navigation` capability (label, help, and
+bindings for oldest/pageUp/pageDown/latest). The broker validates this against
+`shared/schemas.ts`; it contains no harness-specific dispatch. The shared
+`TerminalHistory` controller uses those bindings for both the sidebar and
+Shift+Page Up/Down. Codex supplies Page Up/Down and Ctrl+Home/End; additional
+harnesses can supply their own bindings without changing the broker or views.
+Copy mode still takes precedence when explicitly entered.
 These controls expose no invented history length. A clean exit and reconnect
 of the same conversation applies the inline default and enables the scrollbar.
 
@@ -231,11 +244,11 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `ack {bytes}` | Output rendered; flow control |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
 | → server | `paste-image {id, mediaType, data}` | Upload an image and paste its path |
-| → server | `scrollback {offset?}` | Subscribe to history metadata; seek a line offset from the bottom (`0` = live, `-1` = oldest) |
+| → server | `scrollback {offset?, id?}` | Subscribe to history metadata; seek a line offset from the bottom (`0` = live, `-1` = oldest) |
 | ← client | `hello {resume, session, target}` | Connection accepted |
 | ← client | `ready {scrollback?}` | Attached to tmux, with optional history controls |
-| ← client | `scrollback {available, lines, offset, rows, active, alternate?, application?}` | History extent, position, copy mode, and whether the application owns scrolling |
-| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` |
+| ← client | `scrollback {available, lines, offset, rows, active, alternate?, navigation?}` | History extent, position, copy mode, and whether the application owns scrolling |
+| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / an identified scrollback seek |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |
 
@@ -263,7 +276,7 @@ session, missing tmux), its `OUTPOST_RESULT` error becomes the client's
 | --- | --- | --- |
 | `I` | broker → relay | Input bytes for tmux |
 | `O` | relay → broker | Output bytes from tmux |
-| `C` | both | JSON control: `resize`, `paste-image`, `scrollback`, `signal-result` / `ready`, `paste-result`, `scrollback`, `signal`, `exit` |
+| `C` | both | JSON control: `resize`, `send`, `paste-image`, `scrollback`, `signal-result` / `ready`, `result`, `paste-result`, `scrollback`, `signal`, `exit` |
 
 Framing replaces in-band escape sequences, so typed or pasted bytes can never
 be mistaken for control messages. The relay owns a PTY for `tmux attach`, so
@@ -278,8 +291,18 @@ copy on release, `set-clipboard on` (OSC 52 out), extended keys for
 Shift+Enter, truecolor, focus events, 50,000 lines of history and `Ctrl+\` to
 detach. Connecting starts a stopped session in the same conversation.
 
-**Forking** is one target management operation under the registry lock. The
-runtime creates a new branch from the source directory’s `HEAD` with
+**Creation and forking** share a process-owned `creation.lock`, serializing
+allocations without blocking operations on existing sessions. Lock order is
+creation → registry; other operations never take the creation lock. The
+registry lock is held only to snapshot settings and to commit a new record;
+Git and harness allocation run outside it. Registration re-reads the latest
+registry and rechecks unique names and conversation identities, preserving
+concurrent deletes and attachment timestamps. A failed process releases the
+allocation lock automatically, with no persistent reservations to recover.
+Forking uses a snapshot of the source settings, so deleting the source record
+during allocation does not cancel an already-started fork.
+
+The runtime creates a new branch from the source directory’s `HEAD` with
 `git worktree add -b`, then allocates a fresh harness conversation and saves
 its session. It inherits the source tool and launch settings. Git receives
 the branch and path as argument values; its failures stop before conversation

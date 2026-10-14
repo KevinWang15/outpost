@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { pagePaths } from '../../shared/pages'
 import { api } from '../api'
 import { Dialog } from '../ui/Dialog'
 import AccountKey from './AccountKey'
@@ -26,7 +27,7 @@ export default function AccountDialog({ onClose }: { onClose: () => void }) {
         })
         form.reset()
         await refresh()
-        navigate('/login')
+        navigate(pagePaths.login)
       } else {
         await api('/account/profile', 'PATCH', { name: name.trim() })
         await refresh()

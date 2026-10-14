@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Info } from 'lucide-react'
-import type { ScrollbackState } from '../../shared/protocol'
+import type { HistoryAction, ScrollbackState } from '../../shared/protocol'
 
 interface Props {
   state: ScrollbackState | null
@@ -8,11 +8,9 @@ interface Props {
   controls: string
   onScroll: (offset: number) => void
   onLive: () => void
-  onNavigate: (key: HistoryNavigation) => void
+  onNavigate: (action: HistoryAction) => void
   onHelp: () => void
 }
-
-export type HistoryNavigation = 'Home' | 'PageUp' | 'PageDown' | 'End'
 
 /** A view of tmux's scroll position. It never stores or replays terminal output. */
 export default function ScrollbackBar({ state, enabled, controls, onScroll, onLive, onNavigate, onHelp }: Props) {
@@ -82,32 +80,38 @@ export default function ScrollbackBar({ state, enabled, controls, onScroll, onLi
     onScroll(next)
   }
 
-  // Full-screen Codex exposes navigation keys, but no terminal history length
-  // or position. Do not represent that unknown extent with a fake scrollbar.
-  if (state?.application === 'codex' && !state.active)
+  const navigation = state?.navigation
+  if (navigation && !state.active)
     return (
-      <aside className="terminal-scrollback" aria-label="Codex history controls">
-        {[
-          { key: 'Home', label: 'Oldest Codex history (Ctrl+Home)', Icon: ArrowUpToLine },
-          { key: 'PageUp', label: 'Previous page of Codex history (Page Up)', Icon: ChevronUp },
-          { key: 'PageDown', label: 'Next page of Codex history (Page Down)', Icon: ChevronDown },
-          { key: 'End', label: 'Latest Codex output (Ctrl+End)', Icon: ArrowDownToLine },
-        ].map(({ key, label, Icon }) => (
-          <button
-            key={key}
-            className="icon-button terminal-scroll-live"
-            title={label}
-            aria-label={label}
-            disabled={!enabled}
-            onClick={() => onNavigate(key as HistoryNavigation)}
-          >
-            <Icon size={15} />
-          </button>
-        ))}
+      <aside className="terminal-scrollback" aria-label={`${navigation.label} controls`}>
+        {(
+          [
+            { action: 'oldest', label: 'Oldest', Icon: ArrowUpToLine },
+            { action: 'pageUp', label: 'Previous page of', Icon: ChevronUp },
+            { action: 'pageDown', label: 'Next page of', Icon: ChevronDown },
+            { action: 'latest', label: 'Latest', Icon: ArrowDownToLine },
+          ] as const
+        ).map(({ action, label, Icon }) => {
+          const binding = navigation.keys[action]
+          const key = `${binding.ctrl ? 'Ctrl+' : ''}${binding.key.replace('Page', 'Page ')}`
+          const title = `${label} ${navigation.label} (${key})`
+          return (
+            <button
+              key={action}
+              className="icon-button terminal-scroll-live"
+              title={title}
+              aria-label={title}
+              disabled={!enabled}
+              onClick={() => onNavigate(action)}
+            >
+              <Icon size={15} />
+            </button>
+          )
+        })}
         <button
           className="icon-button terminal-scroll-live"
-          title="About Codex history controls"
-          aria-label="About Codex history controls"
+          title={`About ${navigation.label} controls`}
+          aria-label={`About ${navigation.label} controls`}
           onClick={onHelp}
         >
           <Info size={15} />

@@ -19,6 +19,7 @@ import sys
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 from outpost_activity_state import Activity
@@ -206,6 +207,13 @@ def read_registry():
         return validate(json.loads(REGISTRY.read_text()))
     except (ValueError, TypeError, KeyError):
         fail('Invalid session registry. Expected the current schema; no data was modified.', 409)
+
+
+@contextmanager
+def registry_lock():
+    with open(STATE / 'registry.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 def valid_launch_options(environment, arguments):
@@ -661,7 +669,9 @@ class AttachHooks:
     def __init__(self, session):
         self.session = session
         self.observer = activity(session)
-        self.history = Scrollback(tmux_command(session), tmux_environment(), session['tool'])
+        self.history = Scrollback(
+            tmux_command(session), tmux_environment(), CODING_ADAPTERS[session['tool']].history_navigation
+        )
 
     def on_input(self):
         self.observer.input()
@@ -753,6 +763,126 @@ def terminal_size(request):
     return cols, rows
 
 
+def create_session(request):
+    """Serialize allocation without holding up existing sessions.
+
+    Lock order is creation -> registry. Only creators take creation.lock;
+    deleting/attaching/listing sessions can proceed during Git or CLI work.
+    The process-owned lock is released on failure, with no stale reservations.
+    """
+    action = request['action']
+    with open(STATE / 'creation.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        with registry_lock():
+            sessions = read_registry()['sessions']
+        if action == 'fork':
+            source = next((s for s in sessions if s['id'] == request.get('id')), None)
+            if source is None:
+                fail('Session not found', 404)
+            branch = request.get('branch')
+            if not text(branch, 256) or branch != branch.strip():
+                fail('Enter a valid new Git branch name.')
+            name, suffix = branch[:80], 2
+            while any(s['name'].casefold() == name.casefold() for s in sessions):
+                ending = ' (' + str(suffix) + ')'
+                name = branch[: 80 - len(ending)] + ending
+                suffix += 1
+            request = {
+                'name': name,
+                'rootDir': request['rootDir'],
+                'tool': source['tool'],
+                'env': source['env'],
+                'args': source['args'],
+            }
+        tool = request['tool']
+        environment, arguments = request['env'], request['args']
+        if not valid_launch_options(environment, arguments):
+            fail('Invalid environment variables or arguments')
+        syntax = subprocess.run(['bash', '-n', '-c', 'exec "$1" ' + arguments], capture_output=True, text=True)
+        if syntax.returncode:
+            fail('Invalid Bash argument syntax: ' + syntax.stderr.strip())
+        name = request['name'].strip()
+        if any(s['name'].casefold() == name.casefold() for s in sessions):
+            fail('A session with this name already exists on this target', 409)
+        path = os.path.expanduser(request['rootDir'])
+        if not text(path, 4096) or not os.path.isabs(path):
+            fail('Root directory must be absolute or begin with ~/')
+        root = Path(path).resolve()
+        if request.get('createDirectory'):
+            root.mkdir(parents=True, exist_ok=True)
+        if action == 'create' and not root.is_dir():
+            fail('Root directory does not exist. Enable Create directory or choose an existing directory.')
+        launch_environment = dict(os.environ, **environment)
+        if action == 'fork':
+            launch_environment.update(source['cliSessionEnv'])
+        executable = shutil.which(tool, path=launch_environment.get('PATH'))
+        if not executable:
+            fail(tool + ' is missing on this target. Check Required Software and your login PATH.', 409)
+        # CLI identity is owned by the adapter, rather than by optional
+        # argument text. Preserve normal model, permission, and prompt flags.
+        adapter = CODING_ADAPTERS[tool]
+        try:
+            tokens = shlex.split(arguments)
+        except ValueError:
+            tokens = []  # Bash validated the syntax; expanded arguments are checked at launch.
+        if adapter.selects_session(tokens):
+            fail('Outpost controls the coding CLI session ID. Use Find conversations to resume one instead.')
+        if action == 'fork':
+            from outpost_worktrees import create_worktree
+
+            # A Git failure must never allocate a coding conversation or session.
+            try:
+                create_worktree(source['rootDir'], path, branch)
+            except (OSError, ValueError) as error:
+                fail(str(error), 409)
+            except subprocess.TimeoutExpired:
+                fail('Git worktree creation timed out. Check the target before retrying.', 504)
+        try:
+            if request.get('cliSessionId'):
+                requested_storage = request.get('cliSessionEnv', {})
+                if requested_storage and not adapter.valid_storage(requested_storage):
+                    fail('Invalid coding CLI storage directory')
+                native = adapter.find(request['cliSessionId'], {**launch_environment, **requested_storage}, str(root))
+                cli_id, cli_environment = native.id, native.storage
+                if not native.root or Path(native.root).resolve() != root:
+                    fail('Use the conversation’s working directory when linking it to a session.')
+            else:
+                cli_id, cli_environment = adapter.create(str(root), launch_environment, executable)
+        except (ValueError, subprocess.TimeoutExpired) as error:
+            message = str(error)
+            if action == 'fork':
+                message = 'Worktree created at ' + str(root) + ', but session creation failed: ' + message
+            fail(message, 409)
+        session = {
+            'id': str(uuid.uuid4()),
+            'name': name,
+            'rootDir': str(root),
+            'createdAt': now(),
+            'lastConnectedAt': None,
+            'tool': tool,
+            'env': environment,
+            'args': arguments,
+            'cliSessionId': cli_id,
+            'cliSessionEnv': cli_environment,
+        }
+        with registry_lock():
+            # Re-read after slow external work; never overwrite concurrent
+            # deletes, attachment timestamps, or other registry changes.
+            data = read_registry()
+            sessions = data['sessions']
+            if any(s['name'].casefold() == name.casefold() for s in sessions):
+                fail('A session with this name already exists on this target', 409)
+            if any(
+                s['tool'] == tool and s['cliSessionId'] == cli_id and s['cliSessionEnv'] == cli_environment
+                for s in sessions
+            ):
+                fail('This conversation already has an Outpost session on this target.', 409)
+            activity(session).initialize()
+            sessions.append(session)
+            save(data)
+        return describe(session)
+
+
 def main():
     request = json.loads(base64.b64decode(sys.argv[1]))
     if not sys.platform.startswith('linux'):
@@ -795,115 +925,14 @@ def main():
             return
         fail('Session not found', 404)
     os.chdir(STATE)
-    with open(STATE / 'registry.lock', 'a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    if action in ('create', 'fork'):
+        respond(create_session(request))
+        return
+    with registry_lock():
         data = read_registry()
         sessions = data['sessions']
-        if action == 'fork':
-            source = next((s for s in sessions if s['id'] == request.get('id')), None)
-            if source is None:
-                fail('Session not found', 404)
-            branch = request.get('branch')
-            if not text(branch, 256) or branch != branch.strip():
-                fail('Enter a valid new Git branch name.')
-            name, suffix = branch[:80], 2
-            while any(s['name'].casefold() == name.casefold() for s in sessions):
-                ending = ' (' + str(suffix) + ')'
-                name = branch[: 80 - len(ending)] + ending
-                suffix += 1
-            request = {
-                'name': name,
-                'rootDir': request['rootDir'],
-                'tool': source['tool'],
-                'env': source['env'],
-                'args': source['args'],
-            }
         if action == 'list':
             result = {'registryPath': str(REGISTRY), 'sessions': [describe(s) for s in sessions]}
-        elif action in ('create', 'fork'):
-            tool = request['tool']
-            environment, arguments = request['env'], request['args']
-            if not valid_launch_options(environment, arguments):
-                fail('Invalid environment variables or arguments')
-            syntax = subprocess.run(['bash', '-n', '-c', 'exec "$1" ' + arguments], capture_output=True, text=True)
-            if syntax.returncode:
-                fail('Invalid Bash argument syntax: ' + syntax.stderr.strip())
-            name = request['name'].strip()
-            if any(s['name'].casefold() == name.casefold() for s in sessions):
-                fail('A session with this name already exists on this target', 409)
-            path = os.path.expanduser(request['rootDir'])
-            if not text(path, 4096) or not os.path.isabs(path):
-                fail('Root directory must be absolute or begin with ~/')
-            root = Path(path).resolve()
-            if request.get('createDirectory'):
-                root.mkdir(parents=True, exist_ok=True)
-            if action == 'create' and not root.is_dir():
-                fail('Root directory does not exist. Enable Create directory or choose an existing directory.')
-            launch_environment = dict(os.environ, **environment)
-            if action == 'fork':
-                launch_environment.update(source['cliSessionEnv'])
-            executable = shutil.which(tool, path=launch_environment.get('PATH'))
-            if not executable:
-                fail(tool + ' is missing on this target. Check Required Software and your login PATH.', 409)
-            # CLI identity is owned by the adapter, rather than by optional
-            # argument text. Preserve normal model, permission, and prompt flags.
-            adapter = CODING_ADAPTERS[tool]
-            try:
-                tokens = shlex.split(arguments)
-            except ValueError:
-                tokens = []  # Bash validated the syntax; expanded arguments are checked at launch.
-            if adapter.selects_session(tokens):
-                fail('Outpost controls the coding CLI session ID. Use Find conversations to resume one instead.')
-            if action == 'fork':
-                from outpost_worktrees import create_worktree
-
-                # Keep worktree creation and registration under the same lock.
-                # A Git failure must never allocate a coding conversation or session.
-                try:
-                    create_worktree(source['rootDir'], path, branch)
-                except (OSError, ValueError) as error:
-                    fail(str(error), 409)
-                except subprocess.TimeoutExpired:
-                    fail('Git worktree creation timed out. Check the target before retrying.', 504)
-            try:
-                if request.get('cliSessionId'):
-                    requested_storage = request.get('cliSessionEnv', {})
-                    if requested_storage and not adapter.valid_storage(requested_storage):
-                        fail('Invalid coding CLI storage directory')
-                    native = adapter.find(
-                        request['cliSessionId'], {**launch_environment, **requested_storage}, str(root)
-                    )
-                    cli_id, cli_environment = native.id, native.storage
-                    if not native.root or Path(native.root).resolve() != root:
-                        fail('Use the conversation’s working directory when linking it to a session.')
-                else:
-                    cli_id, cli_environment = adapter.create(str(root), launch_environment, executable)
-            except (ValueError, subprocess.TimeoutExpired) as error:
-                message = str(error)
-                if action == 'fork':
-                    message = 'Worktree created at ' + str(root) + ', but session creation failed: ' + message
-                fail(message, 409)
-            if any(
-                s['tool'] == tool and s['cliSessionId'] == cli_id and s['cliSessionEnv'] == cli_environment
-                for s in sessions
-            ):
-                fail('This conversation already has an Outpost session on this target.', 409)
-            session = {
-                'id': str(uuid.uuid4()),
-                'name': name,
-                'rootDir': str(root),
-                'createdAt': now(),
-                'lastConnectedAt': None,
-                'tool': tool,
-                'env': environment,
-                'args': arguments,
-                'cliSessionId': cli_id,
-                'cliSessionEnv': cli_environment,
-            }
-            activity(session).initialize()
-            sessions.append(session)
-            save(data)
-            result = describe(session)
         else:
             session = next((s for s in sessions if s['id'] == request.get('id')), None)
             if session is None:

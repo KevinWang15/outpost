@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react'
 import App from './App'
 import AuthGate from './auth/AuthGate'
-import { notificationSetupPath } from '../shared/terminals'
+import { pagePaths } from '../shared/pages'
 
 const TerminalAppPage = lazy(() => import('./terminal/TerminalAppPage'))
 const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
@@ -12,12 +12,12 @@ const NotificationSetupPage = lazy(() => import('./terminal/NotificationSetupPag
 export default function Root({ terminalApp, ticket }: { terminalApp: boolean; ticket: string | null }) {
   return (
     <Suspense fallback={<div className="auth-loading">Opening terminal…</div>}>
-      {window.location.pathname === notificationSetupPath ? (
+      {window.location.pathname === pagePaths.notifications ? (
         <NotificationSetupPage />
       ) : terminalApp ? (
         <TerminalAppPage token={ticket} />
       ) : (
-        <AuthGate>{window.location.pathname === '/terminal' ? <TerminalPage /> : <App />}</AuthGate>
+        <AuthGate>{window.location.pathname === pagePaths.terminal ? <TerminalPage /> : <App />}</AuthGate>
       )}
     </Suspense>
   )

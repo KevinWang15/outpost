@@ -8,7 +8,8 @@ import test from 'node:test'
 import { harnesses } from '../../shared/harnesses'
 import { closeReasons, protocolVersion, serverMessageTypes } from '../../shared/protocol'
 import { signalValidators } from '../../shared/signals'
-import { connectorTerminals, terminalAppPath } from '../../shared/terminals'
+import { connectorTerminals } from '../../shared/terminals'
+import { pagePaths } from '../../shared/pages'
 import { RelayDecoder, relayFrame, relayMagic } from '../../backend/terminal/broker'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -22,7 +23,7 @@ const json = (directory: 'runtime' | 'connector', code: string) => JSON.parse(py
 
 test('terminal app entry is shared by the connector, browser routing and manifest', () => {
   const path = json('connector', 'from outpost_connector.terminals.terminal_app import PATH\nprint(json.dumps(PATH))')
-  assert.equal(path, terminalAppPath)
+  assert.equal(path, pagePaths.terminalApp)
   const manifest = JSON.parse(readFileSync(new URL('../../public/terminal.webmanifest', import.meta.url), 'utf8'))
   assert.equal(manifest.start_url, path)
   assert.equal(manifest.id, path)

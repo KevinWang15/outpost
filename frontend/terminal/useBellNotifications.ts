@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { bellNotificationPermission, type BellNotificationPermission } from './bell'
-import { notificationSetupPath } from '../../shared/terminals'
+import { pagePaths } from '../../shared/pages'
 import { openBrowserTab } from './browser'
 
 export const notificationLabels: Record<BellNotificationPermission, string> = {
@@ -143,7 +143,7 @@ export function useBellNotifications(onNotice?: (message: string, sticky: boolea
     // App windows can leave native permission prompts hidden indefinitely.
     // Open site controls in a regular tab directly from the user's click,
     // without first creating an unresolved request in the app window.
-    const opened = openBrowserTab(new URL(notificationSetupPath, window.location.origin).href)
+    const opened = openBrowserTab(new URL(pagePaths.notifications, window.location.origin).href)
     publish({
       permission,
       requesting: false,

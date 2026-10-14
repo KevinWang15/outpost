@@ -10,6 +10,17 @@ class CodexAdapter(CodingSessionAdapter):
     storage_key = 'CODEX_HOME'
     storage_directory = '.codex'
     selection_options = ('--last',)
+    history_navigation = {
+        'label': 'Codex history',
+        'help': 'Codex controls this full-screen history. Use the page and jump buttons now. '
+        'Exit Codex cleanly and reconnect this session to enable the draggable scrollbar.',
+        'keys': {
+            'oldest': {'key': 'Home', 'ctrl': True},
+            'pageUp': {'key': 'PageUp'},
+            'pageDown': {'key': 'PageDown'},
+            'latest': {'key': 'End', 'ctrl': True},
+        },
+    }
 
     @cached_property
     def sessions(self):

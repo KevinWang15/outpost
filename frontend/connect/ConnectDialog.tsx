@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { pagePaths } from '../../shared/pages'
 import { AppWindow, ArrowRight, Check, LoaderCircle, SquareTerminal } from 'lucide-react'
 import type { Session, Target } from '../../shared/model'
 import type { ConnectResponse, ConnectionStatus } from '../../shared/protocol'
@@ -72,7 +73,7 @@ export default function ConnectDialog({
         session: session.id,
         title: `${session.name} · ${target.name}`,
       })
-      const popup = window.open(`/terminal?${query}`, '_blank', 'popup,width=1200,height=800')
+      const popup = window.open(`${pagePaths.terminal}?${query}`, '_blank', 'popup,width=1200,height=800')
       if (!popup) {
         setError('Allow pop-ups for Outpost, then try opening the web terminal again.')
         setPhase({ kind: 'choose' })

@@ -27,10 +27,11 @@ import { openBrowserTab } from './browser'
 import { attachClipboard, imageProblem } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
-import ScrollbackBar, { type HistoryNavigation } from './ScrollbackBar'
+import ScrollbackBar from './ScrollbackBar'
+import { TerminalHistory } from './history'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
-import { notificationSetupPath } from '../../shared/terminals'
+import { pagePaths } from '../../shared/pages'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
 
 const touch = () => window.matchMedia('(pointer: coarse)').matches
@@ -96,7 +97,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   const sessionInfo = useRef({ id: '', name: title })
   const [bellRinging, setBellRinging] = useState(false)
   const [history, setHistory] = useState<ScrollbackState | null>(null)
-  const historyState = useRef<ScrollbackState | null>(null)
+  const historyControls = useRef<TerminalHistory | null>(null)
   const [notificationHelpShown, setNotificationHelpShown] = useState(false)
   const [status, setStatus] = useState('')
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
@@ -203,10 +204,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         }
         setName(sessionInfo.current.name)
       },
-      scrollback: next => {
-        historyState.current = next
-        setHistory(next)
-      },
+      scrollback: next => historyController.update(next),
+      notice: notify,
       signal: ({ signal }) => {
         if (signal.type !== 'browser.open') return
         let url: string
@@ -219,6 +218,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       },
     })
     socket.current = client
+    const historyController = new TerminalHistory(client, setHistory)
+    historyControls.current = historyController
     const shims = attachClipboard(term, {
       connected: () => client.connected,
       pasteImage: file => void pasteImage(file),
@@ -236,27 +237,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     term.onBinary(data => client.input(Uint8Array.from(data, character => character.charCodeAt(0))))
     term.attachCustomKeyEventHandler(event => {
       if (!shims.handleKey(event)) return false
-      const history = historyState.current
-      if (
-        event.type === 'keydown' &&
-        event.shiftKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        (event.key === 'PageUp' || event.key === 'PageDown') &&
-        (history?.available || history?.application === 'codex')
-      ) {
-        event.preventDefault()
-        if (history.application === 'codex' && !history.active) {
-          client.input(terminalKey(event.key)!)
-          return false
-        }
-        const page = Math.max(1, history.rows - 1)
-        const offset = Math.max(0, Math.min(history.lines, history.offset + (event.key === 'PageUp' ? page : -page)))
-        historyState.current = { ...history, offset }
-        client.scrollTo(offset)
-        return false
-      }
+      if (historyController.handleKey(event)) return false
       // Coding tools read Shift+Enter as a newline; xterm would send a plain Enter.
       if (
         event.type === 'keydown' &&
@@ -301,6 +282,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       shims.dispose()
       term.dispose()
       socket.current = null
+      historyControls.current = null
       terminal.current = null
       clipboard.current = null
       bell.current = null
@@ -447,7 +429,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       {notificationHelpShown && notifications.needsSetup && (
         <div className="terminal-notice">
           <span>Allow notifications in the same browser and profile as this terminal.</span>
-          <a href={notificationSetupPath} target="_blank" rel="noopener noreferrer">
+          <a href={pagePaths.notifications} target="_blank" rel="noopener noreferrer">
             Open notification setup
           </a>
           <button
@@ -483,21 +465,18 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           state={history}
           enabled={connected}
           controls={terminalId}
-          onScroll={offset => socket.current?.scrollTo(offset)}
+          onScroll={offset => historyControls.current?.scrollTo(offset)}
           onLive={() => {
-            socket.current?.scrollTo(0)
+            historyControls.current?.scrollTo(0)
             terminal.current?.focus()
           }}
-          onNavigate={(key: HistoryNavigation) => {
-            socket.current?.input(terminalKey(key, { ctrl: key === 'Home' || key === 'End' })!)
+          onNavigate={action => {
+            historyControls.current?.navigate(action)
             terminal.current?.focus()
           }}
-          onHelp={() =>
-            notify(
-              'Codex controls this full-screen history. Use the page and jump buttons now. Exit Codex cleanly and reconnect this session to enable the draggable scrollbar.',
-              true,
-            )
-          }
+          onHelp={() => {
+            if (history?.navigation) notify(history.navigation.help, true)
+          }}
         />
         {bellRinging && (
           <div className="terminal-notice terminal-bell" role="status">

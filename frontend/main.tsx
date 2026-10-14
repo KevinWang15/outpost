@@ -4,9 +4,9 @@ import Root from './Root'
 import { ToastProvider } from './ui/Toast'
 import './styles/main.scss'
 import { takeAppTicket } from './terminal/appTicket'
-import { terminalAppPath } from '../shared/terminals'
+import { pagePaths } from '../shared/pages'
 
-const terminalApp = window.location.pathname === terminalAppPath
+const terminalApp = window.location.pathname === pagePaths.terminalApp
 // Strip launch credentials before rendering anything or making API requests.
 const ticket = terminalApp ? takeAppTicket() : null
 if (terminalApp) {

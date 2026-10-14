@@ -64,6 +64,9 @@ while True:
             message = json.loads(payload)
             if message['type'] == 'resize':
                 frame(b'O', ('size:%dx%d' % (message['cols'], message['rows'])).encode())
+            elif message['type'] == 'send':
+                frame(b'O', b'echo:' + message['data'].encode())
+                control({'type': 'result', 'id': message['id'], 'ok': True})
             elif message['type'] == 'paste-image':
                 control(
                     {

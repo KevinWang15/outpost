@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { pagePaths } from '../../shared/pages'
 import { LoaderCircle, RefreshCw } from 'lucide-react'
 import type { AuthState } from '../../shared/auth'
 import { api } from '../api'
@@ -44,7 +45,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     const expired = () => {
       generation.current++
       setState({ mode: 'hosted', user: null })
-      navigate('/login')
+      navigate(pagePaths.login)
     }
     const reload = () => {
       void load().catch(() => {})
@@ -66,7 +67,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     generation.current++
     setState({ mode: 'hosted', user: null })
     channel.current?.postMessage('changed')
-    navigate('/login')
+    navigate(pagePaths.login)
   }
   if (!state)
     return (
@@ -93,7 +94,9 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         )}
       </div>
     )
-  const authRoute = ['/signup', '/verify-email', '/forgot-password', '/reset-password'].includes(path)
+  const authRoute = [pagePaths.signup, pagePaths.verifyEmail, pagePaths.forgotPassword, pagePaths.resetPassword].some(
+    route => route === path,
+  )
   return (
     <AuthContext.Provider value={{ ...state, refresh, signOut, navigate }}>
       {state.mode === 'local' || (state.user && !authRoute) ? (

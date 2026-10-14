@@ -24,7 +24,7 @@ declare global {
 }
 
 async function mockNotifications(page: Page, permission: NotificationPermission = 'default') {
-  await page.addInitScript(permission => {
+  await page.context().addInitScript(permission => {
     window.bellNotifications = {
       permission,
       result: 'granted',
@@ -34,6 +34,12 @@ async function mockNotifications(page: Page, permission: NotificationPermission 
       failConstruction: false,
       instances: [],
     }
+    // Browser permission is shared across same-origin tabs in this profile.
+    const permissionKey = 'outpost-test-notification-permission'
+    Object.defineProperty(window.bellNotifications, 'permission', {
+      get: () => localStorage.getItem(permissionKey) ?? permission,
+      set: value => localStorage.setItem(permissionKey, value),
+    })
     Object.defineProperty(window, 'Notification', {
       configurable: true,
       value: class {
@@ -205,10 +211,24 @@ for (const mode of ['web', 'app'] as const) {
     expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(0)
 
     await attention(page, true)
-    await page.getByRole('button', { name: 'Enable desktop notifications', exact: true }).click()
+    if (mode === 'app') {
+      const opened = page.waitForEvent('popup')
+      await page.getByRole('button', { name: 'Enable desktop notifications', exact: true }).click()
+      const setup = await opened
+      await expect(setup).toHaveURL(/\/notifications$/)
+      expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(0)
+      await setup.getByRole('button', { name: 'Enable notifications', exact: true }).click()
+      await expect(setup.getByRole('status')).toContainText('Desktop notifications enabled')
+      expect(await setup.evaluate(() => window.bellNotifications.requests)).toBe(1)
+      expect(await setup.evaluate(() => window.bellNotifications.gestures)).toEqual([true])
+      await setup.close()
+      await attention(page, true)
+    } else {
+      await page.getByRole('button', { name: 'Enable desktop notifications', exact: true }).click()
+      expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(1)
+      expect(await page.evaluate(() => window.bellNotifications.gestures)).toEqual([true])
+    }
     await expect(page.getByRole('button', { name: 'Desktop notifications enabled', exact: true })).toBeVisible()
-    expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(1)
-    expect(await page.evaluate(() => window.bellNotifications.gestures)).toEqual([true])
     socket.send(Buffer.from('\x07'))
     await expect(notice).toBeVisible()
     expect(await alerts()).toBe(0)

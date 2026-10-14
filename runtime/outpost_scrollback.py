@@ -11,10 +11,10 @@ class Scrollback:
         '#{pane_in_mode}|#{pane_mode}|#{scroll_position}|#{copy_position_limit}|#{alternate_on}'
     )
 
-    def __init__(self, command, environment, application=None):
+    def __init__(self, command, environment, navigation=None):
         self.command = command
         self.environment = environment
-        self.application = application
+        self.navigation = navigation
         self.copy_key = None
         self.copy_lines = 0
 
@@ -58,13 +58,15 @@ class Scrollback:
             'rows': rows,
             'active': active,
             'alternate': alternate == '1',
-            **({'application': 'codex'} if self.application == 'codex' and alternate == '1' and in_mode == '0' else {}),
+            **({'navigation': self.navigation} if self.navigation and alternate == '1' and in_mode == '0' else {}),
         }
 
     def read(self, offset=None):
         pane, state = self.inspect()
-        if offset is None or not state['available']:
+        if offset is None:
             return state
+        if not state['available']:
+            raise ValueError('The application currently owns terminal history.')
         if offset == 0:
             if state['active']:
                 self.run('send-keys', '-X', '-t', pane, 'cancel')
@@ -74,6 +76,8 @@ class Scrollback:
             commands = [] if state['active'] else ['copy-mode', '-e', '-t', pane, ';']
             self.run(*commands, 'send-keys', '-X', '-t', pane, 'goto-line', str(offset))
         _, result = self.inspect(pane)
+        if offset == 0 and result['active']:
+            raise ValueError('Could not return to live output.')
         if result['active'] and offset == -1:
             self.copy_lines = result['lines'] = result['offset']
         return result

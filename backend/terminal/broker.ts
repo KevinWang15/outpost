@@ -1,7 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { WebSocket } from 'ws'
-import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
+import { Ajv } from 'ajv'
+import type { ClientMessage, CloseReason, HistoryNavigation, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, protocolVersion } from '../../shared/protocol'
+import { historyNavigation } from '../../shared/schemas'
 import { signalValidators } from '../../shared/signals'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
@@ -36,6 +38,7 @@ export class RelayDecoder {
 }
 
 const highWater = 1024 * 1024
+const validHistoryNavigation = new Ajv().compile<HistoryNavigation>(historyNavigation)
 const closedMessages: Record<'detached' | 'ended' | 'expired', string> = {
   detached: 'Detached. The session keeps running.',
   ended: 'The coding tool exited. Connect again to start it in the same conversation.',
@@ -190,9 +193,9 @@ class Connection {
           available,
           active,
           ...(typeof message.alternate === 'boolean' ? { alternate: message.alternate } : {}),
-          ...(message.application === 'codex' ? { application: 'codex' } : {}),
+          ...(validHistoryNavigation(message.navigation) ? { navigation: message.navigation } : {}),
         })
-    } else if (message.type === 'paste-result' && typeof message.id === 'string') {
+    } else if ((message.type === 'paste-result' || message.type === 'result') && typeof message.id === 'string') {
       this.send({
         type: 'result',
         id: message.id,
@@ -253,7 +256,11 @@ class Connection {
           message.offset === undefined ||
           (Number.isSafeInteger(message.offset) && message.offset >= -1 && message.offset <= 1_000_000)
         )
-          this.relay({ type: 'scrollback', ...(message.offset !== undefined ? { offset: message.offset } : {}) })
+          this.relay({
+            type: 'scrollback',
+            ...(message.offset !== undefined ? { offset: message.offset } : {}),
+            ...(id !== undefined ? { id } : {}),
+          })
         return
       case 'resize':
         if (
@@ -288,14 +295,7 @@ class Connection {
             ok: false,
             message: 'The terminal is not ready. Your draft is kept.',
           })
-        this.child.stdin.write(relayFrame('I', message.data), error =>
-          this.send({
-            type: 'result',
-            id: message.id,
-            ok: !error,
-            ...(error ? { message: 'Delivery was not confirmed. Check the terminal before retrying.' } : {}),
-          }),
-        )
+        this.relay(message)
         return
       }
       case 'paste-image': {

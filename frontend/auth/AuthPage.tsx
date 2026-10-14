@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
+import { pagePaths } from '../../shared/pages'
 import { ArrowRight, CheckCircle2, Eye, EyeOff, Mail, ShieldCheck, Terminal } from 'lucide-react'
 import type { AuthMessage } from '../../shared/auth'
 import { api, ApiError } from '../api'
@@ -20,13 +21,13 @@ function AuthLink({ href, children }: { href: string; children: ReactNode }) {
 export default function AuthPage({ path }: { path: string }) {
   const { refresh, navigate } = useAuth()
   const kind =
-    path === '/signup'
+    path === pagePaths.signup
       ? 'signup'
-      : path === '/verify-email'
+      : path === pagePaths.verifyEmail
         ? 'verify'
-        : path === '/forgot-password'
+        : path === pagePaths.forgotPassword
           ? 'forgot'
-          : path === '/reset-password'
+          : path === pagePaths.resetPassword
             ? 'reset'
             : 'login'
   const parameters = new URLSearchParams(window.location.search)
@@ -72,7 +73,7 @@ export default function AuthPage({ path }: { path: string }) {
       if (kind === 'login') {
         await api('/auth/login', 'POST', { email: address, password })
         await refresh()
-        navigate('/')
+        navigate(pagePaths.workspace)
       } else if (kind === 'signup') {
         const result = await api<AuthMessage>('/auth/signup', 'POST', { email: address, name: name.trim(), password })
         setPassword('')
@@ -83,7 +84,7 @@ export default function AuthPage({ path }: { path: string }) {
       } else if (kind === 'verify' && token) {
         await api('/auth/verify-email', 'POST', { token })
         await refresh()
-        navigate('/')
+        navigate(pagePaths.workspace)
       } else if (kind === 'reset') {
         if (!token) throw new Error('Open the password reset link from your email.')
         const result = await api<AuthMessage>('/auth/reset-password', 'POST', { token, password })
@@ -113,7 +114,7 @@ export default function AuthPage({ path }: { path: string }) {
   return (
     <div className="auth-shell">
       <div className="auth-story">
-        <a className="brand" href="/">
+        <a className="brand" href={pagePaths.workspace}>
           <img className="brand-mark" src="/outpost.svg" width="42" height="42" alt="" />
           <span>
             Outpost<span className="brand-sub">AI Session Manager</span>
@@ -247,7 +248,9 @@ export default function AuthPage({ path }: { path: string }) {
             )}
             {unverified && (
               <p className="auth-recovery">
-                <AuthLink href={`/verify-email?email=${encodeURIComponent(email)}`}>Resend verification email</AuthLink>
+                <AuthLink href={`${pagePaths.verifyEmail}?email=${encodeURIComponent(email)}`}>
+                  Resend verification email
+                </AuthLink>
               </p>
             )}
             {!complete && (
@@ -272,23 +275,25 @@ export default function AuthPage({ path }: { path: string }) {
           <div className="auth-links">
             {kind === 'signup' && complete && (
               <p>
-                <AuthLink href={`/verify-email?email=${encodeURIComponent(email)}`}>Resend verification email</AuthLink>
+                <AuthLink href={`${pagePaths.verifyEmail}?email=${encodeURIComponent(email)}`}>
+                  Resend verification email
+                </AuthLink>
               </p>
             )}
             {kind === 'login' ? (
               <>
-                <AuthLink href="/forgot-password">Forgot password?</AuthLink>
+                <AuthLink href={pagePaths.forgotPassword}>Forgot password?</AuthLink>
                 <p>
-                  New to Outpost? <AuthLink href="/signup">Create an account</AuthLink>
+                  New to Outpost? <AuthLink href={pagePaths.signup}>Create an account</AuthLink>
                 </p>
               </>
             ) : (
               <p>
-                <AuthLink href="/login">Back to sign in</AuthLink>
+                <AuthLink href={pagePaths.login}>Back to sign in</AuthLink>
                 {kind === 'reset' && !token && (
                   <>
                     {' '}
-                    · <AuthLink href="/forgot-password">Request a reset link</AuthLink>
+                    · <AuthLink href={pagePaths.forgotPassword}>Request a reset link</AuthLink>
                   </>
                 )}
               </p>

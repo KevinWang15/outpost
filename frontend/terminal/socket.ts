@@ -14,6 +14,7 @@ interface Handlers {
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
   scrollback?(state: ScrollbackState | null): void
+  notice?(message: string): void
 }
 
 const retries = 8
@@ -69,7 +70,9 @@ export class TerminalSocket {
       if (this.socket !== socket) return
       if (event.data instanceof ArrayBuffer) {
         const bytes = new Uint8Array(event.data)
-        this.handlers.output(bytes, () => this.send({ type: 'ack', bytes: bytes.length }))
+        this.handlers.output(bytes, () => {
+          if (this.socket === socket) this.send({ type: 'ack', bytes: bytes.length })
+        })
         return
       }
       const message: ServerMessage = JSON.parse(event.data)
@@ -125,6 +128,7 @@ export class TerminalSocket {
     this.stopped = false
     this.attempts = 0
     clearTimeout(this.timer)
+    this.failPending('The terminal reconnected before Outpost confirmed it. Check the terminal before retrying.')
     this.socket?.close()
     this.open()
   }
@@ -144,6 +148,7 @@ export class TerminalSocket {
 
   input(data: string | Uint8Array<ArrayBuffer>) {
     if (!this.connected) return false
+    this.flushHistory()
     this.socket!.send(typeof data === 'string' ? new TextEncoder().encode(data) : data)
     return true
   }
@@ -155,17 +160,23 @@ export class TerminalSocket {
   scrollTo(offset: number) {
     if (!this.connected || !this.historySupported) return
     this.historyOffset = Math.max(-1, Math.min(1_000_000, Math.round(offset)))
-    const flush = () => {
-      this.historyTimer = undefined
-      if (this.historyOffset !== undefined && this.connected)
-        this.send({ type: 'scrollback', offset: this.historyOffset })
-      this.historyOffset = undefined
-    }
     // Jump endpoints immediately. Keep only the latest position during a drag.
     if (offset <= 0) {
-      clearTimeout(this.historyTimer)
-      flush()
-    } else this.historyTimer ??= setTimeout(flush, 50)
+      this.flushHistory()
+    } else this.historyTimer ??= setTimeout(() => this.flushHistory(), 50)
+  }
+
+  private flushHistory() {
+    clearTimeout(this.historyTimer)
+    this.historyTimer = undefined
+    const offset = this.historyOffset
+    this.historyOffset = undefined
+    if (offset === undefined || !this.connected) return
+    void this.request({ type: 'scrollback', id: crypto.randomUUID(), offset })
+      .then(result => {
+        if (!result.ok) throw new Error(result.message)
+      })
+      .catch(error => this.handlers.notice?.((error as Error).message))
   }
 
   private resetHistory() {
@@ -178,6 +189,8 @@ export class TerminalSocket {
 
   private request(message: ClientMessage & { id: string }) {
     if (!this.connected) return Promise.reject(new Error('The terminal is not connected. Your draft is kept.'))
+    // A debounced drag must reach the relay before any subsequent input.
+    if (message.type !== 'scrollback') this.flushHistory()
     return new Promise<Extract<ServerMessage, { type: 'result' }>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(message.id)

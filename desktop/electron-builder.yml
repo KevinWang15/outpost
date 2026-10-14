@@ -1,0 +1,41 @@
+appId: dev.outpost.desktop
+productName: Outpost
+copyright: Copyright © 2026 Outpost contributors
+asar: true
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+directories:
+  output: release
+  buildResources: resources
+files:
+  - dist/**
+  - package.json
+protocols:
+  - name: Outpost session
+    schemes: [outpost]
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/outpost.icns
+  target: [dmg, zip]
+  artifactName: Outpost-${version}-mac-${arch}.${ext}
+  # Private previews: ad-hoc signing supports Apple silicon; no Developer ID or notarization.
+  identity: '-'
+  hardenedRuntime: false
+  notarize: false
+win:
+  icon: resources/outpost.ico
+  target: nsis
+  artifactName: Outpost-${version}-windows-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+linux:
+  icon: resources/outpost.png
+  target: dir

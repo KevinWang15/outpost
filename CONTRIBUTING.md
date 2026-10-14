@@ -14,9 +14,8 @@ npm ci
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. Vite forwards `/api` and `/connector` to the API on
-`127.0.0.1:3000`, which restarts on changes to `backend/`, `runtime/` and
-`connector/`. Use `OUTPOST_DATA_DIR` for a separate development store, and a
+Open http://127.0.0.1:5173. Vite forwards `/api` to the API on
+`127.0.0.1:3000`, which restarts on changes to `backend/` and `runtime/`. Use `OUTPOST_DATA_DIR` for a separate development store, and a
 different one for hosted work (`OUTPOST_MODE=hosted` in `.env`). Without mail
 credentials, hosted development shows verification links in the UI.
 
@@ -25,12 +24,12 @@ credentials, hosted development shows verification links in the UI.
 | Directory | Language | Runs on |
 | --- | --- | --- |
 | `backend/` | TypeScript | Outpost server |
-| `frontend/` | React + SCSS | Browser |
-| `shared/` | TypeScript | Both; includes the harness and connector-launcher registries |
+| `frontend/` | React + SCSS | Browser and Electron renderer |
+| `shared/` | TypeScript | Server, frontend and desktop contracts |
 | `runtime/` | Python 3.9 | Targets, sent with each operation |
-| `connector/` | Python 3.9 | Your computer (macOS, WSL) |
+| `desktop/` | TypeScript + Electron | Your computer (macOS, Windows) |
 
-Python code must stay compatible with Python 3.9 (macOS Command Line Tools) and
+Python code must stay compatible with Python 3.9 on targets and
 use only the standard library.
 
 Formatting is automatic: `npm run format` runs Prettier on TypeScript, SCSS and
@@ -49,11 +48,45 @@ npm run test:ui           # browser tests against a real local backend
 
 Integration and browser tests use disposable homes with fixture coding tools
 (`tests/fixtures/coding-tool-fixture.py`); they never use your real home,
-SSH known hosts or provider credentials. The connector runs with
-`OUTPOST_CONNECTOR_FAKE=<dir>`, which replaces the OS clipboard and browser
-with files. Native terminal integrations (iTerm2 profiles, the Windows
-registry) are checked as generated artifacts; please test those changes by hand
-on a Mac or on Windows and describe what you tried.
+SSH known hosts or provider credentials. Existing browser assertions inspect
+xterm DOM text, so Playwright disables WebGL to exercise the fallback renderer.
+Native GPU behavior and OS integration require checks on the supported systems.
+
+## Desktop development and previews
+
+```sh
+npm ci
+npm --prefix desktop ci
+npm --prefix desktop run typecheck
+npm --prefix desktop run dev
+# On macOS:
+npm --prefix desktop run package -- --mac --arm64 --x64
+# On Windows:
+npm --prefix desktop run package -- --win --x64
+```
+
+Run the server separately. Open it from app home, then select a session in the
+browser and use Connect → Outpost Desktop. macOS protocol handlers require a
+packaged app installed in Applications. Development Windows runs register the
+current Electron executable; reinstall the packaged app to restore its handler.
+
+The shell bundles only native integration and a local home page. It loads the
+shared terminal from the trusted server. Desktop dependencies and its lockfile
+are isolated from the server package. `scripts/build-desktop.mjs` builds the
+preloads and shell and wraps approved logo PNGs into ICNS/ICO containers.
+`npm run logo:generate` derives these PNGs from the canonical SVG.
+
+**Desktop previews** in GitHub Actions is manual. It builds both Mac architectures
+and Windows x64; artifacts expire after 14 days. Select **publish** to create an
+unsigned GitHub prerelease with checksums after both jobs succeed. Bump
+`desktop/package.json` and its lockfile before publishing a new version, and
+update `desktop/RELEASE_NOTES.md`. Existing releases are never overwritten.
+No signing credentials or automatic updater are used for previews.
+
+On each native platform, exercise cold/warm `outpost://` launches, multiple
+windows, trust cancellation/removal, clipboard text and images, notification
+click-through, reconnect/reload, GPU fallback and app identity before a stable
+release. Do not infer OS behavior from a successful packaging job.
 
 ## Pull requests
 

@@ -4,11 +4,11 @@
 
 Outpost keeps your **Claude Code, Codex and Kimi Code** sessions running in tmux
 on your Linux machines, and lets you come back to them from your browser or
-your own terminal app — with paste, copy, Shift+Enter and links working as if
+Outpost Desktop — with paste, copy, Shift+Enter and links working as if
 the agent ran on your computer.
 
-- **One Connect button.** Choose the web terminal, Terminal app, iTerm2 on macOS, or Windows Terminal with WSL. All use the same connection path in both deployment modes.
-- **Feels native.** Paste screenshots with ⌘V (iTerm2) or Alt+V (Windows Terminal) and the agent receives the image. Shift+Enter inserts a newline. Text the agent copies lands on your clipboard. Links it opens open in your browser.
+- **One Connect button.** Choose the web terminal or Outpost Desktop for macOS and Windows. Both share the terminal UI and connection path.
+- **Feels native.** Paste screenshots with your normal paste shortcut and the agent receives the image. Shift+Enter inserts a newline. Text the agent copies lands on your clipboard. Links it opens open in your browser.
 - **Sessions outlive connections.** Close the tab or lose Wi-Fi; the agent keeps working. Reconnect from any computer or your phone, to the same process.
 - **Local tool or hosted service.** Run it on your own computer with your SSH config, or host it for a team with accounts and per-user SSH keys.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
@@ -22,9 +22,8 @@ the agent ran on your computer.
 | --- | --- |
 | Targets — where sessions run | Linux with Bash, Python 3.9+ and tmux 3.2+, reachable over SSH as root. The computer running Outpost can be a target too when it runs Linux (including WSL). Outpost can install missing software for you. |
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
-| Native terminals | **macOS:** iTerm2 and Python 3.9+ (`xcode-select --install`). **Windows:** Windows Terminal and a WSL distribution with Python 3. |
 | Web terminal | Any current browser, including on phones. |
-| Terminal app | **macOS:** Chrome or Edge and Python 3.9+. **Windows:** Chrome or Edge and WSL with Bash and Python 3. Connector 2.1.3 recommended. |
+| Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Bundles Electron; no browser, Python or WSL installation needed. |
 
 ## Run the local tool
 
@@ -63,21 +62,15 @@ paths produce an error without creating a session.
 
 ## Connect
 
-Click **Connect** next to a session and choose a terminal. The dialog
-preselects your computer's operating system; the web terminal is always at the
-top.
+Click **Connect** next to a session and choose a terminal. Your last choice is remembered.
 
-| Choice | Opens in | Connector | Authorization |
+| Choice | Opens in | Installation | Authorization |
 | --- | --- | --- | --- |
-| Web terminal | A regular browser window; also works on phones | No | Uses the browser's Outpost login to request a terminal ticket |
-| Terminal app | A Chrome/Edge window without browser tabs or an address bar | Yes | Transfers a ticket from your signed-in Outpost browser; no second login |
-| iTerm2 | A native macOS terminal tab | Yes | Same scoped terminal ticket |
-| Windows Terminal | A native Windows terminal tab running WSL | Yes | Same scoped terminal ticket |
+| Web terminal | A regular browser window; also works on phones | None | Your Outpost browser login requests a session ticket |
+| Outpost Desktop | An Electron window with its own Outpost Dock/taskbar identity | Outpost Desktop | Transfers a session ticket from your signed-in browser; no second login |
 
 Every choice attaches to the same tmux session. Closing a client disconnects
 it; the coding session keeps running. You can change clients later.
-
-![The Connect dialog: web terminal, then desktop terminals filtered by OS](docs/images/connect.png)
 
 ### Web terminal
 
@@ -87,7 +80,7 @@ arrows, ⇧↩, ^C) and a message box are shown. Dropped connections reconnect b
 themselves.
 
 Use **Hide terminal toolbar** for more screen space; the small button at the
-top right restores it. This preference also applies to Terminal app. Connection
+top right restores it. This preference also applies to Outpost Desktop. Connection
 errors, link prompts and bell notices remain visible while the toolbar is hidden.
 
 The scrollbar on the right navigates the session's saved terminal output,
@@ -96,7 +89,7 @@ Drag its thumb or click the track to jump through history. Use the arrow at
 the bottom to **Return to live output**. **Shift+Page Up / Page Down** moves
 a screen at a time; when the scrollbar has keyboard focus, **Home / End**
 jumps to the oldest output or back to live output. These controls work in
-both the web terminal and Terminal app, including with the toolbar hidden.
+both the web terminal and Outpost Desktop, including with the toolbar hidden.
 
 Outpost starts Codex in inline mode so its output enters terminal history.
 An already-running full-screen Codex session keeps its original mode: its
@@ -122,120 +115,76 @@ or [macOS System Settings → Notifications](https://support.apple.com/guide/saf
 including Focus / Do Not Disturb. Disable notifications through your browser's
 site settings.
 
-In Terminal app, the bell button opens **notification setup** directly in a
-browser tab. Click **Enable notifications** there, or use the site controls
-beside the address bar to allow notifications. In a regular web terminal,
-**Open notification setup** is also available if the permission prompt is
-hidden. Return to the terminal after allowing notifications; it reads the new
-permission without reconnecting. Use the same browser and profile as the
-terminal: Chrome and Edge do not share notification permissions. No sign-in
-is needed on this setup page.
+If a browser permission prompt is hidden, **Open notification setup** provides
+an ordinary page with site permission controls. Use the same browser and profile
+as your terminal; Chrome and Edge have separate permissions.
 
 ![The web terminal](docs/images/web-terminal.png)
 
-### Terminal app (PWA web terminal)
+### Outpost Desktop
 
-Choose **Connect → Terminal app** for the same web terminal in a dedicated
-desktop window. It shares keyboard handling, image paste, reconnects, sound
-and desktop notifications with the regular web terminal. Install or update
-the connector as described below; older connectors cannot open this choice.
+Open **Download Outpost Desktop** in the Connect dialog, or visit `/desktop`
+on your server. Download the matching macOS DMG (arm64 for Apple silicon,
+x64 for Intel) or Windows x64 installer from
+[GitHub releases](https://github.com/KevinWang15/outpost/releases).
 
-The connector uses Chrome first on both macOS and Windows, with Edge as a
-fallback. On macOS, an installed Outpost Terminal app takes priority (Chrome
-before Edge if both have it installed). Update the connector and reopen the app to apply this choice;
-updating the server does not change an installed connector. macOS browsers
-can be in `/Applications` or `~/Applications`;
-Windows browsers are located through their registered App Paths. Windows
-uses WSL to run the connector, but **Windows Terminal is optional** for this
-choice. Safari and Firefox can be used to browse Outpost and launch a session;
-the connector opens the terminal in Chrome or Edge.
+1. On macOS, drag Outpost into Applications; on Windows, run the installer.
+2. Open Outpost once to register its links.
+3. In your browser, choose **Connect → Outpost Desktop** for a session.
+4. Allow the browser to open the app and confirm the server on first use.
 
-**macOS Dock icon:** install `/terminal/app` as a browser app once for each
-Outpost server. The Connect dialog links to this setup page. In Chrome, choose
-**⋮ → Cast, save, and share → Install page as app**; in Edge, choose
-**⋯ → Apps → Install this site as an app**. Update the connector to 2.1.3,
-then use **Connect → Terminal app** again. Allow Outpost Terminal to handle its
-links if prompted. The browser supplies Outpost's icon in the Dock and app
-switcher. To pin it, right-click its Dock icon → **Options → Keep in Dock**.
+These are **unsigned previews**. After the first launch attempt, macOS may
+require **System Settings → Privacy & Security → Open Anyway**. Windows may
+show **SmartScreen → More info → Run anyway**. Only proceed with a release
+you trust; release artifacts include checksums.
 
-The connector recognizes the browser-installed app for this exact server in
-`~/Applications`, `/Applications`, or their browser `*.localized` folders,
-even if the app was renamed. Keep the app in one of those locations. An older
-PWA may need to be reopened for its browser to update the link registration;
-if it still opens with the browser icon, reinstall the PWA from `/terminal/app`.
-Without a matching installed app the connector still opens a fresh browser
-app window; on macOS that window uses the browser's Dock identity.
-Windows continues to use the browser app window launch path.
+The app has its own Outpost icon, independent terminal windows, native system
+notifications and a hideable toolbar. The same xterm.js client handles input,
+image paste, scrollback and reconnects in both clients. WebGL accelerates
+rendering when available, with a DOM renderer fallback. Tabs, split panes and
+local shells are future work; this release connects to Outpost sessions.
 
-An installed shortcut starts at the connection instructions; select the session
-through Outpost's Connect dialog. Each connection opens a new app window.
-PWA installation is optional and remains a browser action. A network connection
-is required; no terminal data or account pages are cached for offline use.
+Desktop bells use Outpost's system notification permission. Allow **Outpost**
+in macOS or Windows notification settings and check Focus / Do Not Disturb.
+No browser permission page is needed. Sound starts after you interact with
+the terminal. **Help → Check for updates** opens newer previews for manual
+installation; remote sessions survive closing or upgrading the app.
 
-Your signed-in browser requests a single-use ticket valid for five minutes.
-The app consumes it, removes it from its address, and connects directly to
-Outpost. It does not need to share login cookies with the original browser.
-Reloading the same window uses a resume ticket in that window's session storage.
-If browser storage is disabled, use Connect again after a reload. Expired or
-already-used links also require a fresh Connect. Signing out of the original
-Outpost login revokes its terminal connections, including app windows.
-
-### Connector setup (all desktop choices)
-
-The first time, Outpost asks you to set up your computer with one command (run
-it in Terminal/iTerm2 on a Mac, or in your WSL shell on Windows):
-
-```sh
-curl -fsSL https://your-outpost/connector/install.sh | bash
-```
-
-This installs the **Outpost Connector** in `~/.outpost-connector`, trusts that
-Outpost server, and registers `outpost://` links. After that, Connect opens a
-window or tab in your chosen terminal, and the dialog confirms when it's attached.
-The connector stores no Outpost account password or login cookie. Its trusted
-server list is shared by all desktop choices.
-
-### Native terminal shortcuts
-
-| | iTerm2 (macOS) | Windows Terminal (WSL) |
+| Action | macOS | Windows |
 | --- | --- | --- |
-| Paste text | ⌘V | Ctrl+V |
-| Paste an image | ⌘V or Ctrl+V | Alt+V, or Ctrl+V when the clipboard holds an image |
-| New line in the prompt | ⇧↩ | Ctrl+Enter |
-| Copy | Select with the mouse (copies on release) | Select with the mouse (copies on release) |
-| Terminal's own selection | Hold ⌥ while selecting | Hold Shift while selecting |
-| Detach | Ctrl+\\ or close the tab | Ctrl+\\ or close the tab |
+| Copy selection | ⌘C | Ctrl+Shift+C |
+| Paste text or an image | ⌘V | Ctrl+Shift+V |
+| Newline in coding tool | Shift+Enter | Shift+Enter |
+| Open app home | ⌘Shift+O | Ctrl+Shift+O |
+| Close window | ⌘W | Ctrl+Shift+W |
 
-The connector adds an **Outpost** profile to iTerm2 (inheriting your default
-profile, with ⌘V, ⇧↩ and Option-as-Meta mapped) and a hidden **Outpost**
-profile to Windows Terminal. Ctrl+V and Alt+V only paste an image when the
-clipboard holds one; otherwise they reach the program unchanged. Windows
-Terminal does not let profiles bind keys, and it sends Shift+Enter to WSL as a
-plain Enter, so use Ctrl+Enter for a newline there.
+The app home remembers trusted servers and opens their workspaces in your
+browser. Removing a server closes its terminal windows. Launch/resume tickets
+stay in memory; the app stores neither your account password nor login cookies.
+Use HTTPS, or HTTP on localhost for a local Outpost server / SSH port forward.
+The app needs a network connection and an open terminal window for bells.
 
-After a detach, the tab shows a banner: **Enter** reconnects, **Ctrl+C**
-closes it. Network drops and Outpost restarts reconnect automatically.
+### Replacing the old connector / PWA
 
-### Update or remove the connector
-
-Run the installer again to update the connector. To remove the connector,
-terminal integration, and trust for **all** Outpost servers, run this as the
-same user (and in the same WSL distribution on Windows) used for installation:
+The Python connector, iTerm2 / Windows Terminal launchers, and browser-installed
+PWA are retired. Before installing Outpost Desktop, run this in Terminal on
+macOS or your WSL shell on Windows:
 
 ```sh
-curl -fsSL https://your-outpost/connector/install.sh | bash -s -- --uninstall
+~/.outpost-connector/bin/outpost-connector uninstall
 ```
 
-The installed `~/.outpost-connector/bin/outpost-connector uninstall` command
-also removes it without downloading the installer. Uninstalling leaves Outpost
-server data and coding sessions intact.
+Uninstall any old Outpost browser app separately through its browser. Then
+install/open Outpost Desktop so it owns `outpost://` links. This migration
+leaves server data and running sessions intact. The old server installer URL
+is no longer served; the installed uninstall command still works offline.
 
 ## Run a hosted service
 
 Set `OUTPOST_MODE=hosted`. Users sign up with a verified email, get their own
 workspace and an Ed25519 SSH key that they authorize on their servers
-(`/root/.ssh/authorized_keys`). The web terminal and native terminals work
-exactly as in local mode; native terminals connect to the hosted server.
+(`/root/.ssh/authorized_keys`). Web terminal and Outpost Desktop work exactly as in local mode, connecting
+to the hosted server.
 
 ```dotenv
 OUTPOST_MODE=hosted
@@ -284,21 +233,20 @@ v2 reads v1 data without changing it:
 ## How it works
 
 ```text
-web terminal / native connector ⇄ WebSocket ⇄ Outpost ⇄ SSH or local shell ⇄ relay ⇄ tmux ⇄ coding tool
+web terminal / Outpost Desktop ⇄ WebSocket ⇄ Outpost ⇄ SSH or local shell ⇄ relay ⇄ tmux ⇄ coding tool
 ```
 
 Every connection takes this one path; tmux is the only place terminal state
 lives, so connections are disposable. The target runtime is a Python program
 sent with each operation — nothing is installed on targets besides tmux and
 `~/.outpost` state. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-principles, protocols, security model and how to add a terminal or a coding
-tool.
+principles, protocols, security model and how to extend desktop capabilities or add a coding tool.
 
 ## Development
 
 ```sh
 npm run check            # lint, typecheck, build, unit and Python tests
-npm run test:integration # real tmux: local targets, the connector in a PTY, SSH in Docker
+npm run test:integration # real tmux: local targets and SSH in Docker
 npx playwright install chromium
 npm run test:ui          # browser tests against a real backend
 npm run docs:capture     # refresh README screenshots

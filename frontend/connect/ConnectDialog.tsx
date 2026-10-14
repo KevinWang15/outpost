@@ -1,36 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
+import { AppWindow, ArrowRight, Check, LoaderCircle, Monitor } from 'lucide-react'
 import { pagePaths } from '../../shared/pages'
-import { AppWindow, ArrowRight, Check, LoaderCircle, SquareTerminal } from 'lucide-react'
+import { terminalChoices, type TerminalChoice } from '../../shared/terminals'
 import type { Session, Target } from '../../shared/model'
 import type { ConnectResponse, ConnectionStatus } from '../../shared/protocol'
-import {
-  clientOS,
-  clientOSLabels,
-  connectorTerminals,
-  type ClientOS,
-  type ConnectorTerminalId,
-  type TerminalChoice,
-} from '../../shared/terminals'
 import { api } from '../api'
-import { CopyField } from '../ui/CopyField'
 import { Dialog } from '../ui/Dialog'
 
 const remembered = 'outpost.terminal'
 type Phase =
   | { kind: 'choose' }
   | { kind: 'requesting'; terminal: TerminalChoice }
-  | { kind: 'opening'; terminal: ConnectorTerminalId; id: string; slow: boolean }
-  | { kind: 'connected'; terminal: ConnectorTerminalId }
+  | { kind: 'opening'; id: string; slow: boolean }
+  | { kind: 'connected' }
 
 function lastChoice(): TerminalChoice | null {
   try {
-    return localStorage.getItem(remembered) as TerminalChoice | null
+    const value = localStorage.getItem(remembered)
+    return terminalChoices.includes(value as TerminalChoice) ? (value as TerminalChoice) : null
   } catch {
     return null
   }
 }
 
-/** One connection flow; the connector only changes how a client is launched. */
+/** Two launch surfaces, one connection grant and terminal implementation. */
 export default function ConnectDialog({
   target,
   session,
@@ -40,11 +33,8 @@ export default function ConnectDialog({
   session: Session
   onClose: () => void
 }) {
-  const detected = clientOS(navigator.userAgent)
-  const [os, setOs] = useState<ClientOS | 'all'>(detected ?? 'all')
   const [phase, setPhase] = useState<Phase>({ kind: 'choose' })
   const [error, setError] = useState('')
-  const [install, setInstall] = useState('')
   const last = lastChoice()
   const alive = useRef(true)
   const close = useRef(onClose)
@@ -64,10 +54,9 @@ export default function ConnectDialog({
     try {
       localStorage.setItem(remembered, terminal)
     } catch {
-      /* Preference is optional. */
+      /* Optional preference. */
     }
     if (terminal === 'web') {
-      // Open during the click; the new page requests its own connection token.
       const query = new URLSearchParams({
         target: target.id,
         session: session.id,
@@ -88,8 +77,8 @@ export default function ConnectDialog({
         terminal,
       })
       if (!alive.current) return
-      setPhase({ kind: 'opening', terminal, id: connection.id, slow: false })
-      window.location.href = connection.url!
+      setPhase({ kind: 'opening', id: connection.id, slow: false })
+      window.location.assign(connection.url!)
     } catch (problem) {
       if (alive.current) {
         setError((problem as Error).message)
@@ -103,40 +92,40 @@ export default function ConnectDialog({
     if (!openingId) return
     const started = Date.now()
     let cancelled = false
-    const timer = setInterval(async () => {
+    let timer: ReturnType<typeof setTimeout>
+    const poll = async () => {
       try {
         const { status } = await api<ConnectionStatus>(`/connections/${openingId}`)
-        if (!alive.current || cancelled) return
+        if (cancelled) return
         if (status === 'connected') {
-          clearInterval(timer)
-          setPhase(current =>
-            current.kind === 'opening' ? { kind: 'connected', terminal: current.terminal } : current,
-          )
-          setTimeout(() => {
-            if (alive.current) close.current()
-          }, 1500)
-        } else if (Date.now() - started > 6000)
-          setPhase(current => (current.kind === 'opening' && !current.slow ? { ...current, slow: true } : current))
+          setPhase({ kind: 'connected' })
+          return
+        }
       } catch {
-        /* Keep polling; the dialog stays useful offline. */
+        /* Retrying or downloading stays available offline. */
       }
+      if (cancelled) return
+      if (Date.now() - started > 6000)
+        setPhase(current => (current.kind === 'opening' ? { ...current, slow: true } : current))
+      timer = setTimeout(() => {
+        void poll()
+      }, 1000)
+    }
+    timer = setTimeout(() => {
+      void poll()
     }, 1000)
     return () => {
       cancelled = true
-      clearInterval(timer)
+      clearTimeout(timer)
     }
   }, [openingId])
-  const slow = phase.kind === 'opening' && phase.slow
   useEffect(() => {
-    if (!slow || install) return
-    api<{ install: string }>('/connector').then(
-      result => setInstall(result.install),
-      () => {},
-    )
-  }, [slow, install])
+    if (phase.kind !== 'connected') return
+    const timer = setTimeout(() => close.current(), 1500)
+    return () => clearTimeout(timer)
+  }, [phase.kind])
 
-  if (phase.kind === 'opening' || phase.kind === 'connected') {
-    const terminal = connectorTerminals.find(item => item.id === phase.terminal)!
+  if (phase.kind === 'opening' || phase.kind === 'connected')
     return (
       <Dialog
         title={`Connect to ${session.name}`}
@@ -151,58 +140,41 @@ export default function ConnectDialog({
               <button
                 className="button primary"
                 onClick={() => {
-                  void choose(phase.terminal)
+                  void choose('desktop')
                 }}
               >
-                Open {terminal.name} again
+                Open Outpost Desktop again
               </button>
             </>
           )
         }
       >
-        {phase.kind === 'connected' ? (
-          <div className="connect-progress done" role="status">
-            <Check size={20} />
-            <div>
-              <strong>Connected in {terminal.name}</strong>
-              <p>You can close this window.</p>
-            </div>
+        <div className={`connect-progress ${phase.kind === 'connected' ? 'done' : ''}`} role="status">
+          {phase.kind === 'connected' ? <Check size={20} /> : <LoaderCircle className="spin" size={20} />}
+          <div>
+            <strong>{phase.kind === 'connected' ? 'Connected in Outpost Desktop' : 'Opening Outpost Desktop…'}</strong>
+            <p>
+              {phase.kind === 'connected'
+                ? 'You can close this window.'
+                : 'Allow your browser to open Outpost. Confirm this server in the app on your first connection.'}
+            </p>
           </div>
-        ) : (
-          <div className="connect-progress" role="status">
-            <LoaderCircle className="spin" size={20} />
-            <div>
-              <strong>Opening {terminal.name}…</strong>
-              <p>Allow your browser to open Outpost Connector if it asks.</p>
-            </div>
-          </div>
-        )}
-        {slow && (
+        </div>
+        {phase.kind === 'opening' && phase.slow && (
           <div className="connect-setup">
             <h3>Nothing opened?</h3>
-            <p>Install or update the connector. In Terminal on macOS or a WSL shell on Windows, run:</p>
-            {install ? (
-              <CopyField value={install} label="Connector install command" />
-            ) : (
-              <p className="muted">Loading the install command…</p>
-            )}
-            <ul>
-              {terminal.requirements.map(requirement => (
-                <li key={requirement}>{requirement}</li>
-              ))}
-            </ul>
+            <p>Install Outpost Desktop for macOS or Windows and open it once, then try again.</p>
+            <a className="button primary" href={pagePaths.desktop} target="_blank" rel="noopener noreferrer">
+              Download Outpost Desktop
+            </a>
             <p className="hint">
-              Then choose “Open {terminal.name} again”. The installer trusts only this Outpost server.
+              Each retry creates a fresh connection ticket. Chrome, Python, and WSL are not required.
             </p>
           </div>
         )}
       </Dialog>
     )
-  }
 
-  const options = connectorTerminals.filter(
-    terminal => os === 'all' || (terminal.os as readonly ClientOS[]).includes(os),
-  )
   const busy = phase.kind === 'requesting' ? phase.terminal : null
   return (
     <Dialog title={`Connect to ${session.name}`} description={`${target.name} · ${session.rootDir}`} onClose={onClose}>
@@ -212,105 +184,52 @@ export default function ConnectDialog({
         </p>
       )}
       <div className="choices">
-        <Choice
-          icon={<AppWindow size={20} />}
-          title="Web terminal"
-          detail="Opens in a new window. No connector needed. Works on phones too."
-          last={last === 'web'}
-          busy={busy === 'web'}
-          disabled={Boolean(busy)}
-          onChoose={() => void choose('web')}
-        />
-      </div>
-      <div className="choices-divider">
-        <span>Desktop terminals · requires connector</span>
-        <label className="os-filter">
-          <span className="sr-only">Operating system</span>
-          <select value={os} onChange={event => setOs(event.target.value as ClientOS | 'all')}>
-            <option value="all">All systems</option>
-            {(Object.keys(clientOSLabels) as ClientOS[]).map(value => (
-              <option key={value} value={value}>
-                {clientOSLabels[value]}
-                {value === detected ? ' (this computer)' : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="choices">
-        {options.map(terminal => (
-          <Choice
-            key={terminal.id}
-            icon={<SquareTerminal size={20} />}
-            title={terminal.name}
-            tag={terminal.os.map(value => clientOSLabels[value]).join(' / ')}
-            detail={terminal.summary}
-            shortcuts={terminal.shortcuts}
-            last={last === terminal.id}
-            busy={busy === terminal.id}
+        {(
+          [
+            {
+              id: 'web',
+              name: 'Web terminal',
+              detail: 'Opens in your browser. No installation needed. Works on phones too.',
+              icon: <AppWindow size={20} />,
+            },
+            {
+              id: 'desktop',
+              name: 'Outpost Desktop',
+              detail: 'Your own terminal window, app icon, and desktop notifications. For macOS and Windows.',
+              icon: <Monitor size={20} />,
+            },
+          ] as const
+        ).map(choice => (
+          <button
+            key={choice.id}
+            className={`choice ${last === choice.id ? 'last' : ''}`}
             disabled={Boolean(busy)}
-            onChoose={() => void choose(terminal.id)}
-          />
+            onClick={() => {
+              void choose(choice.id)
+            }}
+          >
+            <span className="choice-icon">{choice.icon}</span>
+            <span className="choice-text">
+              <span className="choice-title">
+                {choice.name}
+                {last === choice.id && <span className="chip accent">Last used</span>}
+              </span>
+              <span className="choice-detail">{choice.detail}</span>
+            </span>
+            {busy === choice.id ? (
+              <LoaderCircle className="spin" size={18} />
+            ) : (
+              <ArrowRight size={18} className="choice-arrow" />
+            )}
+          </button>
         ))}
-        {!options.length && <p className="muted">No desktop terminals for this system yet. Use the web terminal.</p>}
       </div>
-      {(os === 'macos' || os === 'all') && (
-        <p className="hint">
-          Want an Outpost icon in the macOS Dock?{' '}
-          <a href={pagePaths.terminalApp} target="_blank" rel="noopener noreferrer">
-            Set up the Terminal app
-          </a>
-          .
-        </p>
-      )}
+      <p className="hint">
+        <a href={pagePaths.desktop} target="_blank" rel="noopener noreferrer">
+          Get Outpost Desktop
+        </a>
+      </p>
       <p className="hint">Closing a terminal only disconnects it. The session keeps running.</p>
     </Dialog>
-  )
-}
-
-function Choice({
-  icon,
-  title,
-  tag,
-  detail,
-  shortcuts,
-  last,
-  busy,
-  disabled,
-  onChoose,
-}: {
-  icon: React.ReactNode
-  title: string
-  tag?: string
-  detail: string
-  shortcuts?: readonly { keys: string; action: string }[]
-  last: boolean
-  busy: boolean
-  disabled: boolean
-  onChoose: () => void
-}) {
-  return (
-    <button className={`choice ${last ? 'last' : ''}`} disabled={disabled} onClick={onChoose}>
-      <span className="choice-icon">{icon}</span>
-      <span className="choice-text">
-        <span className="choice-title">
-          {title}
-          {tag && <span className="chip">{tag}</span>}
-          {last && <span className="chip accent">Last used</span>}
-        </span>
-        <span className="choice-detail">{detail}</span>
-        {shortcuts && (
-          <span className="choice-keys">
-            {shortcuts.map(shortcut => (
-              <span key={shortcut.keys}>
-                <kbd>{shortcut.keys}</kbd>
-                {shortcut.action}
-              </span>
-            ))}
-          </span>
-        )}
-      </span>
-      {busy ? <LoaderCircle className="spin" size={18} /> : <ArrowRight size={18} className="choice-arrow" />}
-    </button>
   )
 }

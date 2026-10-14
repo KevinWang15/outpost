@@ -1,5 +1,6 @@
 import type { Terminal } from '@xterm/xterm'
 import { imageMediaTypes, maxImageBytes } from '../../shared/model'
+import { desktop } from '../desktop'
 
 export function imageProblem(file: Blob): string | null {
   if (!(imageMediaTypes as readonly string[]).includes(file.type)) return 'That is not a PNG, JPEG, GIF, or WebP image.'
@@ -25,7 +26,9 @@ export function attachClipboard(
     try {
       // Background tabs keep the text for an explicit Copy action.
       if (!document.hasFocus()) throw new Error('inactive')
-      await navigator.clipboard.writeText(text)
+      if (desktop) {
+        if (!(await desktop.copyText(text))) throw new Error('Copy unavailable')
+      } else await navigator.clipboard.writeText(text)
       pendingCopy = null
       if (!disposed) options.status('Copied to your clipboard')
     } catch {
@@ -79,6 +82,11 @@ export function attachClipboard(
     async paste() {
       if (!options.connected()) return
       try {
+        if (desktop) {
+          term.focus()
+          if (!(await desktop.pasteClipboard())) throw new Error('Paste unavailable')
+          return
+        }
         if (navigator.clipboard.read) {
           const items = await navigator.clipboard.read()
           const image = items.find(item => item.types.some(type => type.startsWith('image/')))

@@ -1154,54 +1154,11 @@ kbd {
   color: var(--muted);
   font-size: 13px;
 }
-.choice-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 4px;
-  color: var(--text);
-  font-size: 12px;
-  span {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-}
 .choice-arrow {
   color: var(--border-strong);
   transition:
     transform 0.12s,
     color 0.12s;
-}
-.choices-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  &::after {
-    content: '';
-    flex: 1;
-    order: 1;
-    height: 1px;
-    background: var(--border);
-  }
-  .os-filter {
-    order: 2;
-    width: auto;
-    select {
-      min-height: 28px;
-      padding: 2px 26px 2px 8px;
-      font-size: 12.5px;
-      font-weight: 500;
-      letter-spacing: 0;
-      text-transform: none;
-    }
-  }
 }
 .connect-progress {
   display: flex;
@@ -1670,7 +1627,7 @@ kbd {
 
 /* Accounts */
 .notification-setup,
-.terminal-app-setup {
+.desktop-setup {
   display: grid;
   gap: 20px;
   width: min(100%, 600px);

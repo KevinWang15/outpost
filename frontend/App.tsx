@@ -187,7 +187,7 @@ export default function App() {
               </li>
               <li>
                 <strong>Connect anywhere</strong>
-                <span>Web terminal, Terminal app, iTerm2 or Windows Terminal.</span>
+                <span>Web terminal or Outpost Desktop for macOS and Windows.</span>
               </li>
             </ol>
           </section>

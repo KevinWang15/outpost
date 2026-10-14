@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { bellNotificationPermission, type BellNotificationPermission } from './bell'
-import { pagePaths } from '../../shared/pages'
-import { openBrowserTab } from './browser'
+import { desktop } from '../desktop'
 
 export const notificationLabels: Record<BellNotificationPermission, string> = {
   default: 'Enable desktop notifications',
@@ -26,7 +25,10 @@ type State = {
   notice: Notice | null
 }
 const noticeFor = (permission: BellNotificationPermission): Notice => ({
-  text: notificationMessages[permission],
+  text:
+    desktop && permission === 'granted'
+      ? 'Outpost desktop alerts are enabled. If they do not appear, allow Outpost in your system notification settings and check Focus / Do Not Disturb.'
+      : notificationMessages[permission],
   sticky: permission !== 'granted',
 })
 
@@ -67,15 +69,16 @@ export function useBellNotifications(onNotice?: (message: string, sticky: boolea
     document.addEventListener('visibilitychange', refresh)
     // Chrome/Edge notify app windows when permission is changed in another tab.
     // Focus/visibility remain the fallback where this query is unsupported.
-    void navigator.permissions
-      ?.query({ name: 'notifications' })
-      .then(status => {
-        if (disposed) return
-        permissionStatus = status
-        status.addEventListener('change', refresh)
-        refresh()
-      })
-      .catch(() => {})
+    if (!desktop)
+      void navigator.permissions
+        ?.query({ name: 'notifications' })
+        .then(status => {
+          if (disposed) return
+          permissionStatus = status
+          status.addEventListener('change', refresh)
+          refresh()
+        })
+        .catch(() => {})
     return () => {
       disposed = true
       clearPending()
@@ -134,32 +137,9 @@ export function useBellNotifications(onNotice?: (message: string, sticky: boolea
     }
   }
 
-  const openSetup = () => {
-    const permission = refresh()
-    if (permission !== 'default' && permission !== 'denied') {
-      publish({ permission, requesting: false, notice: noticeFor(permission) })
-      return
-    }
-    // App windows can leave native permission prompts hidden indefinitely.
-    // Open site controls in a regular tab directly from the user's click,
-    // without first creating an unresolved request in the app window.
-    const opened = openBrowserTab(new URL(pagePaths.notifications, window.location.origin).href)
-    publish({
-      permission,
-      requesting: false,
-      notice: {
-        text: opened
-          ? 'Allow notifications in the setup tab, then return here. Use the same browser and profile as this terminal.'
-          : 'The setup tab was blocked. Open notification setup below and allow notifications in this browser.',
-        sticky: true,
-      },
-    })
-  }
-
   return {
     ...state,
     request,
-    openSetup,
     needsSetup: state.notice !== null && (state.permission === 'default' || state.permission === 'denied'),
   }
 }

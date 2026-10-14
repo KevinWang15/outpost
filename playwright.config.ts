@@ -9,6 +9,8 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:4178',
     viewport: { width: 1360, height: 900 },
     headless: true,
+    // Existing terminal assertions inspect DOM text; exercise the GPU fallback here.
+    launchOptions: { args: ['--disable-webgl'] },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

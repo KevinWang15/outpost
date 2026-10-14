@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import {
   Bell,
   BellOff,
@@ -31,6 +32,7 @@ import ScrollbackBar from './ScrollbackBar'
 import { TerminalHistory } from './history'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
+import { desktop } from '../desktop'
 import { pagePaths } from '../../shared/pages'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
 
@@ -72,7 +74,6 @@ interface Props {
   onClose: () => void
   onResume?: (token: string) => void
   onExpired?: () => void
-  appWindow?: boolean
 }
 
 const toolbarPreference = 'outpost.terminal.toolbar-hidden'
@@ -84,7 +85,7 @@ function savedToolbar() {
   }
 }
 
-export default function TerminalView({ token, title, onClose, onResume, onExpired, appWindow = false }: Props) {
+export default function TerminalView({ token, title, onClose, onResume, onExpired }: Props) {
   const terminalId = useId()
   const surface = useRef<HTMLDivElement>(null),
     chooser = useRef<HTMLInputElement>(null)
@@ -174,11 +175,30 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     term.unicode.activeVersion = '11'
     term.loadAddon(
       new WebLinksAddon((_event, uri) => {
-        if (!openBrowserTab(uri)) setBlockedLink(uri)
+        void openBrowserTab(uri).then(opened => {
+          if (!opened) setBlockedLink(uri)
+        })
       }),
     )
     term.open(surface.current!)
+    // Both clients use GPU rendering where available. Losing the GPU context
+    // restores xterm's DOM renderer without losing the session or its buffer.
+    let renderer: WebglAddon | undefined
+    try {
+      renderer = new WebglAddon()
+      renderer.onContextLoss(() => renderer?.dispose())
+      term.loadAddon(renderer)
+    } catch {
+      renderer?.dispose()
+      // Remote desktops, driver failures and older browsers use the DOM renderer.
+    }
     term.textarea?.setAttribute('aria-label', 'Terminal input')
+    const stopSelectAll = desktop?.onSelectAll(() => {
+      const active = document.activeElement
+      if (active !== term.textarea && (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement))
+        active.select()
+      else term.selectAll()
+    })
     terminal.current = term
     const bells = attachBell(term, setBellRinging, () => sessionInfo.current)
     bell.current = bells
@@ -214,7 +234,9 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         } catch {
           return
         }
-        if (!openBrowserTab(url)) setBlockedLink(url)
+        void openBrowserTab(url).then(opened => {
+          if (!opened) setBlockedLink(url)
+        })
       },
     })
     socket.current = client
@@ -280,6 +302,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       client.close()
       bells.dispose()
       shims.dispose()
+      stopSelectAll?.()
       term.dispose()
       socket.current = null
       historyControls.current = null
@@ -347,8 +370,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             disabled={notifications.requesting}
             onClick={() => {
               setNotificationHelpShown(true)
-              if (appWindow || window.matchMedia('(display-mode: standalone)').matches) notifications.openSetup()
-              else notifications.request()
+              notifications.request()
             }}
           >
             {notifications.requesting ? (
@@ -449,7 +471,9 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           <button
             className="button small primary"
             onClick={() => {
-              if (openBrowserTab(blockedLink)) setBlockedLink(null)
+              void openBrowserTab(blockedLink).then(opened => {
+                if (opened) setBlockedLink(null)
+              })
             }}
           >
             Open link

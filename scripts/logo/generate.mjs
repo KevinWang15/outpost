@@ -11,7 +11,7 @@ const browser = await chromium.launch({ headless: true })
 try {
   const page = await browser.newPage()
   const icons = new Map()
-  for (const size of [16, 32, 48, 180, 512]) {
+  for (const size of [16, 32, 48, 180, 256, 512]) {
     const data = await page.evaluate(
       async ({ svg, size }) => {
         const image = new Image()
@@ -28,7 +28,13 @@ try {
     const pixels = Buffer.from(data, 'base64')
     icons.set(size, pixels)
     const filename =
-      size === 512 ? 'outpost.png' : size === 180 ? 'apple-touch-icon.png' : `favicon-${size}x${size}.png`
+      size === 256
+        ? 'outpost-256.png'
+        : size === 512
+          ? 'outpost.png'
+          : size === 180
+            ? 'apple-touch-icon.png'
+            : `favicon-${size}x${size}.png`
     if (size !== 48) await writeFile(new URL(filename, publicDirectory), pixels)
   }
 

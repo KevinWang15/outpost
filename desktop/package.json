@@ -1,0 +1,20 @@
+{
+  "name": "outpost-desktop",
+  "productName": "Outpost",
+  "version": "0.1.0",
+  "description": "Outpost desktop terminal",
+  "author": "Outpost contributors",
+  "license": "MIT",
+  "private": true,
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node ../scripts/build-desktop.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dev": "npm run build && electron .",
+    "package": "npm run build && electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3"
+  }
+}

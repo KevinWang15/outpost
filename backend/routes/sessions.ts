@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { desktopOrigin, type DesktopLaunch } from '../../shared/desktop'
 import type { ConversationSearch, SessionForkInput, SessionImageInput, SessionInput } from '../../shared/model'
 import type { ConnectRequest, ConnectResponse, ConnectionStatus } from '../../shared/protocol'
 import { AppError } from '../errors'
@@ -91,23 +92,33 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
         const context = await services.context(request, request.params.targetId)
         const session = await sessions.get(context, request.params.sessionId, signal)
         const { terminal } = request.body
+        let origin: string | undefined
+        if (terminal === 'desktop') {
+          try {
+            origin = desktopOrigin(deployment.origin(request))
+          } catch {
+            throw new AppError('Outpost Desktop requires HTTPS, or HTTP on localhost.')
+          }
+        }
         const issued = tokens.issue({
           owner: context.owner,
           targetId: context.target.id,
           sessionId: session.id,
           terminal,
         })
-        const link = {
-          v: 1,
-          server: deployment.origin(request),
-          token: issued.token,
-          terminal,
-          title: `${session.name} · ${context.target.name}`,
-        }
+        const link: DesktopLaunch | null =
+          terminal === 'desktop'
+            ? {
+                v: 1,
+                server: origin!,
+                token: issued.token,
+                terminal: 'desktop',
+                title: `${session.name} · ${context.target.name}`,
+              }
+            : null
         return {
           ...issued,
-          url:
-            terminal === 'web' ? null : `outpost://connect/${Buffer.from(JSON.stringify(link)).toString('base64url')}`,
+          url: !link ? null : `outpost://connect/${Buffer.from(JSON.stringify(link)).toString('base64url')}`,
         } satisfies ConnectResponse
       }),
   )

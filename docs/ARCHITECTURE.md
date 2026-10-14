@@ -1,8 +1,7 @@
 # Outpost v2 architecture
 
 Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code) running in tmux
-on Linux machines, and lets you return to them from a browser or from your own
-terminal app as if the session were running on your computer.
+on Linux machines, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
 
 This document is the source of truth for how Outpost behaves and why. Code
 comments refer back to the principles below by name.
@@ -13,7 +12,7 @@ comments refer back to the principles below by name.
    server on its target. Every connection is disposable: connecting means
    attaching, reconnecting means attaching again, and tmux redraws the screen.
    Outpost never holds PTYs, screen snapshots or replay buffers.
-2. **One connection path.** Every terminal — web, browser app or native —
+2. **One connection path.** Every terminal — browser or Electron —
    uses the same chain:
 
    ```text
@@ -32,12 +31,12 @@ comments refer back to the principles below by name.
 5. **The client shims the platform.** Making a remote session feel native
    (paste an image with the usual shortcut, Shift+Enter for a newline, copying
    to your clipboard, opening links on your computer) is the client's job.
-   Knowledge about a particular terminal app lives in one launcher adapter.
-   OS URL handlers are shared by all launchers on that OS.
+   Electron owns a narrow native capability bridge; renderer and connection
+   code stay in the shared frontend.
 6. **Explicit gestures only.** The local clipboard is read only on a paste
    gesture, never polled. Remote programs can copy to your clipboard (OSC 52)
    and ask to open `http(s)` links, but can never read your clipboard.
-7. **Extensible at the edges, small in the middle.** Native terminals, coding
+7. **Extensible at the edges, small in the middle.** Desktop capabilities, coding
    harnesses, signal types and transports are registries or interfaces. The
    data path between them stays a dumb, well-specified pipe.
 
@@ -45,9 +44,8 @@ comments refer back to the principles below by name.
 
 ```text
                  ┌──────────── your computer ────────────┐
-  Browser UI ────┤ web / Terminal app (same xterm.js)     │
-                 │ native connector (Python) in iTerm2 / │
-                 │   Windows Terminal + WSL              │
+  Browser UI ────┤ web / Outpost Desktop (same xterm.js)  │
+                 │ Electron: OS links, clipboard, bells  │
                  └───────────────┬───────────────────────┘
                                  │ HTTPS + WebSocket (terminal protocol)
                  ┌───────────────┴───────────────────────┐
@@ -68,14 +66,13 @@ comments refer back to the principles below by name.
 | `frontend/` | Browser | Workspace UI, Connect dialog, web terminal client |
 | `backend/` | Outpost server | HTTP API, deployments, transports, terminal broker |
 | `runtime/` | Targets | Session registry, tmux control, relay, harness adapters |
-| `connector/` | Your computer | Native terminal client, installer, OS link handlers and client launchers |
-| `shared/` | Browser + server | Types, harness and connector-launcher registries, protocol |
+| `desktop/` | Your computer | Electron shell, native capabilities, trusted servers and installers |
+| `shared/` | Browser + desktop + server | Schemas, harness registry, terminal protocol, desktop bridge contract |
 
 **One definition per contract.** Request and stored-record shapes are TypeBox
 schemas in `shared/schemas.ts`; the server validates with them and the types in
 `shared/model.ts` are derived from them. Contracts that also exist in Python —
-the harness and terminal registries, the terminal protocol's version, message
-types, close reasons and signals, and the relay framing — are checked against
+the harness registry and relay framing — are checked against
 each other by `tests/unit/contracts.test.ts`. Browser entry paths live in
 `shared/pages.ts`, shared by navigation and the production SPA fallback. A new
 browser page must be registered there so development and production agree.
@@ -86,9 +83,8 @@ browser page must be registered there so development and production agree.
 | --- | --- |
 | Targets (where sessions run) | Linux with Bash, Python 3.9+ and tmux 3.2+. SSH as root, or the Outpost computer itself when the server runs on Linux (including WSL). |
 | Outpost server | Node.js 24+ with OpenSSH, on Linux (including WSL) or macOS. Hosted deployments run on Linux. |
-| Native terminals | macOS: iTerm2. Windows: Windows Terminal with a WSL distribution (Bash, Python 3). |
 | Web terminal | Any current browser, including phones. |
-| Terminal app | Chrome or Edge on macOS / Windows. Connector runs on macOS (Python 3.9+) or WSL (Bash, Python 3). Windows Terminal is optional. |
+| Outpost Desktop | Packaged Electron for macOS arm64/x64 and Windows x64. No Python, WSL or installed browser required. |
 
 The web terminal pins a built package from the `outpost-6.0` branch of
 [KevinWang15/xterm.js](https://github.com/KevinWang15/xterm.js/tree/outpost-6.0).
@@ -117,51 +113,41 @@ branch on the mode.
 
 ### Connect flow
 
-1. The UI calls `POST /api/targets/:t/sessions/:s/connect` with the chosen
-   terminal (`web`, `terminal-app`, `iterm2`, `windows-terminal`). The server checks the
-   session exists and returns a **launch token** (HMAC-signed, 5 minutes,
-   single use) bound to owner, target and session.
-2. **Web terminal:** the browser opens `wss://…/api/terminal?token=…`.
-   **Connector choices:** the browser navigates to `outpost://connect/<payload>`.
-   The OS handler calls `outpost-connector open <url>`, validates server trust,
-   then dispatches through the launcher registry. Native launchers run
-   `outpost-connector attach <url>` in a terminal tab. Terminal app opens
-   `/terminal/app#token=<launch>` in a Chrome/Edge app window; the page removes
-   the fragment and opens the same WebSocket with the existing web client.
-3. The first message from the server is `hello` with a **resume token**
-   (30 days, validated against the live login on every use, revoked on sign-out).
-   Reconnects send it in the WebSocket upgrade query. It never appears in
-   launcher links, page URLs or process arguments. Proxies must not log
-   `/api/terminal` query strings. Outpost disables request logging.
-4. For connector choices the UI polls `GET /api/connections/:id` to confirm
-   the client attached, or offers setup help. Retrying requests a fresh launch
-   ticket, so installation delays and previously consumed links are recoverable.
+1. The UI chooses `web` or `desktop` (`shared/terminals.ts`). The authenticated
+   `POST /api/targets/:t/sessions/:s/connect` route checks ownership and issues a
+   signed, single-use launch ticket valid for five minutes.
+2. Web opens `/terminal?target=…&session=…`, whose authenticated page requests
+   its ticket. Desktop receives `outpost://connect/<base64url payload>` with
+   `{v: 1, terminal: 'desktop', server, token, title}`. Electron validates the
+   envelope and HTTPS/localhost origin, confirms server trust, and loads
+   `/terminal/desktop#token=…` from that origin.
+3. Both entry pages render `TerminalView` and use `TerminalSocket` to connect
+   to `/api/terminal`. The broker returns a 30-day resume token in `hello`.
+   Both grants remain bound to the originating login and one session; logout
+   revokes them and closes live connections. Resume tokens never appear in
+   OS links or page URLs. Proxies must not log WebSocket query strings.
+4. The desktop Connect dialog polls `/api/connections/:id` until attached.
+   Retrying issues a fresh ticket. Electron deduplicates repeated launches of
+   the same ticket and limits windows and pending launches to 16 each.
 
 ### Client choices and shared responsibilities
 
-| Choice | Launcher | Client that owns the WebSocket | Initial authorization |
+| Choice | Entry | Authorization | Native integration |
 | --- | --- | --- | --- |
-| Web terminal | `ConnectDialog` opens `/terminal?target=…&session=…` | `TerminalView` → `TerminalSocket` | `AuthGate` and `TerminalPage` request a grant using the browser login |
-| Terminal app | Connector → `terminal_app` → OS browser app window | The same `TerminalView` → `TerminalSocket` | `appTicket` consumes the launch fragment; broker validates the grant |
-| iTerm2 | Connector → `iterm2` → native tab | Python `Session` | The same launch grant in `outpost://` |
-| Windows Terminal | Connector → `windows_terminal` → WSL tab | Python `Session` | The same launch grant in `outpost://` |
+| Web terminal | `TerminalPage`, `/terminal` | Browser login requests a grant | Browser permissions and clipboard APIs |
+| Outpost Desktop | `DesktopTerminalPage`, `/terminal/desktop` | `appTicket` consumes the launch fragment | Versioned `DesktopBridge` through a sandboxed preload |
 
-`frontend/Root.tsx` routes `/terminal/app` and the browser notification setup
-page `/notifications` outside `AuthGate`. Serving these pages does not authorize
-a connection or grant account API access. The broker
-checks the same signed grant, session ownership and original login liveness
-for every client. Opening Terminal app from a different browser/profile needs
-no copied login cookie, second account token or connector HTTP service.
+`/terminal/desktop`, `/desktop` (downloads) and `/notifications` (browser setup)
+are public page shells. The terminal broker authorizes each connection; these
+pages confer no account API access. Desktop needs no copied login cookie or
+second authentication system.
 
-`appTicket.ts` removes the launch fragment before React renders, stores it in
-window-scoped `sessionStorage`, and replaces it with the resume token on
-`hello`. This survives reloads and automatic reconnects while keeping separate
-windows independent. Explicit Close or an expired/revoked grant clears it.
-If storage is unavailable, the socket still reconnects in memory; a reload
-requires a fresh Connect. Resume grants never enter `localStorage`. Browser
-session restoration may retain session storage; the originating login remains
-the revocation boundary. Launch grants expire after five minutes, resume
-grants after 30 days, and both are bound to the original login and one session.
+`appTicket` erases the fragment before React renders, replaces the launch ticket
+with the resume grant on `hello`, and clears it on explicit Close or expiry.
+Window-scoped session storage permits reloads. Electron uses nonpersistent
+partitions per server, so no browser login or terminal ticket is written to
+its preferences. If session storage is unavailable, reconnect works in memory
+but reload requires a fresh Connect.
 
 Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
@@ -174,7 +160,7 @@ The relay advertises `ready.scrollback`; interested clients subscribe with a
 count, offset, rows and copy-mode availability) returns to the browser. The
 target's `Scrollback` adapter uses tmux `copy-mode`, `goto-line` and `cancel`;
 tmux redraws through the usual PTY stream. Seeking the bottom exits copy mode.
-Native clients do not subscribe. Compatibility remains tmux 3.2+.
+Both clients subscribe. Compatibility remains tmux 3.2+.
 
 Metadata reads are triggered by input/output/resize, capped at two per second
 and skipped when idle. Drag destinations are coalesced, capped at ten per
@@ -208,56 +194,20 @@ Copy mode still takes precedence when explicitly entered.
 These controls expose no invented history length. A clean exit and reconnect
 of the same conversation applies the inline default and enables the scrollbar.
 
-`useBellNotifications` owns notification permission requests for both terminals
-and the public setup page. App windows open `/notifications` directly from the
-bell click, without issuing a permission request in the chrome-less window.
-The setup page and regular web terminal request permission on a click; the busy indicator ends
-after eight seconds if the browser leaves its prompt unanswered. The original
-request remains observed, with no duplicate requests queued. Permission changes
-are read from the browser through the Permissions API and on focus/visibility
-changes. Setup uses the shared browser-tab opener, outside the manifest's
-`/terminal/` scope, with no opener, referrer or terminal ticket. The page names
-the current browser and explains that it must match the terminal's browser
-and profile; permissions are not shared between Chrome and Edge.
-This makes site permission controls accessible when an app window hides its
-prompt. The page never calls account APIs or opens a terminal connection.
+`useBellNotifications` manages browser permission requests, with an eight-second
+busy timeout and permission refresh on focus. Desktop uses the bridge's native
+notification capability; no browser permission prompt is involved. The shell
+rechecks that the window is in the background, groups pending notifications,
+and focuses the owning window when clicked. System Focus / Do Not Disturb
+and notification settings still apply. Shared `bell.ts` owns attention state
+and the chime; the native notification is silent to avoid duplicate sound.
 
-The app has a `display: standalone` manifest with a credential-free start URL
-and `launch_handler.client_mode: navigate-new`, so new connections do not replace
-another session's window. Browser-menu installation supplies the Outpost Dock
-identity on macOS; a bare Chromium `--app` window uses the browser's identity.
-The tokenless app entry provides installation instructions, linked from Connect.
-
-On macOS, connector 2.1.3 first looks for a browser-created app bundle in the
-user/system Applications directories and their browser `*.localized` folders.
-`desktop/macos_pwa.py` matches its `CrAppModeShortcutURL` to the exact server's
-credential-free app URL, checks `CrBundleIdentifier` for Chrome/Edge, and requires
-the `web+outpost` scheme in `CFBundleURLTypes`. It prefers an installed app over
-a bare browser, then Chrome over Edge. Bundle names do not establish identity.
-Unreadable/malformed plists and older apps lacking the scheme are skipped.
-The connector neither reads browser profile databases nor edits browser bundles.
-
-macOS delivers ordinary HTTPS URLs to PWA shims as protocol launches, which
-Chromium rejects unless registered. Instead, the manifest registers the standard
-PWA custom scheme `web+outpost` with `/terminal/app#launch=%s`. The connector opens
-`web+outpost://connect/<ticket>` using `open -a <matching app bundle>`; explicitly
-selecting the bundle avoids a global scheme association sending a ticket to a
-different Outpost server. The browser may ask once to allow these launches.
-`appTicket` unwraps only that fixed envelope, erases the fragment before render,
-and passes the same scoped ticket to the existing broker. No new credentials,
-login-cookie sharing, or account-authentication path are introduced. See
-[Chromium's app launcher](https://github.com/chromium/chromium/blob/main/chrome/browser/apps/app_shim/web_app_shim_manager_delegate_mac.cc)
-and [PWA protocol handlers](https://developer.chrome.com/docs/web-platform/best-practices/url-protocol-handler).
-
-Without a matching installed app, macOS falls back to Chrome/Edge `--app` mode.
-Windows continues to use that mode. The hidden `Outpost Connector.app` remains
-the short-lived `outpost://` dispatcher; the browser owns the terminal window's
-Dock icon and lifetime. Connector updates require rerunning the installer.
-A pinned app starts at the connection instructions; the Connect dialog chooses
-sessions. There is no service worker, offline terminal cache, browser-profile
-cookie dependence or extra relay. See
-[Chrome's installation criteria](https://developer.chrome.com/blog/update-install-criteria)
-for browser-menu installation without a service worker.
+Both clients load xterm's WebGL addon after opening the terminal. Initialization
+failure or context loss disposes the addon and falls back to the DOM renderer.
+Terminal parsing and broker flow control do not depend on the renderer. Output
+acknowledgements are batched at 64 KiB or 20 ms, at most every 10 ms, after
+xterm's write callback;
+callbacks from an old connection cannot acknowledge a new socket's output.
 
 ### Terminal protocol (client ⇄ broker, WebSocket)
 
@@ -280,13 +230,12 @@ JSON control messages (`shared/protocol.ts`):
 
 The server pauses the transport when more than 1 MiB is unacknowledged.
 
-**Compatibility.** Connectors are installed on users' computers and lag behind
-servers, so every client sends `?protocol=<version>` (`protocolVersion` in
-`shared/protocol.ts`, `PROTOCOL` in the connector). The server accepts only its
-own version and otherwise closes with `outdated`: connectors are shown the
-install command, browsers are asked to reload. The check happens before the
-launch token is redeemed. Additive changes that old clients ignore keep the
-version; anything an old client would misread bumps it.
+**Compatibility.** Both clients send `protocolVersion` from `shared/protocol.ts`.
+A mismatch returns `outdated` before redeeming the launch ticket and asks the
+user to reload. Desktop loads the same frontend from its server. Changes to the
+native bridge use `desktopBridgeVersion`; new native capabilities require an
+app release. Additive wire changes may keep the protocol version; changes that
+an old client would misread bump it.
 
 ### Relay protocol (broker ⇄ relay, stdio)
 
@@ -346,48 +295,40 @@ and passes it to the client on that connection, which opens the link on your
 computer. Delivery is at most once. With no attached terminal, the helper
 fails with a clear message.
 
-## Connector launchers and OS integration
+## Desktop shell and OS integration
 
-`shared/terminals.ts` lists connector choices for the UI (id, name, supported
-OSes, requirements and key hints). `connector/outpost_connector/terminals/`
-holds one launcher per id, with `PLATFORMS`, `install`, `uninstall` and `open`.
-The contract test checks names/platforms and the app entry path across Python,
-TypeScript and the manifest. New launchers reuse the existing grant/protocol.
+`desktop/` is a separate npm package, so server builds never download Electron.
+`main.ts` owns app lifecycle, menus, server trust and `outpost://` dispatch.
+`launch.ts` validates the envelope; `store.ts` atomically serializes only trusted
+origins. `terminals.ts` owns terminal windows and validates every IPC sender.
+The local home page has a different preload and capability set from remote
+terminal windows. No generic IPC or Node API is exposed.
 
-`connector/outpost_connector/desktop/` owns one URL handler per OS. macOS
-installs a signed AppleScript app that invokes `connector open`. Windows
-registers a hidden PowerShell handler that calls WSL `connector open`, with
-the distro and launcher stored as UTF-8 JSON. Every launch is validated before
-dispatch. The Windows handler does not require `wt.exe`; only its native
-launcher does. Terminal adapters install optional profiles separately, so
-the handler cannot be overwritten by whichever adapter installs last.
+Remote windows use sandboxing, context isolation, no Node integration, no
+webviews and no popups/downloads. Top-level navigation is restricted to the
+selected server's desktop terminal entry; TLS failures are not bypassed.
+Clipboard reads use native paste events. The paste bridge checks transient user
+activation in its isolated preload; web clipboard permissions are denied.
+Only that window's main frame may invoke the bridge. External links pass the
+same HTTP(S), no-credentials validator as broker signals and open through
+Electron's shell API, without constructing shell commands. Clipboard copying
+is focused-window only and bounded to 1 MiB. OSC 52 queries remain ignored.
 
-| Terminal | Integration installed by the connector | Native shortcuts |
-| --- | --- | --- |
-| Terminal app | No terminal profile; uses the shared OS handler to launch Chrome/Edge | Same as web terminal |
-| iTerm2 | *Outpost* dynamic profile mapping ⌘V to Outpost paste, ⇧↩ to CSI u, Option as Meta | ⌘V pastes text and images, ⇧↩ newline |
-| Windows Terminal | *Outpost* fragment profile running WSL (skipped if Windows Terminal is absent) | Ctrl+V text (native), Alt+V or Ctrl+V-with-image pastes images, Ctrl+Enter newline |
+Packaged apps register the protocol through Electron and installer metadata.
+macOS handles `open-url` before app readiness; Windows uses initial arguments
+and `second-instance`. A single app instance owns independent session windows.
+Closing a window never terminates tmux. App home can forget a server and close
+its windows. The app icon and Windows AppUserModelID belong to Outpost.
 
-The Python native client handles, for iTerm2 and Windows Terminal:
+`electron-builder.yml` packages unsigned preview DMG/ZIP files for both Mac
+architectures and an NSIS installer for Windows x64. Apple silicon uses ad-hoc
+signing, without Developer ID or notarization. All packaging workflows are
+manual; no build runs on push. `updates.ts` checks GitHub desktop releases only
+when asked and opens a newer release for manual installation. There is no
+background updater for these previews. See [desktop development](../CONTRIBUTING.md).
 
-- **Paste:** the private Outpost paste key (`ESC [9001~`, sent by profile key
-  mappings) reads the clipboard and pastes an image or bracketed text; Ctrl+V
-  and Alt+V paste an image when the clipboard holds one and otherwise pass
-  through unchanged. Keystrokes typed after a paste gesture wait for the
-  clipboard decision, so their order is kept. Images go to the target over the
-  open connection and their path is pasted into tmux once. Gestures inside a
-  bracketed paste or a terminal reply are never interpreted.
-- **Copy:** OSC 52 from tmux or the coding tool is written to your clipboard
-  and stripped from the stream, so no terminal permission prompt is needed.
-- **Links:** `signal` messages open URLs with the OS (`open`, Windows shell).
-- **Reconnect:** network drops reconnect automatically; detaching or the
-  session ending shows a banner (Enter reconnects, Ctrl+C closes).
-
-Native clipboard and remote link access are platform adapters (`platforms.py`),
-separate from desktop launchers. Terminal app hands off to the web client and
-does not start the Python `Session` or proxy the socket. Re-running the installer
-upgrades the shared handlers and profiles; uninstall removes all of them and
-all trusted servers. It does not remove browsers or manually installed PWAs.
+The Python connector, native-terminal profiles and PWA manifest are removed.
+Their replacement and offline uninstall steps are documented in the README.
 
 ## Coding harnesses
 
@@ -420,26 +361,24 @@ validated strictly; invalid data is reported, never rewritten.
   checked; tokens are HMAC-signed with the installation secret.
 - Hosted SSH uses only the account's key and known-hosts file (`-F none`, no
   agent). Connection multiplexing sockets are scoped per owner and identity.
-- The connector only talks to Outpost servers you trusted when installing it;
-  `outpost://` links for other servers are refused before any network access.
+- Desktop confirms unknown server origins before loading their UI. Trust is
+  explicit and revocable from app home; only HTTPS and localhost HTTP qualify.
 - Images are limited to 16 MB, signals to 32 KiB and 120 per minute per
   connection, clipboard text to 1 MiB.
 
 ## Extending Outpost
 
-**Add a connector choice.** Add an entry to `shared/terminals.ts` and a launcher
-in `connector/outpost_connector/terminals/` implementing `PLATFORMS`, `install`,
-`uninstall` and `open`; register it in `terminals/__init__.py`. Reuse the OS
-handler in `desktop/`. For a new OS, add its desktop handler and, if needed by
-a native client, clipboard/URL adapters in `platforms.py`. Do not add another
-backend connection route or broker for a new presentation of the same terminal.
+**Add a desktop capability.** Define its narrow contract in `shared/desktop.ts`,
+expose one method in the preload and validate the sender and all arguments in
+the main process. Keep terminal behavior in the frontend; do not create another
+broker, authentication scheme or desktop copy of `TerminalView`.
 
 **Add a coding harness.** Add an entry to `shared/harnesses.ts`, then
 `runtime/outpost_<id>.py` (adapter) and `runtime/outpost_<id>_store.py`
 (store), and register the adapter in `outpost_harness.py`.
 
 **Add a signal type.** Define a validator in `shared/signals.ts`, allow it in
-the broker, and handle it in both clients.
+the broker, and handle it in the shared client, delegating native actions through the bridge.
 
 ## Verification
 
@@ -447,6 +386,6 @@ the broker, and handle it in both clients.
 | --- | --- |
 | Runtime and relay | `tests/runtime/` — real tmux in a disposable home: lifecycle, framing, resize, image paste, signals, v1 import, activity semantics |
 | Server | `tests/unit/` — tokens, workspace and import, API validation and network policy, hosted isolation and revocation, broker against a fake relay, TypeScript ⇄ Python contracts |
-| Whole path | `tests/integration/` — local targets over WebSocket; the served connector in a PTY (paste, OSC 52, links, detach, automatic reconnect); SSH in Docker with tmux 3.2 in both modes; conversation discovery |
-| Browser | `tests/browser/` — real backend: add target, create session, web terminal, native connect confirmed by a real connector, phone layout |
-| Platforms | `tests/connector/` — shims and generated terminal integrations everywhere; real iTerm2 handler build and clipboards on macOS and Windows CI runners |
+| Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with tmux 3.2 in both modes; conversation discovery |
+| Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout |
+| Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |

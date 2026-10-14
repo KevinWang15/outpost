@@ -1,8 +1,10 @@
 import type { Terminal } from '@xterm/xterm'
+import { desktop } from '../desktop'
 
 export type BellNotificationPermission = NotificationPermission | 'unsupported' | 'insecure'
 
 export function bellNotificationPermission(): BellNotificationPermission {
+  if (desktop) return desktop.notificationsSupported ? 'granted' : 'unsupported'
   if (!window.isSecureContext) return 'insecure'
   if (typeof window.Notification !== 'function') return 'unsupported'
   return Notification.permission
@@ -22,6 +24,7 @@ export function attachBell(
   let lastSound = -Infinity
   const active = () => document.visibilityState === 'visible' && document.hasFocus()
   const closeNotification = () => {
+    if (desktop) void desktop.dismissBell().catch(() => {})
     const current = notification
     notification = null
     if (!current) return
@@ -40,6 +43,18 @@ export function attachBell(
   }
   const showNotification = () => {
     if (active() || notified || bellNotificationPermission() !== 'granted') return
+    if (desktop) {
+      notified = true
+      void desktop.notifyBell(session().name).then(
+        shown => {
+          if (!shown) notified = false
+        },
+        () => {
+          notified = false
+        },
+      )
+      return
+    }
     try {
       const current = new Notification('Outpost · Terminal bell', {
         body: `${session().name} rang a bell`,

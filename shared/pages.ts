@@ -2,8 +2,8 @@
 export const pagePaths = {
   workspace: '/',
   terminal: '/terminal',
-  terminalApp: '/terminal/app',
-  // Outside the terminal manifest scope so setup opens in a regular browser tab.
+  desktopTerminal: '/terminal/desktop',
+  desktop: '/desktop',
   notifications: '/notifications',
   login: '/login',
   signup: '/signup',

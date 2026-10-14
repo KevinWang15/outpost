@@ -75,7 +75,10 @@ try {
   await page.getByRole('row').filter({ hasText: 'Billing API refactor' }).waitFor()
   await page.screenshot({ path: new URL('workspace.png', images).pathname })
   await page.getByRole('button', { name: 'Connect' }).first().click()
-  await page.getByRole('dialog').getByText('Desktop terminals · requires connector').waitFor()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: /Outpost Desktop/ })
+    .waitFor()
   await page.screenshot({ path: new URL('connect.png', images).pathname })
   const opened = page.waitForEvent('popup')
   await page.getByRole('button', { name: /Web terminal/ }).click()

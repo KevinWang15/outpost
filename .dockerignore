@@ -10,8 +10,6 @@
 !shared/**
 !runtime/
 !runtime/**
-!connector/
-!connector/**
 !frontend/
 !frontend/**
 !public/

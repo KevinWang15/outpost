@@ -1,0 +1,83 @@
+name: Desktop previews
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a prerelease after both platforms build
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+            arguments: --mac --arm64 --x64
+          - os: windows-latest
+            platform: windows
+            arguments: --win --x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci
+      - run: npm --prefix desktop ci
+      - run: npm --prefix desktop run typecheck
+      - run: npm --prefix desktop run package -- ${{ matrix.arguments }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: outpost-desktop-${{ matrix.platform }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+
+  publish:
+    if: inputs.publish
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Publish unsigned preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./desktop/package.json').version")
+          tag="desktop-v$version"
+          # Releases are immutable: bump desktop/package.json before publishing again.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; bump the desktop version."
+            exit 1
+          fi
+          (cd installers && sha256sum * > SHA256SUMS)
+          gh release create "$tag" installers/* --target "$GITHUB_SHA" --prerelease \
+            --title "Outpost Desktop $version (unsigned preview)" --notes-file desktop/RELEASE_NOTES.md

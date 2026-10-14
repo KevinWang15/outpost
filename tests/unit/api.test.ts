@@ -139,7 +139,7 @@ test('connect returns a web token or an outpost:// link for the chosen terminal'
   assert.equal((await call('POST', path, { terminal: 'kitty' })).status, 400)
   const web = (await call('POST', path, { terminal: 'web' })).body as ConnectResponse
   assert.equal(web.url, null)
-  for (const terminal of ['windows-terminal', 'iterm2', 'terminal-app']) {
+  for (const terminal of ['desktop']) {
     const connection = (await call('POST', path, { terminal })).body as ConnectResponse
     const link = JSON.parse(Buffer.from(connection.url!.slice('outpost://connect/'.length), 'base64url').toString())
     assert.deepEqual(link, {
@@ -199,7 +199,7 @@ test('the broker relays a terminal and reports attach failures', async t => {
     rootDir: '~/p',
     tool: 'claude',
   })) as { body: Session }
-  const connect = async (terminal = 'iterm2') =>
+  const connect = async (terminal = 'desktop') =>
     (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal })).body as ConnectResponse
   const { token, id } = await connect()
   const client = new TerminalClient(
@@ -265,14 +265,6 @@ test('the broker relays a terminal and reports attach failures', async t => {
   assert.deepEqual(await broken.message('closed'), { type: 'closed', reason: 'error', message: 'Session not found' })
 })
 
-test('the connector is served with an installer for this server', async t => {
-  const { app, port } = await setup(t)
-  const script = await app.inject({ url: '/connector/install.sh', headers: { host: `127.0.0.1:${port}` } })
-  assert.match(script.body, new RegExp(`server='http://127.0.0.1:${port}'`))
-  const archive = await app.inject({ url: '/connector/outpost-connector.pyz', headers: { host: `127.0.0.1:${port}` } })
-  assert.equal(archive.rawPayload.subarray(0, 2).toString(), 'PK')
-})
-
 test('clients speaking another protocol version are told to update, without spending the launch token', async t => {
   const { port, call } = await setup(t)
   const { body: target } = (await call('POST', '/targets', {
@@ -286,17 +278,13 @@ test('clients speaking another protocol version are told to update, without spen
     rootDir: '~/p',
     tool: 'claude',
   })) as { body: Session }
-  const { token } = (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: 'iterm2' }))
-    .body as ConnectResponse
+  const { token } = (
+    await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: 'desktop' })
+  ).body as ConnectResponse
   const base = `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`
-  const connector = new TerminalClient(`${base}&client=connector&protocol=1`)
-  t.after(() => connector.socket.terminate())
-  const outdated = await connector.message('closed')
-  assert.equal(outdated.reason, 'outdated')
-  assert.match(outdated.message, new RegExp(`curl -fsSL 'http://127.0.0.1:${port}/connector/install.sh' \\| bash`))
   const page = new TerminalClient(`${base}&client=web&protocol=`)
   t.after(() => page.socket.terminate())
-  assert.equal((await page.message('closed')).message, 'Outpost was updated. Reload this page to reconnect.')
+  assert.equal((await page.message('closed')).message, 'Outpost was updated. Reload this terminal to reconnect.')
   const current = new TerminalClient(base)
   t.after(() => current.socket.terminate())
   await current.message('ready')
@@ -316,7 +304,7 @@ test('the production server serves the terminal page on direct navigation and re
   await app.listen({ host: '127.0.0.1', port: 0 })
   const port = (app.server.address() as { port: number }).port
   for (const method of ['GET', 'HEAD'] as const) {
-    for (const url of ['/terminal?target=box&session=session', '/terminal/app']) {
+    for (const url of ['/terminal?target=box&session=session', '/terminal/desktop', '/desktop']) {
       const response = await app.inject({
         method,
         url,

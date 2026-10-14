@@ -1,4 +1,4 @@
-// Terminal protocol between clients (web terminal, native connector) and the
+// Terminal protocol between clients (web terminal and desktop app) and the
 // broker. Binary WebSocket frames carry raw terminal bytes; text frames carry
 // these JSON messages. See docs/ARCHITECTURE.md → "Terminal protocol".
 import type { Static } from 'typebox'

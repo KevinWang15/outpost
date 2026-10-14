@@ -1,5 +1,14 @@
-/** Open directly from a click, with popup detection and no retained opener. */
-export function openBrowserTab(url: string) {
+import { desktop } from '../desktop'
+
+/** Browser opens stay in the click's call stack; desktop uses the OS default browser. */
+export async function openBrowserTab(url: string) {
+  if (desktop) {
+    try {
+      return await desktop.openExternal(url)
+    } catch {
+      return false
+    }
+  }
   const tab = window.open('about:blank', '_blank')
   if (!tab) return false
   try {

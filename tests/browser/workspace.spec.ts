@@ -1,11 +1,5 @@
-import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from '@playwright/test'
 
-const fixtures = fileURLToPath(new URL('../fixtures/', import.meta.url))
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)])
 
 async function addTarget(page: Page, name: string) {
@@ -38,14 +32,7 @@ test('add a target, create a session, and work in the web terminal', async ({ pa
 
   await row.getByRole('button', { name: 'Connect' }).click()
   const connect = page.getByRole('dialog', { name: 'Connect to Browser session' })
-  await expect(connect.getByText('Desktop terminals · requires connector')).toBeVisible()
-  await expect(connect.getByRole('button', { name: /iTerm2/ })).toBeVisible()
-  await expect(connect.getByRole('button', { name: /Windows Terminal/ })).toBeVisible()
-  await connect.getByRole('combobox', { name: 'Operating system' }).selectOption('windows')
-  await expect(connect.getByRole('button', { name: /iTerm2/ })).toBeHidden()
-  await expect(connect.getByRole('button', { name: /Terminal app/ })).toBeVisible()
-  await connect.getByRole('combobox', { name: 'Operating system' }).selectOption('macos')
-  await expect(connect.getByRole('button', { name: /Terminal app/ })).toBeVisible()
+  await expect(connect.getByRole('button', { name: /Outpost Desktop/ })).toBeVisible()
   const popupPromise = page.waitForEvent('popup')
   await connect.getByRole('button', { name: /Web terminal/ }).click()
   const popup = await popupPromise
@@ -84,48 +71,7 @@ test('add a target, create a session, and work in the web terminal', async ({ pa
   await expect(row).toContainText('Stopped')
 })
 
-test('choosing a native terminal opens the link and confirms when the connector attaches', async ({ page }) => {
-  await addTarget(page, 'Native box')
-  await createSession(page, 'Native session', '~/native-project')
-  await page.getByRole('row').filter({ hasText: 'Native session' }).getByRole('button', { name: 'Connect' }).click()
-  const connect = page.getByRole('dialog', { name: 'Connect to Native session' })
-  const response = page.waitForResponse(
-    response => response.url().endsWith('/connect') && response.request().method() === 'POST',
-  )
-  await connect.getByRole('button', { name: /iTerm2/ }).click()
-  const { url } = await (await response).json()
-  expect(url).toMatch(/^outpost:\/\/connect\//)
-  await expect(connect.getByText('Opening iTerm2…')).toBeVisible()
-  await expect(connect.getByText('Nothing opened?')).toBeVisible({ timeout: 12_000 })
-  await expect(connect.getByLabel('Connector install command')).toContainText(
-    /^curl -fsSL 'http:\/\/127\.0\.0\.1:\d+\/connector\/install\.sh' \| bash$/,
-  )
-
-  // Play the part of the outpost:// handler: run the served connector on this link.
-  const home = await mkdtemp(join(tmpdir(), 'outpost-connector-ui-'))
-  const archive = join(home, 'outpost-connector.pyz')
-  await writeFile(archive, Buffer.from(await (await page.request.get('/connector/outpost-connector.pyz')).body()))
-  await writeFile(
-    join(home, 'config.json'),
-    JSON.stringify({ servers: [JSON.parse(Buffer.from(url.slice(18), 'base64url').toString()).server] }),
-  )
-  const connector = spawn(
-    'python3',
-    [join(fixtures, 'pty_driver.py'), '100', '30', '--', 'python3', archive, 'attach', url],
-    { env: { ...process.env, OUTPOST_CONNECTOR_HOME: home, OUTPOST_CONNECTOR_FAKE: home } },
-  )
-  try {
-    await expect(connect.getByText('Connected in iTerm2')).toBeVisible()
-    await expect(page.getByRole('row').filter({ hasText: 'Native session' })).toContainText('Attached', {
-      timeout: 20_000,
-    })
-  } finally {
-    connector.kill()
-    await rm(home, { recursive: true, force: true })
-  }
-})
-
-test('Terminal app uses the connector flow and retries with a fresh ticket', async ({ page, context }) => {
+test('Outpost Desktop uses the launch flow and retries with a fresh ticket', async ({ page, context }) => {
   await addTarget(page, 'Desktop app box')
   await createSession(page, 'Desktop app session', '~/desktop-app-project')
   await page
@@ -137,20 +83,20 @@ test('Terminal app uses the connector flow and retries with a fresh ticket', asy
   const response = () =>
     page.waitForResponse(response => response.url().endsWith('/connect') && response.request().method() === 'POST')
   const first = response()
-  await connect.getByRole('button', { name: /Terminal app/ }).click()
+  await connect.getByRole('button', { name: /Outpost Desktop/ }).click()
   const firstTicket = await (await first).json()
-  await expect(connect.getByText('Opening Terminal app…')).toBeVisible()
+  await expect(connect.getByText('Opening Outpost Desktop…')).toBeVisible()
   const retry = response()
-  await connect.getByRole('button', { name: 'Open Terminal app again' }).click()
+  await connect.getByRole('button', { name: 'Open Outpost Desktop again' }).click()
   const next = await (await retry).json()
   expect(next.token).not.toBe(firstTicket.token)
   const payload = JSON.parse(Buffer.from(next.url.slice('outpost://connect/'.length), 'base64url').toString())
-  expect(payload.terminal).toBe('terminal-app')
+  expect(payload.terminal).toBe('desktop')
   // The OS launcher opens this URL; exercise the real browser client and broker.
   const app = await context.newPage()
-  await app.goto(`/terminal/app#token=${payload.token}`)
+  await app.goto(`/terminal/desktop#token=${payload.token}`)
   await expect(app.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
-  await expect(connect.getByText('Connected in Terminal app')).toBeVisible()
+  await expect(connect.getByText('Connected in Outpost Desktop')).toBeVisible()
   await app.close()
 })
 

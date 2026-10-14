@@ -41,15 +41,23 @@ signing out closes open terminals within seconds and invalidates their tokens.
 Input rate, message size, unacknowledged output and terminals per account are
 bounded. Closing a terminal never stops the tmux session.
 
-**The connector.** It runs on your computer and only talks to Outpost servers
-you trusted by running their installer. `outpost://` links for other servers
-are refused before any network access. It reads your clipboard only on a paste
-gesture (⌘V/Ctrl+V/Alt+V); remote programs can write to your clipboard through
-OSC 52 but clipboard queries are never answered. It opens only `http(s)` links
-without credentials, and never through a shell. A trusted server can open
-terminals into its own sessions on your computer; only trust servers you would
-let run your coding sessions. The launch token in an `outpost://` link is
-visible to local processes for the few seconds before it is used.
+**Outpost Desktop.** The Electron app confirms trust before loading a server's
+terminal UI. Origins must use HTTPS, except localhost HTTP. Remote windows have
+no Node access, use sandboxing and context isolation, and expose only the
+versioned terminal bridge. IPC checks the exact window, main frame, origin and
+path; navigation, popups, webviews and downloads are restricted. Local app home
+has a separate preload. Trusting a server permits its UI to notify you, copy
+text and open validated HTTP(S) links. Do not trust servers you do not control.
+
+Clipboard reads use native paste events. The paste bridge checks transient user
+activation in its isolated preload; web clipboard permissions are denied.
+Clipboard text is bounded to 1 MiB; OSC 52 queries are never answered. Links
+open via Electron's shell API, without interpolating commands. The app stores
+only trusted origins on disk; per-server Chromium sessions are nonpersistent.
+Launch links can briefly be visible to local processes. The fragment is erased
+before rendering, and resume tickets remain in window-scoped session storage.
+Removing server trust closes its windows; signing out revokes the underlying
+grants. These first installers are unsigned previews with manual updates.
 
 **Signals.** Programs in a session can ask the attached client to open a link
 (`outpost-browser`). The helper talks to the relay over a Unix socket in a

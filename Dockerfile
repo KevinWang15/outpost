@@ -16,7 +16,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 LABEL org.opencontainers.image.source="https://github.com/KevinWang15/outpost" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.description="Outpost: persistent AI coding sessions with web and native terminals"
+      org.opencontainers.image.description="Outpost: persistent AI coding sessions with web and desktop terminals"
 ENV NODE_ENV=production OUTPOST_MODE=hosted HOST=0.0.0.0 PORT=3000 OUTPOST_DATA_DIR=/state/outpost
 USER node
 EXPOSE 3000

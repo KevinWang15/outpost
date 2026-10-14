@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently --kill-others --names api,web \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite",
-    "dev:server": "tsx watch --include=backend/** --include=runtime/** --include=connector/** backend/server.ts",
+    "dev:server": "tsx watch --include=backend/** --include=runtime/** backend/server.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.tests.json",
     "build": "npm run typecheck && npm run build:client && npm run build:server",
     "build:client": "vite build",
@@ -15,7 +15,7 @@
     "start": "node --enable-source-maps dist/server/server.js",
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "test": "node --import tsx --test 'tests/unit/*.test.ts' && npm run test:python",
-    "test:python": "python3 -m unittest discover -s tests/connector && python3 -m unittest discover -s tests/runtime",
+    "test:python": "python3 -m unittest discover -s tests/runtime",
     "test:integration": "node --import tsx --test 'tests/integration/*.test.ts'",
     "test:ui": "playwright test",
     "check": "npm run lint && npm run lint:python && npm run build && npm test",
@@ -27,9 +27,9 @@
     "promo:render": "npm --prefix promo-v2 run render --",
     "promo:preview": "npm --prefix promo-v2 run preview --",
     "docs:capture": "node scripts/screenshots.mjs",
-    "dev:debug": "tsx watch --inspect=127.0.0.1:9229 --include=backend/** --include=runtime/** --include=connector/** backend/server.ts",
-    "lint:python": "ruff check runtime connector tests && ruff format --check runtime connector tests",
-    "format": "prettier --write . && ruff format runtime connector tests && ruff check --fix runtime connector tests"
+    "dev:debug": "tsx watch --inspect=127.0.0.1:9229 --include=backend/** --include=runtime/** backend/server.ts",
+    "lint:python": "ruff check runtime tests && ruff format --check runtime tests",
+    "format": "prettier --write . && ruff format runtime tests && ruff check --fix runtime tests"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.4",
@@ -45,6 +45,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "https://github.com/KevinWang15/xterm.js/releases/download/outpost-6.0.1/xterm-xterm-6.0.1.tgz",
     "ajv": "8.20.0",
     "codemirror": "^6.0.2",

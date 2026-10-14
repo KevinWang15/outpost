@@ -7,3 +7,8 @@ test-results
 playwright-report
 *.md
 *.html
+
+desktop/package-lock.json
+desktop/dist
+desktop/release
+desktop/resources

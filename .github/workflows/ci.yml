@@ -26,7 +26,7 @@ jobs:
       - run: npm run test:ui
 
   python-3-9:
-    # macOS Command Line Tools ship Python 3.9; targets may too.
+    # Target runtimes support Python 3.9.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -35,21 +35,4 @@ jobs:
         with:
           python-version: '3.9'
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tmux
-      - run: python -m unittest discover -s tests/connector && python -m unittest discover -s tests/runtime
-
-  macos-connector:
-    runs-on: macos-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - run: /usr/bin/python3 -m unittest discover -s tests/connector -v
-
-  windows-connector:
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - run: python -m unittest tests/connector/test_platforms.py -v
+      - run: python -m unittest discover -s tests/runtime

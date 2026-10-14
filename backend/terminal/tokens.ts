@@ -117,7 +117,7 @@ export class ConnectTokens {
   markConnected(id: string, owner: Owner) {
     this.connected.set(id, { userId: owner.userId, until: Date.now() + launchLifetime })
   }
-  /** Whether the client for a launch token has attached, for "Connected in iTerm2". */
+  /** Whether the client for a launch token has attached, for "Connected in Outpost Desktop". */
   status(owner: Owner, id: string): 'pending' | 'connected' {
     this.prune()
     return this.connected.get(id)?.userId === owner.userId ? 'connected' : 'pending'

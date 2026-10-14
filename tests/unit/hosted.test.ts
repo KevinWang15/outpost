@@ -80,7 +80,7 @@ test(
       await call('POST', `/targets/${target.id}/sessions`, { name: 'Build', rootDir: '~/p', tool: 'claude' }, alice)
     ).body as Session
     const connections = []
-    for (const choice of ['web', 'terminal-app']) {
+    for (const choice of ['web', 'desktop']) {
       assert.equal(
         (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: choice })).status,
         401,

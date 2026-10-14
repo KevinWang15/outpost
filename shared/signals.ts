@@ -1,5 +1,5 @@
 // Signal types a remote session may send to the attached client. Each has a
-// validator here and a handler in both clients (web terminal, connector).
+// validator here and a shared handler for the web terminal and desktop app.
 export function browserUrl(payload: unknown): string {
   if (
     !payload ||

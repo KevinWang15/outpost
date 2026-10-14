@@ -18,13 +18,10 @@ await build({
   sourcemap: true,
   logLevel: 'info',
 })
-// The server resolves these relative to itself: the target runtime it sends
-// with each operation, and the connector it serves to your computer.
+// The server sends this target runtime with each operation.
 const python = source => !source.includes('__pycache__')
-for (const directory of ['runtime', 'connector']) {
-  await rm(new URL(`${directory}/`, dist), { recursive: true, force: true })
-  await cp(new URL(`../${directory}/`, import.meta.url), new URL(`${directory}/`, dist), {
-    recursive: true,
-    filter: python,
-  })
-}
+await rm(new URL('runtime/', dist), { recursive: true, force: true })
+await cp(new URL('../runtime/', import.meta.url), new URL('runtime/', dist), {
+  recursive: true,
+  filter: python,
+})

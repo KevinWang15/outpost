@@ -65,13 +65,28 @@ export class TerminalSocket {
     socket.binaryType = 'arraybuffer'
     this.socket = socket
     this.ready = false
+    let acknowledged = 0
+    let lastAck = 0
+    let ackTimer: ReturnType<typeof setTimeout> | undefined
+    const acknowledge = () => {
+      clearTimeout(ackTimer)
+      ackTimer = undefined
+      if (this.socket === socket && socket.readyState === WebSocket.OPEN && acknowledged)
+        this.send({ type: 'ack', bytes: acknowledged })
+      acknowledged = 0
+      lastAck = performance.now()
+    }
     let closed: Extract<ServerMessage, { type: 'closed' }> | null = null
     socket.onmessage = event => {
       if (this.socket !== socket) return
       if (event.data instanceof ArrayBuffer) {
         const bytes = new Uint8Array(event.data)
         this.handlers.output(bytes, () => {
-          if (this.socket === socket) this.send({ type: 'ack', bytes: bytes.length })
+          if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
+          acknowledged += bytes.length
+          // Bound latency for small output and avoid a JSON roundtrip per tiny write.
+          if (acknowledged >= 64 * 1024 && performance.now() - lastAck >= 10) acknowledge()
+          else ackTimer ??= setTimeout(acknowledge, 20)
         })
         return
       }
@@ -95,6 +110,7 @@ export class TerminalSocket {
       else if (message.type === 'closed') closed = message
     }
     socket.onclose = () => {
+      clearTimeout(ackTimer)
       if (this.socket !== socket) return
       this.ready = false
       this.resetHistory()

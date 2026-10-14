@@ -2,33 +2,19 @@
 // other so a change on one side cannot silently break the other.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { harnesses } from '../../shared/harnesses'
-import { closeReasons, protocolVersion, serverMessageTypes } from '../../shared/protocol'
-import { signalValidators } from '../../shared/signals'
-import { connectorTerminals } from '../../shared/terminals'
-import { pagePaths } from '../../shared/pages'
 import { RelayDecoder, relayFrame, relayMagic } from '../../backend/terminal/broker'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
-function python(directory: 'runtime' | 'connector', code: string, input?: Buffer) {
+function python(directory: 'runtime', code: string, input?: Buffer) {
   return execFileSync('python3', ['-c', `import json, sys\n${code}`], {
     env: { ...process.env, PYTHONPATH: root + directory, PYTHONDONTWRITEBYTECODE: '1' },
     input,
   })
 }
-const json = (directory: 'runtime' | 'connector', code: string) => JSON.parse(python(directory, code).toString())
-
-test('terminal app entry is shared by the connector, browser routing and manifest', () => {
-  const path = json('connector', 'from outpost_connector.terminals.terminal_app import PATH\nprint(json.dumps(PATH))')
-  assert.equal(path, pagePaths.terminalApp)
-  const manifest = JSON.parse(readFileSync(new URL('../../public/terminal.webmanifest', import.meta.url), 'utf8'))
-  assert.equal(manifest.start_url, path)
-  assert.equal(manifest.id, path)
-  assert.equal(manifest.display, 'standalone')
-})
+const json = (directory: 'runtime', code: string) => JSON.parse(python(directory, code).toString())
 
 test('coding harnesses: shared/harnesses.ts matches the runtime adapters', () => {
   const adapters = json(
@@ -41,37 +27,6 @@ print(json.dumps({tool: {'storage': a.storage_key, 'id': a.id_pattern} for tool,
     assert.equal(adapters[harness.id].storage, harness.storageKey, harness.id)
     assert.equal(`^${adapters[harness.id].id}$`, harness.nativeId, harness.id)
   }
-})
-
-test('connector launchers: shared/terminals.ts matches the connector adapters', () => {
-  const adapters = json(
-    'connector',
-    `from outpost_connector import terminals
-print(json.dumps({key: {'name': a.NAME, 'platforms': list(a.PLATFORMS)} for key, a in terminals.ADAPTERS.items()}))`,
-  )
-  const platform = { macos: 'macos', windows: 'wsl' } as const
-  assert.deepEqual(
-    adapters,
-    Object.fromEntries(
-      connectorTerminals.map(terminal => [
-        terminal.id,
-        { name: terminal.name, platforms: terminal.os.map(os => platform[os]) },
-      ]),
-    ),
-  )
-})
-
-test('terminal protocol: the connector speaks this version and handles every message, close reason and signal', () => {
-  const connector = json(
-    'connector',
-    `from outpost_connector import PROTOCOL
-from outpost_connector.session import CLOSE_REASONS, HANDLERS, SIGNALS
-print(json.dumps({'protocol': PROTOCOL, 'reasons': sorted(CLOSE_REASONS), 'messages': sorted(HANDLERS), 'signals': sorted(SIGNALS)}))`,
-  )
-  assert.equal(connector.protocol, protocolVersion)
-  assert.deepEqual(connector.reasons, [...closeReasons].sort())
-  assert.deepEqual(connector.messages, [...serverMessageTypes].sort())
-  assert.deepEqual(connector.signals, Object.keys(signalValidators).sort())
 })
 
 test('relay protocol: broker and relay agree on the marker and frames', () => {

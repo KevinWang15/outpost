@@ -356,19 +356,14 @@ export class TerminalBroker {
     this.connections.delete(connection)
   }
 
-  async accept(socket: WebSocket, query: TerminalQuery, client: { install: string }) {
+  async accept(socket: WebSocket, query: TerminalQuery) {
     const reject = (reason: CloseReason, message: string) => {
       socket.send(JSON.stringify({ type: 'closed', reason, message } satisfies ServerMessage))
       socket.close(1000, reason)
     }
     // Checked before the token is redeemed, so the same link works after updating.
     if (query.protocol !== String(protocolVersion)) {
-      return reject(
-        'outdated',
-        query.client === 'web'
-          ? 'Outpost was updated. Reload this page to reconnect.'
-          : `This Outpost Connector is out of date. Update it, then connect again:\n  ${client.install}`,
-      )
+      return reject('outdated', 'Outpost was updated. Reload this terminal to reconnect.')
     }
     const redeemed = this.stopped ? null : this.dependencies.tokens.redeem(query.token ?? '')
     if (!redeemed || !this.dependencies.deployment.active(redeemed.grant.owner))

@@ -6,7 +6,17 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default defineConfig([
-  globalIgnores(['dist', 'test-results', 'playwright-report', 'promo-v2/node_modules', 'promo-v2/output']),
+  globalIgnores([
+    'dist',
+    'test-results',
+    'playwright-report',
+    'promo-v2/node_modules',
+    'promo-v2/output',
+    'desktop/node_modules',
+    'desktop/dist',
+    'desktop/release',
+    'desktop/resources',
+  ]),
   js.configs.recommended,
   tseslint.configs.recommended,
   {
@@ -15,11 +25,18 @@ export default defineConfig([
     linterOptions: { reportUnusedDisableDirectives: 'error' },
   },
   {
-    files: ['*.{js,ts}', 'backend/**/*.ts', 'tests/**/*.{js,ts}', 'scripts/**/*.mjs', 'promo-v2/scripts/**/*.mjs'],
+    files: [
+      '*.{js,ts}',
+      'backend/**/*.ts',
+      'desktop/src/**/*.ts',
+      'tests/**/*.{js,ts}',
+      'scripts/**/*.mjs',
+      'promo-v2/scripts/**/*.mjs',
+    ],
     languageOptions: { globals: globals.node },
   },
   {
-    files: ['promo-v2/src/**/*.js'],
+    files: ['promo-v2/src/**/*.js', 'desktop/src/home.ts', 'desktop/src/preload.ts'],
     languageOptions: { globals: globals.browser },
   },
   {

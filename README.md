@@ -114,8 +114,17 @@ plain Enter, so use Ctrl+Enter for a newline there.
 After a detach, the tab shows a banner: **Enter** reconnects, **Ctrl+C**
 closes it. Network drops and Outpost restarts reconnect automatically.
 
-Run the installer again to update the connector. `outpost-connector uninstall`
-removes it and its terminal integration.
+Run the installer again to update the connector. To remove the connector,
+terminal integration, and trust for **all** Outpost servers, run this as the
+same user (and in the same WSL distribution on Windows) used for installation:
+
+```sh
+curl -fsSL https://your-outpost/connector/install.sh | bash -s -- --uninstall
+```
+
+The installed `~/.outpost-connector/bin/outpost-connector uninstall` command
+also removes it without downloading the installer. Uninstalling leaves Outpost
+server data and coding sessions intact.
 
 ## Run a hosted service
 

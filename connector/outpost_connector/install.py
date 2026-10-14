@@ -41,6 +41,7 @@ def supported_platform():
 def install(server, archive):
     platform, adapters = supported_platform()
     link.HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+    link.HOME.chmod(0o700)
     if os.path.abspath(archive) != str(ARCHIVE):
         temporary = ARCHIVE.with_name('.outpost-connector.pyz.tmp')
         shutil.copyfile(archive, temporary)
@@ -60,10 +61,23 @@ def install(server, archive):
 
 def uninstall():
     _, adapters = supported_platform()
+    errors = []
     for adapter in adapters:
-        adapter.uninstall(context())
-    shutil.rmtree(link.HOME, ignore_errors=True)
-    print('Outpost Connector was removed.')
+        try:
+            adapter.uninstall(context())
+        except OSError as error:
+            errors.append(adapter.NAME + ': ' + str(error))
+    # Revoke all trusted servers even if removing the OS integration failed.
+    # Only an absent installation is ignored; permission errors must surface.
+    try:
+        shutil.rmtree(link.HOME)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        errors.append(str(error))
+    if errors:
+        raise OSError('Uninstall was incomplete: ' + '; '.join(errors))
+    print('Outpost Connector, its terminal integration, and all trusted servers were removed.')
 
 
 def open_link(url):

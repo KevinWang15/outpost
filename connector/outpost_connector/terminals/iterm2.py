@@ -133,7 +133,7 @@ def uninstall(context):
     app = handler_path(context)
     if app.exists():
         context.run([LSREGISTER, '-u', str(app)])
-        shutil.rmtree(app, ignore_errors=True)
+        shutil.rmtree(app)
 
 
 def open(url, context):

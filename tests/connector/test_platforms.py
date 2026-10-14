@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'connector'))
-from outpost_connector import install, terminals  # noqa: E402
+from outpost_connector import install, link, terminals  # noqa: E402
 from outpost_connector.platforms import WINDOWS_CLIPBOARD, WSL, MacOS  # noqa: E402
 from outpost_connector.terminals import iterm2, windows_terminal  # noqa: E402
 
@@ -51,6 +51,44 @@ class InstallerProcessTest(unittest.TestCase):
                 )
                 with self.assertRaisesRegex(OSError, 'Native setup failed:'):
                     install.run([sys.executable, '-c', script])
+
+
+class UninstallTest(unittest.TestCase):
+    def test_data_deletion_errors_are_reported(self):
+        adapter = mock.Mock(NAME='Test terminal')
+        with (
+            mock.patch.object(install, 'supported_platform', return_value=(None, [adapter])),
+            mock.patch.object(install.shutil, 'rmtree', side_effect=PermissionError('Cannot delete trust file')),
+        ):
+            with self.assertRaisesRegex(OSError, 'Uninstall was incomplete:.*Cannot delete trust file'):
+                install.uninstall()
+        adapter.uninstall.assert_called_once()
+
+    def test_macos_uninstall_removes_profile_handler_and_all_trust(self):
+        home = Path(tempfile.mkdtemp(prefix='outpost-uninstall-'))
+        self.addCleanup(shutil.rmtree, home, True)
+        connector = home / '.outpost-connector'
+        connector.mkdir()
+        (connector / 'config.json').write_text(
+            json.dumps({'servers': ['https://one.example', 'http://localhost:3000']})
+        )
+        context = terminals.Context(home, connector / 'bin' / 'outpost-connector', mock.Mock())
+        profile, app = iterm2.profile_path(context), iterm2.handler_path(context)
+        profile.parent.mkdir(parents=True)
+        profile.write_text('{}')
+        app.mkdir(parents=True)
+        (app / 'handler').touch()
+        with (
+            mock.patch.object(install, 'supported_platform', return_value=(None, [iterm2])),
+            mock.patch.object(install, 'context', return_value=context),
+            mock.patch.object(link, 'HOME', connector),
+        ):
+            install.uninstall()
+            install.uninstall()
+        self.assertFalse(profile.exists())
+        self.assertFalse(app.exists())
+        self.assertFalse(connector.exists())
+        context.run.assert_called_once_with([iterm2.LSREGISTER, '-u', str(app)])
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'macOS only')
@@ -158,6 +196,12 @@ class WindowsTest(unittest.TestCase):
                 windows_terminal.powershell(context, {'action': 'install', 'fragment': fragment, 'command': command})
             self.assertIn('张三', str(failed.exception))
             self.assertNotIn('#< CLIXML', str(failed.exception))
+            # Removing Windows Terminal itself must not prevent connector cleanup.
+            wt.unlink()
+            windows_terminal.uninstall(context)
+            self.assertFalse(installed.parent.exists())
+            self.assertEqual(WSL().powershell("[Console]::Write((Test-Path -LiteralPath '" + key + "'))"), 'False')
+            windows_terminal.uninstall(context)  # Missing files and registry keys are harmless.
 
 
 if __name__ == '__main__':

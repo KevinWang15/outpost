@@ -67,11 +67,20 @@ export const connectorArchive = zip([
   ...files('outpost_connector/', 'outpost_connector/'),
 ])
 
-/** `curl -fsSL <origin>/connector/install.sh | bash` — installs and trusts this server. */
+/** Install and trust this server, or use `bash -s -- --uninstall` to remove the connector and all trust. */
 export function installScript(origin: string) {
   return `#!/usr/bin/env bash
 # Outpost connector installer. Installs into ~/.outpost-connector and trusts ${origin}.
 set -euo pipefail
+usage() { echo 'Usage: bash install.sh [--uninstall | --help]'; }
+if [ "$#" -gt 1 ]; then usage >&2; exit 2; fi
+action=install
+case "\${1-}" in
+  '') ;;
+  --uninstall) action=uninstall ;;
+  --help|-h) usage; echo 'Uninstall removes the connector, terminal integration, and every trusted server.'; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
 server=${quote(origin)}
 python=$(command -v python3 || true)
 if [ -z "$python" ] || ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; then
@@ -79,13 +88,15 @@ if [ -z "$python" ] || ! "$python" -c 'import sys; sys.exit(sys.version_info < (
   else echo 'Outpost needs Python 3.9 or newer. Install it with: sudo apt install python3' >&2; fi
   exit 1
 fi
-directory="$HOME/.outpost-connector"
-mkdir -p "$directory"
-chmod 700 "$directory"
-download=$(mktemp "$directory/.download.XXXXXX")
-trap 'rm -f "$download"' EXIT
+temporary=$(mktemp -d "\${TMPDIR:-/tmp}/outpost-connector.XXXXXX")
+trap 'rm -rf -- "$temporary"' EXIT
+download="$temporary/outpost-connector.pyz"
 curl -fsSL "$server/connector/outpost-connector.pyz" -o "$download"
-"$python" "$download" install --server "$server" --archive "$download"
+if [ "$action" = uninstall ]; then
+  "$python" "$download" uninstall
+else
+  "$python" "$download" install --server "$server" --archive "$download"
+fi
 `
 }
 

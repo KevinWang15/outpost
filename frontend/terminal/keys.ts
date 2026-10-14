@@ -50,6 +50,7 @@ export function terminalKey(key: string, modifiers: TerminalModifiers = {}, appl
     if (modifiers.ctrl) {
       const code = key.toUpperCase().charCodeAt(0)
       if (key === ' ') data = '\0'
+      else if (key === '/' && !modifiers.shift) data = '\x1f'
       else if (key === '?') data = '\x7f'
       else if (code >= 64 && code <= 95) data = String.fromCharCode(code & 31)
       else return null

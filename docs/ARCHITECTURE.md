@@ -87,6 +87,12 @@ each other by `tests/unit/contracts.test.ts`.
 | Native terminals | macOS: iTerm2. Windows: Windows Terminal with a WSL distribution (Bash, Python 3). |
 | Web terminal | Any current browser, including phones. |
 
+The web terminal pins a built package from the `outpost-6.0` branch of
+[KevinWang15/xterm.js](https://github.com/KevinWang15/xterm.js/tree/outpost-6.0).
+It backports upstream's Ctrl+/ fix to xterm.js 6.0.0; the release URL and package
+integrity are locked in `package-lock.json`. Return to the upstream package when
+upgrading to a release containing [#5515](https://github.com/xtermjs/xterm.js/pull/5515).
+
 ## Deployment modes
 
 `OUTPOST_MODE=local` (default) or `hosted`. Both register the same routes,

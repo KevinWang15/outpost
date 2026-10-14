@@ -5,6 +5,11 @@ import { notificationMessages, useBellNotifications } from './useBellNotificatio
 /** Public browser settings page: no account APIs, terminal ticket, or connection. */
 export default function NotificationSetupPage() {
   const notifications = useBellNotifications()
+  const browser = /Edg\//.test(navigator.userAgent)
+    ? 'Microsoft Edge'
+    : /Chrome\//.test(navigator.userAgent)
+      ? 'Google Chrome'
+      : 'this browser'
   useEffect(() => {
     document.title = 'Desktop notifications · Outpost'
   }, [])
@@ -12,7 +17,13 @@ export default function NotificationSetupPage() {
     <main className="notification-setup">
       <img src="/outpost.svg" width="48" height="48" alt="Outpost" />
       <h1>Desktop notifications</h1>
-      <p>Allow notifications for {window.location.host} in this browser, then return to your terminal.</p>
+      <p>
+        Allow notifications for {window.location.host} in {browser}, then return to your terminal.
+      </p>
+      <p>
+        Use the same browser and profile as your terminal window. Chrome and Edge have separate notification
+        permissions; allowing notifications in one does not enable them in the other.
+      </p>
       <p role="status">
         {notifications.notice?.text ??
           (notifications.permission === 'default'

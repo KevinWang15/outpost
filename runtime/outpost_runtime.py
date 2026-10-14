@@ -661,7 +661,7 @@ class AttachHooks:
     def __init__(self, session):
         self.session = session
         self.observer = activity(session)
-        self.history = Scrollback(tmux_command(session), tmux_environment())
+        self.history = Scrollback(tmux_command(session), tmux_environment(), session['tool'])
 
     def on_input(self):
         self.observer.input()

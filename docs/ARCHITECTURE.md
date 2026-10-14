@@ -181,22 +181,39 @@ timeouts so history controls cannot block terminal traffic. Copy-mode history
 size is remembered on older tmux releases which do not expose the snapshot's
 size; newer releases expose it directly. This stores no terminal content.
 The scrollbar follows the pane's shared copy mode, including mouse-wheel
-changes and changes made by other attached clients. Full-screen applications
-may keep their own internal history that tmux cannot expose.
+changes and changes made by other attached clients. The runtime also reports
+`alternate_on`: an application's alternate-screen transcript is not tmux
+history. Such screens do not display a draggable thumb or a made-up extent.
+
+The Codex adapter defaults `tui.alternate_screen` to `never`, preserving output
+in tmux's normal history. This is a per-launch CLI configuration override, not
+a change to the user's Codex config; an explicit later `-c` can override it.
+Existing processes retain their launch mode. For full-screen Codex the runtime
+reports `application: codex` and the sidebar sends its Page Up/Down and
+Ctrl+Home/End keys through the existing input path. Shift+Page Up/Down maps to
+the same page keys. Copy mode still takes precedence when explicitly entered.
+These controls expose no invented history length. A clean exit and reconnect
+of the same conversation applies the inline default and enables the scrollbar.
 
 `useBellNotifications` owns notification permission requests for both terminals
-and the public setup page. Requests require a click; the busy indicator ends
+and the public setup page. App windows open `/notifications` directly from the
+bell click, without issuing a permission request in the chrome-less window.
+The setup page and regular web terminal request permission on a click; the busy indicator ends
 after eight seconds if the browser leaves its prompt unanswered. The original
 request remains observed, with no duplicate requests queued. Permission changes
 are read from the browser through the Permissions API and on focus/visibility
-changes. The setup link opens a tab in the app's browser profile, outside the
-manifest's `/terminal/` scope, with no opener, referrer or terminal ticket.
+changes. Setup uses the shared browser-tab opener, outside the manifest's
+`/terminal/` scope, with no opener, referrer or terminal ticket. The page names
+the current browser and explains that it must match the terminal's browser
+and profile; permissions are not shared between Chrome and Edge.
 This makes site permission controls accessible when an app window hides its
 prompt. The page never calls account APIs or opens a terminal connection.
 
 The app has a `display: standalone` manifest with a credential-free start URL,
 but the connector uses Chromium's `--app` launch mode, without installing a PWA
-or creating a browser profile. Chrome is preferred on macOS, Edge on Windows.
+or creating a browser profile. Connector 2.1.1 prefers Chrome on both macOS and
+Windows, falling back to Edge. Existing installations need a connector update
+and a newly opened app window to change that choice.
 A manually installed shortcut starts at the connection instructions; the
 Connect dialog chooses sessions. There is no service worker, offline terminal
 cache, browser-profile cookie dependence or extra relay. See
@@ -217,7 +234,7 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `scrollback {offset?}` | Subscribe to history metadata; seek a line offset from the bottom (`0` = live, `-1` = oldest) |
 | ← client | `hello {resume, session, target}` | Connection accepted |
 | ← client | `ready {scrollback?}` | Attached to tmux, with optional history controls |
-| ← client | `scrollback {available, lines, offset, rows, active}` | History extent, position and whether copy mode is active |
+| ← client | `scrollback {available, lines, offset, rows, active, alternate?, application?}` | History extent, position, copy mode, and whether the application owns scrolling |
 | ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |

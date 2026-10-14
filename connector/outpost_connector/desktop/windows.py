@@ -80,7 +80,7 @@ if ($settings.action -eq 'install') {
 APP = r"""
 $browser = $null
 # App Paths covers machine and per-user installs, including custom locations.
-foreach ($name in @('msedge.exe', 'chrome.exe')) {
+foreach ($name in @('chrome.exe', 'msedge.exe')) {
   foreach ($hive in @('HKCU:', 'HKLM:')) {
     $key = "$hive\Software\Microsoft\Windows\CurrentVersion\App Paths\$name"
     if (Test-Path -LiteralPath $key) {
@@ -90,7 +90,7 @@ foreach ($name in @('msedge.exe', 'chrome.exe')) {
   }
   if ($browser) { break }
 }
-if (-not $browser) { throw 'Terminal app needs Microsoft Edge or Google Chrome. Install either browser, then click Connect again.' }
+if (-not $browser) { throw 'Terminal app needs Google Chrome or Microsoft Edge. Install either browser, then click Connect again.' }
 # Quote the one URL argument for CreateProcess; Python supplies a normalized
 # origin and an encoded fragment, neither of which may contain a quote.
 if ($settings.url.Contains('"')) { throw 'Invalid terminal app URL.' }

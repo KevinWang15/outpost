@@ -24,7 +24,7 @@ the agent ran on your computer.
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Native terminals | **macOS:** iTerm2 and Python 3.9+ (`xcode-select --install`). **Windows:** Windows Terminal and a WSL distribution with Python 3. |
 | Web terminal | Any current browser, including on phones. |
-| Terminal app | **macOS:** Chrome or Edge and Python 3.9+. **Windows:** Edge or Chrome and WSL with Bash and Python 3. Connector 2.1.0+. |
+| Terminal app | **macOS:** Chrome or Edge and Python 3.9+. **Windows:** Chrome or Edge and WSL with Bash and Python 3. Connector 2.1.1 recommended. |
 
 ## Run the local tool
 
@@ -97,8 +97,14 @@ the bottom to **Return to live output**. **Shift+Page Up / Page Down** moves
 a screen at a time; when the scrollbar has keyboard focus, **Home / End**
 jumps to the oldest output or back to live output. These controls work in
 both the web terminal and Terminal app, including with the toolbar hidden.
-Programs that keep history only inside their own full-screen interface still
-use that program's scrolling controls.
+
+Outpost starts Codex in inline mode so its output enters terminal history.
+An already-running full-screen Codex session keeps its original mode: its
+sidebar has **Oldest**, **Previous page**, **Next page**, and **Latest** buttons
+instead of a draggable thumb. **Shift+Page Up / Page Down** also works there.
+To enable the draggable scrollbar, exit Codex cleanly and reconnect the same
+session. Reloading the page alone does not restart Codex. Other full-screen
+applications use their own scrolling controls.
 
 When the coding tool rings the terminal bell, the page and tab title show
 which session rang, and a short chime plays. Click or type in the terminal
@@ -116,12 +122,14 @@ or [macOS System Settings → Notifications](https://support.apple.com/guide/saf
 including Focus / Do Not Disturb. Disable notifications through your browser's
 site settings.
 
-If the bell button waits for a prompt you cannot see, choose **Open notification
-setup**. This opens a browser tab where you can click **Enable notifications**
-or use the site controls beside the address bar to allow notifications. The
-terminal updates its permission automatically; its connection stays open.
-Use the tab opened by the terminal so the permission is saved in the same
-browser profile. No sign-in is needed on this setup page.
+In Terminal app, the bell button opens **notification setup** directly in a
+browser tab. Click **Enable notifications** there, or use the site controls
+beside the address bar to allow notifications. In a regular web terminal,
+**Open notification setup** is also available if the permission prompt is
+hidden. Return to the terminal after allowing notifications; it reads the new
+permission without reconnecting. Use the same browser and profile as the
+terminal: Chrome and Edge do not share notification permissions. No sign-in
+is needed on this setup page.
 
 ![The web terminal](docs/images/web-terminal.png)
 
@@ -132,8 +140,10 @@ desktop window. It shares keyboard handling, image paste, reconnects, sound
 and desktop notifications with the regular web terminal. Install or update
 the connector as described below; older connectors cannot open this choice.
 
-The launcher uses Chrome first on macOS (then Edge), and Edge first on Windows
-(then Chrome). macOS browsers can be in `/Applications` or `~/Applications`;
+Connector 2.1.1 uses Chrome first on both macOS and Windows, with Edge as a
+fallback. Update the connector and close/reopen the app to apply this choice;
+updating the server does not change an installed connector. macOS browsers
+can be in `/Applications` or `~/Applications`;
 Windows browsers are located through their registered App Paths. Windows
 uses WSL to run the connector, but **Windows Terminal is optional** for this
 choice. Safari and Firefox can be used to browse Outpost and launch a session;

@@ -182,7 +182,16 @@ class Connection {
         typeof available === 'boolean' &&
         typeof active === 'boolean'
       )
-        this.send({ type: 'scrollback', lines, offset, rows, available, active })
+        this.send({
+          type: 'scrollback',
+          lines,
+          offset,
+          rows,
+          available,
+          active,
+          ...(typeof message.alternate === 'boolean' ? { alternate: message.alternate } : {}),
+          ...(message.application === 'codex' ? { application: 'codex' } : {}),
+        })
     } else if (message.type === 'paste-result' && typeof message.id === 'string') {
       this.send({
         type: 'result',

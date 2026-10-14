@@ -17,6 +17,9 @@ export interface ScrollbackState {
   offset: number
   rows: number
   active: boolean
+  alternate?: boolean
+  // Full-screen Codex owns its transcript; offer keys without inventing a length.
+  application?: 'codex'
 }
 
 export type ClientMessage =

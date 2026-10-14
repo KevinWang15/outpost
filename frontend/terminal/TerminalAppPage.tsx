@@ -23,6 +23,7 @@ export default function TerminalAppPage({ token: initial }: { token: string | nu
 
   return (
     <TerminalView
+      appWindow
       key={token}
       token={token}
       title="Terminal app"

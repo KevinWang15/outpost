@@ -23,10 +23,11 @@ import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
 import { readImage } from '../api'
 import { attachBell } from './bell'
+import { openBrowserTab } from './browser'
 import { attachClipboard, imageProblem } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
-import ScrollbackBar from './ScrollbackBar'
+import ScrollbackBar, { type HistoryNavigation } from './ScrollbackBar'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
 import { notificationSetupPath } from '../../shared/terminals'
@@ -64,26 +65,13 @@ const theme = {
   brightWhite: '#f8fafc',
 }
 
-function openLink(url: string) {
-  // Open a blank tab first so a blocked popup is detectable, then drop the opener.
-  const tab = window.open('about:blank', '_blank')
-  if (!tab) return false
-  try {
-    tab.opener = null
-    tab.location.replace(url)
-    return true
-  } catch {
-    tab.close()
-    return false
-  }
-}
-
 interface Props {
   token: string
   title: string
   onClose: () => void
   onResume?: (token: string) => void
   onExpired?: () => void
+  appWindow?: boolean
 }
 
 const toolbarPreference = 'outpost.terminal.toolbar-hidden'
@@ -95,7 +83,7 @@ function savedToolbar() {
   }
 }
 
-export default function TerminalView({ token, title, onClose, onResume, onExpired }: Props) {
+export default function TerminalView({ token, title, onClose, onResume, onExpired, appWindow = false }: Props) {
   const terminalId = useId()
   const surface = useRef<HTMLDivElement>(null),
     chooser = useRef<HTMLInputElement>(null)
@@ -185,7 +173,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     term.unicode.activeVersion = '11'
     term.loadAddon(
       new WebLinksAddon((_event, uri) => {
-        if (!openLink(uri)) setBlockedLink(uri)
+        if (!openBrowserTab(uri)) setBlockedLink(uri)
       }),
     )
     term.open(surface.current!)
@@ -227,7 +215,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         } catch {
           return
         }
-        if (!openLink(url)) setBlockedLink(url)
+        if (!openBrowserTab(url)) setBlockedLink(url)
       },
     })
     socket.current = client
@@ -256,9 +244,13 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         !event.altKey &&
         !event.metaKey &&
         (event.key === 'PageUp' || event.key === 'PageDown') &&
-        history?.available
+        (history?.available || history?.application === 'codex')
       ) {
         event.preventDefault()
+        if (history.application === 'codex' && !history.active) {
+          client.input(terminalKey(event.key)!)
+          return false
+        }
         const page = Math.max(1, history.rows - 1)
         const offset = Math.max(0, Math.min(history.lines, history.offset + (event.key === 'PageUp' ? page : -page)))
         historyState.current = { ...history, offset }
@@ -373,7 +365,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             disabled={notifications.requesting}
             onClick={() => {
               setNotificationHelpShown(true)
-              notifications.request()
+              if (appWindow || window.matchMedia('(display-mode: standalone)').matches) notifications.openSetup()
+              else notifications.request()
             }}
           >
             {notifications.requesting ? (
@@ -453,7 +446,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       )}
       {notificationHelpShown && notifications.needsSetup && (
         <div className="terminal-notice">
-          <span>Permission prompt hidden or blocked?</span>
+          <span>Allow notifications in the same browser and profile as this terminal.</span>
           <a href={notificationSetupPath} target="_blank" rel="noopener noreferrer">
             Open notification setup
           </a>
@@ -474,7 +467,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           <button
             className="button small primary"
             onClick={() => {
-              if (openLink(blockedLink)) setBlockedLink(null)
+              if (openBrowserTab(blockedLink)) setBlockedLink(null)
             }}
           >
             Open link
@@ -495,6 +488,16 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             socket.current?.scrollTo(0)
             terminal.current?.focus()
           }}
+          onNavigate={(key: HistoryNavigation) => {
+            socket.current?.input(terminalKey(key, { ctrl: key === 'Home' || key === 'End' })!)
+            terminal.current?.focus()
+          }}
+          onHelp={() =>
+            notify(
+              'Codex controls this full-screen history. Use the page and jump buttons now. Exit Codex cleanly and reconnect this session to enable the draggable scrollbar.',
+              true,
+            )
+          }
         />
         {bellRinging && (
           <div className="terminal-notice terminal-bell" role="status">

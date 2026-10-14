@@ -8,12 +8,13 @@ class Scrollback:
     # versions need the length remembered when entering, until returning live.
     template = (
         '#{pane_id}|#{pane_width}|#{pane_height}|#{history_size}|'
-        '#{pane_in_mode}|#{pane_mode}|#{scroll_position}|#{copy_position_limit}'
+        '#{pane_in_mode}|#{pane_mode}|#{scroll_position}|#{copy_position_limit}|#{alternate_on}'
     )
 
-    def __init__(self, command, environment):
+    def __init__(self, command, environment, application=None):
         self.command = command
         self.environment = environment
+        self.application = application
         self.copy_key = None
         self.copy_lines = 0
 
@@ -34,12 +35,14 @@ class Scrollback:
         return result.stdout.strip()
 
     def inspect(self, target='=outpost:'):
-        pane, cols, rows, lines, in_mode, mode, offset, copy_limit = self.run(
+        pane, cols, rows, lines, in_mode, mode, offset, copy_limit, alternate = self.run(
             'display-message', '-p', '-t', target, self.template
         ).split('|')
         lines, rows, offset = int(lines), int(rows), int(offset or '0')
         active = mode == 'copy-mode'
-        available = in_mode == '0' or active
+        # An alternate-screen application's transcript is not tmux history.
+        # Preserve copy-mode navigation if the user explicitly entered it.
+        available = active or (in_mode == '0' and alternate != '1')
         key = (pane, cols, rows) if active else None
         if active:
             if key != self.copy_key:
@@ -54,6 +57,8 @@ class Scrollback:
             'offset': offset if active else 0,
             'rows': rows,
             'active': active,
+            'alternate': alternate == '1',
+            **({'application': 'codex'} if self.application == 'codex' and alternate == '1' and in_mode == '0' else {}),
         }
 
     def read(self, offset=None):

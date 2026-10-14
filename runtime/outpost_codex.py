@@ -18,7 +18,11 @@ class CodexAdapter(CodingSessionAdapter):
         return CodexSessionStore(self)
 
     def arguments(self, session):
-        return ['resume', session['cliSessionId']]
+        # Codex's full-screen transcript lives inside the application and is
+        # invisible to tmux. Inline mode gives every terminal the same history.
+        # A default config override also accepts an existing --no-alt-screen
+        # argument, and lets an explicit later -c override choose full screen.
+        return ['resume', session['cliSessionId'], '-c', 'tui.alternate_screen="never"']
 
     def activity_files(self, session):
         home = self.home(session['cliSessionEnv'], session['rootDir'])

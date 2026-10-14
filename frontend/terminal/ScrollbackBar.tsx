@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
-import { ArrowDownToLine } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Info } from 'lucide-react'
 import type { ScrollbackState } from '../../shared/protocol'
 
 interface Props {
@@ -8,10 +8,14 @@ interface Props {
   controls: string
   onScroll: (offset: number) => void
   onLive: () => void
+  onNavigate: (key: HistoryNavigation) => void
+  onHelp: () => void
 }
 
+export type HistoryNavigation = 'Home' | 'PageUp' | 'PageDown' | 'End'
+
 /** A view of tmux's scroll position. It never stores or replays terminal output. */
-export default function ScrollbackBar({ state, enabled, controls, onScroll, onLive }: Props) {
+export default function ScrollbackBar({ state, enabled, controls, onScroll, onLive, onNavigate, onHelp }: Props) {
   const thumb = useRef<HTMLSpanElement>(null)
   const drag = useRef<{ pointer: number; grab: number; lines: number } | null>(null)
   const [preview, setPreview] = useState<{
@@ -33,7 +37,9 @@ export default function ScrollbackBar({ state, enabled, controls, onScroll, onLi
   const description = !enabled
     ? 'Connect to browse terminal history'
     : !state?.available
-      ? 'Terminal history is unavailable'
+      ? state?.alternate
+        ? 'The application controls its full-screen history'
+        : 'Terminal history is unavailable'
       : !lines
         ? 'No earlier terminal output yet'
         : offset
@@ -76,6 +82,39 @@ export default function ScrollbackBar({ state, enabled, controls, onScroll, onLi
     onScroll(next)
   }
 
+  // Full-screen Codex exposes navigation keys, but no terminal history length
+  // or position. Do not represent that unknown extent with a fake scrollbar.
+  if (state?.application === 'codex' && !state.active)
+    return (
+      <aside className="terminal-scrollback" aria-label="Codex history controls">
+        {[
+          { key: 'Home', label: 'Oldest Codex history (Ctrl+Home)', Icon: ArrowUpToLine },
+          { key: 'PageUp', label: 'Previous page of Codex history (Page Up)', Icon: ChevronUp },
+          { key: 'PageDown', label: 'Next page of Codex history (Page Down)', Icon: ChevronDown },
+          { key: 'End', label: 'Latest Codex output (Ctrl+End)', Icon: ArrowDownToLine },
+        ].map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            className="icon-button terminal-scroll-live"
+            title={label}
+            aria-label={label}
+            disabled={!enabled}
+            onClick={() => onNavigate(key as HistoryNavigation)}
+          >
+            <Icon size={15} />
+          </button>
+        ))}
+        <button
+          className="icon-button terminal-scroll-live"
+          title="About Codex history controls"
+          aria-label="About Codex history controls"
+          onClick={onHelp}
+        >
+          <Info size={15} />
+        </button>
+      </aside>
+    )
+
   return (
     <aside className="terminal-scrollback" aria-label="Terminal history">
       <div
@@ -110,15 +149,17 @@ export default function ScrollbackBar({ state, enabled, controls, onScroll, onLi
         onPointerCancel={release}
         onLostPointerCapture={release}
       >
-        <span
-          ref={thumb}
-          className="terminal-scroll-thumb"
-          style={{
-            height: `${(rows / (lines + rows)) * 100}%`,
-            top: `${position * 100}%`,
-            transform: `translateY(-${position * 100}%)`,
-          }}
-        />
+        {scrollable && (
+          <span
+            ref={thumb}
+            className="terminal-scroll-thumb"
+            style={{
+              height: `${(rows / (lines + rows)) * 100}%`,
+              top: `${position * 100}%`,
+              transform: `translateY(-${position * 100}%)`,
+            }}
+          />
+        )}
       </div>
       <button
         className="icon-button terminal-scroll-live"

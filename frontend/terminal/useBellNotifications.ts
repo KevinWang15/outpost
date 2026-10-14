@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { bellNotificationPermission, type BellNotificationPermission } from './bell'
+import { notificationSetupPath } from '../../shared/terminals'
+import { openBrowserTab } from './browser'
 
 export const notificationLabels: Record<BellNotificationPermission, string> = {
   default: 'Enable desktop notifications',
@@ -132,9 +134,32 @@ export function useBellNotifications(onNotice?: (message: string, sticky: boolea
     }
   }
 
+  const openSetup = () => {
+    const permission = refresh()
+    if (permission !== 'default' && permission !== 'denied') {
+      publish({ permission, requesting: false, notice: noticeFor(permission) })
+      return
+    }
+    // App windows can leave native permission prompts hidden indefinitely.
+    // Open site controls in a regular tab directly from the user's click,
+    // without first creating an unresolved request in the app window.
+    const opened = openBrowserTab(new URL(notificationSetupPath, window.location.origin).href)
+    publish({
+      permission,
+      requesting: false,
+      notice: {
+        text: opened
+          ? 'Allow notifications in the setup tab, then return here. Use the same browser and profile as this terminal.'
+          : 'The setup tab was blocked. Open notification setup below and allow notifications in this browser.',
+        sticky: true,
+      },
+    })
+  }
+
   return {
     ...state,
     request,
+    openSetup,
     needsSetup: state.notice !== null && (state.permission === 'default' || state.permission === 'denied'),
   }
 }

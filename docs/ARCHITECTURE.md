@@ -179,6 +179,15 @@ copy on release, `set-clipboard on` (OSC 52 out), extended keys for
 Shift+Enter, truecolor, focus events, 50,000 lines of history and `Ctrl+\` to
 detach. Connecting starts a stopped session in the same conversation.
 
+**Forking** is one target management operation under the registry lock. The
+runtime creates a new branch from the source directory’s `HEAD` with
+`git worktree add -b`, then allocates a fresh harness conversation and saves
+its session. It inherits the source tool and launch settings. Git receives
+the branch and path as argument values; its failures stop before conversation
+allocation or registration. SSH and local targets use their existing
+management transports. If harness allocation fails after Git succeeds, the
+error identifies the created worktree so it can be reused or removed manually.
+
 ### Signals
 
 Coding sessions run with `BROWSER=~/.outpost/bin/outpost-browser`. The helper

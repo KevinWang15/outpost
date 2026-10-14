@@ -151,6 +151,39 @@ test('connect returns a web token or an outpost:// link for the chosen terminal'
   assert.deepEqual((await call('GET', `/connections/${native.id}`)).body, { status: 'pending' })
 })
 
+test('fork validates input, resolves the source on its target, and inherits launch settings', async t => {
+  const { call } = await setup(t)
+  const { body: target } = await call('POST', '/targets', { kind: 'local', name: 'Forks', tools: ['claude'] })
+  const base = `/targets/${target.id}/sessions`
+  const { body: source } = await call('POST', base, {
+    name: 'Source',
+    rootDir: '~/project',
+    tool: 'claude',
+    env: { MODEL: 'fixture' },
+    args: '--model "$MODEL"',
+  })
+  const path = `${base}/${source.id}/fork`
+  const input = { branch: 'feature/login', rootDir: '~/project-feature-login' }
+  for (const invalid of [
+    { ...input, branch: '' },
+    { ...input, branch: 'bad\nbranch' },
+    { ...input, rootDir: 'relative' },
+    { ...input, tool: 'codex' },
+    { ...input, cliSessionId: source.cliSessionId },
+  ])
+    assert.equal((await call('POST', path, invalid)).status, 400)
+  const { body: other } = await call('POST', '/targets', { kind: 'local', name: 'Other', tools: ['claude'] })
+  assert.equal((await call('POST', `/targets/${other.id}/sessions/${source.id}/fork`, input)).status, 404)
+  const fork = await call('POST', path, input)
+  assert.equal(fork.status, 201)
+  assert.equal(fork.body.tool, source.tool)
+  assert.deepEqual(fork.body.env, source.env)
+  assert.equal(fork.body.args, source.args)
+  assert.notEqual(fork.body.cliSessionId, source.cliSessionId)
+  await call('PATCH', `/targets/${target.id}`, { tools: ['codex'] })
+  assert.equal((await call('POST', path, input)).status, 400)
+})
+
 test('the broker relays a terminal and reports attach failures', async t => {
   const { port, call, sessions } = await setup(t)
   const { body: target } = (await call('POST', '/targets', {

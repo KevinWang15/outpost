@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import type { ConversationSearch, SessionImageInput, SessionInput } from '../../shared/model'
+import type { ConversationSearch, SessionForkInput, SessionImageInput, SessionInput } from '../../shared/model'
 import type { ConnectRequest, ConnectResponse, ConnectionStatus } from '../../shared/protocol'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
@@ -12,6 +12,7 @@ import {
   directoryQuery,
   imageInput,
   sessionInput,
+  sessionForkInput,
 } from '../../shared/schemas'
 
 type Params = { targetId: string; sessionId: string }
@@ -34,6 +35,17 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
     withRequestSignal(reply, async signal =>
       sessions.get(await services.context(request, request.params.targetId), request.params.sessionId, signal),
     ),
+  )
+  app.post<{ Params: Params; Body: SessionForkInput }>(
+    `${base}/:sessionId/fork`,
+    { schema: { body: sessionForkInput } },
+    async (request, reply) => {
+      const context = await services.context(request, request.params.targetId)
+      const source = await sessions.get(context, request.params.sessionId)
+      if (!context.target.tools.includes(source.tool))
+        throw new AppError('Add this coding tool to the target before creating a session.', 400)
+      return reply.code(201).send(await sessions.fork(context, source.id, request.body))
+    },
   )
   app.delete<{ Params: Params }>(`${base}/:sessionId`, async (request, reply) => {
     const context = await services.context(request, request.params.targetId)

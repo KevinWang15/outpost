@@ -70,6 +70,114 @@ class RuntimeTest(unittest.TestCase):
             {'action': 'create', 'name': name, 'rootDir': str(self.project), 'tool': tool, 'env': {}, 'args': ''}
         )
 
+    def git(self, *arguments, cwd=None):
+        return subprocess.run(
+            ['git', '-C', str(cwd or self.project), *arguments],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def repository(self):
+        self.git('init', '-b', 'main')
+        (self.project / 'tracked.txt').write_text('committed content')
+        self.git('add', 'tracked.txt')
+        self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'Initial commit')
+
+    def test_fork_creates_worktree_and_fresh_session_with_inherited_settings(self):
+        self.repository()
+        (self.project / 'tracked.txt').write_text('uncommitted content')
+        for tool in ('claude', 'codex', 'kimi'):
+            with self.subTest(tool=tool):
+                source = self.call(
+                    {
+                        'action': 'create',
+                        'name': tool,
+                        'tool': tool,
+                        'rootDir': str(self.project),
+                        'env': {'MODEL': 'fixture'},
+                        'args': '--model "$MODEL"',
+                    }
+                )
+                branch = 'feature/' + tool
+                destination = self.home / (tool + " fork's worktree")
+                fork = self.call(
+                    {'action': 'fork', 'id': source['id'], 'branch': branch, 'rootDir': '~/' + destination.name}
+                )
+                self.assertEqual(fork['rootDir'], str(destination))
+                self.assertEqual(fork['name'], branch)
+                self.assertEqual(fork['tool'], tool)
+                self.assertEqual(fork['env'], source['env'])
+                self.assertEqual(fork['args'], source['args'])
+                self.assertEqual(fork['cliSessionEnv'], source['cliSessionEnv'])
+                self.assertNotEqual(fork['cliSessionId'], source['cliSessionId'])
+                self.assertNotEqual(fork['id'], source['id'])
+                self.assertEqual(fork['status'], 'ready')
+                self.assertIsNone(fork['lastConnectedAt'])
+                self.assertTrue((destination / '.git').is_file())
+                self.assertEqual(self.git('branch', '--show-current', cwd=destination), branch)
+                self.assertEqual(self.git('rev-parse', 'HEAD', cwd=destination), self.git('rev-parse', 'HEAD'))
+                self.assertEqual((destination / 'tracked.txt').read_text(), 'committed content')
+        self.assertEqual((self.project / 'tracked.txt').read_text(), 'uncommitted content')
+        self.assertEqual(self.git('branch', '--show-current'), 'main')
+
+    def test_fork_git_failures_do_not_create_sessions(self):
+        source = self.create()
+        registry = self.home / '.outpost' / 'registry.json'
+        original = registry.read_bytes()
+        destination = self.home / 'fork'
+        request = {'action': 'fork', 'id': source['id'], 'branch': 'feature/new', 'rootDir': str(destination)}
+        error = self.call(request, expect_ok=False)
+        self.assertEqual(error['status'], 409)
+        self.assertIn('not a git repository', error['message'])
+        self.assertEqual(registry.read_bytes(), original)
+        self.assertFalse(destination.exists())
+
+        self.repository()
+        for branch in ('main', '--detach', 'invalid..branch', '@{-1}'):
+            with self.subTest(branch=branch):
+                self.call({**request, 'branch': branch}, expect_ok=False)
+                self.assertEqual(registry.read_bytes(), original)
+                self.assertFalse(destination.exists())
+        destination.mkdir()
+        (destination / 'keep.txt').write_text('keep this')
+        error = self.call(request, expect_ok=False)
+        self.assertIn('already exists', error['message'])
+        self.assertEqual(registry.read_bytes(), original)
+        self.assertEqual((destination / 'keep.txt').read_text(), 'keep this')
+        self.assertEqual(self.git('branch', '--format=%(refname:short)'), 'main')
+
+    def test_fork_preserves_literal_paths_and_avoids_name_collisions(self):
+        self.repository()
+        source = self.create('feature/fork')
+        destination = self.home / 'fork;$(touch injected)'
+        request = {'action': 'fork', 'id': source['id'], 'branch': source['name'], 'rootDir': str(destination)}
+        fork = self.call(request)
+        self.assertEqual(fork['name'], 'feature/fork (2)')
+        self.assertEqual(fork['rootDir'], str(destination))
+        self.assertFalse((self.project / 'injected').exists())
+        self.assertTrue((destination / '.git').is_file())
+
+        missing = self.call({**request, 'id': str(uuid.uuid4())}, expect_ok=False)
+        self.assertEqual(missing['status'], 404)
+
+    def test_fork_reports_created_worktree_if_harness_allocation_fails(self):
+        self.repository()
+        source = self.create(tool='codex')
+        registry = self.home / '.outpost' / 'registry.json'
+        original = registry.read_bytes()
+        (self.bin / 'codex').write_text('#!/bin/sh\nexit 1\n')
+        destination = self.home / 'fork-without-session'
+        error = self.call(
+            {'action': 'fork', 'id': source['id'], 'branch': 'feature/no-cli', 'rootDir': str(destination)},
+            expect_ok=False,
+        )
+        self.assertEqual(error['status'], 409)
+        self.assertIn('Worktree created at ' + str(destination), error['message'])
+        self.assertEqual(registry.read_bytes(), original)
+        self.assertEqual(self.git('branch', '--show-current', cwd=destination), 'feature/no-cli')
+
     def attach(self, session, cols=100, rows=30):
         process = subprocess.Popen(
             self.command({'action': 'attach', 'id': session['id'], 'cols': cols, 'rows': rows}),

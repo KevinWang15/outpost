@@ -8,6 +8,7 @@ import { Confirm } from '../ui/Dialog'
 import { Menu } from '../ui/Menu'
 import { useToast } from '../ui/toast-context'
 import FinderDialog from './FinderDialog'
+import ForkDialog from './ForkDialog'
 import ImageDialog from './ImageDialog'
 import SessionDialog from './SessionDialog'
 import SessionTable from './SessionTable'
@@ -22,6 +23,7 @@ type Panel =
   | { kind: 'finder' }
   | { kind: 'connect'; session: Session }
   | { kind: 'image'; session: Session }
+  | { kind: 'fork'; session: Session }
   | { kind: 'edit' }
   | { kind: 'remove' }
   | { kind: 'terminate' | 'delete'; session: Session }
@@ -120,6 +122,7 @@ export default function TargetView({
         onCreate={() => setPanel({ kind: 'session', conversation: null })}
         onConnect={session => setPanel({ kind: 'connect', session })}
         onImage={session => setPanel({ kind: 'image', session })}
+        onFork={session => setPanel({ kind: 'fork', session })}
         onCheck={session => void check(session)}
         onTerminate={session => setPanel({ kind: 'terminate', session })}
         onDelete={session => setPanel({ kind: 'delete', session })}
@@ -146,6 +149,19 @@ export default function TargetView({
           onClose={close}
           onLink={conversation => setPanel({ kind: 'session', conversation })}
           onConnect={session => setPanel({ kind: 'connect', session })}
+        />
+      )}
+      {panel?.kind === 'fork' && (
+        <ForkDialog
+          session={panel.session}
+          target={target}
+          onClose={close}
+          onSave={async input => {
+            const session = await api<Session>(`/targets/${target.id}/sessions/${panel.session.id}/fork`, 'POST', input)
+            close()
+            toast(`Created ${session.name}`)
+            void refresh()
+          }}
         />
       )}
       {panel?.kind === 'connect' && (

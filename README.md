@@ -46,6 +46,20 @@ To use Outpost running on another machine, forward its port to the **same**
 port locally (`ssh -L 3000:127.0.0.1:3000 that-machine`) and open
 http://127.0.0.1:3000.
 
+## Fork a session
+
+Choose **Fork** in a session’s **…** menu to create a new Git branch and
+worktree on the same target. A branch such as `feature/new-login` suggests
+`/path/project-feature-new-login`; you can edit the path or restore the
+suggestion. The branch starts at the source directory’s current commit,
+leaving uncommitted changes in the source.
+
+Only after Git succeeds does Outpost create a fresh conversation, using the
+source session’s coding tool, arguments, and environment. The new session is
+named after the branch and starts when you connect. Git must be installed on
+the target; invalid repositories, existing branches, and existing destination
+paths produce an error without creating a session.
+
 ## Connect
 
 Click **Connect** next to a session and choose a terminal. The dialog

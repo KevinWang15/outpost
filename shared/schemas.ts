@@ -78,6 +78,8 @@ export const sessionInput = Type.Object(
   },
 )
 
+export const sessionForkInput = Type.Object({ branch: text(256), rootDir: session.rootDir }, strict)
+
 export const imageInput = Type.Object(
   {
     data: Type.String({ minLength: 8, maxLength: 24 * 1024 * 1024, pattern: '^[A-Za-z0-9+/]+={0,2}$' }),

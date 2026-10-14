@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ImagePlus, LoaderCircle, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2 } from 'lucide-react'
+import { GitFork, ImagePlus, LoaderCircle, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import type { Session } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
 import { Menu } from '../ui/Menu'
@@ -23,6 +23,7 @@ export default function SessionTable({
   onCreate,
   onConnect,
   onImage,
+  onFork,
   onCheck,
   onTerminate,
   onDelete,
@@ -36,6 +37,7 @@ export default function SessionTable({
   onCreate: () => void
   onConnect: (session: Session) => void
   onImage: (session: Session) => void
+  onFork: (session: Session) => void
   onCheck: (session: Session) => void
   onTerminate: (session: Session) => void
   onDelete: (session: Session) => void
@@ -142,6 +144,8 @@ export default function SessionTable({
                   <Menu
                     label={`More actions for ${session.name}`}
                     items={[
+                      { label: 'Fork', icon: <GitFork size={14} />, onSelect: () => onFork(session) },
+                      'separator',
                       running
                         ? {
                             label: 'Terminate',

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Session, SessionInput, SessionList } from '../../shared/model'
+import type { Session, SessionForkInput, SessionInput, SessionList } from '../../shared/model'
 import { AppError } from '../../backend/errors'
 import type { SessionService, TargetContext } from '../../backend/sessions'
 import type { SoftwareService } from '../../backend/software'
@@ -45,6 +45,16 @@ export class FakeSessions implements SessionService {
   }
   async acknowledge(context: TargetContext, id: string) {
     return this.find(context, id)
+  }
+  async fork(context: TargetContext, id: string, input: SessionForkInput) {
+    const source = this.find(context, id)
+    return this.create(context, {
+      name: input.branch,
+      rootDir: input.rootDir,
+      tool: source.tool,
+      env: source.env,
+      args: source.args,
+    })
   }
   async terminate(context: TargetContext, id: string) {
     return { ...this.find(context, id), status: 'stopped' as const }

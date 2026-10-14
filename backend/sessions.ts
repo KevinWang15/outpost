@@ -3,6 +3,7 @@ import type {
   ConversationSearch,
   DirectorySuggestions,
   Session,
+  SessionForkInput,
   SessionImage,
   SessionImageInput,
   SessionInput,
@@ -31,6 +32,7 @@ type Request =
   | ({ action: 'coding-search' } & ConversationSearch)
   | { action: 'directories'; path: string }
   | ({ action: 'create' } & SessionInput & SessionLaunchOptions)
+  | ({ action: 'fork'; id: string } & SessionForkInput)
   | { action: 'get' | 'terminate' | 'delete'; id: string }
   | { action: 'acknowledge'; id: string; completionId: string }
   | { action: 'paste-image'; id: string; extension: string }
@@ -56,6 +58,7 @@ export interface SessionService {
   list(context: TargetContext, signal?: AbortSignal): Promise<SessionList>
   get(context: TargetContext, id: string, signal?: AbortSignal): Promise<Session>
   create(context: TargetContext, input: SessionInput): Promise<Session>
+  fork(context: TargetContext, id: string, input: SessionForkInput): Promise<Session>
   acknowledge(context: TargetContext, id: string, completionId: string): Promise<Session>
   terminate(context: TargetContext, id: string): Promise<Session>
   remove(context: TargetContext, id: string): Promise<void>
@@ -70,7 +73,11 @@ export class SessionClient implements SessionService {
   constructor(private env: NodeJS.ProcessEnv = process.env) {}
   private run<T>({ transport }: TargetContext, request: Request, signal?: AbortSignal, stdin = '') {
     const operation = runtimeOperation(request)
-    return runProtocol<T>(transport.management(), `set -eu\n${operation}${stdin}\n`, { signal, env: this.env })
+    return runProtocol<T>(transport.management(), `set -eu\n${operation}${stdin}\n`, {
+      signal,
+      env: this.env,
+      timeoutMs: request.action === 'fork' ? 120_000 : undefined,
+    })
   }
   list(context: TargetContext, signal?: AbortSignal) {
     return this.run<SessionList>(context, { action: 'list' }, signal)
@@ -80,6 +87,9 @@ export class SessionClient implements SessionService {
   }
   create(context: TargetContext, input: SessionInput) {
     return this.run<Session>(context, { action: 'create', ...input, ...launchOptions(input) })
+  }
+  fork(context: TargetContext, id: string, input: SessionForkInput) {
+    return this.run<Session>(context, { action: 'fork', id, ...input })
   }
   acknowledge(context: TargetContext, id: string, completionId: string) {
     return this.run<Session>(context, { action: 'acknowledge', id, completionId })

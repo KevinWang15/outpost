@@ -794,9 +794,28 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX)
         data = read_registry()
         sessions = data['sessions']
+        if action == 'fork':
+            source = next((s for s in sessions if s['id'] == request.get('id')), None)
+            if source is None:
+                fail('Session not found', 404)
+            branch = request.get('branch')
+            if not text(branch, 256) or branch != branch.strip():
+                fail('Enter a valid new Git branch name.')
+            name, suffix = branch[:80], 2
+            while any(s['name'].casefold() == name.casefold() for s in sessions):
+                ending = ' (' + str(suffix) + ')'
+                name = branch[: 80 - len(ending)] + ending
+                suffix += 1
+            request = {
+                'name': name,
+                'rootDir': request['rootDir'],
+                'tool': source['tool'],
+                'env': source['env'],
+                'args': source['args'],
+            }
         if action == 'list':
             result = {'registryPath': str(REGISTRY), 'sessions': [describe(s) for s in sessions]}
-        elif action == 'create':
+        elif action in ('create', 'fork'):
             tool = request['tool']
             environment, arguments = request['env'], request['args']
             if not valid_launch_options(environment, arguments):
@@ -808,14 +827,16 @@ def main():
             if any(s['name'].casefold() == name.casefold() for s in sessions):
                 fail('A session with this name already exists on this target', 409)
             path = os.path.expanduser(request['rootDir'])
-            if not os.path.isabs(path):
+            if not text(path, 4096) or not os.path.isabs(path):
                 fail('Root directory must be absolute or begin with ~/')
             root = Path(path).resolve()
             if request.get('createDirectory'):
                 root.mkdir(parents=True, exist_ok=True)
-            if not root.is_dir():
+            if action == 'create' and not root.is_dir():
                 fail('Root directory does not exist. Enable Create directory or choose an existing directory.')
             launch_environment = dict(os.environ, **environment)
+            if action == 'fork':
+                launch_environment.update(source['cliSessionEnv'])
             executable = shutil.which(tool, path=launch_environment.get('PATH'))
             if not executable:
                 fail(tool + ' is missing on this target. Check Required Software and your login PATH.', 409)
@@ -828,6 +849,17 @@ def main():
                 tokens = []  # Bash validated the syntax; expanded arguments are checked at launch.
             if adapter.selects_session(tokens):
                 fail('Outpost controls the coding CLI session ID. Use Find conversations to resume one instead.')
+            if action == 'fork':
+                from outpost_worktrees import create_worktree
+
+                # Keep worktree creation and registration under the same lock.
+                # A Git failure must never allocate a coding conversation or session.
+                try:
+                    create_worktree(source['rootDir'], path, branch)
+                except (OSError, ValueError) as error:
+                    fail(str(error), 409)
+                except subprocess.TimeoutExpired:
+                    fail('Git worktree creation timed out. Check the target before retrying.', 504)
             try:
                 if request.get('cliSessionId'):
                     requested_storage = request.get('cliSessionEnv', {})
@@ -842,7 +874,10 @@ def main():
                 else:
                     cli_id, cli_environment = adapter.create(str(root), launch_environment, executable)
             except (ValueError, subprocess.TimeoutExpired) as error:
-                fail(str(error), 409)
+                message = str(error)
+                if action == 'fork':
+                    message = 'Worktree created at ' + str(root) + ', but session creation failed: ' + message
+                fail(message, 409)
             if any(
                 s['tool'] == tool and s['cliSessionId'] == cli_id and s['cliSessionEnv'] == cli_environment
                 for s in sessions

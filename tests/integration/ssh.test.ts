@@ -81,6 +81,15 @@ async function lifecycle(
   const { token } = await call<ConnectResponse>('POST', `/targets/${added.id}/sessions/${session.id}/connect`, {
     terminal: 'web',
   })
+  const fork = await call<Session>('POST', `/targets/${added.id}/sessions/${session.id}/fork`, {
+    branch: `feature/fork-${session.id}`,
+    rootDir: `~/work-${session.id}`,
+  })
+  assert.equal(fork.rootDir, `/root/work-${session.id}`)
+  assert.equal(fork.tool, session.tool)
+  assert.notEqual(fork.cliSessionId, session.cliSessionId)
+  assert.equal(fork.status, 'ready')
+  await call('DELETE', `/targets/${added.id}/sessions/${fork.id}`)
   const client = new TerminalClient(
     `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}&cols=90&rows=28`,
   )

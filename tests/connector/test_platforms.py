@@ -8,10 +8,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'connector'))
-from outpost_connector import terminals  # noqa: E402
+from outpost_connector import install, terminals  # noqa: E402
 from outpost_connector.platforms import WINDOWS_CLIPBOARD, WSL, MacOS  # noqa: E402
 from outpost_connector.terminals import iterm2, windows_terminal  # noqa: E402
 
@@ -25,6 +27,30 @@ def run(command):
     if result.returncode:
         raise OSError(command[0] + ': ' + result.stderr)
     return result.stdout
+
+
+class InstallerProcessTest(unittest.TestCase):
+    def test_success_with_utf8_path_and_legacy_encoded_diagnostics(self):
+        path = 'C:\\Users\\张三\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe'
+        script = (
+            'import sys; '
+            'sys.stdout.buffer.write(' + repr(path.encode()) + '); '
+            'sys.stderr.buffer.write(' + repr('正在准备模块'.encode('gbk')) + ')'
+        )
+        self.assertEqual(install.run([sys.executable, '-c', script]), path)
+
+    def test_failure_preserves_exit_status_even_with_legacy_encoded_diagnostics(self):
+        for stream in ('stdout', 'stderr'):
+            with self.subTest(stream=stream):
+                script = (
+                    'import sys; sys.'
+                    + stream
+                    + '.buffer.write('
+                    + repr(b'Native setup failed: ' + '拒绝访问'.encode('gbk'))
+                    + '); sys.exit(1)'
+                )
+                with self.assertRaisesRegex(OSError, 'Native setup failed:'):
+                    install.run([sys.executable, '-c', script])
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'macOS only')
@@ -91,6 +117,47 @@ class WindowsTest(unittest.TestCase):
             'if ($errors.Count) { exit 1 }'
         )
         WSL().powershell(check)
+
+    def test_terminal_setup_uses_utf8_for_paths_and_errors(self):
+        directory = Path(tempfile.mkdtemp(prefix='outpost-windows-'))
+        self.addCleanup(shutil.rmtree, directory, True)
+        local = directory / '张三'
+        wt = local / 'Microsoft' / 'WindowsApps' / 'wt.exe'
+        wt.parent.mkdir(parents=True)
+        wt.touch()
+        key = 'HKCU:\\Software\\Classes\\outpost-test-' + uuid.uuid4().hex
+        self.addCleanup(
+            WSL().powershell, "Remove-Item -LiteralPath '" + key + "' -Recurse -Force -ErrorAction SilentlyContinue"
+        )
+        # Exercise the real setup under a legacy code page, isolating only its
+        # Windows paths and registry key from the user's actual installation.
+        script = '[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(936)\n' + windows_terminal.SETUP
+        script = script.replace(
+            "[Environment]::GetFolderPath('LocalApplicationData')", "'" + str(local).replace("'", "''") + "'"
+        ).replace('HKCU:\\Software\\Classes\\outpost', key)
+        context = terminals.Context(directory, Path('/home/test/.outpost-connector/bin/outpost-connector'), install.run)
+        fragment = json.dumps(windows_terminal.fragment('Ubuntu'))
+        command = windows_terminal.handler_command('{wt}', 'Ubuntu', context.launcher)
+        with mock.patch.object(windows_terminal, 'SETUP', script):
+            self.assertEqual(
+                windows_terminal.powershell(context, {'action': 'install', 'fragment': fragment, 'command': command}),
+                str(wt),
+            )
+            installed = local / 'Microsoft' / 'Windows Terminal' / 'Fragments' / 'Outpost' / 'outpost.json'
+            self.assertEqual(installed.read_text(encoding='utf-8'), fragment)
+            registered = WSL().powershell(
+                '[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false); '
+                "[Console]::Write((Get-Item -LiteralPath '" + key + "\\shell\\open\\command').GetValue(''))"
+            )
+            self.assertEqual(registered, command.replace('{wt}', str(wt)))
+            # Force a localized filesystem error after setup starts. The real
+            # message and failing status must survive the Python boundary.
+            installed.unlink()
+            installed.mkdir()
+            with self.assertRaises(OSError) as failed:
+                windows_terminal.powershell(context, {'action': 'install', 'fragment': fragment, 'command': command})
+            self.assertIn('张三', str(failed.exception))
+            self.assertNotIn('#< CLIXML', str(failed.exception))
 
 
 if __name__ == '__main__':

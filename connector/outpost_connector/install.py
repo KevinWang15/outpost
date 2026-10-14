@@ -15,7 +15,9 @@ LAUNCHER = link.HOME / 'bin' / 'outpost-connector'
 
 
 def run(command):
-    result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    # Our scripts emit UTF-8. Native startup errors may still use a Windows
+    # code page; decoding diagnostics must not hide the process's exit status.
+    result = subprocess.run(command, capture_output=True, encoding='utf-8', errors='replace', timeout=120)
     if result.returncode:
         raise OSError(' '.join(command[:1]) + ' failed: ' + (result.stderr or result.stdout).strip()[:500])
     return result.stdout

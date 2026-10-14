@@ -72,25 +72,32 @@ def handler_command(wt, distro, launcher):
 
 
 SETUP = r"""$ErrorActionPreference = 'Stop'
-$settings = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')))
-$local = [Environment]::GetFolderPath('LocalApplicationData')
-$wt = Join-Path $local 'Microsoft\WindowsApps\wt.exe'
-if (-not (Test-Path -LiteralPath $wt)) { throw 'Windows Terminal is not installed. Install it from the Microsoft Store, then run the installer again.' }
-$fragments = Join-Path $local 'Microsoft\Windows Terminal\Fragments\Outpost'
-if ($settings.action -eq 'install') {
-  New-Item -ItemType Directory -Force -Path $fragments | Out-Null
-  [IO.File]::WriteAllText((Join-Path $fragments 'outpost.json'), $settings.fragment, (New-Object Text.UTF8Encoding($false)))
-  $command = $settings.command.Replace('{wt}', $wt)
-  $key = 'HKCU:\Software\Classes\outpost'
-  New-Item -Path "$key\shell\open\command" -Force | Out-Null
-  Set-Item -Path $key -Value 'URL:Outpost Connector'
-  New-ItemProperty -Path $key -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
-  Set-Item -Path "$key\shell\open\command" -Value $command
-} else {
-  Remove-Item -LiteralPath $fragments -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item -Path 'HKCU:\Software\Classes\outpost' -Recurse -Force -ErrorAction SilentlyContinue
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+try {
+  $settings = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')))
+  $local = [Environment]::GetFolderPath('LocalApplicationData')
+  $wt = Join-Path $local 'Microsoft\WindowsApps\wt.exe'
+  if (-not (Test-Path -LiteralPath $wt)) { throw 'Windows Terminal is not installed. Install it from the Microsoft Store, then run the installer again.' }
+  $fragments = Join-Path $local 'Microsoft\Windows Terminal\Fragments\Outpost'
+  if ($settings.action -eq 'install') {
+    New-Item -ItemType Directory -Force -Path $fragments | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fragments 'outpost.json'), $settings.fragment, (New-Object Text.UTF8Encoding($false)))
+    $command = $settings.command.Replace('{wt}', $wt)
+    $key = 'HKCU:\Software\Classes\outpost'
+    New-Item -Path "$key\shell\open\command" -Force | Out-Null
+    Set-Item -Path $key -Value 'URL:Outpost Connector'
+    New-ItemProperty -Path $key -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
+    Set-Item -Path "$key\shell\open\command" -Value $command
+  } else {
+    Remove-Item -LiteralPath $fragments -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path 'HKCU:\Software\Classes\outpost' -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  [Console]::Write($wt)
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
 }
-[Console]::Write($wt)
 """
 
 

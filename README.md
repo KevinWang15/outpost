@@ -24,7 +24,7 @@ the agent ran on your computer.
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Native terminals | **macOS:** iTerm2 and Python 3.9+ (`xcode-select --install`). **Windows:** Windows Terminal and a WSL distribution with Python 3. |
 | Web terminal | Any current browser, including on phones. |
-| Terminal app | **macOS:** Chrome or Edge and Python 3.9+. **Windows:** Chrome or Edge and WSL with Bash and Python 3. Connector 2.1.2 recommended. |
+| Terminal app | **macOS:** Chrome or Edge and Python 3.9+. **Windows:** Chrome or Edge and WSL with Bash and Python 3. Connector 2.1.3 recommended. |
 
 ## Run the local tool
 
@@ -140,8 +140,9 @@ desktop window. It shares keyboard handling, image paste, reconnects, sound
 and desktop notifications with the regular web terminal. Install or update
 the connector as described below; older connectors cannot open this choice.
 
-Connector 2.1.1 uses Chrome first on both macOS and Windows, with Edge as a
-fallback. Update the connector and close/reopen the app to apply this choice;
+The connector uses Chrome first on both macOS and Windows, with Edge as a
+fallback. On macOS, an installed Outpost Terminal app takes priority (Chrome
+before Edge if both have it installed). Update the connector and reopen the app to apply this choice;
 updating the server does not change an installed connector. macOS browsers
 can be in `/Applications` or `~/Applications`;
 Windows browsers are located through their registered App Paths. Windows
@@ -149,13 +150,27 @@ uses WSL to run the connector, but **Windows Terminal is optional** for this
 choice. Safari and Firefox can be used to browse Outpost and launch a session;
 the connector opens the terminal in Chrome or Edge.
 
-Outpost supplies a standalone PWA manifest at `/terminal/app`. You may install
-that page through your browser's app menu for a dock/taskbar shortcut. The
-connector opens a fresh browser app window for each connection and does not
-require a separately installed PWA or automate PWA installation. An installed
-shortcut starts at the connection instructions; select the session through
-Outpost's Connect dialog. A network connection is required; no terminal data
-or account pages are cached for offline use.
+**macOS Dock icon:** install `/terminal/app` as a browser app once for each
+Outpost server. The Connect dialog links to this setup page. In Chrome, choose
+**⋮ → Cast, save, and share → Install page as app**; in Edge, choose
+**⋯ → Apps → Install this site as an app**. Update the connector to 2.1.3,
+then use **Connect → Terminal app** again. Allow Outpost Terminal to handle its
+links if prompted. The browser supplies Outpost's icon in the Dock and app
+switcher. To pin it, right-click its Dock icon → **Options → Keep in Dock**.
+
+The connector recognizes the browser-installed app for this exact server in
+`~/Applications`, `/Applications`, or their browser `*.localized` folders,
+even if the app was renamed. Keep the app in one of those locations. An older
+PWA may need to be reopened for its browser to update the link registration;
+if it still opens with the browser icon, reinstall the PWA from `/terminal/app`.
+Without a matching installed app the connector still opens a fresh browser
+app window; on macOS that window uses the browser's Dock identity.
+Windows continues to use the browser app window launch path.
+
+An installed shortcut starts at the connection instructions; select the session
+through Outpost's Connect dialog. Each connection opens a new app window.
+PWA installation is optional and remains a browser action. A network connection
+is required; no terminal data or account pages are cached for offline use.
 
 Your signed-in browser requests a single-use ticket valid for five minutes.
 The app consumes it, removes it from its address, and connects directly to

@@ -7,6 +7,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from . import macos_pwa
+
 LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 
 
@@ -83,6 +85,12 @@ def uninstall(context):
 
 
 def open_app(url, context):
+    app = macos_pwa.installed_app(url, context.home)
+    if app:
+        # Target this server's browser-created app explicitly, even when a
+        # different Outpost installation owns the global protocol association.
+        context.run(['/usr/bin/open', '-a', str(app), macos_pwa.launch_url(url)])
+        return
     for name in ('Google Chrome', 'Microsoft Edge'):
         for directory in (Path('/Applications'), context.home / 'Applications'):
             app = directory / (name + '.app')

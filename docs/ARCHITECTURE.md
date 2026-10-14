@@ -222,14 +222,40 @@ and profile; permissions are not shared between Chrome and Edge.
 This makes site permission controls accessible when an app window hides its
 prompt. The page never calls account APIs or opens a terminal connection.
 
-The app has a `display: standalone` manifest with a credential-free start URL,
-but the connector uses Chromium's `--app` launch mode, without installing a PWA
-or creating a browser profile. Connector 2.1.1 prefers Chrome on both macOS and
-Windows, falling back to Edge. Existing installations need a connector update
-and a newly opened app window to change that choice.
-A manually installed shortcut starts at the connection instructions; the
-Connect dialog chooses sessions. There is no service worker, offline terminal
-cache, browser-profile cookie dependence or extra relay. See
+The app has a `display: standalone` manifest with a credential-free start URL
+and `launch_handler.client_mode: navigate-new`, so new connections do not replace
+another session's window. Browser-menu installation supplies the Outpost Dock
+identity on macOS; a bare Chromium `--app` window uses the browser's identity.
+The tokenless app entry provides installation instructions, linked from Connect.
+
+On macOS, connector 2.1.3 first looks for a browser-created app bundle in the
+user/system Applications directories and their browser `*.localized` folders.
+`desktop/macos_pwa.py` matches its `CrAppModeShortcutURL` to the exact server's
+credential-free app URL, checks `CrBundleIdentifier` for Chrome/Edge, and requires
+the `web+outpost` scheme in `CFBundleURLTypes`. It prefers an installed app over
+a bare browser, then Chrome over Edge. Bundle names do not establish identity.
+Unreadable/malformed plists and older apps lacking the scheme are skipped.
+The connector neither reads browser profile databases nor edits browser bundles.
+
+macOS delivers ordinary HTTPS URLs to PWA shims as protocol launches, which
+Chromium rejects unless registered. Instead, the manifest registers the standard
+PWA custom scheme `web+outpost` with `/terminal/app#launch=%s`. The connector opens
+`web+outpost://connect/<ticket>` using `open -a <matching app bundle>`; explicitly
+selecting the bundle avoids a global scheme association sending a ticket to a
+different Outpost server. The browser may ask once to allow these launches.
+`appTicket` unwraps only that fixed envelope, erases the fragment before render,
+and passes the same scoped ticket to the existing broker. No new credentials,
+login-cookie sharing, or account-authentication path are introduced. See
+[Chromium's app launcher](https://github.com/chromium/chromium/blob/main/chrome/browser/apps/app_shim/web_app_shim_manager_delegate_mac.cc)
+and [PWA protocol handlers](https://developer.chrome.com/docs/web-platform/best-practices/url-protocol-handler).
+
+Without a matching installed app, macOS falls back to Chrome/Edge `--app` mode.
+Windows continues to use that mode. The hidden `Outpost Connector.app` remains
+the short-lived `outpost://` dispatcher; the browser owns the terminal window's
+Dock icon and lifetime. Connector updates require rerunning the installer.
+A pinned app starts at the connection instructions; the Connect dialog chooses
+sessions. There is no service worker, offline terminal cache, browser-profile
+cookie dependence or extra relay. See
 [Chrome's installation criteria](https://developer.chrome.com/blog/update-install-criteria)
 for browser-menu installation without a service worker.
 

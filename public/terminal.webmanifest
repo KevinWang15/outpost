@@ -1,11 +1,13 @@
 {
   "id": "/terminal/app",
   "name": "Outpost Terminal",
-  "short_name": "Terminal",
+  "short_name": "Outpost Terminal",
   "description": "Connect to your Outpost coding sessions in a terminal window.",
   "start_url": "/terminal/app",
   "scope": "/terminal/",
   "display": "standalone",
+  "launch_handler": { "client_mode": "navigate-new" },
+  "protocol_handlers": [{ "protocol": "web+outpost", "url": "/terminal/app#launch=%s" }],
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
   "icons": [

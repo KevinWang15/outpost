@@ -18,8 +18,17 @@ export function saveAppTicket(token: string | null) {
  * session or remain in browser history. The broker validates the signature. */
 export function takeAppTicket() {
   if (window.location.hash) {
-    const token = new URLSearchParams(window.location.hash.slice(1)).get('token')
+    const params = new URLSearchParams(window.location.hash.slice(1))
     window.history.replaceState(null, '', window.location.pathname)
+    // Installed PWAs receive the same ticket through the browser's OS protocol
+    // handler. Accept only our fixed envelope, never a URL to navigate to.
+    const launch = params.get('launch')
+    const prefix = 'web+outpost://connect/'
+    const token = params.has('launch')
+      ? launch?.startsWith(prefix)
+        ? launch.slice(prefix.length)
+        : null
+      : params.get('token')
     const ticket = valid(token) ? token : null
     saveAppTicket(ticket)
     return ticket

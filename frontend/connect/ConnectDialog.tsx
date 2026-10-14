@@ -254,6 +254,15 @@ export default function ConnectDialog({
         ))}
         {!options.length && <p className="muted">No desktop terminals for this system yet. Use the web terminal.</p>}
       </div>
+      {(os === 'macos' || os === 'all') && (
+        <p className="hint">
+          Want an Outpost icon in the macOS Dock?{' '}
+          <a href={pagePaths.terminalApp} target="_blank" rel="noopener noreferrer">
+            Set up the Terminal app
+          </a>
+          .
+        </p>
+      )}
       <p className="hint">Closing a terminal only disconnects it. The session keeps running.</p>
     </Dialog>
   )

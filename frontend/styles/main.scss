@@ -1669,7 +1669,8 @@ kbd {
 }
 
 /* Accounts */
-.notification-setup {
+.notification-setup,
+.terminal-app-setup {
   display: grid;
   gap: 20px;
   width: min(100%, 600px);
@@ -1677,6 +1678,13 @@ kbd {
   padding: 28px;
   .button {
     justify-self: start;
+  }
+  ol {
+    margin: 0;
+    padding-left: 24px;
+    li + li {
+      margin-top: 10px;
+    }
   }
 }
 

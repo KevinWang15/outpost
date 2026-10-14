@@ -23,7 +23,7 @@ def attach(url):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog='outpost-connector', description='Outpost native terminal connector ' + VERSION
+        prog='outpost-connector', description='Outpost desktop terminal connector ' + VERSION
     )
     commands = parser.add_subparsers(dest='command', required=True)
     setup = commands.add_parser('install', help='install or update, and trust an Outpost server')

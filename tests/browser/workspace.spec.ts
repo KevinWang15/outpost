@@ -38,11 +38,14 @@ test('add a target, create a session, and work in the web terminal', async ({ pa
 
   await row.getByRole('button', { name: 'Connect' }).click()
   const connect = page.getByRole('dialog', { name: 'Connect to Browser session' })
-  await expect(connect.getByText('Native terminals')).toBeVisible()
+  await expect(connect.getByText('Desktop terminals · requires connector')).toBeVisible()
   await expect(connect.getByRole('button', { name: /iTerm2/ })).toBeVisible()
   await expect(connect.getByRole('button', { name: /Windows Terminal/ })).toBeVisible()
   await connect.getByRole('combobox', { name: 'Operating system' }).selectOption('windows')
   await expect(connect.getByRole('button', { name: /iTerm2/ })).toBeHidden()
+  await expect(connect.getByRole('button', { name: /Terminal app/ })).toBeVisible()
+  await connect.getByRole('combobox', { name: 'Operating system' }).selectOption('macos')
+  await expect(connect.getByRole('button', { name: /Terminal app/ })).toBeVisible()
   const popupPromise = page.waitForEvent('popup')
   await connect.getByRole('button', { name: /Web terminal/ }).click()
   const popup = await popupPromise
@@ -120,6 +123,35 @@ test('choosing a native terminal opens the link and confirms when the connector 
     connector.kill()
     await rm(home, { recursive: true, force: true })
   }
+})
+
+test('Terminal app uses the connector flow and retries with a fresh ticket', async ({ page, context }) => {
+  await addTarget(page, 'Desktop app box')
+  await createSession(page, 'Desktop app session', '~/desktop-app-project')
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'Desktop app session' })
+    .getByRole('button', { name: 'Connect' })
+    .click()
+  const connect = page.getByRole('dialog', { name: 'Connect to Desktop app session' })
+  const response = () =>
+    page.waitForResponse(response => response.url().endsWith('/connect') && response.request().method() === 'POST')
+  const first = response()
+  await connect.getByRole('button', { name: /Terminal app/ }).click()
+  const firstTicket = await (await first).json()
+  await expect(connect.getByText('Opening Terminal app…')).toBeVisible()
+  const retry = response()
+  await connect.getByRole('button', { name: 'Open Terminal app again' }).click()
+  const next = await (await retry).json()
+  expect(next.token).not.toBe(firstTicket.token)
+  const payload = JSON.parse(Buffer.from(next.url.slice('outpost://connect/'.length), 'base64url').toString())
+  expect(payload.terminal).toBe('terminal-app')
+  // The OS launcher opens this URL; exercise the real browser client and broker.
+  const app = await context.newPage()
+  await app.goto(`/terminal/app#token=${payload.token}`)
+  await expect(app.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
+  await expect(connect.getByText('Connected in Terminal app')).toBeVisible()
+  await app.close()
 })
 
 test('phones get on-screen keys and a message box', async ({ browser }) => {

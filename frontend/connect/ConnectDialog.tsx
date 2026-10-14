@@ -5,9 +5,9 @@ import type { ConnectResponse, ConnectionStatus } from '../../shared/protocol'
 import {
   clientOS,
   clientOSLabels,
-  nativeTerminals,
+  connectorTerminals,
   type ClientOS,
-  type NativeTerminalId,
+  type ConnectorTerminalId,
   type TerminalChoice,
 } from '../../shared/terminals'
 import { api } from '../api'
@@ -18,8 +18,8 @@ const remembered = 'outpost.terminal'
 type Phase =
   | { kind: 'choose' }
   | { kind: 'requesting'; terminal: TerminalChoice }
-  | { kind: 'opening'; terminal: NativeTerminalId; id: string; url: string; slow: boolean }
-  | { kind: 'connected'; terminal: NativeTerminalId }
+  | { kind: 'opening'; terminal: ConnectorTerminalId; id: string; slow: boolean }
+  | { kind: 'connected'; terminal: ConnectorTerminalId }
 
 function lastChoice(): TerminalChoice | null {
   try {
@@ -29,7 +29,7 @@ function lastChoice(): TerminalChoice | null {
   }
 }
 
-/** The one way to connect: choose the web terminal or a native terminal. */
+/** One connection flow; the connector only changes how a client is launched. */
 export default function ConnectDialog({
   target,
   session,
@@ -87,7 +87,7 @@ export default function ConnectDialog({
         terminal,
       })
       if (!alive.current) return
-      setPhase({ kind: 'opening', terminal, id: connection.id, url: connection.url!, slow: false })
+      setPhase({ kind: 'opening', terminal, id: connection.id, slow: false })
       window.location.href = connection.url!
     } catch (problem) {
       if (alive.current) {
@@ -101,10 +101,11 @@ export default function ConnectDialog({
   useEffect(() => {
     if (!openingId) return
     const started = Date.now()
+    let cancelled = false
     const timer = setInterval(async () => {
       try {
         const { status } = await api<ConnectionStatus>(`/connections/${openingId}`)
-        if (!alive.current) return
+        if (!alive.current || cancelled) return
         if (status === 'connected') {
           clearInterval(timer)
           setPhase(current =>
@@ -119,7 +120,10 @@ export default function ConnectDialog({
         /* Keep polling; the dialog stays useful offline. */
       }
     }, 1000)
-    return () => clearInterval(timer)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
   }, [openingId])
   const slow = phase.kind === 'opening' && phase.slow
   useEffect(() => {
@@ -131,7 +135,7 @@ export default function ConnectDialog({
   }, [slow, install])
 
   if (phase.kind === 'opening' || phase.kind === 'connected') {
-    const terminal = nativeTerminals.find(item => item.id === phase.terminal)!
+    const terminal = connectorTerminals.find(item => item.id === phase.terminal)!
     return (
       <Dialog
         title={`Connect to ${session.name}`}
@@ -146,7 +150,7 @@ export default function ConnectDialog({
               <button
                 className="button primary"
                 onClick={() => {
-                  window.location.href = phase.url
+                  void choose(phase.terminal)
                 }}
               >
                 Open {terminal.name} again
@@ -175,12 +179,7 @@ export default function ConnectDialog({
         {slow && (
           <div className="connect-setup">
             <h3>Nothing opened?</h3>
-            <p>
-              Set up this computer once.{' '}
-              {terminal.os === 'windows'
-                ? 'In your WSL terminal (for example Ubuntu), run:'
-                : 'In Terminal or iTerm2, run:'}
-            </p>
+            <p>Install or update the connector. In Terminal on macOS or a WSL shell on Windows, run:</p>
             {install ? (
               <CopyField value={install} label="Connector install command" />
             ) : (
@@ -200,7 +199,9 @@ export default function ConnectDialog({
     )
   }
 
-  const options = nativeTerminals.filter(terminal => os === 'all' || terminal.os === os)
+  const options = connectorTerminals.filter(
+    terminal => os === 'all' || (terminal.os as readonly ClientOS[]).includes(os),
+  )
   const busy = phase.kind === 'requesting' ? phase.terminal : null
   return (
     <Dialog title={`Connect to ${session.name}`} description={`${target.name} · ${session.rootDir}`} onClose={onClose}>
@@ -213,7 +214,7 @@ export default function ConnectDialog({
         <Choice
           icon={<AppWindow size={20} />}
           title="Web terminal"
-          detail="Opens in a new window. Works on phones too."
+          detail="Opens in a new window. No connector needed. Works on phones too."
           last={last === 'web'}
           busy={busy === 'web'}
           disabled={Boolean(busy)}
@@ -221,7 +222,7 @@ export default function ConnectDialog({
         />
       </div>
       <div className="choices-divider">
-        <span>Native terminals</span>
+        <span>Desktop terminals · requires connector</span>
         <label className="os-filter">
           <span className="sr-only">Operating system</span>
           <select value={os} onChange={event => setOs(event.target.value as ClientOS | 'all')}>
@@ -241,7 +242,7 @@ export default function ConnectDialog({
             key={terminal.id}
             icon={<SquareTerminal size={20} />}
             title={terminal.name}
-            tag={clientOSLabels[terminal.os]}
+            tag={terminal.os.map(value => clientOSLabels[value]).join(' / ')}
             detail={terminal.summary}
             shortcuts={terminal.shortcuts}
             last={last === terminal.id}
@@ -250,7 +251,7 @@ export default function ConnectDialog({
             onChoose={() => void choose(terminal.id)}
           />
         ))}
-        {!options.length && <p className="muted">No native terminals for this system yet. Use the web terminal.</p>}
+        {!options.length && <p className="muted">No desktop terminals for this system yet. Use the web terminal.</p>}
       </div>
       <p className="hint">Closing a terminal only disconnects it. The session keeps running.</p>
     </Dialog>

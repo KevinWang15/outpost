@@ -139,16 +139,18 @@ test('connect returns a web token or an outpost:// link for the chosen terminal'
   assert.equal((await call('POST', path, { terminal: 'kitty' })).status, 400)
   const web = (await call('POST', path, { terminal: 'web' })).body as ConnectResponse
   assert.equal(web.url, null)
-  const native = (await call('POST', path, { terminal: 'windows-terminal' })).body as ConnectResponse
-  const link = JSON.parse(Buffer.from(native.url!.slice('outpost://connect/'.length), 'base64url').toString())
-  assert.deepEqual(link, {
-    v: 1,
-    server: `http://127.0.0.1:${port}`,
-    token: native.token,
-    terminal: 'windows-terminal',
-    title: 'Build · dev',
-  })
-  assert.deepEqual((await call('GET', `/connections/${native.id}`)).body, { status: 'pending' })
+  for (const terminal of ['windows-terminal', 'iterm2', 'terminal-app']) {
+    const connection = (await call('POST', path, { terminal })).body as ConnectResponse
+    const link = JSON.parse(Buffer.from(connection.url!.slice('outpost://connect/'.length), 'base64url').toString())
+    assert.deepEqual(link, {
+      v: 1,
+      server: `http://127.0.0.1:${port}`,
+      token: connection.token,
+      terminal,
+      title: 'Build · dev',
+    })
+    assert.deepEqual((await call('GET', `/connections/${connection.id}`)).body, { status: 'pending' })
+  }
 })
 
 test('fork validates input, resolves the source on its target, and inherits launch settings', async t => {
@@ -314,13 +316,15 @@ test('the production server serves the terminal page on direct navigation and re
   await app.listen({ host: '127.0.0.1', port: 0 })
   const port = (app.server.address() as { port: number }).port
   for (const method of ['GET', 'HEAD'] as const) {
-    const response = await app.inject({
-      method,
-      url: '/terminal?target=box&session=session',
-      headers: { host: `127.0.0.1:${port}` },
-    })
-    assert.equal(response.statusCode, 200)
-    assert.match(response.headers['content-type']!, /text\/html/)
-    if (method === 'GET') assert.match(response.body, /<title>Outpost<\/title>/)
+    for (const url of ['/terminal?target=box&session=session', '/terminal/app']) {
+      const response = await app.inject({
+        method,
+        url,
+        headers: { host: `127.0.0.1:${port}` },
+      })
+      assert.equal(response.statusCode, 200)
+      assert.match(response.headers['content-type']!, /text\/html/)
+      if (method === 'GET') assert.match(response.body, /<title>Outpost<\/title>/)
+    }
   }
 })

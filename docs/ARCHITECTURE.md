@@ -13,8 +13,8 @@ comments refer back to the principles below by name.
    server on its target. Every connection is disposable: connecting means
    attaching, reconnecting means attaching again, and tmux redraws the screen.
    Outpost never holds PTYs, screen snapshots or replay buffers.
-2. **One connection path.** Every terminal — the web terminal or a native
-   terminal — uses the same chain:
+2. **One connection path.** Every terminal — web, browser app or native —
+   uses the same chain:
 
    ```text
    client ⇄ WebSocket ⇄ Outpost broker ⇄ transport (SSH or local shell) ⇄ relay ⇄ tmux
@@ -32,8 +32,8 @@ comments refer back to the principles below by name.
 5. **The client shims the platform.** Making a remote session feel native
    (paste an image with the usual shortcut, Shift+Enter for a newline, copying
    to your clipboard, opening links on your computer) is the client's job.
-   Knowledge about a particular terminal app lives in exactly one registry
-   entry per app.
+   Knowledge about a particular terminal app lives in one launcher adapter.
+   OS URL handlers are shared by all launchers on that OS.
 6. **Explicit gestures only.** The local clipboard is read only on a paste
    gesture, never polled. Remote programs can copy to your clipboard (OSC 52)
    and ask to open `http(s)` links, but can never read your clipboard.
@@ -45,7 +45,7 @@ comments refer back to the principles below by name.
 
 ```text
                  ┌──────────── your computer ────────────┐
-  Browser UI ────┤ web terminal (xterm.js)               │
+  Browser UI ────┤ web / Terminal app (same xterm.js)     │
                  │ native connector (Python) in iTerm2 / │
                  │   Windows Terminal + WSL              │
                  └───────────────┬───────────────────────┘
@@ -68,8 +68,8 @@ comments refer back to the principles below by name.
 | `frontend/` | Browser | Workspace UI, Connect dialog, web terminal client |
 | `backend/` | Outpost server | HTTP API, deployments, transports, terminal broker |
 | `runtime/` | Targets | Session registry, tmux control, relay, harness adapters |
-| `connector/` | Your computer | Native terminal client, installer, terminal adapters |
-| `shared/` | Browser + server | Types, harness and native-terminal registries, protocol |
+| `connector/` | Your computer | Native terminal client, installer, OS link handlers and client launchers |
+| `shared/` | Browser + server | Types, harness and connector-launcher registries, protocol |
 
 **One definition per contract.** Request and stored-record shapes are TypeBox
 schemas in `shared/schemas.ts`; the server validates with them and the types in
@@ -86,6 +86,7 @@ each other by `tests/unit/contracts.test.ts`.
 | Outpost server | Node.js 24+ with OpenSSH, on Linux (including WSL) or macOS. Hosted deployments run on Linux. |
 | Native terminals | macOS: iTerm2. Windows: Windows Terminal with a WSL distribution (Bash, Python 3). |
 | Web terminal | Any current browser, including phones. |
+| Terminal app | Chrome or Edge on macOS / Windows. Connector runs on macOS (Python 3.9+) or WSL (Bash, Python 3). Windows Terminal is optional. |
 
 The web terminal pins a built package from the `outpost-6.0` branch of
 [KevinWang15/xterm.js](https://github.com/KevinWang15/xterm.js/tree/outpost-6.0).
@@ -115,19 +116,62 @@ branch on the mode.
 ### Connect flow
 
 1. The UI calls `POST /api/targets/:t/sessions/:s/connect` with the chosen
-   terminal (`web`, `iterm2`, `windows-terminal`). The server checks the
+   terminal (`web`, `terminal-app`, `iterm2`, `windows-terminal`). The server checks the
    session exists and returns a **launch token** (HMAC-signed, 5 minutes,
    single use) bound to owner, target and session.
 2. **Web terminal:** the browser opens `wss://…/api/terminal?token=…`.
-   **Native terminal:** the browser navigates to
-   `outpost://connect/<payload>`. The URL handler installed by the connector
-   opens the terminal app, which runs `outpost-connector attach <url>`. The
-   connector opens the same WebSocket.
+   **Connector choices:** the browser navigates to `outpost://connect/<payload>`.
+   The OS handler calls `outpost-connector open <url>`, validates server trust,
+   then dispatches through the launcher registry. Native launchers run
+   `outpost-connector attach <url>` in a terminal tab. Terminal app opens
+   `/terminal/app#token=<launch>` in a Chrome/Edge app window; the page removes
+   the fragment and opens the same WebSocket with the existing web client.
 3. The first message from the server is `hello` with a **resume token**
    (30 days, validated against the live login on every use, revoked on sign-out).
-   Reconnects use the resume token; it never appears in URLs or process lists.
-4. The UI polls `GET /api/connections/:id` to show *Connected in iTerm2*, or
-   offers setup help if the connector never arrived.
+   Reconnects send it in the WebSocket upgrade query. It never appears in
+   launcher links, page URLs or process arguments. Proxies must not log
+   `/api/terminal` query strings. Outpost disables request logging.
+4. For connector choices the UI polls `GET /api/connections/:id` to confirm
+   the client attached, or offers setup help. Retrying requests a fresh launch
+   ticket, so installation delays and previously consumed links are recoverable.
+
+### Client choices and shared responsibilities
+
+| Choice | Launcher | Client that owns the WebSocket | Initial authorization |
+| --- | --- | --- | --- |
+| Web terminal | `ConnectDialog` opens `/terminal?target=…&session=…` | `TerminalView` → `TerminalSocket` | `AuthGate` and `TerminalPage` request a grant using the browser login |
+| Terminal app | Connector → `terminal_app` → OS browser app window | The same `TerminalView` → `TerminalSocket` | `appTicket` consumes the launch fragment; broker validates the grant |
+| iTerm2 | Connector → `iterm2` → native tab | Python `Session` | The same launch grant in `outpost://` |
+| Windows Terminal | Connector → `windows_terminal` → WSL tab | Python `Session` | The same launch grant in `outpost://` |
+
+`frontend/Root.tsx` routes only `/terminal/app` outside `AuthGate`. Serving this
+page does not authorize a connection or grant account API access. The broker
+checks the same signed grant, session ownership and original login liveness
+for every client. Opening Terminal app from a different browser/profile needs
+no copied login cookie, second account token or connector HTTP service.
+
+`appTicket.ts` removes the launch fragment before React renders, stores it in
+window-scoped `sessionStorage`, and replaces it with the resume token on
+`hello`. This survives reloads and automatic reconnects while keeping separate
+windows independent. Explicit Close or an expired/revoked grant clears it.
+If storage is unavailable, the socket still reconnects in memory; a reload
+requires a fresh Connect. Resume grants never enter `localStorage`. Browser
+session restoration may retain session storage; the originating login remains
+the revocation boundary. Launch grants expire after five minutes, resume
+grants after 30 days, and both are bound to the original login and one session.
+
+Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
+uses its existing observer and never opens another connection. Keyboard,
+clipboard, composer, links, bells and notifications have one web implementation.
+
+The app has a `display: standalone` manifest with a credential-free start URL,
+but the connector uses Chromium's `--app` launch mode, without installing a PWA
+or creating a browser profile. Chrome is preferred on macOS, Edge on Windows.
+A manually installed shortcut starts at the connection instructions; the
+Connect dialog chooses sessions. There is no service worker, offline terminal
+cache, browser-profile cookie dependence or extra relay. See
+[Chrome's installation criteria](https://developer.chrome.com/blog/update-install-criteria)
+for browser-menu installation without a service worker.
 
 ### Terminal protocol (client ⇄ broker, WebSocket)
 
@@ -204,18 +248,29 @@ and passes it to the client on that connection, which opens the link on your
 computer. Delivery is at most once. With no attached terminal, the helper
 fails with a clear message.
 
-## Native terminals
+## Connector launchers and OS integration
 
-`shared/terminals.ts` lists terminals for the UI (id, name, OS label, key
-hints). `connector/outpost_connector/terminals/` holds one adapter per id that
-knows how to install its integration and how to open a session.
+`shared/terminals.ts` lists connector choices for the UI (id, name, supported
+OSes, requirements and key hints). `connector/outpost_connector/terminals/`
+holds one launcher per id, with `PLATFORMS`, `install`, `uninstall` and `open`.
+The contract test checks names/platforms and the app entry path across Python,
+TypeScript and the manifest. New launchers reuse the existing grant/protocol.
+
+`connector/outpost_connector/desktop/` owns one URL handler per OS. macOS
+installs a signed AppleScript app that invokes `connector open`. Windows
+registers a hidden PowerShell handler that calls WSL `connector open`, with
+the distro and launcher stored as UTF-8 JSON. Every launch is validated before
+dispatch. The Windows handler does not require `wt.exe`; only its native
+launcher does. Terminal adapters install optional profiles separately, so
+the handler cannot be overwritten by whichever adapter installs last.
 
 | Terminal | Integration installed by the connector | Native shortcuts |
 | --- | --- | --- |
-| iTerm2 | `outpost://` handler app; *Outpost* dynamic profile mapping ⌘V to Outpost paste, ⇧↩ to CSI u, Option as Meta | ⌘V pastes text and images, ⇧↩ newline |
-| Windows Terminal | `outpost://` handler in `HKCU`; *Outpost* fragment profile running WSL | Ctrl+V text (native), Alt+V or Ctrl+V-with-image pastes images, Ctrl+Enter newline |
+| Terminal app | No terminal profile; uses the shared OS handler to launch Chrome/Edge | Same as web terminal |
+| iTerm2 | *Outpost* dynamic profile mapping ⌘V to Outpost paste, ⇧↩ to CSI u, Option as Meta | ⌘V pastes text and images, ⇧↩ newline |
+| Windows Terminal | *Outpost* fragment profile running WSL (skipped if Windows Terminal is absent) | Ctrl+V text (native), Alt+V or Ctrl+V-with-image pastes images, Ctrl+Enter newline |
 
-The connector itself handles, for every terminal:
+The Python native client handles, for iTerm2 and Windows Terminal:
 
 - **Paste:** the private Outpost paste key (`ESC [9001~`, sent by profile key
   mappings) reads the clipboard and pastes an image or bracketed text; Ctrl+V
@@ -230,8 +285,11 @@ The connector itself handles, for every terminal:
 - **Reconnect:** network drops reconnect automatically; detaching or the
   session ending shows a banner (Enter reconnects, Ctrl+C closes).
 
-Clipboard and URL access are platform adapters (macOS, WSL), separate from
-terminal adapters, so adding a terminal on an existing OS is one file.
+Native clipboard and remote link access are platform adapters (`platforms.py`),
+separate from desktop launchers. Terminal app hands off to the web client and
+does not start the Python `Session` or proxy the socket. Re-running the installer
+upgrades the shared handlers and profiles; uninstall removes all of them and
+all trusted servers. It does not remove browsers or manually installed PWAs.
 
 ## Coding harnesses
 
@@ -271,10 +329,12 @@ validated strictly; invalid data is reported, never rewritten.
 
 ## Extending Outpost
 
-**Add a native terminal.** Add an entry to `shared/terminals.ts` and an adapter
-module in `connector/outpost_connector/terminals/` implementing `install()`
-and `open(link)`; register it in `terminals/__init__.py`. If it runs on a new
-OS, add a platform adapter in `platforms.py`.
+**Add a connector choice.** Add an entry to `shared/terminals.ts` and a launcher
+in `connector/outpost_connector/terminals/` implementing `PLATFORMS`, `install`,
+`uninstall` and `open`; register it in `terminals/__init__.py`. Reuse the OS
+handler in `desktop/`. For a new OS, add its desktop handler and, if needed by
+a native client, clipboard/URL adapters in `platforms.py`. Do not add another
+backend connection route or broker for a new presentation of the same terminal.
 
 **Add a coding harness.** Add an entry to `shared/harnesses.ts`, then
 `runtime/outpost_<id>.py` (adapter) and `runtime/outpost_<id>_store.py`

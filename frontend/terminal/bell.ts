@@ -10,7 +10,11 @@ export function bellNotificationPermission(): BellNotificationPermission {
 
 /** Use the parser's bell event: BEL also terminates OSC sequences, where it
  * must not ring. Browser attention, notifications, and sound belong to this connection. */
-export function attachBell(term: Terminal, changed: (ringing: boolean) => void, name: () => string) {
+export function attachBell(
+  term: Terminal,
+  changed: (ringing: boolean) => void,
+  session: () => { id: string; name: string },
+) {
   let audio: AudioContext | null = null
   let notification: Notification | null = null
   let notified = false
@@ -38,9 +42,10 @@ export function attachBell(term: Terminal, changed: (ringing: boolean) => void, 
     if (active() || notified || bellNotificationPermission() !== 'granted') return
     try {
       const current = new Notification('Outpost · Terminal bell', {
-        body: `${name()} rang a bell`,
+        body: `${session().name} rang a bell`,
         icon: '/outpost.png',
-        tag: `outpost-bell:${window.location.pathname}${window.location.search}`,
+        // App windows share a page URL. Group by the session, never by URL or token.
+        tag: `outpost-bell:${session().id}`,
       })
       notification = current
       notified = true

@@ -12,6 +12,7 @@ import { ConnectTokens } from './terminal/tokens'
 import { sessionRoutes } from './routes/sessions'
 import { terminalRoutes } from './routes/terminal'
 import { workspaceRoutes } from './routes/workspace'
+import { terminalAppPath } from '../shared/terminals'
 
 export interface AppOptions {
   deployment: Deployment
@@ -98,7 +99,15 @@ export async function createApp(options: AppOptions) {
 
   if (options.frontendRoot) {
     await app.register(staticFiles, { root: options.frontendRoot })
-    const pages = new Set(['/terminal', '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'])
+    const pages = new Set([
+      '/terminal',
+      terminalAppPath,
+      '/login',
+      '/signup',
+      '/verify-email',
+      '/forgot-password',
+      '/reset-password',
+    ])
     app.setNotFoundHandler((request, reply) => {
       if (['GET', 'HEAD'].includes(request.method) && pages.has(request.url.split('?')[0]))
         return reply.sendFile('index.html')

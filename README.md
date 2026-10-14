@@ -7,7 +7,7 @@ on your Linux machines, and lets you come back to them from your browser or
 your own terminal app — with paste, copy, Shift+Enter and links working as if
 the agent ran on your computer.
 
-- **One Connect button.** Choose the web terminal, iTerm2 on macOS, or Windows Terminal with WSL. That's the only way to connect, and it works the same in both deployment modes.
+- **One Connect button.** Choose the web terminal, Terminal app, iTerm2 on macOS, or Windows Terminal with WSL. All use the same connection path in both deployment modes.
 - **Feels native.** Paste screenshots with ⌘V (iTerm2) or Alt+V (Windows Terminal) and the agent receives the image. Shift+Enter inserts a newline. Text the agent copies lands on your clipboard. Links it opens open in your browser.
 - **Sessions outlive connections.** Close the tab or lose Wi-Fi; the agent keeps working. Reconnect from any computer or your phone, to the same process.
 - **Local tool or hosted service.** Run it on your own computer with your SSH config, or host it for a team with accounts and per-user SSH keys.
@@ -24,6 +24,7 @@ the agent ran on your computer.
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Native terminals | **macOS:** iTerm2 and Python 3.9+ (`xcode-select --install`). **Windows:** Windows Terminal and a WSL distribution with Python 3. |
 | Web terminal | Any current browser, including on phones. |
+| Terminal app | **macOS:** Chrome or Edge and Python 3.9+. **Windows:** Edge or Chrome and WSL with Bash and Python 3. Connector 2.1.0+. |
 
 ## Run the local tool
 
@@ -66,7 +67,17 @@ Click **Connect** next to a session and choose a terminal. The dialog
 preselects your computer's operating system; the web terminal is always at the
 top.
 
-![The Connect dialog: web terminal, then native terminals filtered by OS](docs/images/connect.png)
+| Choice | Opens in | Connector | Authorization |
+| --- | --- | --- | --- |
+| Web terminal | A regular browser window; also works on phones | No | Uses the browser's Outpost login to request a terminal ticket |
+| Terminal app | A Chrome/Edge window without browser tabs or an address bar | Yes | Transfers a ticket from your signed-in Outpost browser; no second login |
+| iTerm2 | A native macOS terminal tab | Yes | Same scoped terminal ticket |
+| Windows Terminal | A native Windows terminal tab running WSL | Yes | Same scoped terminal ticket |
+
+Every choice attaches to the same tmux session. Closing a client disconnects
+it; the coding session keeps running. You can change clients later.
+
+![The Connect dialog: web terminal, then desktop terminals filtered by OS](docs/images/connect.png)
 
 ### Web terminal
 
@@ -74,6 +85,10 @@ Opens full-window in the browser. Paste images with your normal paste shortcut
 or the image button. On phones, an on-screen key bar (Esc, Tab, Ctrl, Alt,
 arrows, ⇧↩, ^C) and a message box are shown. Dropped connections reconnect by
 themselves.
+
+Use **Hide terminal toolbar** for more screen space; the small button at the
+top right restores it. This preference also applies to Terminal app. Connection
+errors, link prompts and bell notices remain visible while the toolbar is hidden.
 
 When the coding tool rings the terminal bell, the page and tab title show
 which session rang, and a short chime plays. Click or type in the terminal
@@ -93,7 +108,37 @@ site settings.
 
 ![The web terminal](docs/images/web-terminal.png)
 
-### Native terminals
+### Terminal app (PWA web terminal)
+
+Choose **Connect → Terminal app** for the same web terminal in a dedicated
+desktop window. It shares keyboard handling, image paste, reconnects, sound
+and desktop notifications with the regular web terminal. Install or update
+the connector as described below; older connectors cannot open this choice.
+
+The launcher uses Chrome first on macOS (then Edge), and Edge first on Windows
+(then Chrome). macOS browsers can be in `/Applications` or `~/Applications`;
+Windows browsers are located through their registered App Paths. Windows
+uses WSL to run the connector, but **Windows Terminal is optional** for this
+choice. Safari and Firefox can be used to browse Outpost and launch a session;
+the connector opens the terminal in Chrome or Edge.
+
+Outpost supplies a standalone PWA manifest at `/terminal/app`. You may install
+that page through your browser's app menu for a dock/taskbar shortcut. The
+connector opens a fresh browser app window for each connection and does not
+require a separately installed PWA or automate PWA installation. An installed
+shortcut starts at the connection instructions; select the session through
+Outpost's Connect dialog. A network connection is required; no terminal data
+or account pages are cached for offline use.
+
+Your signed-in browser requests a single-use ticket valid for five minutes.
+The app consumes it, removes it from its address, and connects directly to
+Outpost. It does not need to share login cookies with the original browser.
+Reloading the same window uses a resume ticket in that window's session storage.
+If browser storage is disabled, use Connect again after a reload. Expired or
+already-used links also require a fresh Connect. Signing out of the original
+Outpost login revokes its terminal connections, including app windows.
+
+### Connector setup (all desktop choices)
 
 The first time, Outpost asks you to set up your computer with one command (run
 it in Terminal/iTerm2 on a Mac, or in your WSL shell on Windows):
@@ -104,7 +149,11 @@ curl -fsSL https://your-outpost/connector/install.sh | bash
 
 This installs the **Outpost Connector** in `~/.outpost-connector`, trusts that
 Outpost server, and registers `outpost://` links. After that, Connect opens a
-tab in your terminal directly, and the dialog confirms when it's attached.
+window or tab in your chosen terminal, and the dialog confirms when it's attached.
+The connector stores no Outpost account password or login cookie. Its trusted
+server list is shared by all desktop choices.
+
+### Native terminal shortcuts
 
 | | iTerm2 (macOS) | Windows Terminal (WSL) |
 | --- | --- | --- |
@@ -124,6 +173,8 @@ plain Enter, so use Ctrl+Enter for a newline there.
 
 After a detach, the tab shows a banner: **Enter** reconnects, **Ctrl+C**
 closes it. Network drops and Outpost restarts reconnect automatically.
+
+### Update or remove the connector
 
 Run the installer again to update the connector. To remove the connector,
 terminal integration, and trust for **all** Outpost servers, run this as the

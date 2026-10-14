@@ -1,22 +1,31 @@
-// Native terminal registry. Each entry has a connector adapter in
+// Connector terminal registry. Each entry has a launcher adapter in
 // connector/outpost_connector/terminals/; see docs/ARCHITECTURE.md.
 export type ClientOS = 'macos' | 'windows'
 export const clientOSLabels: Record<ClientOS, string> = { macos: 'macOS', windows: 'Windows' }
+export const terminalAppPath = '/terminal/app'
 
-export interface NativeTerminal {
+export interface ConnectorTerminal {
   id: string
   name: string
-  os: ClientOS
+  os: readonly ClientOS[]
   summary: string
   requirements: readonly string[]
   shortcuts: readonly { keys: string; action: string }[]
 }
 
-export const nativeTerminals = [
+export const connectorTerminals = [
+  {
+    id: 'terminal-app',
+    name: 'Terminal app',
+    os: ['macos', 'windows'],
+    summary: 'The web terminal in its own window, without browser tabs or an address bar',
+    requirements: ['Google Chrome or Microsoft Edge', 'macOS: Python 3.9+; Windows: WSL with Bash and Python 3'],
+    shortcuts: [{ keys: '⇧↩', action: 'New line' }],
+  },
   {
     id: 'iterm2',
     name: 'iTerm2',
-    os: 'macos',
+    os: ['macos'],
     summary: 'Opens a tab with the Outpost profile',
     requirements: ['iTerm2 3.4 or newer', 'Python 3.9+ (Xcode Command Line Tools)'],
     shortcuts: [
@@ -28,7 +37,7 @@ export const nativeTerminals = [
   {
     id: 'windows-terminal',
     name: 'Windows Terminal',
-    os: 'windows',
+    os: ['windows'],
     summary: 'Opens a WSL tab with the Outpost profile',
     requirements: ['Windows Terminal', 'WSL with Bash and Python 3'],
     shortcuts: [
@@ -37,13 +46,13 @@ export const nativeTerminals = [
       { keys: 'Ctrl+Enter', action: 'New line' },
     ],
   },
-] as const satisfies readonly NativeTerminal[]
+] as const satisfies readonly ConnectorTerminal[]
 
-export type NativeTerminalId = (typeof nativeTerminals)[number]['id']
-export type TerminalChoice = 'web' | NativeTerminalId
-export const terminalChoices: TerminalChoice[] = ['web', ...nativeTerminals.map(terminal => terminal.id)]
+export type ConnectorTerminalId = (typeof connectorTerminals)[number]['id']
+export type TerminalChoice = 'web' | ConnectorTerminalId
+export const terminalChoices: TerminalChoice[] = ['web', ...connectorTerminals.map(terminal => terminal.id)]
 export const terminalName = (id: TerminalChoice) =>
-  id === 'web' ? 'Web terminal' : nativeTerminals.find(terminal => terminal.id === id)!.name
+  id === 'web' ? 'Web terminal' : connectorTerminals.find(terminal => terminal.id === id)!.name
 
 export function clientOS(userAgent: string): ClientOS | null {
   // iPadOS can identify as a Mac; the web terminal is always available.

@@ -25,8 +25,9 @@ const resumeLifetime = 30 * 24 * 60 * 60_000
 const text = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 128
 
 /** Launch tokens start one connection (short-lived, single use, safe to put in
- * an outpost:// URL). Resume tokens reconnect it and only travel inside the
- * WebSocket. Both are bound to one owner, target and session. */
+ * an outpost:// URL). Resume tokens are returned over the WebSocket and used
+ * only to reconnect that socket, never in launcher links. Both are bound to
+ * one owner, target and session. */
 export class ConnectTokens {
   private used = new Map<string, number>()
   private connected = new Map<string, { userId: string; until: number }>()

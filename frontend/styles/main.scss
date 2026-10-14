@@ -1427,6 +1427,9 @@ kbd {
   }
 }
 .terminal-bar {
+  &[hidden] {
+    display: none;
+  }
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1434,6 +1437,18 @@ kbd {
   height: 46px;
   padding: 0 8px 0 16px;
   border-bottom: 1px solid #1e293b;
+}
+.terminal-show-toolbar {
+  position: absolute;
+  z-index: 3;
+  top: 4px;
+  right: 16px;
+  background: #0f172a;
+  opacity: 0.4;
+  &:hover,
+  &:focus-visible {
+    opacity: 1;
+  }
 }
 .terminal-title {
   display: flex;

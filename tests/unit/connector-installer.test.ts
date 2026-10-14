@@ -104,7 +104,16 @@ if os.environ.get('FAIL_CLEANUP') == '1':
     assert.deepEqual(readdirSync(downloads), [], 'the downloaded uninstaller is cleaned up too')
   }
   assert.equal(readFileSync(join(serverState, 'keep'), 'utf8'), 'server state')
-  assert.deepEqual(readFileSync(actions, 'utf8').trim().split('\n'), ['install', 'install', 'uninstall', 'uninstall'])
+  assert.deepEqual(readFileSync(actions, 'utf8').trim().split('\n'), [
+    'install',
+    'install-profile',
+    'install',
+    'install-profile',
+    'uninstall-profile',
+    'uninstall',
+    'uninstall-profile',
+    'uninstall',
+  ])
   mkdirSync(connector)
   writeFileSync(join(connector, 'config.json'), JSON.stringify({ servers: [first, second] }))
   const failed = run(first, ['--uninstall'], { FAIL_CLEANUP: '1' })

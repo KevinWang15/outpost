@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / 'connector'))
 os.environ['OUTPOST_CONNECTOR_HOME'] = tempfile.mkdtemp(prefix='outpost-connector-')
 atexit.register(shutil.rmtree, os.environ['OUTPOST_CONNECTOR_HOME'], True)
 from outpost_connector import VERSION, link, terminals  # noqa: E402
+from outpost_connector.desktop import macos, windows  # noqa: E402
 from outpost_connector.keys import InputRouter, bracketed  # noqa: E402
 from outpost_connector.platforms import ClipboardError, parse_clipboard  # noqa: E402
 from outpost_connector.screen import OutputFilter  # noqa: E402
@@ -239,38 +240,42 @@ class TerminalTest(unittest.TestCase):
         return 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe'
 
     def test_iterm2_profile_and_handler(self):
+        macos.install(self.context)
         iterm2.install(self.context)
         profile = json.loads(iterm2.profile_path(self.context).read_text())['Profiles'][0]
         self.assertEqual(profile['Name'], 'Outpost')
         self.assertEqual(profile['Keyboard Map']['0x76-0x100000'], {'Action': 10, 'Text': '[9001~'})
         self.assertEqual(profile['Keyboard Map']['0xd-0x20000'], {'Action': 10, 'Text': '[13;2u'})
-        info = plistlib.loads((iterm2.handler_path(self.context) / 'Contents' / 'Info.plist').read_bytes())
+        info = plistlib.loads((macos.handler_path(self.context) / 'Contents' / 'Info.plist').read_bytes())
         self.assertEqual(info['CFBundleURLTypes'][0]['CFBundleURLSchemes'], ['outpost'])
         self.assertEqual(info['CFBundleExecutable'], 'applet', 'keeps osacompile settings')
         self.assertIn('on open location theURL', self.handler)
         self.assertIn(json.dumps(shlex.quote(str(self.context.launcher)) + ' open '), self.handler)
         self.assertEqual(
-            [command[0] for command in self.commands], ['/usr/bin/osacompile', '/usr/bin/codesign', iterm2.LSREGISTER]
+            [command[0] for command in self.commands], ['/usr/bin/osacompile', '/usr/bin/codesign', macos.LSREGISTER]
         )
         iterm2.open(outpost_link(), self.context)
         self.assertEqual(
             self.commands[-1][-1], shlex.quote(str(self.context.launcher)) + ' attach ' + shlex.quote(outpost_link())
         )
 
-    def test_windows_terminal_fragment_and_handler(self):
+    def test_windows_terminal_fragment_and_shared_handler(self):
         with mock.patch.dict(os.environ, {'WSL_DISTRO_NAME': 'Ubuntu'}):
+            windows.install(self.context)
             windows_terminal.install(self.context)
-        script = base64.b64decode(self.commands[0][-1]).decode('utf-16-le')
-        settings = json.loads(base64.b64decode(script.split("FromBase64String('")[1].split("'")[0]))
-        fragment = json.loads(settings['fragment'])
-        self.assertEqual(fragment['profiles'][0]['commandline'], 'wsl.exe -d Ubuntu')
+        scripts = [base64.b64decode(command[-1]).decode('utf-16-le') for command in self.commands]
+        settings = [
+            json.loads(base64.b64decode(script.split("FromBase64String('")[1].split("'")[0])) for script in scripts
+        ]
+        handler = settings[0]
         self.assertEqual(
-            settings['command'],
-            '"{wt}" -w 0 new-tab --profile "Outpost" wsl.exe -d "Ubuntu" --exec "'
-            + str(self.context.launcher)
-            + '" attach "%1"',
+            json.loads(handler['handler']), {'distribution': 'Ubuntu', 'launcher': str(self.context.launcher)}
         )
-        self.assertIn('HKCU:\\Software\\Classes\\outpost', script)
+        self.assertIn(' open $Url', handler['script'])
+        self.assertIn('HKCU:\\Software\\Classes\\outpost', scripts[0])
+        fragment = json.loads(settings[1]['fragment'])
+        self.assertEqual(fragment['profiles'][0]['commandline'], 'wsl.exe -d Ubuntu')
+        self.assertNotIn('HKCU:', scripts[1], 'terminal profiles never own the shared URL handler')
 
     def test_windows_terminal_reports_missing_distro_without_registering_a_handler(self):
         with mock.patch.dict(os.environ, {'WSL_DISTRO_NAME': ''}):

@@ -14,6 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'connector'))
 from outpost_connector import install, link, terminals  # noqa: E402
+from outpost_connector.desktop import macos, windows  # noqa: E402
 from outpost_connector.platforms import WINDOWS_CLIPBOARD, WSL, MacOS  # noqa: E402
 from outpost_connector.terminals import iterm2, windows_terminal  # noqa: E402
 
@@ -57,7 +58,8 @@ class UninstallTest(unittest.TestCase):
     def test_data_deletion_errors_are_reported(self):
         adapter = mock.Mock(NAME='Test terminal')
         with (
-            mock.patch.object(install, 'supported_platform', return_value=(None, [adapter])),
+            mock.patch.object(install, 'supported_platform', return_value=(MacOS(), [adapter])),
+            mock.patch.object(macos, 'uninstall'),
             mock.patch.object(install.shutil, 'rmtree', side_effect=PermissionError('Cannot delete trust file')),
         ):
             with self.assertRaisesRegex(OSError, 'Uninstall was incomplete:.*Cannot delete trust file'):
@@ -73,13 +75,13 @@ class UninstallTest(unittest.TestCase):
             json.dumps({'servers': ['https://one.example', 'http://localhost:3000']})
         )
         context = terminals.Context(home, connector / 'bin' / 'outpost-connector', mock.Mock())
-        profile, app = iterm2.profile_path(context), iterm2.handler_path(context)
+        profile, app = iterm2.profile_path(context), macos.handler_path(context)
         profile.parent.mkdir(parents=True)
         profile.write_text('{}')
         app.mkdir(parents=True)
         (app / 'handler').touch()
         with (
-            mock.patch.object(install, 'supported_platform', return_value=(None, [iterm2])),
+            mock.patch.object(install, 'supported_platform', return_value=(MacOS(), [iterm2])),
             mock.patch.object(install, 'context', return_value=context),
             mock.patch.object(link, 'HOME', connector),
         ):
@@ -88,7 +90,7 @@ class UninstallTest(unittest.TestCase):
         self.assertFalse(profile.exists())
         self.assertFalse(app.exists())
         self.assertFalse(connector.exists())
-        context.run.assert_called_once_with([iterm2.LSREGISTER, '-u', str(app)])
+        context.run.assert_called_once_with([macos.LSREGISTER, '-u', str(app)])
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'macOS only')
@@ -97,8 +99,9 @@ class MacOSTest(unittest.TestCase):
         home = Path(tempfile.mkdtemp(prefix='outpost-macos-'))
         self.addCleanup(shutil.rmtree, home, True)
         context = terminals.Context(home, home / '.outpost-connector' / 'bin' / 'outpost-connector', run)
+        macos.install(context)
         iterm2.install(context)
-        app = iterm2.handler_path(context)
+        app = macos.handler_path(context)
         run(['/usr/bin/plutil', '-lint', str(app / 'Contents' / 'Info.plist')])
         run(['/usr/bin/codesign', '--verify', '--deep', str(app)])
         info = plistlib.loads((app / 'Contents' / 'Info.plist').read_bytes())
@@ -109,6 +112,7 @@ class MacOSTest(unittest.TestCase):
         source.write_text(iterm2.OPEN_SCRIPT)
         run(['/usr/bin/osacompile', '-o', str(home / 'open.scpt'), str(source)])
         iterm2.uninstall(context)
+        macos.uninstall(context)
         self.assertFalse(app.exists())
 
     def test_clipboard_round_trip(self):
@@ -145,68 +149,74 @@ class WindowsTest(unittest.TestCase):
         self.assertTrue(result.value.startswith(b'\x89PNG'))
         self.assertIn('ConvertTo-Json', WINDOWS_CLIPBOARD)
 
-    def test_terminal_setup_script_parses(self):
-        script = windows_terminal.SETUP % base64.b64encode(b'{}').decode()
-        check = (
-            '$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput('
-            '[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("'
-            + base64.b64encode(script.encode()).decode()
-            + '")), [ref]$null, [ref]$errors); '
-            'if ($errors.Count) { exit 1 }'
-        )
-        WSL().powershell(check)
+    def test_desktop_scripts_parse(self):
+        for script in (windows.SETUP, windows.OPEN, windows.APP, windows_terminal.SETUP):
+            check = (
+                '$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput('
+                '[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("'
+                + base64.b64encode(script.encode()).decode()
+                + '")), [ref]$null, [ref]$errors); '
+                'if ($errors.Count) { $errors | Out-String | Write-Error; exit 1 }'
+            )
+            WSL().powershell(check)
 
-    def test_terminal_setup_uses_utf8_for_paths_and_errors(self):
+    def test_setup_uses_utf8_and_installs_without_windows_terminal(self):
         directory = Path(tempfile.mkdtemp(prefix='outpost-windows-'))
         self.addCleanup(shutil.rmtree, directory, True)
         local = directory / '张三'
-        wt = local / 'Microsoft' / 'WindowsApps' / 'wt.exe'
-        wt.parent.mkdir(parents=True)
-        wt.touch()
         key = 'HKCU:\\Software\\Classes\\outpost-test-' + uuid.uuid4().hex
         self.addCleanup(
             WSL().powershell,
-            "$ErrorActionPreference = 'Stop'; if (Test-Path -LiteralPath '"
-            + key
-            + "') { Remove-Item -LiteralPath '"
-            + key
-            + "' -Recurse -Force }",
+            "if (Test-Path -LiteralPath '" + key + "') { Remove-Item -LiteralPath '" + key + "' -Recurse -Force }",
         )
-        # Exercise the real setup under a legacy code page, isolating only its
-        # Windows paths and registry key from the user's actual installation.
-        script = '[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(936)\n' + windows_terminal.SETUP
-        script = script.replace(
-            "[Environment]::GetFolderPath('LocalApplicationData')", "'" + str(local).replace("'", "''") + "'"
-        ).replace('HKCU:\\Software\\Classes\\outpost', key)
-        context = terminals.Context(directory, Path('/home/test/.outpost-connector/bin/outpost-connector'), install.run)
-        fragment = json.dumps(windows_terminal.fragment('Ubuntu'))
-        command = windows_terminal.handler_command('{wt}', 'Ubuntu', context.launcher)
-        with mock.patch.object(windows_terminal, 'SETUP', script):
-            self.assertEqual(
-                windows_terminal.powershell(context, {'action': 'install', 'fragment': fragment, 'command': command}),
-                str(wt),
-            )
-            installed = local / 'Microsoft' / 'Windows Terminal' / 'Fragments' / 'Outpost' / 'outpost.json'
-            self.assertEqual(installed.read_text(encoding='utf-8'), fragment)
+
+        def isolated(script):
+            return script.replace(
+                "[Environment]::GetFolderPath('LocalApplicationData')", "'" + str(local).replace("'", "''") + "'"
+            ).replace('HKCU:\\Software\\Classes\\outpost', key)
+
+        context = terminals.Context(directory, Path('/home/张三/with spaces/connector'), install.run)
+        with (
+            mock.patch.object(windows, 'SETUP', isolated(windows.SETUP)),
+            mock.patch.object(windows_terminal, 'SETUP', isolated(windows_terminal.SETUP)),
+            mock.patch.dict('os.environ', {'WSL_DISTRO_NAME': 'Ubuntu Test'}),
+        ):
+            windows.install(context)
+            self.assertIn('skipped', windows_terminal.install(context)[0])
+            handler = local / 'Outpost Connector'
+            config = json.loads((handler / 'handler.json').read_text(encoding='utf-8-sig'))
+            self.assertEqual(config['launcher'], str(context.launcher))
+            self.assertEqual(config['distribution'], 'Ubuntu Test')
             registered = WSL().powershell(
                 '[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false); '
                 "[Console]::Write((Get-Item -LiteralPath '" + key + "\\shell\\open\\command').GetValue(''))"
             )
-            self.assertEqual(registered, command.replace('{wt}', str(wt)))
-            # Force a localized filesystem error after setup starts. The real
-            # message and failing status must survive the Python boundary.
-            installed.unlink()
-            installed.mkdir()
+            self.assertIn(str(handler / 'open.ps1'), registered)
+            self.assertIn('-File', registered)
+            self.assertNotIn('wt.exe', registered)
+            wt = local / 'Microsoft' / 'WindowsApps' / 'wt.exe'
+            wt.parent.mkdir(parents=True)
+            wt.touch()
+            windows_terminal.install(context)
+            profile = local / 'Microsoft' / 'Windows Terminal' / 'Fragments' / 'Outpost' / 'outpost.json'
+            self.assertEqual(
+                json.loads(profile.read_text(encoding='utf-8'))['profiles'][0]['commandline'],
+                'wsl.exe -d "Ubuntu Test"',
+            )
+            # A localized filesystem failure must survive the Python boundary.
+            profile.unlink()
+            profile.mkdir()
             with self.assertRaises(OSError) as failed:
-                windows_terminal.powershell(context, {'action': 'install', 'fragment': fragment, 'command': command})
+                windows_terminal.install(context)
             self.assertIn('张三', str(failed.exception))
             self.assertNotIn('#< CLIXML', str(failed.exception))
-            # Removing Windows Terminal itself must not prevent connector cleanup.
             wt.unlink()
-            windows_terminal.uninstall(context)
-            self.assertFalse(installed.parent.exists())
+            for _ in range(2):
+                windows_terminal.uninstall(context)
+                windows.uninstall(context)
+            self.assertFalse(profile.parent.exists())
+            self.assertFalse(handler.exists())
             self.assertEqual(WSL().powershell("[Console]::Write((Test-Path -LiteralPath '" + key + "'))"), 'False')
-            windows_terminal.uninstall(context)  # Missing files and registry keys are harmless.
 
 
 if __name__ == '__main__':

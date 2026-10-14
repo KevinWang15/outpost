@@ -11,6 +11,8 @@ import {
   Keyboard,
   LoaderCircle,
   MessageSquareText,
+  PanelTopClose,
+  PanelTopOpen,
   RotateCw,
   X,
 } from 'lucide-react'
@@ -80,7 +82,24 @@ function openLink(url: string) {
   }
 }
 
-export default function TerminalView({ token, title, onClose }: { token: string; title: string; onClose: () => void }) {
+interface Props {
+  token: string
+  title: string
+  onClose: () => void
+  onResume?: (token: string) => void
+  onExpired?: () => void
+}
+
+const toolbarPreference = 'outpost.terminal.toolbar-hidden'
+function savedToolbar() {
+  try {
+    return localStorage.getItem(toolbarPreference) !== 'true'
+  } catch {
+    return true
+  }
+}
+
+export default function TerminalView({ token, title, onClose, onResume, onExpired }: Props) {
   const surface = useRef<HTMLDivElement>(null),
     chooser = useRef<HTMLInputElement>(null)
   const terminal = useRef<Terminal | null>(null),
@@ -89,7 +108,7 @@ export default function TerminalView({ token, title, onClose }: { token: string;
   const bell = useRef<ReturnType<typeof attachBell> | null>(null)
   const [state, setState] = useState<SocketState>({ kind: 'connecting' })
   const [name, setName] = useState(title)
-  const sessionName = useRef(title)
+  const sessionInfo = useRef({ id: '', name: title })
   const [bellRinging, setBellRinging] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState(bellNotificationPermission)
   const [requestingNotifications, setRequestingNotifications] = useState(false)
@@ -101,6 +120,20 @@ export default function TerminalView({ token, title, onClose }: { token: string;
   const armed = useRef<TerminalModifiers>({})
   const statusTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const connected = state.kind === 'connected'
+  const [toolbarShown, setToolbarShown] = useState(savedToolbar)
+  const lifecycle = useRef({ onResume, onExpired })
+  useEffect(() => {
+    lifecycle.current = { onResume, onExpired }
+  }, [onResume, onExpired])
+  const showToolbar = (shown: boolean) => {
+    setToolbarShown(shown)
+    try {
+      localStorage.setItem(toolbarPreference, String(!shown))
+    } catch {
+      /* The layout preference is optional. */
+    }
+    terminal.current?.focus()
+  }
 
   useEffect(() => {
     const previous = document.title
@@ -192,7 +225,7 @@ export default function TerminalView({ token, title, onClose }: { token: string;
     term.open(surface.current!)
     term.textarea?.setAttribute('aria-label', 'Terminal input')
     terminal.current = term
-    const bells = attachBell(term, setBellRinging, () => sessionName.current)
+    const bells = attachBell(term, setBellRinging, () => sessionInfo.current)
     bell.current = bells
     const size = () => {
       const proposed = surface.current?.clientWidth ? fit.proposeDimensions() : undefined
@@ -205,11 +238,16 @@ export default function TerminalView({ token, title, onClose }: { token: string;
       output: (bytes, rendered) => term.write(bytes, rendered),
       state: next => {
         setState(next)
+        if (next.kind === 'closed' && next.reason === 'expired') lifecycle.current.onExpired?.()
         if (next.kind === 'connected' && !touch()) term.focus()
       },
       hello: message => {
-        sessionName.current = `${message.session.name} · ${message.target.name}`
-        setName(sessionName.current)
+        lifecycle.current.onResume?.(message.resume)
+        sessionInfo.current = {
+          id: `${message.target.id}/${message.session.id}`,
+          name: `${message.session.name} · ${message.target.name}`,
+        }
+        setName(sessionInfo.current.name)
       },
       signal: ({ signal }) => {
         if (signal.type !== 'browser.open') return
@@ -315,7 +353,7 @@ export default function TerminalView({ token, title, onClose }: { token: string;
 
   return (
     <div className="terminal-view" role="dialog" aria-label={`Web terminal · ${name}`}>
-      <header className="terminal-bar">
+      <header className="terminal-bar" hidden={!toolbarShown}>
         <div className="terminal-title">
           <strong>{name}</strong>
           <span className={`terminal-state ${state.kind}`}>
@@ -333,6 +371,14 @@ export default function TerminalView({ token, title, onClose }: { token: string;
           )}
         </div>
         <div className="terminal-actions">
+          <button
+            className="icon-button"
+            title="Hide terminal toolbar"
+            aria-label="Hide terminal toolbar"
+            onClick={() => showToolbar(false)}
+          >
+            <PanelTopClose size={17} />
+          </button>
           <button
             className="icon-button"
             title={notificationLabels[notificationPermission]}
@@ -398,6 +444,23 @@ export default function TerminalView({ token, title, onClose }: { token: string;
           </button>
         </div>
       </header>
+      {!toolbarShown && (
+        <>
+          <button
+            className="icon-button terminal-show-toolbar"
+            title="Show terminal toolbar"
+            aria-label="Show terminal toolbar"
+            onClick={() => showToolbar(true)}
+          >
+            <PanelTopOpen size={17} />
+          </button>
+          {(status || state.kind === 'connecting' || state.kind === 'reconnecting') && (
+            <div className="terminal-notice" role="status">
+              {status || label}
+            </div>
+          )}
+        </>
+      )}
       {blockedLink && (
         <div className="terminal-notice">
           <span>

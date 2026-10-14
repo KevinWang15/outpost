@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from . import VERSION, link, terminals
+from .desktop import HANDLERS
 from .platforms import detect
 
 ARCHIVE = link.HOME / 'outpost-connector.pyz'
@@ -31,10 +32,7 @@ def supported_platform():
     platform = detect()
     adapters = terminals.for_platform(platform.name)
     if not adapters:
-        raise OSError(
-            'Outpost native terminals support macOS with iTerm2 and Windows Terminal with WSL. '
-            'Use the web terminal on this computer.'
-        )
+        raise OSError('Outpost Connector supports macOS and Windows with WSL. Use the web terminal on this computer.')
     return platform, adapters
 
 
@@ -50,7 +48,7 @@ def install(server, archive):
     LAUNCHER.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' ' + shlex.quote(str(ARCHIVE)) + ' "$@"\n')
     LAUNCHER.chmod(0o700)
     trusted = link.trust(server)
-    messages = []
+    messages = HANDLERS[platform.name].install(context())
     for adapter in adapters:
         messages += adapter.install(context())
     print('Outpost Connector ' + VERSION + ' is installed.')
@@ -60,13 +58,17 @@ def install(server, archive):
 
 
 def uninstall():
-    _, adapters = supported_platform()
+    platform, adapters = supported_platform()
     errors = []
     for adapter in adapters:
         try:
             adapter.uninstall(context())
         except OSError as error:
             errors.append(adapter.NAME + ': ' + str(error))
+    try:
+        HANDLERS[platform.name].uninstall(context())
+    except OSError as error:
+        errors.append('URL handler: ' + str(error))
     # Revoke all trusted servers even if removing the OS integration failed.
     # Only an absent installation is ignored; permission errors must surface.
     try:

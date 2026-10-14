@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useReducer, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { LoaderCircle, LogOut, Monitor, Plus, Server, UserRound } from 'lucide-react'
 import type { Target, TargetInput } from '../shared/model'
 import { api } from './api'
@@ -8,8 +8,6 @@ import { Menu } from './ui/Menu'
 import TargetDialog from './workspace/TargetDialog'
 import TargetView from './workspace/TargetView'
 import { address } from './workspace/labels'
-
-const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
 
 interface Workspace {
   targets: Target[] | null
@@ -52,22 +50,6 @@ function reducer(state: Workspace, action: Action): Workspace {
 }
 
 export default function App() {
-  if (window.location.pathname === '/terminal')
-    return (
-      <Suspense
-        fallback={
-          <div className="auth-loading" role="status">
-            Opening terminal…
-          </div>
-        }
-      >
-        <TerminalPage />
-      </Suspense>
-    )
-  return <WorkspaceView />
-}
-
-function WorkspaceView() {
   const { mode, user, signOut } = useAuth()
   const [{ targets, selected, visit }, dispatch] = useReducer(reducer, { targets: null, selected: '', visit: 0 })
   const [error, setError] = useState('')
@@ -205,7 +187,7 @@ function WorkspaceView() {
               </li>
               <li>
                 <strong>Connect anywhere</strong>
-                <span>Web terminal, iTerm2 or Windows Terminal.</span>
+                <span>Web terminal, Terminal app, iTerm2 or Windows Terminal.</span>
               </li>
             </ol>
           </section>

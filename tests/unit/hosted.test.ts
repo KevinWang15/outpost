@@ -79,20 +79,41 @@ test(
     const session = (
       await call('POST', `/targets/${target.id}/sessions`, { name: 'Build', rootDir: '~/p', tool: 'claude' }, alice)
     ).body as Session
-    const { token, id } = (
-      await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: 'web' }, alice)
-    ).body as ConnectResponse
-    assert.deepEqual((await call('GET', `/connections/${id}`, undefined, bob)).body, { status: 'pending' })
-    const terminal = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`)
-    t.after(() => terminal.socket.terminate())
-    const hello = await terminal.message('hello')
-    await terminal.message('ready')
+    const connections = []
+    for (const choice of ['web', 'terminal-app']) {
+      assert.equal(
+        (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: choice })).status,
+        401,
+      )
+      const { token, id } = (
+        await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: choice }, alice)
+      ).body as ConnectResponse
+      assert.deepEqual((await call('GET', `/connections/${id}`, undefined, bob)).body, { status: 'pending' })
+      // WebSocket authorization uses the scoped grant, with no account cookie.
+      const terminal = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`)
+      t.after(() => terminal.socket.terminate())
+      const hello = await terminal.message('hello')
+      await terminal.message('ready')
+      const replay = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`)
+      t.after(() => replay.socket.terminate())
+      assert.equal((await replay.message('closed')).reason, 'expired')
+      assert.equal(
+        (await call('GET', '/targets', undefined, `outpost_session=${hello.resume}`)).status,
+        401,
+        'terminal grants are not account sessions',
+      )
+      connections.push({ terminal, hello })
+    }
 
     assert.equal((await call('POST', '/auth/logout', undefined, alice)).status, 204)
-    const closed = await terminal.message('closed')
-    assert.equal(closed.reason, 'expired', 'open terminals close within the revocation sweep')
-    const resumed = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(hello.resume)}`)
-    t.after(() => resumed.socket.terminate())
-    assert.equal((await resumed.message('closed')).reason, 'expired', 'resume tokens die with the login')
+    for (const { terminal, hello } of connections) {
+      const closed = await terminal.message('closed')
+      assert.equal(closed.reason, 'expired', 'open terminals close within the revocation sweep')
+      const resumed = new TerminalClient(
+        `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(hello.resume)}`,
+      )
+      t.after(() => resumed.socket.terminate())
+      assert.equal((await resumed.message('closed')).reason, 'expired', 'resume tokens die with the login')
+    }
   },
 )

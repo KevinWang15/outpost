@@ -26,7 +26,7 @@ credentials, hosted development shows verification links in the UI.
 | --- | --- | --- |
 | `backend/` | TypeScript | Outpost server |
 | `frontend/` | React + SCSS | Browser |
-| `shared/` | TypeScript | Both; includes the harness and native-terminal registries |
+| `shared/` | TypeScript | Both; includes the harness and connector-launcher registries |
 | `runtime/` | Python 3.9 | Targets, sent with each operation |
 | `connector/` | Python 3.9 | Your computer (macOS, WSL) |
 

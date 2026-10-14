@@ -23,6 +23,7 @@ from pathlib import Path
 
 from outpost_activity_state import Activity
 from outpost_harness import adapters
+from outpost_scrollback import Scrollback
 
 CODING_ADAPTERS = adapters()
 
@@ -660,9 +661,13 @@ class AttachHooks:
     def __init__(self, session):
         self.session = session
         self.observer = activity(session)
+        self.history = Scrollback(tmux_command(session), tmux_environment())
 
     def on_input(self):
         self.observer.input()
+
+    def scrollback(self, offset=None):
+        return self.history.read(offset)
 
     def paste_image(self, extension, encoded):
         path = save_image(self.session, extension, decode_image(extension, encoded))

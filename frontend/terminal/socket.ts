@@ -1,4 +1,4 @@
-import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
+import type { ClientMessage, CloseReason, ScrollbackState, ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
 import type { ImageMediaType } from '../../shared/model'
 
@@ -13,6 +13,7 @@ interface Handlers {
   state(state: SocketState): void
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
+  scrollback?(state: ScrollbackState | null): void
 }
 
 const retries = 8
@@ -26,6 +27,9 @@ export class TerminalSocket {
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
   private ready = false
+  private historySupported = false
+  private historyTimer: ReturnType<typeof setTimeout> | undefined
+  private historyOffset: number | undefined
   private pending = new Map<
     string,
     { resolve: (message: Extract<ServerMessage, { type: 'result' }>) => void; reject: (error: Error) => void }
@@ -45,6 +49,7 @@ export class TerminalSocket {
 
   open() {
     if (this.stopped) return
+    this.resetHistory()
     const { cols, rows } = this.size()
     const url = new URL('/api/terminal', window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -76,6 +81,10 @@ export class TerminalSocket {
         this.attempts = 0
         this.handlers.state({ kind: 'connected' })
         this.send({ type: 'resize', ...this.size() })
+        this.historySupported = message.scrollback === true
+        if (this.historySupported && this.handlers.scrollback) this.send({ type: 'scrollback' })
+      } else if (message.type === 'scrollback') {
+        this.handlers.scrollback?.(message)
       } else if (message.type === 'result') {
         this.pending.get(message.id)?.resolve(message)
         this.pending.delete(message.id)
@@ -85,6 +94,7 @@ export class TerminalSocket {
     socket.onclose = () => {
       if (this.socket !== socket) return
       this.ready = false
+      this.resetHistory()
       this.failPending('The connection closed before Outpost confirmed it. Check the terminal before retrying.')
       if (this.stopped) return
       const message = closed as Extract<ServerMessage, { type: 'closed' }> | null
@@ -122,6 +132,7 @@ export class TerminalSocket {
   close() {
     this.stopped = true
     clearTimeout(this.timer)
+    this.resetHistory()
     this.failPending('The terminal closed.')
     this.socket?.close()
     this.socket = null
@@ -139,6 +150,30 @@ export class TerminalSocket {
 
   resize(cols: number, rows: number) {
     if (this.connected) this.send({ type: 'resize', cols, rows })
+  }
+
+  scrollTo(offset: number) {
+    if (!this.connected || !this.historySupported) return
+    this.historyOffset = Math.max(-1, Math.min(1_000_000, Math.round(offset)))
+    const flush = () => {
+      this.historyTimer = undefined
+      if (this.historyOffset !== undefined && this.connected)
+        this.send({ type: 'scrollback', offset: this.historyOffset })
+      this.historyOffset = undefined
+    }
+    // Jump endpoints immediately. Keep only the latest position during a drag.
+    if (offset <= 0) {
+      clearTimeout(this.historyTimer)
+      flush()
+    } else this.historyTimer ??= setTimeout(flush, 50)
+  }
+
+  private resetHistory() {
+    clearTimeout(this.historyTimer)
+    this.historyTimer = undefined
+    this.historyOffset = undefined
+    this.historySupported = false
+    this.handlers.scrollback?.(null)
   }
 
   private request(message: ClientMessage & { id: string }) {

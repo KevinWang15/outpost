@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -18,25 +18,20 @@ import {
 } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 import type { ImageMediaType } from '../../shared/model'
-import type { CloseReason } from '../../shared/protocol'
+import type { CloseReason, ScrollbackState } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
 import { readImage } from '../api'
-import { attachBell, bellNotificationPermission, type BellNotificationPermission } from './bell'
+import { attachBell } from './bell'
 import { attachClipboard, imageProblem } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
+import ScrollbackBar from './ScrollbackBar'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
+import { notificationLabels, notificationSetupPath, useBellNotifications } from './useBellNotifications'
 
 const touch = () => window.matchMedia('(pointer: coarse)').matches
-const notificationLabels: Record<BellNotificationPermission, string> = {
-  default: 'Enable desktop notifications',
-  granted: 'Desktop notifications enabled',
-  denied: 'Desktop notifications blocked',
-  unsupported: 'Desktop notifications unavailable in this browser',
-  insecure: 'Desktop notifications require HTTPS or localhost',
-}
 const closedTitles: Record<CloseReason, string> = {
   detached: 'Detached',
   ended: 'Session ended',
@@ -100,6 +95,7 @@ function savedToolbar() {
 }
 
 export default function TerminalView({ token, title, onClose, onResume, onExpired }: Props) {
+  const terminalId = useId()
   const surface = useRef<HTMLDivElement>(null),
     chooser = useRef<HTMLInputElement>(null)
   const terminal = useRef<Terminal | null>(null),
@@ -110,8 +106,9 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   const [name, setName] = useState(title)
   const sessionInfo = useRef({ id: '', name: title })
   const [bellRinging, setBellRinging] = useState(false)
-  const [notificationPermission, setNotificationPermission] = useState(bellNotificationPermission)
-  const [requestingNotifications, setRequestingNotifications] = useState(false)
+  const [history, setHistory] = useState<ScrollbackState | null>(null)
+  const historyState = useRef<ScrollbackState | null>(null)
+  const [notificationHelpShown, setNotificationHelpShown] = useState(false)
   const [status, setStatus] = useState('')
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
   const [keysShown, setKeysShown] = useState(touch)
@@ -143,44 +140,12 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     }
   }, [name, bellRinging])
 
-  useEffect(() => {
-    const refresh = () => setNotificationPermission(bellNotificationPermission())
-    window.addEventListener('focus', refresh)
-    document.addEventListener('visibilitychange', refresh)
-    return () => {
-      window.removeEventListener('focus', refresh)
-      document.removeEventListener('visibilitychange', refresh)
-    }
-  }, [])
-
   const notify = useCallback((message: string, sticky = false) => {
     setStatus(message)
     clearTimeout(statusTimer.current)
     if (!sticky) statusTimer.current = setTimeout(() => setStatus(''), 4000)
   }, [])
-  const enableNotifications = async () => {
-    const permission = bellNotificationPermission()
-    setNotificationPermission(permission)
-    if (permission === 'insecure') return notify('Open Outpost over HTTPS or localhost to enable notifications.', true)
-    if (permission === 'unsupported') return notify('This browser does not support desktop notifications.', true)
-    if (permission === 'denied')
-      return notify('Notifications are blocked. Allow them in your browser’s site settings.', true)
-    if (permission === 'granted')
-      return notify('Desktop notifications are enabled. Keep this terminal tab open to receive alerts.')
-    setRequestingNotifications(true)
-    try {
-      // Request directly from the button click; Safari and Firefox require a gesture.
-      const next = await Notification.requestPermission()
-      setNotificationPermission(next)
-      if (next === 'granted') notify('Desktop notifications enabled. Keep this terminal tab open to receive alerts.')
-      else if (next === 'denied') notify('Notifications are blocked. Allow them in your browser’s site settings.', true)
-      else notify('Desktop notifications were not enabled. Click the bell to try again.')
-    } catch {
-      notify('Could not enable desktop notifications. Check your browser’s site settings.', true)
-    } finally {
-      setRequestingNotifications(false)
-    }
-  }
+  const notifications = useBellNotifications(notify)
   const arm = useCallback((next: TerminalModifiers) => {
     armed.current = next
     setModifiers(next)
@@ -249,6 +214,10 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         }
         setName(sessionInfo.current.name)
       },
+      scrollback: next => {
+        historyState.current = next
+        setHistory(next)
+      },
       signal: ({ signal }) => {
         if (signal.type !== 'browser.open') return
         let url: string
@@ -278,6 +247,23 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     term.onBinary(data => client.input(Uint8Array.from(data, character => character.charCodeAt(0))))
     term.attachCustomKeyEventHandler(event => {
       if (!shims.handleKey(event)) return false
+      const history = historyState.current
+      if (
+        event.type === 'keydown' &&
+        event.shiftKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        (event.key === 'PageUp' || event.key === 'PageDown') &&
+        history?.available
+      ) {
+        event.preventDefault()
+        const page = Math.max(1, history.rows - 1)
+        const offset = Math.max(0, Math.min(history.lines, history.offset + (event.key === 'PageUp' ? page : -page)))
+        historyState.current = { ...history, offset }
+        client.scrollTo(offset)
+        return false
+      }
       // Coding tools read Shift+Enter as a newline; xterm would send a plain Enter.
       if (
         event.type === 'keydown' &&
@@ -381,16 +367,19 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           </button>
           <button
             className="icon-button"
-            title={notificationLabels[notificationPermission]}
-            aria-label={notificationLabels[notificationPermission]}
-            disabled={requestingNotifications}
-            onClick={() => void enableNotifications()}
+            title={notificationLabels[notifications.permission]}
+            aria-label={notificationLabels[notifications.permission]}
+            disabled={notifications.requesting}
+            onClick={() => {
+              setNotificationHelpShown(true)
+              notifications.request()
+            }}
           >
-            {requestingNotifications ? (
+            {notifications.requesting ? (
               <LoaderCircle className="spin" size={17} />
-            ) : notificationPermission === 'granted' ? (
+            ) : notifications.permission === 'granted' ? (
               <BellRing size={17} />
-            ) : notificationPermission === 'default' ? (
+            ) : notifications.permission === 'default' ? (
               <Bell size={17} />
             ) : (
               <BellOff size={17} />
@@ -461,6 +450,21 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           )}
         </>
       )}
+      {notificationHelpShown && notifications.needsSetup && (
+        <div className="terminal-notice">
+          <span>Permission prompt hidden or blocked?</span>
+          <a href={notificationSetupPath} target="_blank" rel="noopener noreferrer">
+            Open notification setup
+          </a>
+          <button
+            className="icon-button"
+            aria-label="Dismiss notification setup"
+            onClick={() => setNotificationHelpShown(false)}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
       {blockedLink && (
         <div className="terminal-notice">
           <span>
@@ -480,7 +484,17 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         </div>
       )}
       <div className="terminal-body">
-        <div className="terminal-surface" ref={surface} />
+        <div className="terminal-surface" id={terminalId} ref={surface} />
+        <ScrollbackBar
+          state={history}
+          enabled={connected}
+          controls={terminalId}
+          onScroll={offset => socket.current?.scrollTo(offset)}
+          onLive={() => {
+            socket.current?.scrollTo(0)
+            terminal.current?.focus()
+          }}
+        />
         {bellRinging && (
           <div className="terminal-notice terminal-bell" role="status">
             <Bell size={16} aria-hidden="true" />

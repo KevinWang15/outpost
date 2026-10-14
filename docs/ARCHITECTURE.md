@@ -144,8 +144,9 @@ branch on the mode.
 | iTerm2 | Connector → `iterm2` → native tab | Python `Session` | The same launch grant in `outpost://` |
 | Windows Terminal | Connector → `windows_terminal` → WSL tab | Python `Session` | The same launch grant in `outpost://` |
 
-`frontend/Root.tsx` routes only `/terminal/app` outside `AuthGate`. Serving this
-page does not authorize a connection or grant account API access. The broker
+`frontend/Root.tsx` routes `/terminal/app` and the browser notification setup
+page `/notifications` outside `AuthGate`. Serving these pages does not authorize
+a connection or grant account API access. The broker
 checks the same signed grant, session ownership and original login liveness
 for every client. Opening Terminal app from a different browser/profile needs
 no copied login cookie, second account token or connector HTTP service.
@@ -163,6 +164,35 @@ grants after 30 days, and both are bound to the original login and one session.
 Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
 clipboard, composer, links, bells and notifications have one web implementation.
+
+`ScrollbackBar` displays tmux's history position, not xterm's local buffer:
+tmux uses the alternate screen, so xterm's scrollbar cannot reach that history.
+The relay advertises `ready.scrollback`; interested clients subscribe with a
+`scrollback` control message over the existing socket. Only metadata (line
+count, offset, rows and copy-mode availability) returns to the browser. The
+target's `Scrollback` adapter uses tmux `copy-mode`, `goto-line` and `cancel`;
+tmux redraws through the usual PTY stream. Seeking the bottom exits copy mode.
+Native clients do not subscribe. Compatibility remains tmux 3.2+.
+
+Metadata reads are triggered by input/output/resize, capped at two per second
+and skipped when idle. Drag destinations are coalesced, capped at ten per
+second in the relay, and executed by one background worker with command
+timeouts so history controls cannot block terminal traffic. Copy-mode history
+size is remembered on older tmux releases which do not expose the snapshot's
+size; newer releases expose it directly. This stores no terminal content.
+The scrollbar follows the pane's shared copy mode, including mouse-wheel
+changes and changes made by other attached clients. Full-screen applications
+may keep their own internal history that tmux cannot expose.
+
+`useBellNotifications` owns notification permission requests for both terminals
+and the public setup page. Requests require a click; the busy indicator ends
+after eight seconds if the browser leaves its prompt unanswered. The original
+request remains observed, with no duplicate requests queued. Permission changes
+are read from the browser through the Permissions API and on focus/visibility
+changes. The setup link opens a tab in the app's browser profile, outside the
+manifest's `/terminal/` scope, with no opener, referrer or terminal ticket.
+This makes site permission controls accessible when an app window hides its
+prompt. The page never calls account APIs or opens a terminal connection.
 
 The app has a `display: standalone` manifest with a credential-free start URL,
 but the connector uses Chromium's `--app` launch mode, without installing a PWA
@@ -184,8 +214,10 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `ack {bytes}` | Output rendered; flow control |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
 | → server | `paste-image {id, mediaType, data}` | Upload an image and paste its path |
+| → server | `scrollback {offset?}` | Subscribe to history metadata; seek a line offset from the bottom (`0` = live, `-1` = oldest) |
 | ← client | `hello {resume, session, target}` | Connection accepted |
-| ← client | `ready` | Attached to tmux |
+| ← client | `ready {scrollback?}` | Attached to tmux, with optional history controls |
+| ← client | `scrollback {available, lines, offset, rows, active}` | History extent, position and whether copy mode is active |
 | ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |
@@ -214,7 +246,7 @@ session, missing tmux), its `OUTPOST_RESULT` error becomes the client's
 | --- | --- | --- |
 | `I` | broker → relay | Input bytes for tmux |
 | `O` | relay → broker | Output bytes from tmux |
-| `C` | both | JSON control: `resize`, `paste-image`, `signal-result` / `ready`, `paste-result`, `signal`, `exit` |
+| `C` | both | JSON control: `resize`, `paste-image`, `scrollback`, `signal-result` / `ready`, `paste-result`, `scrollback`, `signal`, `exit` |
 
 Framing replaces in-band escape sequences, so typed or pasted bytes can never
 be mistaken for control messages. The relay owns a PTY for `tmux attach`, so

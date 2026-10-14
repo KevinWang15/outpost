@@ -272,6 +272,9 @@ class Connection:
     def ready(self, _message):
         self.connected = True
 
+    def scrollback(self, _message):
+        pass  # Native clients use tmux mouse/copy mode and do not subscribe.
+
     def result(self, message):
         if message.get('ok'):
             self.session.title('Image pasted' if message.get('reference') else None)
@@ -357,6 +360,7 @@ HANDLERS = {
     'ready': Connection.ready,
     'result': Connection.result,
     'signal': Connection.signal,
+    'scrollback': Connection.scrollback,
     'closed': Connection.closed,
 }
 SIGNALS = {'browser.open': Connection.open_link}

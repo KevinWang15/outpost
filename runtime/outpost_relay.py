@@ -18,6 +18,7 @@ import struct
 import termios
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 MAGIC = b'\x00OUTPOST-RELAY-2\x00'
 HEADER = struct.Struct('>cI')
@@ -212,7 +213,7 @@ def winsize(cols, rows):
 
 
 class Relay:
-    """hooks: on_input(), paste_image(extension, data) -> dict."""
+    """hooks: on_input(), paste_image(extension, data), optional scrollback(offset)."""
 
     def __init__(self, command, environment, cols, rows, hooks, signal_path=None):
         self.command = command
@@ -224,6 +225,14 @@ class Relay:
         self.outgoing = bytearray()
         self.tail = b''
         self.stopped = False
+        self.history_subscribed = False
+        self.history_dirty = False
+        self.history_offset = None
+        self.history_checked = 0
+        self.history_last = None
+        self.history_worker = None
+        self.history_future = None
+        self.history_seeking = False
 
     def send(self, message):
         self.outgoing += control(message)
@@ -234,15 +243,53 @@ class Relay:
         except (OSError, ValueError):
             pass  # Activity observation must never interrupt a coding session.
 
+    def update_history(self):
+        if self.history_future is not None:
+            if not self.history_future.done():
+                return
+            try:
+                state = self.history_future.result()
+                if self.history_seeking:
+                    self.observed()
+            except (OSError, ValueError):
+                state = {'available': False, 'lines': 0, 'offset': 0, 'rows': 1, 'active': False}
+            self.history_future = None
+            if state != self.history_last:
+                self.history_last = state
+                self.send({'type': 'scrollback', **state})
+        if not self.history_subscribed or not self.history_dirty or len(self.outgoing) >= HIGH_WATER:
+            return
+        now = time.monotonic()
+        # Coalesce drag requests; read metadata only after terminal activity.
+        # Idle and native connections do not keep spawning tmux queries.
+        if now - self.history_checked < (0.1 if self.history_offset is not None else 0.5):
+            return
+        offset, self.history_offset = self.history_offset, None
+        self.history_dirty = False
+        self.history_checked = now
+        self.history_seeking = offset is not None
+        if self.history_worker is None:
+            self.history_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='outpost-history')
+        # Slow tmux commands must not stall PTY traffic or browser keystrokes.
+        self.history_future = self.history_worker.submit(self.hooks.scrollback, offset)
+
     def handle(self, kind, payload, master):
         if kind == b'I':
+            self.history_dirty = True
             self.observer.feed(payload)
             self.incoming += payload
             return
         if kind != b'C':
             raise ValueError('Unknown relay frame')
         message = json.loads(payload)
-        if message.get('type') == 'resize':
+        if message.get('type') == 'scrollback' and hasattr(self.hooks, 'scrollback'):
+            offset = message.get('offset')
+            if offset is None or (type(offset) is int and -1 <= offset <= 1000000):
+                self.history_subscribed = self.history_dirty = True
+                if offset is not None:
+                    self.history_offset = offset
+        elif message.get('type') == 'resize':
+            self.history_dirty = True
             cols, rows = message.get('cols'), message.get('rows')
             if isinstance(cols, int) and isinstance(rows, int) and 0 < cols <= 1000 and 0 < rows <= 1000:
                 fcntl.ioctl(master, termios.TIOCSWINSZ, winsize(cols, rows))
@@ -284,9 +331,11 @@ class Relay:
             signal.signal(signal.SIGHUP, stop)
             signal.signal(signal.SIGTERM, stop)
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-            self.send({'type': 'ready'})
+            self.send({'type': 'ready', 'scrollback': hasattr(self.hooks, 'scrollback')})
             while not self.stopped and (not eof or self.outgoing):
                 self.observer.flush()
+                if not eof:
+                    self.update_history()
                 if self.signals:
                     self.signals.expire()
                 readers = [] if eof or len(self.outgoing) >= HIGH_WATER else [master]
@@ -324,6 +373,7 @@ class Relay:
                         for kind, payload in decoder.feed(data):
                             self.handle(kind, payload, master)
                     else:
+                        self.history_dirty = True
                         self.outgoing += encode(b'O', data)
                         self.tail = (self.tail + data)[-512:]
                 for descriptor in writable:
@@ -343,6 +393,8 @@ class Relay:
             child, status = os.waitpid(pid, os.WNOHANG)
             reaped = child == pid
         finally:
+            if self.history_worker:
+                self.history_worker.shutdown(wait=False, cancel_futures=True)
             os.close(master)
             if self.signals:
                 self.signals.close()

@@ -90,6 +90,16 @@ Use **Hide terminal toolbar** for more screen space; the small button at the
 top right restores it. This preference also applies to Terminal app. Connection
 errors, link prompts and bell notices remain visible while the toolbar is hidden.
 
+The scrollbar on the right navigates the session's saved terminal output,
+including output from before you opened this window (up to 50,000 lines).
+Drag its thumb or click the track to jump through history. Use the arrow at
+the bottom to **Return to live output**. **Shift+Page Up / Page Down** moves
+a screen at a time; when the scrollbar has keyboard focus, **Home / End**
+jumps to the oldest output or back to live output. These controls work in
+both the web terminal and Terminal app, including with the toolbar hidden.
+Programs that keep history only inside their own full-screen interface still
+use that program's scrolling controls.
+
 When the coding tool rings the terminal bell, the page and tab title show
 which session rang, and a short chime plays. Click or type in the terminal
 once to enable sound. Bells received while you are away stay marked until
@@ -105,6 +115,13 @@ do not appear, check the browser's site permissions and
 or [macOS System Settings → Notifications](https://support.apple.com/guide/safari/sfri40734/mac),
 including Focus / Do Not Disturb. Disable notifications through your browser's
 site settings.
+
+If the bell button waits for a prompt you cannot see, choose **Open notification
+setup**. This opens a browser tab where you can click **Enable notifications**
+or use the site controls beside the address bar to allow notifications. The
+terminal updates its permission automatically; its connection stays open.
+Use the tab opened by the terminal so the permission is saved in the same
+browser profile. No sign-in is needed on this setup page.
 
 ![The web terminal](docs/images/web-terminal.png)
 

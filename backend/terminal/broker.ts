@@ -164,7 +164,25 @@ class Connection {
       this.started = true
       for (const frame of this.pending) this.child!.stdin.write(frame)
       this.pending = []
-      this.send({ type: 'ready' })
+      this.send({ type: 'ready', ...(message.scrollback === true ? { scrollback: true } : {}) })
+    } else if (message.type === 'scrollback') {
+      const { lines, offset, rows, available, active } = message
+      if (
+        typeof lines === 'number' &&
+        Number.isSafeInteger(lines) &&
+        lines >= 0 &&
+        typeof offset === 'number' &&
+        Number.isSafeInteger(offset) &&
+        offset >= 0 &&
+        offset <= lines &&
+        typeof rows === 'number' &&
+        Number.isSafeInteger(rows) &&
+        rows >= 1 &&
+        rows <= 1000 &&
+        typeof available === 'boolean' &&
+        typeof active === 'boolean'
+      )
+        this.send({ type: 'scrollback', lines, offset, rows, available, active })
     } else if (message.type === 'paste-result' && typeof message.id === 'string') {
       this.send({
         type: 'result',
@@ -221,6 +239,13 @@ class Connection {
     if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)))
       return this.socket.close(1008, 'Invalid terminal message')
     switch (message.type) {
+      case 'scrollback':
+        if (
+          message.offset === undefined ||
+          (Number.isSafeInteger(message.offset) && message.offset >= -1 && message.offset <= 1_000_000)
+        )
+          this.relay({ type: 'scrollback', ...(message.offset !== undefined ? { offset: message.offset } : {}) })
+        return
       case 'resize':
         if (
           Number.isInteger(message.cols) &&

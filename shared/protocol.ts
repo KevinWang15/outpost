@@ -11,11 +11,21 @@ import type { connectInput } from './schemas'
 export const protocolVersion = 2
 export const maxInputMessage = 64 * 1024
 
+export interface ScrollbackState {
+  available: boolean
+  lines: number
+  offset: number
+  rows: number
+  active: boolean
+}
+
 export type ClientMessage =
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ack'; bytes: number }
   | { type: 'send'; id: string; data: string }
   | { type: 'paste-image'; id: string; mediaType: ImageMediaType; data: string }
+  // No offset subscribes to metadata; 0 returns live, -1 seeks the oldest line.
+  | { type: 'scrollback'; offset?: number }
 
 export const closeReasons = ['detached', 'ended', 'expired', 'outdated', 'error'] as const
 export type CloseReason = (typeof closeReasons)[number]
@@ -25,14 +35,15 @@ export interface SignalMessage {
 }
 export type ServerMessage =
   | { type: 'hello'; resume: string; session: { id: string; name: string }; target: { id: string; name: string } }
-  | { type: 'ready' }
+  | { type: 'ready'; scrollback?: boolean }
+  | ({ type: 'scrollback' } & ScrollbackState)
   | { type: 'result'; id: string; ok: boolean; message?: string; reference?: string }
   | { type: 'signal'; signal: SignalMessage }
   | { type: 'closed'; reason: CloseReason; message: string }
 
 // Runtime list for clients in other languages (tests/unit/contracts.test.ts);
 // the alias below fails to compile if it misses a ServerMessage type.
-export const serverMessageTypes = ['hello', 'ready', 'result', 'signal', 'closed'] as const
+export const serverMessageTypes = ['hello', 'ready', 'result', 'signal', 'scrollback', 'closed'] as const
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Assert<T extends true> = T
 export type ServerMessageTypesCovered = Assert<Same<ServerMessage['type'], (typeof serverMessageTypes)[number]>>

@@ -61,6 +61,11 @@ or the image button. On phones, an on-screen key bar (Esc, Tab, Ctrl, Alt,
 arrows, ⇧↩, ^C) and a message box are shown. Dropped connections reconnect by
 themselves.
 
+When the coding tool rings the terminal bell, the page and tab title show
+which session rang, and a short chime plays. Click or type in the terminal
+once to enable sound. Bells received while you are away stay marked until
+you return; repeated bells are limited to one chime per second.
+
 ![The web terminal](docs/images/web-terminal.png)
 
 ### Native terminals

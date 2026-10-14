@@ -3,13 +3,14 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { ImagePlus, Keyboard, LoaderCircle, MessageSquareText, RotateCw, X } from 'lucide-react'
+import { Bell, ImagePlus, Keyboard, LoaderCircle, MessageSquareText, RotateCw, X } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 import type { ImageMediaType } from '../../shared/model'
 import type { CloseReason } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
 import { readImage } from '../api'
+import { attachBell } from './bell'
 import { attachClipboard, imageProblem } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
@@ -68,8 +69,10 @@ export default function TerminalView({ token, title, onClose }: { token: string;
   const terminal = useRef<Terminal | null>(null),
     socket = useRef<TerminalSocket | null>(null)
   const clipboard = useRef<ReturnType<typeof attachClipboard> | null>(null)
+  const bell = useRef<ReturnType<typeof attachBell> | null>(null)
   const [state, setState] = useState<SocketState>({ kind: 'connecting' })
   const [name, setName] = useState(title)
+  const [bellRinging, setBellRinging] = useState(false)
   const [status, setStatus] = useState('')
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
   const [keysShown, setKeysShown] = useState(touch)
@@ -81,11 +84,11 @@ export default function TerminalView({ token, title, onClose }: { token: string;
 
   useEffect(() => {
     const previous = document.title
-    document.title = `${name} · Outpost`
+    document.title = bellRinging ? `🔔 ${name} rang a bell · Outpost` : `${name} · Outpost`
     return () => {
       document.title = previous
     }
-  }, [name])
+  }, [name, bellRinging])
 
   const notify = useCallback((message: string, sticky = false) => {
     setStatus(message)
@@ -136,6 +139,8 @@ export default function TerminalView({ token, title, onClose }: { token: string;
     term.open(surface.current!)
     term.textarea?.setAttribute('aria-label', 'Terminal input')
     terminal.current = term
+    const bells = attachBell(term, setBellRinging)
+    bell.current = bells
     const size = () => {
       const proposed = surface.current?.clientWidth ? fit.proposeDimensions() : undefined
       return {
@@ -219,11 +224,13 @@ export default function TerminalView({ token, title, onClose }: { token: string;
       observer.disconnect()
       window.visualViewport?.removeEventListener('resize', refit)
       client.close()
+      bells.dispose()
       shims.dispose()
       term.dispose()
       socket.current = null
       terminal.current = null
       clipboard.current = null
+      bell.current = null
     }
   }, [token, arm, notify, pasteImage])
 
@@ -338,6 +345,19 @@ export default function TerminalView({ token, title, onClose }: { token: string;
       )}
       <div className="terminal-body">
         <div className="terminal-surface" ref={surface} />
+        {bellRinging && (
+          <div className="terminal-notice terminal-bell" role="status">
+            <Bell size={16} aria-hidden="true" />
+            <span>{name} rang a bell</span>
+            <button
+              className="icon-button"
+              aria-label="Dismiss bell notification"
+              onClick={() => bell.current?.acknowledge()}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
         {state.kind === 'closed' && (
           <div className="terminal-closed">
             <h3>{closedTitles[state.reason]}</h3>

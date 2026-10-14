@@ -1493,6 +1493,26 @@ kbd {
   flex: 1;
   min-height: 0;
 }
+.terminal-bell {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  right: 12px;
+  flex-wrap: nowrap;
+  max-width: calc(100% - 24px);
+  border: 1px solid #854d0e;
+  border-radius: 6px;
+  background: #422006;
+  box-shadow: 0 4px 16px #0004;
+  color: #fde68a;
+  > svg {
+    flex-shrink: 0;
+  }
+  span {
+    flex: 1;
+    overflow-wrap: anywhere;
+  }
+}
 .terminal-surface {
   position: absolute;
   inset: 8px 4px 4px 12px;

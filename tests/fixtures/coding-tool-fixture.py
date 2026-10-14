@@ -202,6 +202,8 @@ while True:
 
         if received(b'clipboard'):
             print('\x1b]52;c;T1VUUE9TVF9DTElQQk9BUkRfVEVTVA==\x07', end='', flush=True)
+        if received(b'ring-bell'):
+            print('\x07', end='', flush=True)
         if received(b'OUTPOST_KEYS_END'):
             keyboard_probes += 1
             print('OUTPOST_KEYBOARD_COMPLETE:' + str(keyboard_probes) + '!', flush=True)

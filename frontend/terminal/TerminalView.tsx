@@ -3,14 +3,24 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { Bell, ImagePlus, Keyboard, LoaderCircle, MessageSquareText, RotateCw, X } from 'lucide-react'
+import {
+  Bell,
+  BellOff,
+  BellRing,
+  ImagePlus,
+  Keyboard,
+  LoaderCircle,
+  MessageSquareText,
+  RotateCw,
+  X,
+} from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 import type { ImageMediaType } from '../../shared/model'
 import type { CloseReason } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
 import { readImage } from '../api'
-import { attachBell } from './bell'
+import { attachBell, bellNotificationPermission, type BellNotificationPermission } from './bell'
 import { attachClipboard, imageProblem } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
@@ -18,6 +28,13 @@ import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
 
 const touch = () => window.matchMedia('(pointer: coarse)').matches
+const notificationLabels: Record<BellNotificationPermission, string> = {
+  default: 'Enable desktop notifications',
+  granted: 'Desktop notifications enabled',
+  denied: 'Desktop notifications blocked',
+  unsupported: 'Desktop notifications unavailable in this browser',
+  insecure: 'Desktop notifications require HTTPS or localhost',
+}
 const closedTitles: Record<CloseReason, string> = {
   detached: 'Detached',
   ended: 'Session ended',
@@ -72,7 +89,10 @@ export default function TerminalView({ token, title, onClose }: { token: string;
   const bell = useRef<ReturnType<typeof attachBell> | null>(null)
   const [state, setState] = useState<SocketState>({ kind: 'connecting' })
   const [name, setName] = useState(title)
+  const sessionName = useRef(title)
   const [bellRinging, setBellRinging] = useState(false)
+  const [notificationPermission, setNotificationPermission] = useState(bellNotificationPermission)
+  const [requestingNotifications, setRequestingNotifications] = useState(false)
   const [status, setStatus] = useState('')
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
   const [keysShown, setKeysShown] = useState(touch)
@@ -90,11 +110,44 @@ export default function TerminalView({ token, title, onClose }: { token: string;
     }
   }, [name, bellRinging])
 
+  useEffect(() => {
+    const refresh = () => setNotificationPermission(bellNotificationPermission())
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [])
+
   const notify = useCallback((message: string, sticky = false) => {
     setStatus(message)
     clearTimeout(statusTimer.current)
     if (!sticky) statusTimer.current = setTimeout(() => setStatus(''), 4000)
   }, [])
+  const enableNotifications = async () => {
+    const permission = bellNotificationPermission()
+    setNotificationPermission(permission)
+    if (permission === 'insecure') return notify('Open Outpost over HTTPS or localhost to enable notifications.', true)
+    if (permission === 'unsupported') return notify('This browser does not support desktop notifications.', true)
+    if (permission === 'denied')
+      return notify('Notifications are blocked. Allow them in your browser’s site settings.', true)
+    if (permission === 'granted')
+      return notify('Desktop notifications are enabled. Keep this terminal tab open to receive alerts.')
+    setRequestingNotifications(true)
+    try {
+      // Request directly from the button click; Safari and Firefox require a gesture.
+      const next = await Notification.requestPermission()
+      setNotificationPermission(next)
+      if (next === 'granted') notify('Desktop notifications enabled. Keep this terminal tab open to receive alerts.')
+      else if (next === 'denied') notify('Notifications are blocked. Allow them in your browser’s site settings.', true)
+      else notify('Desktop notifications were not enabled. Click the bell to try again.')
+    } catch {
+      notify('Could not enable desktop notifications. Check your browser’s site settings.', true)
+    } finally {
+      setRequestingNotifications(false)
+    }
+  }
   const arm = useCallback((next: TerminalModifiers) => {
     armed.current = next
     setModifiers(next)
@@ -139,7 +192,7 @@ export default function TerminalView({ token, title, onClose }: { token: string;
     term.open(surface.current!)
     term.textarea?.setAttribute('aria-label', 'Terminal input')
     terminal.current = term
-    const bells = attachBell(term, setBellRinging)
+    const bells = attachBell(term, setBellRinging, () => sessionName.current)
     bell.current = bells
     const size = () => {
       const proposed = surface.current?.clientWidth ? fit.proposeDimensions() : undefined
@@ -154,7 +207,10 @@ export default function TerminalView({ token, title, onClose }: { token: string;
         setState(next)
         if (next.kind === 'connected' && !touch()) term.focus()
       },
-      hello: message => setName(`${message.session.name} · ${message.target.name}`),
+      hello: message => {
+        sessionName.current = `${message.session.name} · ${message.target.name}`
+        setName(sessionName.current)
+      },
       signal: ({ signal }) => {
         if (signal.type !== 'browser.open') return
         let url: string
@@ -277,6 +333,23 @@ export default function TerminalView({ token, title, onClose }: { token: string;
           )}
         </div>
         <div className="terminal-actions">
+          <button
+            className="icon-button"
+            title={notificationLabels[notificationPermission]}
+            aria-label={notificationLabels[notificationPermission]}
+            disabled={requestingNotifications}
+            onClick={() => void enableNotifications()}
+          >
+            {requestingNotifications ? (
+              <LoaderCircle className="spin" size={17} />
+            ) : notificationPermission === 'granted' ? (
+              <BellRing size={17} />
+            ) : notificationPermission === 'default' ? (
+              <Bell size={17} />
+            ) : (
+              <BellOff size={17} />
+            )}
+          </button>
           <input
             ref={chooser}
             type="file"

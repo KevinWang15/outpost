@@ -1,15 +1,68 @@
 import type { Terminal } from '@xterm/xterm'
 
+export type BellNotificationPermission = NotificationPermission | 'unsupported' | 'insecure'
+
+export function bellNotificationPermission(): BellNotificationPermission {
+  if (!window.isSecureContext) return 'insecure'
+  if (typeof window.Notification !== 'function') return 'unsupported'
+  return Notification.permission
+}
+
 /** Use the parser's bell event: BEL also terminates OSC sequences, where it
- * must not ring. Browser attention and sound belong to this connection. */
-export function attachBell(term: Terminal, changed: (ringing: boolean) => void) {
+ * must not ring. Browser attention, notifications, and sound belong to this connection. */
+export function attachBell(term: Terminal, changed: (ringing: boolean) => void, name: () => string) {
   let audio: AudioContext | null = null
+  let notification: Notification | null = null
+  let notified = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastSound = -Infinity
   const active = () => document.visibilityState === 'visible' && document.hasFocus()
+  const closeNotification = () => {
+    const current = notification
+    notification = null
+    if (!current) return
+    current.onclick = current.onclose = current.onerror = null
+    try {
+      current.close()
+    } catch {
+      // A browser notification failure must not interrupt the terminal.
+    }
+  }
   const acknowledge = () => {
     clearTimeout(timer)
+    closeNotification()
+    notified = false
     changed(false)
+  }
+  const showNotification = () => {
+    if (active() || notified || bellNotificationPermission() !== 'granted') return
+    try {
+      const current = new Notification('Outpost · Terminal bell', {
+        body: `${name()} rang a bell`,
+        icon: '/outpost.png',
+        tag: `outpost-bell:${window.location.pathname}${window.location.search}`,
+      })
+      notification = current
+      notified = true
+      current.onclick = () => {
+        // Preserve the browser's default click action, which activates this tab.
+        window.focus()
+        term.focus()
+        acknowledge()
+      }
+      current.onclose = () => {
+        if (notification === current) notification = null
+      }
+      current.onerror = () => {
+        if (notification === current) {
+          closeNotification()
+          notified = false
+        }
+      }
+    } catch {
+      // Permission can change, and some browsers cannot create notifications.
+      // Keep the visual bell and chime even when desktop alerts are unavailable.
+    }
   }
   const prepareSound = () => {
     try {
@@ -54,6 +107,7 @@ export function attachBell(term: Terminal, changed: (ringing: boolean) => void) 
   const listener = term.onBell(() => {
     changed(true)
     playSound()
+    showNotification()
     clearTimeout(timer)
     if (active()) timer = setTimeout(returned, 4000)
   })
@@ -67,6 +121,7 @@ export function attachBell(term: Terminal, changed: (ringing: boolean) => void) 
     dispose() {
       listener.dispose()
       clearTimeout(timer)
+      closeNotification()
       window.removeEventListener('click', interact, true)
       window.removeEventListener('keydown', interact, true)
       window.removeEventListener('focus', returned)

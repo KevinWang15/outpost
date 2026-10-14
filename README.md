@@ -80,6 +80,17 @@ which session rang, and a short chime plays. Click or type in the terminal
 once to enable sound. Bells received while you are away stay marked until
 you return; repeated bells are limited to one chime per second.
 
+Click the bell button in the terminal toolbar to enable desktop notifications,
+then allow notifications in your browser. On Windows and macOS, bells also show
+a system notification while the terminal is in the background. Clicking it
+returns to the terminal; repeated bells produce one notification until you
+return. This requires HTTPS (or localhost) and an open terminal tab. If alerts
+do not appear, check the browser's site permissions and
+[Windows notification settings](https://support.microsoft.com/en-us/windows/experience/notifications-and-do-not-disturb-in-windows)
+or [macOS System Settings → Notifications](https://support.apple.com/guide/safari/sfri40734/mac),
+including Focus / Do Not Disturb. Disable notifications through your browser's
+site settings.
+
 ![The web terminal](docs/images/web-terminal.png)
 
 ### Native terminals

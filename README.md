@@ -24,7 +24,7 @@ the agent ran on your computer.
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Native terminals | **macOS:** iTerm2 and Python 3.9+ (`xcode-select --install`). **Windows:** Windows Terminal and a WSL distribution with Python 3. |
 | Web terminal | Any current browser, including on phones. |
-| Terminal app | **macOS:** Chrome or Edge and Python 3.9+. **Windows:** Chrome or Edge and WSL with Bash and Python 3. Connector 2.1.1 recommended. |
+| Terminal app | **macOS:** Chrome or Edge and Python 3.9+. **Windows:** Chrome or Edge and WSL with Bash and Python 3. Connector 2.1.2 recommended. |
 
 ## Run the local tool
 

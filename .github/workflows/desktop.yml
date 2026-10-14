@@ -1,6 +1,11 @@
 name: Desktop previews
 
 on:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       publish:

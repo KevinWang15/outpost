@@ -83,6 +83,11 @@ unsigned GitHub prerelease with checksums after both jobs succeed. Bump
 update `desktop/RELEASE_NOTES.md`. Existing releases are never overwritten.
 No signing credentials or automatic updater are used for previews.
 
+The existing **CI** workflow can also call this same packaging workflow with
+`suite=desktop` and `publish_preview=true`; its full checks are skipped in that
+mode. This entry works while `desktop.yml` exists only on the `v2` branch and
+GitHub has not registered it on the default branch yet.
+
 On each native platform, exercise cold/warm `outpost://` launches, multiple
 windows, trust cancellation/removal, clipboard text and images, notification
 click-through, reconnect/reload, GPU fallback and app identity before a stable

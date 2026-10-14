@@ -78,6 +78,7 @@ def uninstall():
     if errors:
         raise OSError('Uninstall was incomplete: ' + '; '.join(errors))
     print('Outpost Connector, its terminal integration, and all trusted servers were removed.')
+    print('  Connector data directory: ' + str(link.HOME))
 
 
 def open_link(url):

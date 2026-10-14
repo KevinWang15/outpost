@@ -272,6 +272,12 @@ class TerminalTest(unittest.TestCase):
         )
         self.assertIn('HKCU:\\Software\\Classes\\outpost', script)
 
+    def test_windows_terminal_reports_missing_distro_without_registering_a_handler(self):
+        with mock.patch.dict(os.environ, {'WSL_DISTRO_NAME': ''}):
+            with self.assertRaisesRegex(OSError, 'WSL_DISTRO_NAME is missing.*without sudo'):
+                windows_terminal.install(self.context)
+        self.assertEqual(self.commands, [])
+
 
 if __name__ == '__main__':
     unittest.main()

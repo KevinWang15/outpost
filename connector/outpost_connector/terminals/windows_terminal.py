@@ -20,7 +20,10 @@ PROFILE_NAME = 'Outpost'
 def distribution():
     name = os.environ.get('WSL_DISTRO_NAME', '')
     if not name:
-        raise OSError('Run the Outpost installer inside your WSL distribution.')
+        raise OSError(
+            'WSL_DISTRO_NAME is missing (sudo or su may clear it). '
+            'Open your WSL distribution normally and run the installer as your usual Linux user, without sudo.'
+        )
     return name
 
 

@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  chownSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -101,4 +112,46 @@ if os.environ.get('FAIL_CLEANUP') == '1':
   assert.match(failed.stderr, /Uninstall was incomplete:.*Registry access denied/)
   assert.ok(!existsSync(connector), 'trust is revoked even if OS cleanup fails')
   assert.deepEqual(readdirSync(downloads), [])
+
+  if (process.platform === 'linux') {
+    // Reproduce a genuinely unwritable temporary directory, including when
+    // this test suite itself is run as root (drop the child to nobody).
+    const uid = process.getuid!() === 0 ? 65534 : process.getuid!(),
+      gid = process.getuid!() === 0 ? 65534 : process.getgid!(),
+      userHome = join(directory, 'unprivileged home'),
+      blocked = join(directory, 'unwritable tmp')
+    chmodSync(directory, 0o755)
+    chmodSync(bin, 0o755)
+    for (const executable of ['curl', 'powershell.exe']) chmodSync(join(bin, executable), 0o755)
+    chmodSync(archive, 0o644)
+    mkdirSync(userHome, { mode: 0o700 })
+    if (process.getuid!() === 0) chownSync(userHome, uid, gid)
+    mkdirSync(blocked, { mode: 0o500 })
+    const userConnector = join(userHome, '.outpost-connector')
+    for (const args of [[], ['--uninstall']]) {
+      const result = spawnSync('bash', ['-s', '--', ...args], {
+        input: installScript(first),
+        env: {
+          ...env,
+          HOME: userHome,
+          TMPDIR: blocked,
+          OUTPOST_CONNECTOR_HOME: userConnector,
+          REQUESTS: join(userHome, 'requests'),
+          ACTIONS: join(userHome, 'actions'),
+        },
+        uid,
+        gid,
+        encoding: 'utf8',
+        timeout: 20_000,
+      })
+      assert.equal(result.status, 0, result.stderr)
+      assert.ok(!readdirSync(userHome).some(name => name.startsWith('.outpost-connector-tmp.')))
+      if (args.length === 0) assert.ok(existsSync(join(userConnector, 'config.json')))
+      else {
+        assert.ok(result.stdout.includes(userConnector), 'uninstall identifies the data directory it removed')
+        assert.ok(!existsSync(userConnector))
+      }
+    }
+    assert.deepEqual(readdirSync(blocked), [])
+  }
 })

@@ -88,7 +88,9 @@ if [ -z "$python" ] || ! "$python" -c 'import sys; sys.exit(sys.version_info < (
   else echo 'Outpost needs Python 3.9 or newer. Install it with: sudo apt install python3' >&2; fi
   exit 1
 fi
-temporary=$(mktemp -d "\${TMPDIR:-/tmp}/outpost-connector.XXXXXX")
+if ! temporary=$(mktemp -d "\${TMPDIR:-/tmp}/outpost-connector.XXXXXX" 2>/dev/null); then
+  temporary=$(mktemp -d "$HOME/.outpost-connector-tmp.XXXXXX")
+fi
 trap 'rm -rf -- "$temporary"' EXIT
 download="$temporary/outpost-connector.pyz"
 curl -fsSL "$server/connector/outpost-connector.pyz" -o "$download"

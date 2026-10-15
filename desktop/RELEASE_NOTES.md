@@ -1,18 +1,16 @@
-# Outpost Desktop 0.4.0 preview
+# Outpost Desktop 0.4.1 preview
 
-Shared session activity, reliable tab shortcuts and smoother history browsing on macOS and Windows.
+More reliable Codex activity indicators and better tab-icon alignment on macOS and Windows.
 
 ## What's new
 
-- **Tab navigation:** Ctrl+Tab and Ctrl+Shift+Tab cycle through the current window's tabs in order, wrapping at either end. Native key handling reserves these shortcuts even when the terminal or a workspace panel has focus. Both platforms use Control.
-- **Shared activity indicators:** tabs and the session switcher show Working, Idle, Needs you or Unknown using the same native coding-tool records and acknowledgement state as the server's session list. Unread terminal bells remain highlighted. Hover over an icon for details.
-- **Stable workspace controls:** activity refreshes preserve keyboard focus, session-switcher selection and indicator animations. Workspace pages highlight their own toolbar button, and toolbar icons use consistent SVG sizing and alignment.
-- **Text size shortcuts:** Ctrl+= on Windows and Command+= on macOS increase terminal text size, alongside the existing Plus shortcut. Minus decreases it and 0 resets it.
-- **Native scrollback:** the terminal keeps up to 10,000 lines and restores its screen and history on reconnect. Selecting text does not pause the remote process.
+- **Reliable Codex activity:** the updated Outpost server observes Codex's live daemon status. Reconnecting to an ongoing turn no longer hides Working, and reverted conversations use their current transcript. Session lists and app tabs share the same detector.
+- **Separate completion acknowledgements:** marking a completion as seen cannot hide active work. Missing live status and unresolved review activity show Unknown. Hover over an icon for details, including approval/input waits.
+- **Aligned tab icons:** the clock, spinner and bell sit more evenly alongside tab titles, with their animations preserved.
 
 Use ⌘T on Mac or Ctrl+Shift+T on Windows to choose another session. The Settings page lists all shortcuts. Up to 32 tabs across 16 windows can stay open. Closing the app leaves remote sessions running; reconnect through your Outpost server after reopening. Local shells and extensions are not included.
 
-**Update the Outpost server and desktop app together.** This preview uses desktop bridge version 4 for shared activity metadata. Older server pages or desktop apps are incompatible with the new bridge. Self-hosted users should update their server from the same source revision as this release.
+**Self-hosted users:** update your Outpost server to receive the activity fixes. The icon alignment ships in the desktop app. Desktop bridge version 4 is unchanged from 0.4.0; there is no Linux terminal executable update in this release.
 
 ## Install
 

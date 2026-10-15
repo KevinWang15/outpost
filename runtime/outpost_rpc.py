@@ -1,4 +1,4 @@
-"""Bounded JSON-RPC over a short-lived coding CLI process."""
+"""Bounded JSON-RPC shared by coding CLI processes and local daemon observers."""
 
 import json
 import os
@@ -8,7 +8,47 @@ import subprocess
 import time
 
 
-class JsonRpcProcess:
+class JsonRpcConnection:
+    sequence = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exception):
+        self.close()
+
+    def notification(self, message):
+        """Override to observe notifications while waiting for an RPC response."""
+
+    def call(self, method, params):
+        self.sequence += 1
+        self.send({'jsonrpc': '2.0', 'id': self.sequence, 'method': method, 'params': params})
+        while True:
+            message = self.receive()
+            if not isinstance(message, dict):
+                raise ValueError('Coding CLI returned an invalid protocol response')
+            if message.get('id') == self.sequence and ('result' in message or 'error' in message):
+                if 'error' in message:
+                    error = message['error']
+                    if not isinstance(error, dict) or not isinstance(error.get('message'), str):
+                        raise ValueError('Coding CLI returned an invalid protocol error')
+                    raise ValueError('Coding CLI request failed: ' + error['message'][:280])
+                if not isinstance(message['result'], dict):
+                    raise ValueError('Coding CLI returned an invalid protocol result')
+                return message['result']
+            if 'id' in message and 'method' in message:
+                self.send(
+                    {
+                        'jsonrpc': '2.0',
+                        'id': message['id'],
+                        'error': {'code': -32601, 'message': 'This connection is not an interactive client'},
+                    }
+                )
+            elif 'method' in message:
+                self.notification(message)
+
+
+class JsonRpcProcess(JsonRpcConnection):
     """A bounded, short-lived local CLI protocol connection; no target-side agent."""
 
     def __init__(self, command, environment, cwd):
@@ -27,12 +67,6 @@ class JsonRpcProcess:
         self.buffer = b''
         self.sequence = 0
         self.deadline = time.monotonic() + 18
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exception):
-        self.close()
 
     def send(self, message):
         try:
@@ -66,34 +100,6 @@ class JsonRpcProcess:
                 raise ValueError('Coding CLI returned an invalid protocol response')
             return message
         raise ValueError('Coding CLI session initialization timed out. Check its configuration and login.')
-
-    def notification(self, message):
-        """Override to observe notifications while waiting for an RPC response."""
-
-    def call(self, method, params):
-        self.sequence += 1
-        self.send({'jsonrpc': '2.0', 'id': self.sequence, 'method': method, 'params': params})
-        while True:
-            message = self.receive()
-            if message.get('id') == self.sequence and ('result' in message or 'error' in message):
-                if 'error' in message:
-                    error = message['error']
-                    if not isinstance(error, dict) or not isinstance(error.get('message'), str):
-                        raise ValueError('Coding CLI returned an invalid protocol error')
-                    raise ValueError('Coding CLI initialization failed: ' + error['message'][:280])
-                if not isinstance(message['result'], dict):
-                    raise ValueError('Coding CLI returned an invalid protocol result')
-                return message['result']
-            if 'id' in message and 'method' in message:
-                self.send(
-                    {
-                        'jsonrpc': '2.0',
-                        'id': message['id'],
-                        'error': {'code': -32601, 'message': 'No interactive client during initialization'},
-                    }
-                )
-            elif 'method' in message:
-                self.notification(message)
 
     def close(self):
         self.selector.close()

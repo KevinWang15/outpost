@@ -1,4 +1,4 @@
-"""Bounded native turn-marker readers shared by management and terminal streams."""
+"""Shared live activity and bounded unread-completion detection."""
 
 import datetime
 import hashlib
@@ -60,21 +60,41 @@ def timestamp(value):
     return None
 
 
-def inspect(adapter, session, metadata, running):
+def inspect(activity, running, live, metadata=None):
+    adapter, session = activity.adapter, activity.session
     result = {'state': 'idle', 'updatedAt': None, 'completionId': None, 'detail': None}
-    found = latest_file(adapter, session)
-    if found is None:
+    if live is not None and live.state != 'idle':
+        result.update(state=live.state, detail=live.detail)
         return result, None
-    path, _ = found
+    # Liveness wins even when acknowledgement metadata is missing/corrupt.
+    # Only completed-turn notices consult the persisted checkpoints for a
+    # harness with authoritative live state.
+    if metadata is None:
+        metadata = activity.read()
+    if live is None:
+        found = latest_file(adapter, session)
+        path = found[0] if found else None
+    else:
+        path = live.path
+    if path is None:
+        return result, None
     with path.open('rb') as stream:
         info = os.fstat(stream.fileno())
         marker = adapter.activity_marker(reverse_records(stream, info.st_size))
         if marker is not None:
             event, offset = marker
             state, updated = event
+            if state == 'unknown':
+                result = unavailable(
+                    'The native transcript records an operation whose live status cannot be confirmed.'
+                )
+                result['updatedAt'] = timestamp(updated)
+                return result, None
             point = checkpoint(stream, info, offset)
             token = hashlib.sha256(json.dumps(point, sort_keys=True).encode()).hexdigest()
-            if covered(metadata['baseline'], stream, info, offset):
+            if live is not None and state != 'finished':
+                state = live.state
+            elif covered(metadata['baseline'], stream, info, offset):
                 state = 'idle'
             elif state == 'working' and not running:
                 state = 'idle'
@@ -98,15 +118,22 @@ def unavailable(detail):
 
 def describe(activity, running):
     try:
-        return inspect(activity.adapter, activity.session, activity.read(), running)[0]
+        live = activity.adapter.live_activity(activity.session, running)
+        return inspect(activity, running, live)[0]
     except (OSError, ValueError) as error:
         return unavailable(error)
 
 
 def acknowledge(activity, token, running):
+    # Socket I/O must never hold the lock used by the terminal input path.
+    # Even if a new turn starts after this observation, the exact completion
+    # token below can acknowledge only the old notice, never that new turn.
+    live = activity.adapter.live_activity(activity.session, running)
+    if live is not None and live.state != 'idle':
+        return
     with activity.lock():
         metadata = activity.read()
-        result, point = inspect(activity.adapter, activity.session, metadata, running)
+        result, point = inspect(activity, running, live, metadata)
         if result['state'] == 'finished' and result['completionId'] == token:
             # Pin the displayed completion, never a later file EOF.
             metadata['checked'] = point

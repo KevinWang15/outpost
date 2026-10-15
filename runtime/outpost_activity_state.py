@@ -109,7 +109,12 @@ class Activity:
 
     def initialize(self):
         with self.lock():
-            point = self.snapshot()
+            try:
+                point = self.snapshot()
+            except (OSError, ValueError):
+                # Optional activity discovery must not prevent the PTY starting.
+                # The normal observer reports any ongoing discovery failure.
+                point = None
             self.save({'baseline': point, 'checked': point})
 
     def describe(self, running):

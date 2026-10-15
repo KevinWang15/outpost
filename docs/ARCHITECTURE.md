@@ -417,10 +417,52 @@ error identifies the created worktree so it can be reused or removed manually.
 ### Shared session activity
 
 `Activity.describe()` in the target runtime is the source for both the session
-list and live terminal activity. Harness adapters read native turn markers;
-terminal output rate, elapsed silence and local typing never infer Working or
-Idle. The same baseline and acknowledgement checkpoints decide whether a
-completed turn is still unchecked. Reading activity does not acknowledge it.
+list and live terminal activity. Harness adapters supply live state when the CLI
+has an authoritative status API; other harnesses use native turn markers.
+Terminal output rate, elapsed silence and local typing never infer Working or
+Idle. Current activity and unread completions are separate: live Working always
+wins over startup baselines and acknowledgement checkpoints. Reading activity
+does not acknowledge it.
+
+**Codex** reads `thread/read` (`includeTurns: false`) from the existing daemon's
+`CODEX_HOME/app-server-control/app-server-control.sock`. This observes an exact
+thread without starting a process, resuming/subscribing to a thread, or submitting
+a model request. An active turn is Working, including a turn that survived a
+terminal restart.
+Approval/input waiting flags appear in the activity description. Idle permits
+checking for an unread completion; stale transcript start markers cannot keep a
+daemon-confirmed idle thread Working. A running terminal whose thread is not
+loaded in that daemon, an unreachable daemon, or an unsupported response becomes
+Unknown instead of guessing from old files. If neither terminal nor daemon is
+running, persisted completions can still be checked.
+
+Codex 0.162.1's `/review` does not emit a parent start event, and its own live
+status can remain Idle before delegated work starts. The adapter recognizes
+native review entry/exit records (including paginated `ItemCompleted` records).
+An unresolved review with no confirmed live work shows Unknown until an active
+status or later lifecycle event resolves it; acknowledgement and startup
+checkpoints cannot turn that uncertainty into Idle.
+
+The native API supplies the current transcript path. Local input/startup
+checkpoints use the selected path in Codex's `state_5.sqlite`, opened read-only
+with bounded queries. Reverts keep the logical thread ID but switch to a new
+rollout; filename globs and modification time cannot select it correctly.
+An unindexed new thread has no checkpoint yet. Paths stay within the pinned
+`CODEX_HOME`; index errors never fall back to an obsolete file. The adapter owns
+these native-format details. Changing the conversation inside Codex still does
+not change Outpost's pinned thread identity.
+
+`outpost_rpc.py` shares JSON-RPC response handling between allocation processes
+and the local observer. `outpost_rpc_socket.py` provides a stdlib-only Unix
+WebSocket client with peer-user verification, bounded HTTP/frame/message sizes,
+fragmentation and ping/pong support, and a two-second whole-observation deadline.
+No observation performs socket I/O while holding the acknowledgement lock or
+from terminal input handling. Startup tolerates unavailable native activity data;
+subsequent observations report failures without preventing terminal attachment.
+
+The baseline and acknowledgement checkpoints decide whether a completed turn
+is still unchecked. Only completion notices consult them for Codex; the other
+harnesses also use the startup baseline to discard stale transcript work markers.
 Actual terminal input, the list's explicit check action and the terminal's
 explicit completion acknowledgement update those checkpoints. Focus-report
 escape sequences and attachment itself do not advance the watermark.

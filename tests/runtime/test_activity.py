@@ -2,11 +2,13 @@
 
 import json
 import shutil
+import sqlite3
 import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'runtime'))
 
@@ -22,6 +24,7 @@ class ActivityTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='outpost-activity-')
         self.home = Path(self.directory.name)
+        self.codex_threads = {}
         self.addCleanup(self.directory.cleanup)
 
     def fixture(self, tool):
@@ -42,6 +45,17 @@ class ActivityTests(unittest.TestCase):
         path = home / relative
         path.parent.mkdir(parents=True)
         path.touch()
+        if tool == 'codex':
+            # The real Codex adapter observes the daemon and its selected rollout;
+            # fixture events drive that independent native status explicitly.
+            with sqlite3.connect(home / 'state_5.sqlite') as database:
+                database.execute('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT)')
+                database.execute('INSERT INTO threads VALUES (?, ?)', (cli_id, str(path)))
+            native = {'id': cli_id, 'status': {'type': 'idle'}, 'path': str(path)}
+            self.codex_threads[path] = native
+            reader = patch('outpost_codex_state.read_thread', return_value=native)
+            reader.start()
+            self.addCleanup(reader.stop)
         observer = Activity(self.home / 'activity', adapter, session)
         observer.initialize()
         return observer, path
@@ -49,6 +63,12 @@ class ActivityTests(unittest.TestCase):
     def append(self, path, record, complete=True):
         with path.open('a') as stream:
             stream.write(json.dumps(record) + ('\n' if complete else ''))
+        if complete and path in self.codex_threads and record.get('type') == 'event_msg':
+            kind = record.get('payload', {}).get('type')
+            if kind in ('task_started', 'task_complete', 'turn_aborted'):
+                self.codex_threads[path]['status'] = (
+                    {'type': 'active', 'activeFlags': []} if kind == 'task_started' else {'type': 'idle'}
+                )
 
     def event(self, tool, state):
         if tool == 'codex':
@@ -91,7 +111,11 @@ class ActivityTests(unittest.TestCase):
                 self.assertEqual(observer.describe(True)['state'], 'idle')
                 self.append(path, self.event(tool, 'working'))
                 self.assertEqual(observer.describe(True)['state'], 'working')
-                self.assertEqual(observer.describe(False)['state'], 'idle', 'exited processes cannot keep working')
+                self.assertEqual(
+                    observer.describe(False)['state'],
+                    'working' if tool == 'codex' else 'idle',
+                    'a live Codex daemon turn can outlive its terminal process',
+                )
                 self.append(path, self.event(tool, 'finished'))
                 first = observer.describe(True)
                 self.assertEqual(first['state'], 'finished')
@@ -122,6 +146,8 @@ class ActivityTests(unittest.TestCase):
             self.assertEqual(observer.describe(True)['state'], 'working')
             with path.open('a') as stream:
                 stream.write('\n')
+            if tool == 'codex':
+                self.codex_threads[path]['status'] = {'type': 'idle'}
             self.assertEqual(observer.describe(True)['state'], 'finished')
 
     def test_input_checkpoints_cannot_move_backwards_across_terminals(self):
@@ -153,7 +179,9 @@ class ActivityTests(unittest.TestCase):
             for state in ('finished', 'working'):
                 self.append(path, self.event(tool, state))
                 observer.initialize()
-                self.assertEqual(observer.describe(True)['state'], 'idle')
+                self.assertEqual(
+                    observer.describe(True)['state'], 'working' if tool == 'codex' and state == 'working' else 'idle'
+                )
             self.append(path, self.event(tool, 'working'))
             self.assertEqual(observer.describe(True)['state'], 'working')
 
@@ -230,7 +258,7 @@ class ActivityTests(unittest.TestCase):
 
     def test_detection_is_bounded_and_missing_or_corrupt_metadata_is_visible(self):
         observer, path = self.fixture('codex')
-        self.append(path, self.event('codex', 'working'))
+        self.append(path, self.event('codex', 'finished'))
         self.append(path, {'type': 'response_item', 'payload': 'x' * (4 * 1024 * 1024)})
         self.assertIsNotNone(observer.describe(True)['detail'])
         observer.path.write_text('{}')
@@ -244,7 +272,7 @@ class ActivityTests(unittest.TestCase):
         outside.write_text(json.dumps(self.event('codex', 'finished')) + '\n')
         path.unlink()
         path.symlink_to(outside)
-        self.assertEqual(observer.describe(True)['state'], 'idle')
+        self.assertEqual(observer.describe(True)['state'], 'unknown')
 
     def test_focus_reports_dont_ack_but_user_input_does(self):
         seen = []

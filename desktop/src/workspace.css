@@ -215,13 +215,19 @@ input::placeholder {
   white-space: nowrap;
 }
 .tab-status {
-  display: inline-flex;
+  display: grid;
+  place-items: center;
   width: 16px;
   height: 16px;
   flex: 0 0 16px;
+  line-height: 0;
   color: #94a3b8;
+  /* Align optically with system-font labels. Offset the box so the SVG keeps
+     its own transform origin for spinner and bell animations. */
+  translate: 0 1px;
 }
 .tab-status svg {
+  display: block;
   width: 100%;
   height: 100%;
   transform-origin: center;

@@ -187,4 +187,13 @@ class CodexSessionStore(CodingSessionStore):
             return ('idle' if payload.get('error') else 'finished'), record.get('timestamp')
         if kind == 'turn_aborted':
             return 'idle', record.get('timestamp')
+        item = payload.get('item')
+        item_type = item.get('type') if kind == 'item_completed' and isinstance(item, dict) else None
+        if kind == 'entered_review_mode' or item_type == 'EnteredReviewMode':
+            # Codex 0.162.1 does not emit a parent TurnStarted for /review;
+            # even daemon status can remain Idle until delegated work starts.
+            # Do not mistake that gap (or an interrupted review) for known Idle.
+            return 'unknown', record.get('timestamp')
+        if kind == 'exited_review_mode' or item_type == 'ExitedReviewMode':
+            return 'idle', record.get('timestamp')
         return None

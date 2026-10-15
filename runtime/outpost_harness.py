@@ -9,7 +9,9 @@ import os
 import re
 import shlex
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 def storage_home(environment, key, default, cwd=None):
@@ -19,6 +21,15 @@ def storage_home(environment, key, default, cwd=None):
         path = str(Path(home) / path[2:])
     path = Path(path)
     return (path if path.is_absolute() else Path(cwd or os.getcwd()) / path).resolve()
+
+
+@dataclass(frozen=True)
+class LiveActivity:
+    """Authoritative current state and selected transcript, independent of seen completions."""
+
+    state: str
+    path: Optional[Path] = None
+    detail: Optional[str] = None
 
 
 class CodingSessionAdapter(ABC):
@@ -106,12 +117,16 @@ class CodingSessionAdapter(ABC):
         """Native main-agent event logs for this exact conversation and store."""
 
     def activity_event(self, record):
-        """Return (working/idle/finished, native timestamp), or None for non-turn events."""
+        """Return (working/idle/finished/unknown, timestamp), or None for non-turn events."""
         return self.sessions.activity_event(record)
 
     def activity_marker(self, records):
         """Select a native turn event and its byte offset from bounded reverse records."""
         return self.sessions.activity_marker(records)
+
+    def live_activity(self, session, running):
+        """Return LiveActivity when the harness owns a live status API; otherwise use turn markers."""
+        return None
 
     @abstractmethod
     def arguments(self, session):

@@ -21,6 +21,15 @@ class CodexAdapter(CodingSessionAdapter):
         return ['resume', session['cliSessionId']]
 
     def activity_files(self, session):
+        from outpost_codex_state import selected_rollout
+
         home = self.home(session['cliSessionEnv'], session['rootDir'])
-        for folder in ('sessions', 'archived_sessions'):
-            yield from (home / folder).glob('**/rollout-*-' + session['cliSessionId'] + '.jsonl')
+        path = selected_rollout(home, session['cliSessionId'])
+        if path is not None:
+            yield path
+
+    def live_activity(self, session, running):
+        from outpost_codex_state import observe
+
+        home = self.home(session['cliSessionEnv'], session['rootDir'])
+        return observe(home, session['cliSessionId'], running)

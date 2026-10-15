@@ -38,7 +38,7 @@ export default function ActivityBadge({
   }
   if (state === 'working')
     return (
-      <span className="badge working">
+      <span className="badge working" title={activity.detail ?? undefined}>
         <LoaderCircle className="spin" size={12} />
         {activityLabels[state]}
       </span>

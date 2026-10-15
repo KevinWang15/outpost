@@ -219,7 +219,12 @@ pauses the service or changes the harness's terminal mode.
 
 `viewport.ts` follows the visual viewport's size and offset using coalesced
 animation frames. The terminal's existing ResizeObserver fits xterm after the
-container changes, including keyboard open/close and rotation. During pinch
+container changes, including keyboard open/close and rotation. Resize requests
+are coalesced per animation frame, including during continuous window dragging
+and font-size key repeat. The socket deduplicates the last requested dimensions,
+not the last rendered dimensions, so an in-flight acknowledgement cannot swallow
+a resize back to the original size. Readiness sends the latest dimensions after
+checkpoint restoration. During pinch
 zoom it preserves the last unzoomed layout instead of reflowing terminal text.
 Touch controls use larger targets and 16px form text, and the composer stays
 focused while a send is pending. Floating notices remain visible and dismissible
@@ -394,6 +399,16 @@ The headless engine alone answers terminal queries, even when disconnected.
 The browser forwards user input, mouse and focus events, suppressing duplicate
 terminal-generated replies. Palette queries use the same shared terminal theme.
 Resizing updates both engine geometry and the PTY, delivering normal SIGWINCH.
+`outpost_terminal.child_command` wraps the harness command in a short Python
+bootstrap: create a child session, claim stdin's PTY as its controlling terminal,
+set the foreground process group, restore terminal signal defaults, and exec the
+original command. The service retains the PTY master and its independent lifetime;
+the bootstrap does not remain as a supervisor. Assigning PTY stdio alone does not
+establish a foreground process group and therefore cannot deliver resize signals.
+The existing Python dependency provides this setup without a new target package.
+Sessions started before this setup need an explicit Terminate/Connect to restart the
+CLI and resume its conversation; reconnecting a viewer cannot establish terminal
+ownership for an already-running process.
 Ctrl+C and other application keys pass directly through the PTY.
 
 The terminal service persists across client, SSH and Outpost server restarts.

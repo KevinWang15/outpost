@@ -1,10 +1,11 @@
-"""Control client for the installed terminal service; no PTY or terminal state."""
+"""Terminal-service control client and harness child-process setup."""
 
 import errno
 import json
 import os
 import socket
 import struct
+import sys
 from pathlib import Path
 
 from outpost_frames import HEADER, control, header
@@ -14,6 +15,25 @@ VERSION = '1.0.1'
 MAX_COLS = 400
 MAX_ROWS = 200
 EXECUTABLE = Path.home() / '.outpost' / 'bin' / 'outpost-terminal'
+
+
+def child_command(arguments):
+    """Claim the inherited PTY in the child, then replace the bootstrap with the CLI.
+
+    Bun connects stdio to the slave but does not establish a controlling terminal.
+    Without a foreground process group, TIOCSWINSZ cannot deliver SIGWINCH.
+    Python is already required on targets; the bootstrap leaves no extra process.
+    """
+    bootstrap = """import fcntl, os, signal, sys, termios
+os.setsid()
+fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+os.tcsetpgrp(0, os.getpgrp())
+for name in ('SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGPIPE', 'SIGTSTP', 'SIGTTIN', 'SIGTTOU', 'SIGWINCH'):
+    signal.signal(getattr(signal, name), signal.SIG_DFL)
+signal.pthread_sigmask(signal.SIG_SETMASK, [])
+os.execvpe(sys.argv[1], sys.argv[1:], os.environ)
+"""
+    return [sys.executable, '-I', '-S', '-c', bootstrap, *arguments]
 
 
 def command():

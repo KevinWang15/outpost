@@ -312,15 +312,15 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       }
       return true
     })
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let fitFrame = 0
     const refit = () => {
-      clearTimeout(timer)
-      timer = setTimeout(() => {
+      // Coalesce within a frame without waiting for a resize drag/key repeat to stop.
+      if (fitFrame) return
+      fitFrame = requestAnimationFrame(() => {
+        fitFrame = 0
         const { cols, rows } = size()
-        if (!rendering.restoring && (term.cols !== cols || term.rows !== rows)) {
-          client.resize(cols, rows)
-        }
-      }, 60)
+        client.resize(cols, rows)
+      })
     }
     const observer = new ResizeObserver(refit)
     observer.observe(surface.current!)
@@ -392,7 +392,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     })
     return () => {
       clearTimeout(start)
-      clearTimeout(timer)
+      cancelAnimationFrame(fitFrame)
       observer.disconnect()
       window.removeEventListener('pageshow', resume)
       window.removeEventListener('online', resume)

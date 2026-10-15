@@ -492,7 +492,7 @@ def start_session(session, cols, rows):
     environment.update(TERM='xterm-256color', COLORTERM='truecolor')
     configuration = {
         'socket': socket_name(session),
-        'command': [command_shell, '-c', launch_script(session, executable)],
+        'command': terminal.child_command([command_shell, '-c', launch_script(session, executable)]),
         'cwd': session['rootDir'],
         'env': environment,
         'cols': cols,

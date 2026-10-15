@@ -28,6 +28,7 @@ export class TerminalSocket {
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
   private ready = false
+  private requestedSize: { cols: number; rows: number } | null = null
   private closedReason: CloseReason | null = null
   private openedAt = 0
   private probing: WebSocket | null = null
@@ -69,6 +70,7 @@ export class TerminalSocket {
     socket.binaryType = 'arraybuffer'
     this.socket = socket
     this.ready = false
+    this.requestedSize = null
     this.rendering.begin()
     let acknowledged = 0
     let lastAck = 0
@@ -110,7 +112,8 @@ export class TerminalSocket {
           this.ready = true
           this.attempts = 0
           this.handlers.state({ kind: 'connected' })
-          this.send({ type: 'resize', ...this.size() })
+          const { cols, rows } = this.size()
+          this.resize(cols, rows)
         })
       } else if (message.type === 'activity') {
         this.handlers.activity(message.activity)
@@ -217,7 +220,11 @@ export class TerminalSocket {
   }
 
   resize(cols: number, rows: number) {
-    if (this.connected) this.send({ type: 'resize', cols, rows })
+    if (!this.connected || (this.requestedSize?.cols === cols && this.requestedSize.rows === rows)) return
+    // Track requests, not rendered geometry: the target's acknowledgement may
+    // still be in flight when the user resizes back to an earlier dimension.
+    this.requestedSize = { cols, rows }
+    this.send({ type: 'resize', cols, rows })
   }
 
   private request(message: ClientMessage & { id: string }, timeout = 60_000) {

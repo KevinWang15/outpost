@@ -1,3 +1,4 @@
+import { tabDragging } from './tab-drag-ui'
 import {
   statusBarHeight,
   tabBarHeight,
@@ -39,7 +40,6 @@ const run = (work: Promise<unknown>) => {
 }
 let state: WorkspaceSnapshot | null = null
 let panelKey = ''
-let dragged: number | null = null
 let selected = 0
 let matches: TabSummary[] = []
 const tabNodes = new Map<number, HTMLElement>()
@@ -53,10 +53,36 @@ const statusLabel = (tab: TabSummary) =>
         tab.connection
       ]
 
+tabDragging(tabs, api, run)
+let geometryFrame = 0
+let scrollFrame = 0
+const dragSpace = document.querySelector<HTMLElement>('.window-drag')!
+function reportGeometry() {
+  cancelAnimationFrame(geometryFrame)
+  geometryFrame = requestAnimationFrame(() => {
+    const viewport = tabs.getBoundingClientRect()
+    const end = dragSpace.getBoundingClientRect()
+    run(
+      api.tabGeometry({
+        left: viewport.left,
+        right: end.right,
+        viewportRight: viewport.right,
+        tabs: [...tabs.children].map(node => {
+          const bounds = node.getBoundingClientRect()
+          return { id: Number((node as HTMLElement).dataset.tab), left: bounds.left, right: bounds.right }
+        }),
+      }),
+    )
+  })
+}
+new ResizeObserver(reportGeometry).observe(tabs)
+new ResizeObserver(reportGeometry).observe(dragSpace)
+tabs.addEventListener('scroll', reportGeometry)
+
 function tabNode(id: number) {
   const node = document.createElement('div')
   node.className = 'tab'
-  node.draggable = true
+  node.dataset.tab = String(id)
   const select = button('', () => run(api.activate(id)), 'tab-select')
   select.setAttribute('role', 'tab')
   const dot = document.createElement('span')
@@ -96,36 +122,6 @@ function tabNode(id: number) {
       run(api.close(id))
     }
   }
-  node.ondragstart = event => {
-    dragged = id
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = 'move'
-      event.dataTransfer.setData('text/plain', String(id))
-    }
-  }
-  node.ondragover = event => {
-    if (dragged === null || dragged === id) return
-    event.preventDefault()
-    const rect = node.getBoundingClientRect()
-    node.dataset.drop = event.clientX < rect.x + rect.width / 2 ? 'before' : 'after'
-  }
-  node.ondragleave = () => {
-    delete node.dataset.drop
-  }
-  node.ondrop = event => {
-    event.preventDefault()
-    if (dragged !== null && state) {
-      const index = state.tabs.findIndex(tab => tab.id === id)
-      const before = node.dataset.drop === 'after' ? (state.tabs[index + 1]?.id ?? null) : id
-      run(api.reorder(dragged, before))
-    }
-    delete node.dataset.drop
-    dragged = null
-  }
-  node.ondragend = () => {
-    dragged = null
-    for (const item of tabNodes.values()) delete item.dataset.drop
-  }
   return node
 }
 function renderTabs() {
@@ -156,6 +152,26 @@ function renderTabs() {
     close.title = tab.hasDraft ? 'Close tab (unsent message)' : 'Close tab'
     if (tabs.children[index] !== node) tabs.insertBefore(node, tabs.children[index] ?? null)
   })
+  for (const [id, node] of tabNodes) {
+    node.classList.toggle('dragging', Boolean(state.drag?.source && state.drag.id === id))
+    delete node.dataset.drop
+  }
+  const drag = state.drag
+  document.documentElement.classList.toggle('tab-dragging', Boolean(drag?.source))
+  tabs.classList.toggle('drop-empty', Boolean(drag?.target && !state.tabs.length))
+  if (drag?.target) {
+    const id = drag.before ?? state.tabs.at(-1)?.id
+    const node = id === undefined ? undefined : tabNodes.get(id)
+    if (node) node.dataset.drop = drag.before === null ? 'after' : 'before'
+  }
+  cancelAnimationFrame(scrollFrame)
+  const scroll = () => {
+    if (!state?.drag?.scroll) return
+    tabs.scrollLeft += state.drag.scroll * 10
+    scrollFrame = requestAnimationFrame(scroll)
+  }
+  if (drag?.scroll) scrollFrame = requestAnimationFrame(scroll)
+  reportGeometry()
 }
 function renderServers() {
   const list = el('servers')
@@ -401,6 +417,8 @@ run(
     const mac = value.platform === 'darwin',
       modifier = mac ? '⌘' : 'Ctrl+Shift+'
     const shortcuts = [
+      ['New window', mac ? '⌘Shift+N' : 'Ctrl+Shift+N'],
+      ['Cancel tab drag', 'Esc'],
       ['New tab / choose a session', `${modifier}T`],
       ['Switch session', `${modifier}P`],
       ['Close tab', `${modifier}W`],

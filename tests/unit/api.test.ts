@@ -140,9 +140,12 @@ test('connect returns a web token or an outpost:// link for the chosen terminal'
   assert.equal(web.url, null)
   for (const terminal of ['desktop']) {
     const connection = (await call('POST', path, { terminal })).body as ConnectResponse
-    const link = JSON.parse(Buffer.from(connection.url!.slice('outpost://connect/'.length), 'base64url').toString())
+    const { sessionKey, ...link } = JSON.parse(
+      Buffer.from(connection.url!.slice('outpost://connect/'.length), 'base64url').toString(),
+    )
+    assert.match(sessionKey, /^[A-Za-z0-9_-]{43}$/)
     assert.deepEqual(link, {
-      v: 1,
+      v: 2,
       server: `http://127.0.0.1:${port}`,
       token: connection.token,
       terminal,

@@ -1,12 +1,22 @@
 import { useState } from 'react'
 import { pagePaths } from '../../shared/pages'
-import { desktop } from '../desktop'
+import { desktop, desktopProblem } from '../desktop'
 import TerminalView from './TerminalView'
 import { saveDesktopTicket } from './desktopTicket'
 import { openBrowserTab } from './browser'
 
 export default function DesktopTerminalPage({ token: initial }: { token: string | null }) {
   const [token] = useState(initial)
+  if (desktopProblem)
+    return (
+      <main className="auth-loading" role="alert">
+        <h1>Outpost update required</h1>
+        <p>{desktopProblem}</p>
+        <button className="button primary" onClick={() => window.location.reload()}>
+          Reload terminal
+        </button>
+      </main>
+    )
   if (!token)
     return (
       <main className="auth-loading">

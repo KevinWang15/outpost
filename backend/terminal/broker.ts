@@ -254,9 +254,22 @@ class Connection {
     const id = (message as { id?: unknown }).id
     if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)))
       return this.socket.close(1008, 'Invalid terminal message')
-    if ((message.type === 'send' || message.type === 'paste-image') && id === undefined)
+    if ((message.type === 'send' || message.type === 'paste-image' || message.type === 'activate') && id === undefined)
       return this.socket.close(1008, 'A terminal request ID is required')
     switch (message.type) {
+      case 'activate': {
+        const ok =
+          this.started &&
+          typeof message.token === 'string' &&
+          message.token.length <= 8192 &&
+          this.broker.activate(this.grant, message.token)
+        return this.send({
+          type: 'result',
+          id: message.id,
+          ok,
+          ...(!ok && { message: 'Could not accept this launch ticket. Use Connect in Outpost again.' }),
+        })
+      }
       case 'scrollback':
         if (message.offset === undefined && id === undefined) return this.relay({ type: 'scrollback' })
         if (
@@ -361,6 +374,15 @@ export class TerminalBroker {
   }
   forget(connection: Connection) {
     this.connections.delete(connection)
+  }
+
+  /** A fresh Connect can focus an existing tab without attaching another PTY. */
+  activate(grant: Grant, token: string) {
+    if (this.stopped || !this.dependencies.deployment.active(grant.owner)) return false
+    const redeemed = this.dependencies.tokens.redeem(token, grant)
+    if (!redeemed) return false
+    this.dependencies.tokens.markConnected(redeemed.id, grant.owner)
+    return true
   }
 
   async accept(socket: WebSocket, query: TerminalQuery) {

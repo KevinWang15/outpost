@@ -40,6 +40,13 @@ export class ConnectTokens {
     for (const [id, until] of this.used) if (until <= now) this.used.delete(id)
     for (const [id, entry] of this.connected) if (entry.until <= now) this.connected.delete(id)
   }
+  /** Opaque routing identity, scoped to this login. It is never authorization. */
+  desktopSessionKey(grant: Grant) {
+    return createHmac('sha256', this.secret)
+      .update('outpost-desktop-session:')
+      .update(JSON.stringify([grant.owner.userId, grant.owner.loginId, grant.targetId, grant.sessionId]))
+      .digest('base64url')
+  }
   issue(grant: Grant) {
     const id = randomUUID(),
       expires = Date.now() + launchLifetime
@@ -71,7 +78,7 @@ export class ConnectTokens {
     })
   }
   /** Verify a token; a launch token is consumed. Returns null when invalid, expired or reused. */
-  redeem(token: string): { id: string; kind: Payload['k']; grant: Grant } | null {
+  redeem(token: string, expectedGrant?: Grant): { id: string; kind: Payload['k']; grant: Grant } | null {
     const [data, signature, extra] = token.split('.')
     if (!data || !signature || extra !== undefined) return null
     const expected = Buffer.from(this.sign(data)),
@@ -89,6 +96,17 @@ export class ConnectTokens {
       ![payload.i, payload.u, payload.l, payload.t, payload.s].every(text) ||
       !Number.isSafeInteger(payload.e) ||
       payload.e <= Date.now()
+    )
+      return null
+    // Reusing an attached tab must not consume a ticket for another session or
+    // login. The desktop launch envelope is only a routing hint.
+    if (
+      expectedGrant &&
+      (payload.k !== 'launch' ||
+        payload.u !== expectedGrant.owner.userId ||
+        payload.l !== expectedGrant.owner.loginId ||
+        payload.t !== expectedGrant.targetId ||
+        payload.s !== expectedGrant.sessionId)
     )
       return null
     this.prune()

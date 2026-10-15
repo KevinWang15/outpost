@@ -228,7 +228,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       state: next => {
         setState(next)
         if (next.kind === 'closed' && next.reason === 'expired') lifecycle.current.onExpired?.()
-        if (next.kind === 'connected' && !touch() && (!desktop || host.current.focused)) term.focus()
+        if (next.kind === 'connected' && !touch() && (!desktop || (host.current.focused && document.hasFocus())))
+          term.focus()
       },
       hello: message => {
         lifecycle.current.onResume?.(message.resume)
@@ -331,12 +332,27 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       }
       if (focused) {
         bells.acknowledge()
-        focusInput()
+        // Native focus commands own activation. A delayed host-state update
+        // must not steal focus from the tab strip during a click or drag.
       }
     })
     // Launch tokens are single use: open after the commit, so a discarded
     // render (React StrictMode) never spends the token.
     const start = setTimeout(() => client.open(), 0)
+    const launches = new Set<string>()
+    const stopLaunches = desktop?.onLaunch(launch => {
+      if (launches.has(launch)) return
+      launches.add(launch)
+      if (launches.size > 32) launches.delete(launches.values().next().value!)
+      clearTimeout(start)
+      if (!client.connected) lifecycle.current.onResume?.(launch)
+      void client
+        .activate(launch)
+        .catch(error => notify((error as Error).message))
+        .finally(() => {
+          void desktop?.launchHandled(launch).catch(() => {})
+        })
+    })
     return () => {
       clearTimeout(start)
       clearTimeout(timer)
@@ -347,6 +363,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       shims.dispose()
       stopCommands?.()
       stopHost?.()
+      stopLaunches?.()
       term.dispose()
       socket.current = null
       historyControls.current = null
@@ -499,6 +516,13 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             onClick={() => {
               void openBrowserTab(blockedLink).then(opened => {
                 if (opened) setBlockedLink(null)
+                else
+                  notify(
+                    desktop
+                      ? 'Could not open your default browser. Copy the link and open it in your browser.'
+                      : 'Allow pop-ups for Outpost, then try again, or copy the link into your browser.',
+                    true,
+                  )
               })
             }}
           >

@@ -11,6 +11,24 @@ const bridge: DesktopBridge = {
       ipcRenderer.removeListener('terminal:command', handle)
     }
   },
+  onLaunch: listener => {
+    let disposed = false
+    const handle = (_event: Electron.IpcRendererEvent, token: string) => listener(token)
+    ipcRenderer.on('terminal:launch', handle)
+    // Reading does not consume: StrictMode cleanup or a loading renderer must
+    // not drop the launch. The renderer acknowledges it after handling it.
+    void ipcRenderer
+      .invoke('terminal:pending-launches')
+      .then((tokens: string[]) => {
+        if (!disposed) for (const token of tokens) listener(token)
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      ipcRenderer.removeListener('terminal:launch', handle)
+    }
+  },
+  launchHandled: token => ipcRenderer.invoke('terminal:launch-handled', token),
   onHostState: listener => {
     let disposed = false
     const handle = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)

@@ -118,7 +118,7 @@ branch on the mode.
    signed, single-use launch ticket valid for five minutes.
 2. Web opens `/terminal?target=…&session=…`, whose authenticated page requests
    its ticket. Desktop receives `outpost://connect/<base64url payload>` with
-   `{v: 1, terminal: 'desktop', server, token, title}`. Electron validates the
+   `{v: 2, terminal: 'desktop', server, sessionKey, token, title}`. Electron validates the
    envelope and HTTPS/localhost origin, confirms server trust, and loads
    `/terminal/desktop#token=…` from that origin.
 3. Both entry pages render `TerminalView` and use `TerminalSocket` to connect
@@ -127,8 +127,14 @@ branch on the mode.
    revokes them and closes live connections. Resume tokens never appear in
    OS links or page URLs. Proxies must not log WebSocket query strings.
 4. The desktop Connect dialog polls `/api/connections/:id` until attached.
-   Retrying issues a fresh ticket. Electron deduplicates repeated launches of
-   the same ticket and limits windows and pending launches to 16 each.
+   Retrying issues a fresh ticket. Electron identifies tabs by normalized server
+   origin and an opaque `sessionKey`, derived from the login, target and session.
+   Every Connect activates that tab; a connected tab acknowledges the new ticket
+   with `activate` over its existing WebSocket. The broker verifies that the signed
+   ticket matches the connection's full grant before consuming it and marking the
+   handoff connected. The routing key itself never authorizes access. Disconnected
+   tabs use the fresh ticket to reconnect without replacing their renderer or draft.
+   There are at most 16 pending OS launches and 32 tabs.
 
 ### Client choices and shared responsibilities
 
@@ -151,6 +157,12 @@ but reload requires a fresh Connect.
 Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
 clipboard, composer, links, bells and notifications have one web implementation.
+
+`TerminalContextMenu` owns the terminal menu in both clients. On every attach,
+the runtime removes tmux's right-click and Alt+right-click pane/status menu
+bindings and its prefix `<` / `>` menu shortcuts. This applies to Outpost's
+isolated tmux server, including existing sessions on reconnect. Mouse reporting,
+wheel scrolling and copy-mode selection remain enabled.
 
 `ScrollbackBar` displays tmux's history position, not xterm's local buffer:
 tmux uses the alternate screen, so xterm's scrollbar cannot reach that history.
@@ -222,10 +234,11 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
 | → server | `paste-image {id, mediaType, data}` | Upload an image and paste its path |
 | → server | `scrollback {offset?, id?}` | Without fields, subscribe to history metadata; with both `offset` and `id`, seek from the bottom (`0` = live, `-1` = oldest) |
+| → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
 | ← client | `hello {resume, session, target}` | Connection accepted |
 | ← client | `ready` | Attached to tmux; subscribe to history metadata |
 | ← client | `scrollback {available, lines, offset, rows, active, alternate, navigation?}` | History extent, position, copy mode, and whether the application owns scrolling |
-| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / a scrollback seek |
+| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / a scrollback seek / `activate` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |
 
@@ -235,7 +248,10 @@ The server pauses the transport when more than 1 MiB is unacknowledged.
 A mismatch returns `outdated` before redeeming the launch ticket and asks the
 user to reload. Desktop loads the same frontend from its server. Changes to the
 native bridge use `desktopBridgeVersion`; new native capabilities require an
-app release. Version checks reject unsupported input; there are no protocol
+app release. The desktop page shows an update error for a mismatched bridge.
+The shell also detects pages that never report state after loading, so an older
+server cannot silently leave the tab showing Connecting while native actions fail.
+Version checks reject unsupported input; there are no protocol
 translators or historical readers. Connection grants authorize an owner/login,
 target and session independently of the selected UI.
 
@@ -304,14 +320,40 @@ fails with a clear message.
 `launch.ts` validates the envelope; `store.ts` atomically serializes trusted
 origins, and `preferences.ts` serializes font size and bell sound only.
 
-One `BrowserWindow` hosts local workspace chrome. `workspace.ts` owns it, tab
-activation and close/reload confirmation. `layout.ts` owns ordered tab IDs,
-the active session, an optional two-session split and shared pane geometry.
+`workspace.ts` owns all windows and a single app-wide `TerminalTabs` registry.
+Each terminal ID has one owning `WorkspaceWindow`; duplicate launches and
+notification clicks resolve that owner dynamically, including after a transfer.
+`workspace-window.ts` owns one `BrowserWindow`, its close/reload confirmation and
+local chrome. Its `TabLayout` owns ordered tab IDs, the active session, an optional
+two-session split and shared pane geometry. Menus resolve the focused window.
 `workspace-ui.ts` renders the tab strip, session switcher, server launcher and
 settings. Its `workspace-preload.ts` bridge accepts only enumerated local UI
-actions; the main process verifies that calls came from its bundled main frame.
+actions; one IPC dispatcher verifies the bundled main frame and routes each call
+to that sender's window. Tab actions check ownership before changing a terminal.
 The local renderer receives tab labels, connection state, attention and draft
 flags, never grants, terminal bytes or draft contents.
+
+Activation applies view visibility before restoring or focusing the native window.
+Native focus events may select another visible split pane, but cannot override an
+activation in progress or reactivate a view already hidden by the current layout.
+
+`tab-drag-ui.ts` captures pointer events and starts a drag after an eight-pixel threshold. The
+original view and layout remain intact during the gesture. `tab-drag.ts` owns
+one drag across the app, shows a noninteractive native tab preview, and resolves
+drop positions from native DIP cursor coordinates and each chrome's measured
+tab geometry. A 32 ms timer runs only during a drag, including while edge scrolling.
+It considers visible, nonminimized Outpost windows in focus order and never drops
+through an overlapping Outpost window. Escape, capture loss, blur, renderer failure
+or source closure cancel the drag. No grant or terminal data enters drag payloads.
+
+On release, a tab-bar drop reorders or transfers the existing `WebContentsView`;
+an outside drop creates a window. A lone tab instead moves its existing window.
+The same transfer method serves the tab context menu. It detaches the view,
+updates ownership and reparents it without reloading, reconnecting or consuming
+a ticket. Failed attachment restores the source. Moving the last tab into another
+window closes the empty source only after attachment succeeds. A source split
+collapses to its remaining session. New window bounds are clamped to the destination
+display's work area. The renderer, connection, terminal buffer and draft stay alive.
 
 The tab strip replaces the system title bar using Electron's
 `titleBarStyle: 'hidden'` and [Window Controls Overlay](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar#custom-window-controls).
@@ -328,9 +370,15 @@ Views use nonpersistent sessions partitioned by server origin. Switching tabs
 only changes visibility; hidden views retain their size and keep processing
 output and acknowledgements. A split displays two existing views and changes
 their bounds. Moving/reordering tabs never redeems another grant. There is a
-32-tab limit. Closing a tab explicitly destroys its web contents; child views
-are also closed when the owning window is destroyed. Renderer failures are
+32-tab limit across at most 16 workspace windows. Closing a tab explicitly destroys
+its web contents; closing a window destroys only the views it still owns. Quit
+confirmation covers tabs and drafts across all windows. Renderer failures are
 shown per tab and do not reset the workspace or other sessions.
+
+Fresh launches for an existing tab wait in a bounded, in-memory queue until its
+renderer handles them. The preload subscribes before reading pending launches;
+only an explicit acknowledgement removes one, so loading and StrictMode cleanup
+do not lose a handoff. Exact repeats of the most recent OS link are ignored.
 
 Remote views use sandboxing, context isolation, no Node integration, no
 webviews and no popups/downloads. Top-level navigation is restricted to the
@@ -365,8 +413,8 @@ the remote harness is not inspected for drafts.
 
 Packaged apps register the protocol through Electron and installer metadata.
 macOS handles `open-url` before app readiness; Windows uses initial arguments
-and `second-instance`. A single app instance owns the workspace; subsequent
-launches add tabs. Closing a tab or window never terminates tmux. The server
+and `second-instance`. A single app instance owns all workspaces; subsequent
+launches focus an existing tab or add one to the active window. Closing a tab or window never terminates tmux. The server
 launcher can forget a server and close its tabs. No connection tickets or
 layouts with credentials are persisted; reopening the app starts a fresh
 workspace. The app icon and Windows AppUserModelID belong to Outpost.

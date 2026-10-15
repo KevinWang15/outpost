@@ -15,15 +15,26 @@ export function parseLaunch(value: string): DesktopLaunch {
   }
   if (
     !data ||
-    data.v !== 1 ||
+    data.v !== 2 ||
     data.terminal !== 'desktop' ||
     typeof data.server !== 'string' ||
+    typeof data.sessionKey !== 'string' ||
+    !/^[A-Za-z0-9_-]{43}$/.test(data.sessionKey) ||
     typeof data.token !== 'string' ||
     data.token.length > 8192 ||
     !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(data.token) ||
     typeof data.title !== 'string' ||
     data.title.length > 512
   )
-    throw new Error('This link is not an Outpost Desktop connection. Use Connect → Outpost Desktop again.')
-  return { v: 1, server: desktopOrigin(data.server), token: data.token, terminal: 'desktop', title: data.title }
+    throw new Error(
+      'Update Outpost Desktop and your Outpost server together, then use Connect → Outpost Desktop again.',
+    )
+  return {
+    v: 2,
+    server: desktopOrigin(data.server),
+    sessionKey: data.sessionKey,
+    token: data.token,
+    terminal: 'desktop',
+    title: data.title,
+  }
 }

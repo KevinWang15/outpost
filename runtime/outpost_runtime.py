@@ -671,6 +671,20 @@ def attach_session(session, cols, rows):
         if features.returncode == 0 and wanted in features.stdout.split()
         else [';', 'set-option', '-saq', 'terminal-features', wanted]
     )
+    # Outpost owns context menus. Remove tmux's menu bindings on every attach
+    # so existing sessions pick up the policy without restarting their harness.
+    # Keep mouse reporting, wheel scrolling and copy-mode selection enabled.
+    for table, key in (
+        ('root', 'MouseDown3Pane'),
+        ('root', 'M-MouseDown3Pane'),
+        ('root', 'MouseDown3Status'),
+        ('root', 'M-MouseDown3Status'),
+        ('root', 'MouseDown3StatusLeft'),
+        ('root', 'M-MouseDown3StatusLeft'),
+        ('prefix', '<'),
+        ('prefix', '>'),
+    ):
+        chain.extend([';', 'unbind-key', '-q', '-T', table, key])
     tmux(
         session,
         'set-option',

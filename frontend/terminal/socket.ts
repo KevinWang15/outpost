@@ -146,6 +146,17 @@ export class TerminalSocket {
     this.open()
   }
 
+  /** Keep a live connection and its draft; use the fresh grant for recovery. */
+  async activate(token: string) {
+    if (!this.connected) {
+      this.token = token
+      this.reconnect()
+      return
+    }
+    const result = await this.request({ type: 'activate', id: crypto.randomUUID(), token })
+    if (!result.ok) throw new Error(result.message)
+  }
+
   close() {
     this.stopped = true
     clearTimeout(this.timer)

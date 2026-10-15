@@ -8,7 +8,7 @@ import type { connectInput, historyNavigation } from './schemas'
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 3
+export const protocolVersion = 4
 export const maxInputMessage = 64 * 1024
 
 export type HistoryNavigation = Static<typeof historyNavigation>
@@ -25,6 +25,7 @@ export interface ScrollbackState {
 }
 
 export type ClientMessage =
+  | { type: 'activate'; id: string; token: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ack'; bytes: number }
   | { type: 'send'; id: string; data: string }

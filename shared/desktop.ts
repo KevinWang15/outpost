@@ -1,5 +1,5 @@
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 2
+export const desktopBridgeVersion = 3
 export interface TerminalPreferences {
   fontSize: number
   sound: boolean
@@ -19,6 +19,8 @@ export interface DesktopBridge {
   notificationsSupported: boolean
   openExternal(url: string): Promise<boolean>
   onCommand(listener: (command: TerminalCommand) => void): () => void
+  onLaunch(listener: (token: string) => void): () => void
+  launchHandled(token: string): Promise<void>
   onHostState(listener: (state: TerminalHostState) => void): () => void
   reportState(state: TerminalTabState): Promise<void>
   pasteClipboard(): Promise<boolean>
@@ -30,8 +32,9 @@ export interface DesktopBridge {
 
 export const desktopReleases = 'https://github.com/KevinWang15/outpost/releases'
 export interface DesktopLaunch {
-  v: 1
+  v: 2
   server: string
+  sessionKey: string
   token: string
   terminal: 'desktop'
   title: string

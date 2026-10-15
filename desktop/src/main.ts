@@ -51,13 +51,14 @@ function receive(value: string) {
     .then(async () => {
       const launch = parseLaunch(value)
       if (await trust(launch.server)) workspace!.open(launch)
+      else workspace!.show()
     })
     .catch(async error => {
+      workspace!.show()
       await report(error instanceof Error ? error.message : 'Could not open the session.')
     })
     .finally(() => {
       pending--
-      workspace!.show()
     })
 }
 function menus() {
@@ -68,15 +69,16 @@ function menus() {
     {
       label: 'File',
       submenu: [
-        { label: 'New tab…', accelerator: shortcut('T'), click: () => workspace!.panel('sessions') },
-        { label: 'Switch session…', accelerator: shortcut('P'), click: () => workspace!.panel('switcher') },
-        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => workspace!.panel('settings') },
+        { label: 'New window', accelerator: 'CmdOrCtrl+Shift+N', click: () => workspace!.newWindow() },
+        { label: 'New tab…', accelerator: shortcut('T'), click: () => workspace!.current.panel('sessions') },
+        { label: 'Switch session…', accelerator: shortcut('P'), click: () => workspace!.current.panel('switcher') },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => workspace!.current.panel('settings') },
         { type: 'separator' },
         {
           label: 'Close tab',
           accelerator: shortcut('W'),
           click: () => {
-            void workspace!.close()
+            void workspace!.current.close()
           },
         },
         { role: 'close', label: 'Close window', accelerator: mac ? 'Cmd+Shift+W' : 'Alt+F4' },
@@ -86,29 +88,33 @@ function menus() {
     {
       label: 'Edit',
       submenu: [
-        { label: 'Copy', accelerator: shortcut('C'), click: () => workspace!.edit('copy') },
-        { label: 'Paste', accelerator: shortcut('V'), click: () => workspace!.edit('paste') },
-        { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.command('select-all') },
+        { label: 'Copy', accelerator: shortcut('C'), click: () => workspace!.current.edit('copy') },
+        { label: 'Paste', accelerator: shortcut('V'), click: () => workspace!.current.edit('paste') },
+        { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.current.command('select-all') },
       ],
     },
     {
       label: 'View',
       submenu: [
-        { label: 'Split side by side', accelerator: shortcut('D'), click: () => workspace!.split('columns') },
-        { label: 'Split top and bottom', click: () => workspace!.split('rows') },
-        { label: 'Single pane', click: () => workspace!.split(null) },
-        { label: 'Focus other pane', accelerator: 'CmdOrCtrl+Alt+Right', click: () => workspace!.otherPane() },
+        { label: 'Split side by side', accelerator: shortcut('D'), click: () => workspace!.current.split('columns') },
+        { label: 'Split top and bottom', click: () => workspace!.current.split('rows') },
+        { label: 'Single pane', click: () => workspace!.current.split(null) },
+        { label: 'Focus other pane', accelerator: 'CmdOrCtrl+Alt+Right', click: () => workspace!.current.otherPane() },
         { type: 'separator' },
-        { label: 'Larger terminal text', accelerator: 'CmdOrCtrl+Plus', click: () => workspace!.fontSize(1) },
-        { label: 'Smaller terminal text', accelerator: 'CmdOrCtrl+-', click: () => workspace!.fontSize(-1) },
-        { label: 'Reset terminal text size', accelerator: 'CmdOrCtrl+0', click: () => workspace!.fontSize(null) },
+        { label: 'Larger terminal text', accelerator: 'CmdOrCtrl+Plus', click: () => workspace!.current.fontSize(1) },
+        { label: 'Smaller terminal text', accelerator: 'CmdOrCtrl+-', click: () => workspace!.current.fontSize(-1) },
+        {
+          label: 'Reset terminal text size',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => workspace!.current.fontSize(null),
+        },
         { type: 'separator' },
-        { label: 'Reconnect terminal', click: () => workspace!.command('reconnect') },
+        { label: 'Reconnect terminal', click: () => workspace!.current.command('reconnect') },
         {
           label: 'Reload terminal',
           accelerator: shortcut('R'),
           click: () => {
-            void workspace!.reload()
+            void workspace!.current.reload()
           },
         },
         { role: 'togglefullscreen' },
@@ -118,13 +124,13 @@ function menus() {
     {
       label: 'Tabs',
       submenu: [
-        { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => workspace!.cycle(1) },
-        { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => workspace!.cycle(-1) },
+        { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => workspace!.current.cycle(1) },
+        { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => workspace!.current.cycle(-1) },
         { type: 'separator' },
         ...Array.from({ length: 9 }, (_, index) => ({
           label: index === 8 ? 'Last tab' : `Tab ${index + 1}`,
           accelerator: `${mac ? 'Cmd' : 'Alt'}+${index + 1}`,
-          click: () => workspace!.select(index),
+          click: () => workspace!.current.select(index),
         })),
       ],
     },

@@ -118,6 +118,19 @@ input::placeholder {
   overflow-x: auto;
   scrollbar-width: thin;
   scrollbar-color: #35445c transparent;
+  touch-action: none;
+}
+.tab.dragging {
+  opacity: 0.4;
+}
+.tab-dragging,
+.tab-dragging * {
+  cursor: grabbing !important;
+}
+#tabs.drop-empty {
+  min-width: 100px;
+  border: 2px solid #60a5fa;
+  border-radius: 8px;
 }
 .tab {
   display: flex;

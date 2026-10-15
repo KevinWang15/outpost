@@ -100,16 +100,18 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
             throw new AppError('Outpost Desktop requires HTTPS, or HTTP on localhost.')
           }
         }
-        const issued = tokens.issue({
+        const grant = {
           owner: context.owner,
           targetId: context.target.id,
           sessionId: session.id,
-        })
+        }
+        const issued = tokens.issue(grant)
         const link: DesktopLaunch | null =
           terminal === 'desktop'
             ? {
-                v: 1,
+                v: 2,
                 server: origin!,
+                sessionKey: tokens.desktopSessionKey(grant),
                 token: issued.token,
                 terminal: 'desktop',
                 title: `${session.name} · ${context.target.name}`,

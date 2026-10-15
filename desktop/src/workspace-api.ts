@@ -8,6 +8,19 @@ export interface TabSummary extends TerminalTabState {
   label: string
   error: string | null
 }
+export interface TabGeometry {
+  left: number
+  right: number
+  viewportRight: number
+  tabs: { id: number; left: number; right: number }[]
+}
+export interface TabDragState {
+  id: number
+  source: boolean
+  target: boolean
+  before: number | null
+  scroll: number
+}
 export interface WorkspaceSnapshot {
   version: string
   platform: string
@@ -17,10 +30,14 @@ export interface WorkspaceSnapshot {
   panel: WorkspacePanel
   servers: string[]
   preferences: TerminalPreferences
+  drag: TabDragState | null
 }
 
 /** Local app chrome only. Terminal pages receive the separate DesktopBridge. */
 export interface WorkspaceBridge {
+  tabGeometry(value: TabGeometry): Promise<void>
+  dragStart(id: number): Promise<void>
+  dragEnd(cancel: boolean): Promise<void>
   state(): Promise<WorkspaceSnapshot>
   onState(listener: (state: WorkspaceSnapshot) => void): () => void
   activate(id: number): Promise<void>

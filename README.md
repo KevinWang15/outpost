@@ -72,6 +72,11 @@ Click **Connect** next to a session and choose a terminal. Your last choice is r
 Every choice attaches to the same tmux session. Closing a client disconnects
 it; the coding session keeps running. You can change clients later.
 
+Desktop Connect brings the app forward and selects the session's tab. If that
+session is already open from the same browser login, its existing tab is reused,
+including its draft and live connection. Keep Outpost Desktop and your server
+updated together; an incompatible terminal interface shows an update message.
+
 ### Web terminal
 
 Opens full-window in the browser. Paste images with your normal paste shortcut
@@ -152,9 +157,16 @@ require **System Settings → Privacy & Security → Open Anyway**. Windows may
 show **SmartScreen → More info → Run anyway**. Only proceed with a release
 you trust; release artifacts include checksums.
 
-The app brings your sessions into one tabbed workspace, with its own Outpost
+The app arranges your sessions in tabbed windows, with its own Outpost
 icon and native notifications. Drag tabs to reorder, double-click to rename,
 or use the session switcher to find an open session by name or server.
+
+Drag a tab outside the tab bar and release to give it a window. Drop it into
+another Outpost window's tab bar to merge it there; an insertion marker shows
+the position. Hover at either edge to scroll a long tab bar. **Esc** cancels a
+drag. Right-click also offers **Move tab to new window** and **Move tab to window**.
+Moving a tab preserves its live connection, terminal buffer and message draft.
+Moving the last tab into another window closes the empty source window.
 
 Tabs share the top row with the native macOS or Windows window controls, with
 no separate title bar. Drag the empty space between the new-tab button and
@@ -164,7 +176,8 @@ Open two sessions, then right-click a tab and choose **Show beside current tab**
 **View → Split side by side / Split top and bottom** also pairs open sessions.
 Drag the divider to resize; double-click it to reset. **View → Single pane**
 returns to one session. Each tab keeps its connection, terminal buffer and
-message draft while you switch or rearrange it. Up to 32 tabs can stay open.
+message draft while you switch or rearrange it. Up to 32 tabs across 16 windows
+can stay open. Connect and notifications select the session in its owning window.
 
 Settings remembers text size and bell sound. The toolbar starts hidden in the
 app and can be revealed from the terminal's upper corner. The same xterm.js
@@ -185,6 +198,8 @@ for manual installation; remote sessions survive closing or upgrading the app.
 | Paste text or an image into the terminal | ⌘V or Ctrl+V | Ctrl+Shift+V |
 | Newline in coding tool | Shift+Enter | Shift+Enter |
 | New tab / choose a session | ⌘T | Ctrl+Shift+T |
+| New window | ⌘Shift+N | Ctrl+Shift+N |
+| Cancel tab drag | Esc | Esc |
 | Switch session | ⌘P | Ctrl+Shift+P |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Ctrl+Tab / Ctrl+Shift+Tab |
 | Go to tab 1–8 / last tab | ⌘1–9 | Alt+1–9 |
@@ -195,7 +210,7 @@ for manual installation; remote sessions survive closing or upgrading the app.
 | Close window | ⌘Shift+W | Alt+F4 |
 
 The app remembers trusted servers and opens their workspaces in your browser.
-Removing a server closes its tabs. Closing multiple tabs or discarding a message
+Removing a server closes its tabs across all windows. Closing multiple tabs or discarding a message
 draft asks for confirmation. Hiding the message box preserves its draft.
 Launch/resume tickets stay in memory; the app stores neither your account
 password nor login cookies. After quitting, connect through your server again.

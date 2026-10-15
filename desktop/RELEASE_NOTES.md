@@ -1,9 +1,14 @@
-# Outpost Desktop 0.2 preview
+# Outpost Desktop 0.3 preview
 
-Your coding sessions now share one tabbed workspace on macOS and Windows.
+Arrange your coding sessions across tabbed windows on macOS and Windows.
 
 ## What's new
 
+- **Move tabs between windows:** drag a tab outside the tab bar and release to give it a window, or drop it into another Outpost window's tab bar to merge. Connections, drafts and terminal buffers stay with the tab. Moving the last tab into another window closes its empty source window.
+- **Drag feedback:** a tab preview and insertion marker show where the tab will land. Hover at the edges to scroll a long tab bar; Escape cancels. Right-click also offers **Move tab to new window** and **Move tab to window**.
+- **New window:** use ⌘Shift+N on macOS or Ctrl+Shift+N on Windows. Menus apply to the focused window; Connect and notifications find an existing session across all windows.
+- **Connect selects your session:** new connections become the active tab; connecting again to an open session selects its existing tab and keeps its connection and draft.
+- **Clear update errors:** incompatible desktop/server interfaces show an update message. Failed browser opens show an error and keep the link available to copy.
 - **Tabs:** drag to reorder, double-click to rename, and right-click for tab actions. Background tabs stay connected.
 - **Integrated title bar:** tabs and native macOS/Windows window controls share one row. Empty space beside the tabs moves the window; tab dragging still reorders sessions.
 - **Terminal context menu:** right-click terminal output for copy, paste, image upload, history navigation and display controls. The same menu is available in the browser; Shift+F10 or the Menu key opens it from the keyboard.
@@ -15,7 +20,7 @@ Your coding sessions now share one tabbed workspace on macOS and Windows.
 - **Draft protection:** message-box drafts survive hiding the composer. Closing or reloading a tab asks before discarding a draft; closing multiple tabs also asks for confirmation.
 - **Recovery:** a terminal that fails to load or crashes has its own reload action. Other tabs keep running.
 
-Use ⌘T on Mac or Ctrl+Shift+T on Windows to choose another session. The Settings page lists all shortcuts. Up to 32 tabs can stay open. Closing the app leaves remote sessions running; reconnect through your Outpost server after reopening. Local shells and extensions are not included.
+Use ⌘T on Mac or Ctrl+Shift+T on Windows to choose another session. The Settings page lists all shortcuts. Up to 32 tabs across 16 windows can stay open. Closing the app leaves remote sessions running; reconnect through your Outpost server after reopening. Local shells and extensions are not included.
 
 Update your Outpost server alongside this preview; desktop and server changes are released together.
 

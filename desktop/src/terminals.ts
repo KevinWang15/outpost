@@ -25,14 +25,19 @@ export interface TerminalTab {
   notification: Notification | null
   externalAt: number
   launchKey: string
+  sessionKey: string
+  pendingLaunches: Set<string>
+  interfaceReady: boolean
+  interfaceTimer?: ReturnType<typeof setTimeout>
 }
 interface Host {
-  window(): BrowserWindow | null
+  window(id: number): BrowserWindow | null
   focused(id: number): boolean
   activate(id: number): void
+  focus(id: number): void
   close(id: number): Promise<void>
   removed(id: number): void
-  changed(): void
+  changed(id: number): void
   state(id: number): TerminalHostState
 }
 const cleanTitle = (value: string) =>
@@ -45,12 +50,16 @@ const cleanTitle = (value: string) =>
 export class TerminalTabs {
   readonly tabs = new Map<number, TerminalTab>()
   private sessions = new WeakSet<Electron.Session>()
-  private launches = new Map<string, number>()
+  private sessionTabs = new Map<string, number>()
   constructor(
     private directory: string,
     private host: Host,
   ) {
     ipcMain.handle('terminal:host-state', event => this.host.state(this.sender(event).id))
+    ipcMain.handle('terminal:pending-launches', event => [...this.sender(event).pendingLaunches])
+    ipcMain.handle('terminal:launch-handled', (event, token: unknown) => {
+      if (typeof token === 'string') this.sender(event).pendingLaunches.delete(token)
+    })
     ipcMain.handle('terminal:state', (event, value: unknown) => {
       const tab = this.sender(event)
       if (!value || typeof value !== 'object') return
@@ -69,8 +78,10 @@ export class TerminalTabs {
         attention: state.attention,
         hasDraft: state.hasDraft,
       }
+      clearTimeout(tab.interfaceTimer)
+      tab.interfaceReady = true
       tab.error = null
-      this.host.changed()
+      this.host.changed(tab.id)
     })
     ipcMain.handle('terminal:open-external', async (event, value: unknown) => {
       const tab = this.sender(event)
@@ -106,7 +117,7 @@ export class TerminalTabs {
       const tab = this.sender(event)
       if (typeof name !== 'string' || name.length > 512 || this.host.focused(tab.id)) return false
       tab.state.attention = true
-      this.host.changed()
+      this.host.changed(tab.id)
       if (!Notification.isSupported()) return false
       if (tab.notification) return true
       const notification = new Notification({
@@ -150,17 +161,21 @@ export class TerminalTabs {
       notification.close()
     }
   }
-  hostState() {
-    for (const tab of this.tabs.values())
-      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.send('terminal:host-state', this.host.state(tab.id))
+  hostState(ids: Iterable<number>) {
+    for (const id of ids) {
+      const tab = this.tabs.get(id)
+      if (tab && !tab.view.webContents.isDestroyed())
+        tab.view.webContents.send('terminal:host-state', this.host.state(tab.id))
+    }
   }
   dispose(id: number) {
     const tab = this.tabs.get(id)
     if (!tab) return
     this.dismiss(tab)
+    clearTimeout(tab.interfaceTimer)
     this.tabs.delete(id)
-    this.launches.delete(tab.launchKey)
-    const window = this.host.window()
+    this.sessionTabs.delete(tab.sessionKey)
+    const window = this.host.window(tab.id)
     if (window && !window.isDestroyed()) window.contentView.removeChildView(tab.view)
     // Native child views are not destroyed with the BrowserWindow automatically.
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close({ waitForBeforeUnload: false })
@@ -168,8 +183,30 @@ export class TerminalTabs {
   }
   open(launch: DesktopLaunch) {
     const launchKey = createHash('sha256').update(launch.token).digest('hex')
-    const existing = this.launches.get(launchKey)
-    if (existing !== undefined) return { tab: this.tabs.get(existing)!, created: false }
+    const sessionKey = JSON.stringify([launch.server, launch.sessionKey])
+    const existing = this.sessionTabs.get(sessionKey)
+    if (existing !== undefined) {
+      const tab = this.tabs.get(existing)!
+      if (tab.launchKey !== launchKey) {
+        if (tab.pendingLaunches.size >= 16)
+          throw new Error('This terminal is still opening. Try Connect again shortly.')
+        tab.launchKey = launchKey
+        if (tab.error) {
+          // Recover a failed page in the same tab. A healthy renderer handles
+          // launches through its existing socket and retains its composer draft.
+          tab.pendingLaunches.clear()
+          tab.error = null
+          tab.state = { ...tab.state, connection: 'connecting', hasDraft: false }
+          void tab.view.webContents
+            .loadURL(`${launch.server}${pagePaths.desktopTerminal}#token=${launch.token}`)
+            .catch(() => {})
+        } else {
+          tab.pendingLaunches.add(launch.token)
+          tab.view.webContents.send('terminal:launch', launch.token)
+        }
+      }
+      return { tab, created: false }
+    }
     if (this.tabs.size >= 32) throw new Error('Close a tab before opening another session (32 tabs maximum).')
     const partition = 'outpost-' + createHash('sha256').update(launch.server).digest('hex')
     const browserSession = session.fromPartition(partition, { cache: false })
@@ -195,6 +232,8 @@ export class TerminalTabs {
         additionalArguments: Notification.isSupported() ? ['--outpost-notifications'] : [],
       },
     })
+    // Attaching a new native child must not focus it before layout selects it.
+    view.setVisible(false)
     view.setBackgroundColor('#0f172a')
     const contents = view.webContents
     const tab: TerminalTab = {
@@ -206,10 +245,13 @@ export class TerminalTabs {
       notification: null,
       externalAt: 0,
       launchKey,
+      sessionKey,
+      pendingLaunches: new Set(),
+      interfaceReady: false,
       state: { title: cleanTitle(launch.title), connection: 'connecting', attention: false, hasDraft: false },
     }
     this.tabs.set(tab.id, tab)
-    this.launches.set(launchKey, tab.id)
+    this.sessionTabs.set(sessionKey, tab.id)
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
     contents.on('will-attach-webview', event => event.preventDefault())
     contents.on('will-frame-navigate', event => {
@@ -219,7 +261,26 @@ export class TerminalTabs {
       if (!this.allowed(url, tab.origin)) event.preventDefault()
     })
     contents.on('focus', () => {
-      if (view.getVisible() && this.host.window()?.isFocused() && !this.host.focused(tab.id)) this.host.activate(tab.id)
+      if (contents.isFocused() && this.host.window(tab.id)?.isFocused()) this.host.focus(tab.id)
+    })
+    contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+      if (mainFrame && !inPlace) {
+        clearTimeout(tab.interfaceTimer)
+        tab.interfaceReady = false
+      }
+    })
+    contents.on('did-finish-load', () => {
+      // Old server pages silently ignore a newer preload. Make that failure
+      // visible; a late reportState clears the error if loading was merely slow.
+      clearTimeout(tab.interfaceTimer)
+      if (tab.interfaceReady) return
+      tab.interfaceTimer = setTimeout(() => {
+        if (tab.interfaceReady || tab.error) return
+        tab.error =
+          'The terminal interface did not initialize. Update Outpost Desktop and your server together, then reload.'
+        tab.state.connection = 'closed'
+        this.host.changed(tab.id)
+      }, 15_000)
     })
     contents.on('context-menu', (_event, params) => {
       // TerminalView owns the terminal menu in both clients and prevents the
@@ -235,19 +296,19 @@ export class TerminalTabs {
         { type: 'separator' },
         { label: 'Select all', enabled: params.editFlags.canSelectAll, click: () => contents.selectAll() },
       ])
-      const window = this.host.window()
+      const window = this.host.window(tab.id)
       if (window) menu.popup({ window })
     })
     contents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
       if (!mainFrame || code === -3) return
       tab.error = 'Could not load the terminal. Check the server connection, then reload or open a new connection.'
       tab.state.connection = 'closed'
-      this.host.changed()
+      this.host.changed(tab.id)
     })
     contents.on('render-process-gone', () => {
       tab.error = 'This terminal stopped responding. Reload it to reconnect. Your remote session keeps running.'
       tab.state.connection = 'closed'
-      this.host.changed()
+      this.host.changed(tab.id)
     })
     contents.on('destroyed', () => this.dispose(tab.id))
     // The shared entry erases the fragment before rendering. No credentials reach the local chrome.

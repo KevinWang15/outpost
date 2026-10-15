@@ -13,7 +13,7 @@ const bridge: WorkspaceBridge = {
       ipcRenderer.removeListener('workspace:state', handle)
     }
   },
-  activate: id => ipcRenderer.invoke('workspace:action', 'activate', id),
+  activate: (id, focusTerminal) => ipcRenderer.invoke('workspace:action', 'activate', id, focusTerminal),
   close: id => ipcRenderer.invoke('workspace:action', 'close', id),
   reorder: (id, before) => ipcRenderer.invoke('workspace:action', 'reorder', id, before),
   rename: (id, label) => ipcRenderer.invoke('workspace:action', 'rename', id, label),

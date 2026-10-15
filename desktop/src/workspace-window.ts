@@ -53,7 +53,7 @@ export class WorkspaceWindow {
       this.actions.set(name, (...values) => Reflect.apply(action, undefined, values))
     }
     handle('state', () => this.snapshot())
-    handle('activate', (id: number) => this.activate(id))
+    handle('activate', (id: number, focusTerminal?: boolean) => this.activate(id, focusTerminal !== false))
     handle('close', (id: number) => this.close(id))
     handle('reorder', (id: number, before: number | null) => {
       this.layout.move(id, before)
@@ -304,10 +304,11 @@ export class WorkspaceWindow {
   closeEmpty() {
     if (!this.hasTabs) this.window?.close()
   }
-  activate(id: number) {
+  activate(id: number, focusTerminal = true) {
     if (!this.has(id)) return
     this.layout.activate(id)
-    this.show()
+    if (focusTerminal) this.show()
+    else this.render()
   }
   panel(panel: WorkspacePanel) {
     this.layout.panel = panel

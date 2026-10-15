@@ -24,6 +24,11 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
     const select = event.target.closest<HTMLButtonElement>('.tab-select')
     const node = select?.closest<HTMLElement>('.tab')
     if (!node || !select) return
+    // Select on press without focusing the button or the separate terminal view.
+    // Moving native focus now would cancel pointer capture before a drag starts.
+    // The normal click activates with terminal focus after release; keyboard and
+    // assistive-technology clicks continue to use that same path.
+    event.preventDefault()
     gesture = {
       pointer: event.pointerId,
       id: Number(node.dataset.tab),
@@ -32,8 +37,8 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
       started: false,
       capture: select,
     }
-    select.focus()
     select.setPointerCapture(event.pointerId)
+    report(api.activate(gesture.id, false))
   })
   window.addEventListener('pointermove', event => {
     const current = gesture

@@ -197,6 +197,7 @@ input::placeholder {
   align-items: center;
   gap: 6px;
   border: 0;
+  border-radius: 5px 0 0 0;
   background: transparent;
   padding: 0 6px 0 9px;
   color: #aebdd2;
@@ -204,6 +205,9 @@ input::placeholder {
 }
 .tab-select:hover {
   background: transparent;
+}
+.tab-select:focus-visible {
+  outline-offset: -3px;
 }
 .tab.selected .tab-select {
   color: #f1f5f9;

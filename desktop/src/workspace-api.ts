@@ -40,7 +40,8 @@ export interface WorkspaceBridge {
   dragEnd(cancel: boolean): Promise<void>
   state(): Promise<WorkspaceSnapshot>
   onState(listener: (state: WorkspaceSnapshot) => void): () => void
-  activate(id: number): Promise<void>
+  /** Pointer presses select immediately, deferring terminal focus until release. */
+  activate(id: number, focusTerminal?: boolean): Promise<void>
   close(id: number): Promise<void>
   reorder(id: number, before: number | null): Promise<void>
   rename(id: number, label: string): Promise<void>

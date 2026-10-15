@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / 'runtime'
 FIXTURE = ROOT / 'tests' / 'fixtures' / 'coding-tool-fixture.py'
 sys.path.insert(0, str(RUNTIME))
-from outpost_relay import MAGIC, FrameDecoder, control, encode  # noqa: E402
+from outpost_frames import MAGIC, FrameDecoder, control, encode  # noqa: E402
 
 BINARY = (
     ROOT

@@ -1,6 +1,9 @@
-# Outpost Terminal 1.0.0
+# Outpost Terminal 1.0.1
 
 Persistent Linux PTY service for Outpost web and desktop terminals.
+
+This revision shares the frame codec with the broker and validates frame types
+and size limits consistently across streaming and control connections.
 
 - Independent session lifetime; clients and the Outpost server can reconnect.
 - Normal terminal screen semantics and 10,000 lines of in-memory scrollback.
@@ -12,7 +15,3 @@ Persistent Linux PTY service for Outpost web and desktop terminals.
 Install through **Required Software → Outpost Terminal → Install**. Outpost
 selects the architecture/libc, verifies SHA-256 and atomically installs the
 executable into `~/.outpost/bin/outpost-terminal`. No public service port is opened.
-
-This replaces tmux for new sessions. Before updating an existing installation,
-stop its running sessions using the previous Outpost version. A running process
-cannot be moved from tmux into a new PTY. Conversation files remain available.

@@ -223,7 +223,7 @@ On visibility restoration, `pageshow`, or `online`, `TerminalSocket.resume()`
 probes an apparently live socket with an authenticated `ping` request. The broker
 answers directly without touching the PTY. A failed eight-second probe replaces
 only the same stale socket; healthy connections remain attached. Recoverable
-disconnects retry immediately, while ended, detached, expired, and outdated
+disconnects retry immediately, while ended, expired, and outdated
 connections require the existing explicit action. This complements the broker's
 WebSocket ping/pong heartbeat, which browser JavaScript cannot observe.
 
@@ -271,11 +271,13 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
 | → server | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
 | ← client | `hello {resume, session, target}` | Connection accepted |
+| ← client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
+| ← client | `geometry {cols, rows}` | Shared terminal dimensions, applied before subsequent output |
 | ← client | `ready` | Checkpoint restored; attached to the persistent PTY |
 | ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
 | ← client | `result {id, ok, message?, reference?}` | Outcome of `ping` / `send` / `paste-image` / `activate` / `acknowledge` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
-| ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |
+| ← client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `error` |
 
 The server pauses the transport when more than 1 MiB is unacknowledged.
 
@@ -320,6 +322,11 @@ Framing separates terminal bytes from control messages. The relay connects to
 and signal messages only between frames. SSH needs no PTY. Closing the relay
 closes only that socket, leaving the service and harness running.
 
+`shared/node/terminalFrames.ts` owns encoding and incremental decoding for the
+broker and terminal service. `runtime/outpost_frames.py` implements the same
+bounded format for the relay and lifecycle RPCs. Framing validates the type and
+length before accepting a payload; the connection owner interprets its controls.
+
 ### Persistent terminal service
 
 `outpost-terminal serve` receives launch configuration on stdin, starts a PTY
@@ -336,8 +343,10 @@ interprets terminal state and delivers live output to attached renderers. Comple
 UTF-8 and VT sequences are framed before entering xterm so checkpoints never
 split a control sequence. Unterminated control strings are bounded to 1 MiB.
 
-`shared/terminalCheckpoint.ts` is the single versioned adapter to xterm 6.0's
-internal state. Reconnect transfers cells (including styles, combined characters,
+`shared/terminalState.ts` defines the checkpoint wire types without importing
+xterm internals. `shared/terminalCheckpoint.ts` is the single versioned adapter
+to xterm 6.0's internal state. Reconnect transfers cells (including styles,
+combined characters,
 soft wrapping and OSC 8 links), both buffers, cursor/save-cursor state, tabs,
 character sets, scrolling margins, palette and application/mouse modes. It does
 not re-execute old output: bells, OSC 52 and browser requests cannot replay.
@@ -349,6 +358,13 @@ Snapshot parts are generated synchronously between PTY callbacks, followed by
 live output. The browser applies checkpoints, geometry and bytes through one
 ordered render queue and acknowledges both snapshots and live output. Its
 buffer is replaced on reconnect instead of appending duplicate history.
+`frontend/terminal/rendering.ts` owns that queue, the restoration lifecycle and
+the readiness barrier. Connection generations discard queued work and callbacks
+from a previous attachment. Restoration is required by `TerminalSocket`, which
+owns transport and acknowledgements; `TerminalView` owns UI events and disposal.
+The renderer rejects live bytes and readiness before a complete checkpoint, and
+configures xterm to leave generated terminal replies to the headless service.
+
 The service always processes PTY output, including with no clients attached;
 a client with an excessive output backlog is disconnected and can resynchronize.
 It cannot freeze the harness through transport backpressure. Only the newest
@@ -378,10 +394,6 @@ architecture/libc, downloads that exact release, checks SHA-256 and `--version`,
 and renames the verified executable into `~/.outpost/bin/outpost-terminal`.
 It uses the existing editable installation plan, SSH/local transport and log UI.
 Minimal musl targets also receive the `libstdc++` system package.
-
-Before deploying this replacement, stop old tmux-backed sessions with the prior
-Outpost version. Their running processes cannot migrate into the new PTYs;
-conversation files can be resumed. Old tmux sockets are not reused or modified.
 
 **Creation and forking** share a process-owned `creation.lock`, serializing
 allocations without blocking operations on existing sessions. Lock order is
@@ -425,7 +437,8 @@ connection generations discard results from an old attachment.
 
 `outpost_activity_stream.py` samples this reader immediately after attachment
 and two seconds after each completed read, with one read in flight. Its worker
-starts after the PTY fork and runs separately from terminal I/O.
+starts with the relay and runs separately from its I/O loop; the persistent
+terminal service owns the PTY independently.
 Only the latest result is retained, so backpressure cannot accumulate a queue
 of observations. Reads that exceed five seconds show Unknown until the reader
 returns; a stalled read never spawns replacement workers. The worker is a daemon,

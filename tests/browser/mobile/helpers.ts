@@ -1,5 +1,6 @@
 import { expect, test as base, type Page, type WebSocketRoute } from '@playwright/test'
 import type { ClientMessage, ServerMessage } from '../../../shared/protocol'
+import { restoreEmptyTerminal } from '../terminal-fixture'
 
 export const test = base.extend({
   page: async ({ page, context }, use) => {
@@ -50,7 +51,7 @@ export async function mockTerminal(page: Page, options: { acknowledgeSends?: boo
       session: { id: 'mobile-session', name: 'Mobile session' },
       target: { id: 'mobile-target', name: 'Development' },
     })
-    send({ type: 'ready' })
+    restoreEmptyTerminal(ws)
   })
   await page.goto('/terminal?target=mobile-target&session=mobile-session')
   await expect(page.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type WebSocketRoute } from '@playwright/test'
+import { restoreEmptyTerminal } from './terminal-fixture'
 
 declare global {
   interface Window {
@@ -96,7 +97,7 @@ async function openTerminal(page: Page, mode: 'web' | 'desktop' = 'web') {
         target: { id: 'bell-target', name: 'Dev box' },
       }),
     )
-    ws.send(JSON.stringify({ type: 'ready' }))
+    restoreEmptyTerminal(ws)
   })
   await page.goto(
     mode === 'web' ? '/terminal?target=bell-target&session=bell-session' : '/terminal/desktop#token=bell.launch',

@@ -1,67 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { terminalService, terminalSize } from './terminalService'
 import { terminalTheme } from './terminalTheme'
+import type { Attributes, BufferState, CellLine, Checkpoint, CheckpointState } from './terminalState'
 
 /** The only xterm-internal adapter in Outpost. Pinned to the 6.0 buffer layout
  * (headless 6.0.0 / our browser 6.0.1 patch). A schema bump is required when
  * upgrading that layout. We transfer cells, not replayed escape sequences:
  * restoring cannot ring bells, run clipboard commands or answer old queries.
  * Snapshot parts are bounded and share output ordering/backpressure. */
-export type Checkpoint =
-  | { part: 'begin'; version: 1; cols: number; rows: number; state: CheckpointState }
-  | { part: 'lines'; buffer: 'normal' | 'alt'; first: number; lines: CellLine[] }
-  | { part: 'end' }
-
-interface CellLine {
-  cells: string
-  wrapped: boolean
-  combined: Record<number, string>
-  extended: [number, number, number][]
-}
-
-interface Attributes {
-  fg: number
-  bg: number
-  ext: number
-  url: number
-}
-type Charset = Record<string, string> | null
-interface BufferState {
-  x: number
-  y: number
-  ybase: number
-  scrollTop: number
-  scrollBottom: number
-  tabs: Record<number, boolean>
-  savedX: number
-  savedY: number
-  savedCharset?: Charset
-  savedAttributes: Attributes
-}
-interface CheckpointState {
-  active: 'normal' | 'alt'
-  normal: BufferState
-  alt: BufferState
-  modes: Record<string, boolean>
-  dec: Record<string, boolean | string | undefined>
-  cursorBlink: boolean
-  cursorHidden: boolean
-  cursorInitialized: boolean
-  mouseProtocol: string
-  mouseEncoding: string
-  attributes: Attributes
-  charsets: Charset[]
-  glevel: number
-  title: string
-  icon: string
-  titleStack: string[]
-  iconStack: string[]
-  join: number
-  links: [number, { id?: string; uri: string }][]
-  nextLink: number
-  colors: Record<number, [number, number, number]>
-}
-
 interface TerminalLike {
   cols: number
   rows: number
@@ -213,6 +159,7 @@ export class CheckpointReader {
       }
       return
     }
+    if (part.part !== 'end') throw new Error('Invalid checkpoint part')
     const state = this.state
     if (state.active === 'alt') buffers.activateAltBuffer()
     for (const name of ['normal', 'alt'] as const) {

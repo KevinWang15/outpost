@@ -4,7 +4,7 @@ import headless from '@xterm/headless'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { checkpoint, headlessColors, writeHeadless } from '../shared/terminalCheckpoint'
 import { terminalService, terminalSize } from '../shared/terminalService'
-import { Decoder, frame } from './framing'
+import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { Sequences } from './sequences'
 
 interface Launch {
@@ -44,15 +44,16 @@ async function serve() {
   let ended = false
   let ptyEnded = false
   let listening = false
-  const send = (socket: Socket, kind: string, data: Buffer | object) => {
+  const send = (socket: Socket, packet: Buffer) => {
     if (socket.destroyed) return
     // Snapshot data is bounded by screen geometry + history. A slow client is
     // disconnected rather than stopping the PTY; it can restore a fresh snapshot.
     if (socket.writableLength > 96 * 1024 * 1024) return socket.destroy()
-    socket.write(frame(kind, data))
+    socket.write(packet)
   }
-  const broadcast = (kind: string, data: Buffer | object) => {
-    for (const client of clients) send(client, kind, data)
+  const sendControl = (socket: Socket, message: object) => send(socket, terminalControl(message))
+  const broadcast = (packet: Buffer) => {
+    for (const client of clients) send(client, packet)
   }
   const pty = new Bun.Terminal({
     cols: launch.cols,
@@ -61,7 +62,7 @@ async function serve() {
       const complete = sequences.feed(Buffer.from(data))
       if (!complete) return
       writeHeadless(term, complete)
-      broadcast('O', Buffer.from(complete))
+      broadcast(terminalFrame('O', Buffer.from(complete)))
     },
     exit() {
       ptyEnded = true
@@ -78,7 +79,7 @@ async function serve() {
     if (cols === term.cols && rows === term.rows) return
     term.resize(cols, rows)
     // Every viewer applies the same geometry before receiving subsequent bytes.
-    broadcast('C', { type: 'geometry', cols, rows })
+    broadcast(terminalControl({ type: 'geometry', cols, rows }))
     pty.resize(cols, rows)
   }
   const server = createServer(socket => {
@@ -90,21 +91,21 @@ async function serve() {
       clients.delete(socket)
       if (controller === socket) controller = [...clients].at(-1)
     })
-    const decoder = new Decoder()
+    const decoder = new FrameDecoder()
     let attached = false
     socket.on('data', bytes => {
       try {
         for (const packet of decoder.feed(Buffer.from(bytes))) {
           if (ended) return socket.end()
           if (packet.kind === 'I') {
-            if (!attached || packet.data.length > 64 * 1024) throw new Error('Invalid terminal input')
-            pty.write(packet.data)
+            if (!attached || packet.payload.length > 64 * 1024) throw new Error('Invalid terminal input')
+            pty.write(packet.payload)
             continue
           }
           if (packet.kind !== 'C') throw new Error('Invalid terminal frame')
-          const message = JSON.parse(packet.data.toString())
+          const message = JSON.parse(packet.payload.toString())
           if (message.type === 'status' && !attached) {
-            send(socket, 'C', {
+            sendControl(socket, {
               version: terminalService.version,
               protocol: terminalService.protocol,
               pid: process.pid,
@@ -117,12 +118,12 @@ async function serve() {
             resize(message.cols, message.rows)
             // Everything below is synchronous. The next PTY callback is strictly
             // after this checkpoint, so no output can be omitted or duplicated.
-            for (const part of checkpoint(term)) send(socket, 'C', { type: 'restore', checkpoint: part })
+            for (const part of checkpoint(term)) sendControl(socket, { type: 'restore', checkpoint: part })
             attached = true
             clients.add(socket)
             controller = socket
             socket.setTimeout(0)
-            send(socket, 'C', { type: 'ready' })
+            sendControl(socket, { type: 'ready' })
           } else if (message.type === 'resize' && attached) {
             if (controller === socket) resize(message.cols, message.rows)
           } else if ((message.type === 'send' && attached) || message.type === 'paste') {
@@ -131,12 +132,12 @@ async function serve() {
             let data = message.data
             if (message.type === 'paste' && term.modes.bracketedPasteMode) data = `\x1b[200~${data}\x1b[201~`
             pty.write(data)
-            send(socket, 'C', { type: 'result', id: message.id, ok: true, reference: message.reference })
+            sendControl(socket, { type: 'result', id: message.id, ok: true, reference: message.reference })
             if (!attached) socket.end()
           } else throw new Error('Unknown terminal operation')
         }
       } catch (error) {
-        send(socket, 'C', { type: 'error', message: (error as Error).message })
+        sendControl(socket, { type: 'error', message: (error as Error).message })
         socket.end()
       }
     })
@@ -151,7 +152,7 @@ async function serve() {
   const close = () => {
     if (ended) return
     ended = true
-    broadcast('C', { type: 'exit', reason: 'ended' })
+    broadcast(terminalControl({ type: 'exit', reason: 'ended' }))
     for (const socket of sockets) socket.end()
     server.close()
     try {

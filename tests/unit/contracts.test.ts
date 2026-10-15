@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { harnesses } from '../../shared/harnesses'
 import { terminalService } from '../../shared/terminalService'
-import { RelayDecoder, relayFrame, relayMagic } from '../../backend/terminal/broker'
+import { FrameDecoder, terminalFrame, terminalControl, relayMagic } from '../../shared/node/terminalFrames'
 
 const runtime = fileURLToPath(new URL('../../runtime/', import.meta.url))
 function python(code: string, input?: Buffer) {
@@ -38,18 +38,18 @@ print(json.dumps({tool: {'storage': a.storage_key, 'id': a.id_pattern} for tool,
 
 test('relay protocol: broker and relay agree on the marker and frames', () => {
   const relay = json(
-    `import outpost_relay as relay
+    `import outpost_frames as relay
 print(json.dumps({'magic': list(relay.MAGIC)}))`,
   )
   assert.deepEqual(Buffer.from(relay.magic), relayMagic)
   // Broker frames decode in Python, split at every byte boundary.
   const frames = Buffer.concat([
-    relayFrame('I', Buffer.from([0, 1, 255])),
-    relayFrame('C', JSON.stringify({ type: 'resize', cols: 80, rows: 24 })),
+    terminalFrame('I', Buffer.from([0, 1, 255])),
+    terminalControl({ type: 'resize', cols: 80, rows: 24 }),
   ])
   const output = JSON.parse(
     python(
-      `from outpost_relay import FrameDecoder
+      `from outpost_frames import FrameDecoder
 data, decoder, frames = sys.stdin.buffer.read(), FrameDecoder(), []
 for index in range(len(data)):
     frames += decoder.feed(data[index:index + 1])
@@ -63,11 +63,11 @@ print(json.dumps([[kind.decode(), list(payload)] for kind, payload in frames]))`
   ])
   // Relay frames decode in the broker.
   const encoded = python(
-    `import outpost_relay as relay
+    `import outpost_frames as relay
 sys.stdout.buffer.write(relay.encode(b'O', bytes([0, 27, 255])) + relay.control({'type': 'ready'}))`,
   )
   assert.deepEqual(
-    new RelayDecoder().feed(encoded).map(frame => [frame.kind, [...frame.payload]]),
+    new FrameDecoder().feed(encoded).map(frame => [frame.kind, [...frame.payload]]),
     [
       ['O', [0, 27, 255]],
       ['C', [...Buffer.from('{"type":"ready"}')]],

@@ -79,7 +79,7 @@ async function fixture(route) {
   if (!target) throw new Error('Unknown synthetic target.')
   let result
   if (resource === 'software' && request.method() === 'GET') result = softwareReport()
-  else if (resource === 'sessions' && !sessionId && request.method() === 'GET') result = { sessions: sessions[targetId], registryPath: `${demoHome}/.outpost/sessions.json` }
+  else if (resource === 'sessions' && !sessionId && request.method() === 'GET') result = { sessions: sessions[targetId], registryPath: `${demoHome}/.outpost/registry.json` }
   else if (resource === 'sessions' && action === 'acknowledge' && request.method() === 'POST') {
     const session = sessions[targetId].find(session => session.id === sessionId)
     if (!session) throw new Error('Unknown synthetic session.')
@@ -119,9 +119,6 @@ try {
       }
     }
     document.addEventListener('DOMContentLoaded', () => {
-      const style = document.createElement('style')
-      style.textContent = '.session-backend-badge,.target-backend{display:none!important}'
-      document.head.append(style)
       new MutationObserver(simplify).observe(document.body, { childList: true, subtree: true })
     })
   })

@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'runtime'))
 
 from outpost_activity_state import Activity
 from outpost_harness import adapters
-from outpost_relay import InputObserver
+from outpost_relay import Relay
 
 ID = '12345678-1234-4123-8123-123456789012'
 TIME = '2026-10-01T00:00:00Z'
@@ -246,25 +246,20 @@ class ActivityTests(unittest.TestCase):
         path.symlink_to(outside)
         self.assertEqual(observer.describe(True)['state'], 'idle')
 
-    def test_terminal_replies_and_focus_reports_dont_ack_but_typing_and_paste_do(self):
+    def test_focus_reports_dont_ack_but_user_input_does(self):
         seen = []
-        observer = InputObserver(lambda: seen.append(True))
-        for data in (
-            b'\x1b[?1;2c',
-            b'\x1b[>0;276;0c',
-            b'\x1b[1;2R',
-            b'\x1b[?7u',
-            b'\x1b[I',
-            b'\x1b[O',
-            b'\x1b]11;rgb:0000/0000/0000\x07',
-        ):
-            observer.feed(data)
-        observer.feed(b'\x1b[?')
-        observer.feed(b'1;2c')
+
+        class Hooks:
+            def on_input(self):
+                seen.append(True)
+
+        relay = Relay('unused', 80, 24, Hooks())
+        for data in (b'', b'\x1b[I', b'\x1b[O'):
+            relay.observed(data)
         self.assertEqual(seen, [])
         for data in (b'x', b'\r', b'\x1b[A', b'\x1b[200~hello\x1b[201~'):
-            observer.feed(data)
-        self.assertGreaterEqual(len(seen), 4)
+            relay.observed(data)
+        self.assertEqual(len(seen), 4)
 
 
 if __name__ == '__main__':

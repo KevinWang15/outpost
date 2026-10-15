@@ -2,6 +2,7 @@ import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/pro
 import { protocolVersion } from '../../shared/protocol'
 import type { ImageMediaType } from '../../shared/model'
 import type { SessionActivity } from '../../shared/activity'
+import type { TerminalRendering } from './rendering'
 
 export type SocketState =
   | { kind: 'connecting' }
@@ -10,18 +11,16 @@ export type SocketState =
   | { kind: 'closed'; reason: CloseReason; message: string }
 
 interface Handlers {
-  output(bytes: Uint8Array, rendered: () => void): void
   state(state: SocketState): void
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
   activity(state: SessionActivity | null): void
-  restore?(message: Extract<ServerMessage, { type: 'restore' | 'geometry' }>, rendered: () => void): void
 }
 
 const retries = 8
 
 /** The web client of the terminal protocol (shared/protocol.ts). Reconnects
- * with the resume token after drops; detaching or the session ending is final. */
+ * with the resume token after drops; an ended session requires explicit reconnect. */
 export class TerminalSocket {
   private socket: WebSocket | null = null
   private token: string
@@ -40,6 +39,7 @@ export class TerminalSocket {
   constructor(
     token: string,
     private size: () => { cols: number; rows: number },
+    private rendering: TerminalRendering,
     private handlers: Handlers,
   ) {
     this.token = token
@@ -69,6 +69,7 @@ export class TerminalSocket {
     socket.binaryType = 'arraybuffer'
     this.socket = socket
     this.ready = false
+    this.rendering.begin()
     let acknowledged = 0
     let lastAck = 0
     let ackTimer: ReturnType<typeof setTimeout> | undefined
@@ -93,7 +94,7 @@ export class TerminalSocket {
       if (this.socket !== socket) return
       if (event.data instanceof ArrayBuffer) {
         const bytes = new Uint8Array(event.data)
-        this.handlers.output(bytes, () => rendered(bytes.length))
+        this.rendering.output(bytes, () => rendered(bytes.length))
         return
       }
       const message: ServerMessage = JSON.parse(event.data)
@@ -102,10 +103,9 @@ export class TerminalSocket {
         this.handlers.hello(message)
       } else if (message.type === 'restore' || message.type === 'geometry') {
         const length = new TextEncoder().encode(event.data).length
-        if (this.handlers.restore) this.handlers.restore(message, () => rendered(length))
-        else rendered(length)
+        this.rendering.restore(message, () => rendered(length))
       } else if (message.type === 'ready') {
-        this.handlers.output(new Uint8Array(), () => {
+        this.rendering.flush(() => {
           if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
           this.ready = true
           this.attempts = 0
@@ -151,7 +151,7 @@ export class TerminalSocket {
     )
   }
 
-  /** Try again after a final close (e.g. detached): the resume token still works. */
+  /** Explicitly reconnect after an ended session or an unrecoverable connection error. */
   reconnect() {
     this.stopped = false
     this.attempts = 0

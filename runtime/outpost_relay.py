@@ -12,89 +12,14 @@ import re
 import select
 import signal
 import socket
-import struct
 import time
 import uuid
 
 from outpost_activity_stream import ActivityStream
+from outpost_frames import MAGIC, FrameDecoder, control, encode
 
-MAGIC = b'\x00OUTPOST-RELAY-2\x00'
-HEADER = struct.Struct('>cI')
-MAX_FRAME = 32 * 1024 * 1024
 MAX_SIGNAL = 32 * 1024
 HIGH_WATER = 256 * 1024
-
-
-def encode(kind, payload):
-    return HEADER.pack(kind, len(payload)) + payload
-
-
-def control(message):
-    return encode(b'C', json.dumps(message, separators=(',', ':')).encode())
-
-
-class FrameDecoder:
-    def __init__(self):
-        self.buffer = bytearray()
-
-    def feed(self, data):
-        self.buffer += data
-        frames = []
-        while len(self.buffer) >= HEADER.size:
-            kind, length = HEADER.unpack_from(self.buffer)
-            if length > MAX_FRAME:
-                raise ValueError('Relay frame exceeds its size limit')
-            end = HEADER.size + length
-            if len(self.buffer) < end:
-                break
-            frames.append((kind, bytes(self.buffer[HEADER.size : end])))
-            del self.buffer[:end]
-        return frames
-
-
-class InputObserver:
-    """Acknowledge actual input; ignore automatic replies and focus reports."""
-
-    replies = re.compile(rb'\x1b\[(?:[?>]?[0-9;]*[cRn]|\?[0-9;]*u|\??[0-9;]*\$y|[IO])$')
-
-    def __init__(self, callback):
-        self.callback = callback
-        self.pending = b''
-        self.deadline = 0
-
-    def feed(self, data):
-        data = self.pending + data
-        self.pending = b''
-        while data:
-            if data.startswith(b'\x1b['):
-                match = re.match(rb'\x1b\[[0-?]*[ -/]*[@-~]', data)
-                if match:
-                    sequence = match.group()
-                    if not self.replies.fullmatch(sequence):
-                        self.callback()
-                    data = data[len(sequence) :]
-                    continue
-                if len(data) < 256:
-                    self.pending, self.deadline = data, time.monotonic() + 0.1
-                    return
-            elif data.startswith(b'\x1b]'):
-                match = re.match(rb'\x1b\].*?(?:\x07|\x1b\\)', data, re.DOTALL)
-                if match:
-                    data = data[len(match.group()) :]
-                    continue
-                if len(data) < 4096:
-                    self.pending, self.deadline = data, time.monotonic() + 0.1
-                    return
-            elif data == b'\x1b':
-                self.pending, self.deadline = data, time.monotonic() + 0.1
-                return
-            self.callback()
-            return
-
-    def flush(self):
-        if self.pending and time.monotonic() >= self.deadline:
-            self.pending = b''
-            self.callback()
 
 
 class SignalClient:
@@ -219,7 +144,11 @@ class Relay:
     def send(self, message):
         self.outgoing += control(message)
 
-    def observed(self):
+    def observed(self, data):
+        # Frames preserve each renderer input event. Only focus reports are
+        # automatic; the headless service owns all terminal query replies.
+        if not data or data in (b'\x1b[I', b'\x1b[O'):
+            return
         try:
             self.hooks.on_input()
         except (OSError, ValueError):
@@ -227,7 +156,7 @@ class Relay:
 
     def handle(self, kind, payload):
         if kind == b'I':
-            self.observer.feed(payload)
+            self.observed(payload)
             self.incoming += encode(kind, payload)
             return
         if kind != b'C':
@@ -236,7 +165,7 @@ class Relay:
         action = message.get('type')
         if action in ('resize', 'send'):
             if action == 'send':
-                self.observer.feed(message['data'].encode())
+                self.observed(message['data'].encode())
             self.incoming += control(message)
         elif action == 'paste-image':
             try:
@@ -250,7 +179,7 @@ class Relay:
                         'reference': result['reference'],
                     }
                 )
-                self.observed()
+                self.observed(result['reference'].encode())
             except (OSError, ValueError) as error:
                 self.send({'type': 'result', 'id': message.get('id'), 'ok': False, 'message': str(error)})
         elif action == 'acknowledge':
@@ -273,7 +202,6 @@ class Relay:
         service.connect(self.path)
         service.setblocking(False)
         self.incoming += control({'type': 'attach', 'protocol': PROTOCOL, 'cols': self.cols, 'rows': self.rows})
-        self.observer = InputObserver(self.observed)
         self.activity = ActivityStream(self.hooks.activity, self.hooks.acknowledge)
         self.signals = None
         if self.signal_path:
@@ -298,7 +226,6 @@ class Relay:
             signal.signal(signal.SIGTERM, stop)
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
             while not self.stopped and (not eof or self.outgoing):
-                self.observer.flush()
                 if len(self.outgoing) < HIGH_WATER:
                     state = self.activity.poll()
                     if state is not None:

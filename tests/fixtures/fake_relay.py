@@ -55,8 +55,8 @@ while True:
                         'signal': {'type': 'browser.open', 'payload': {'url': payload[7:].decode()}},
                     }
                 )
-            elif payload == b'detach':
-                control({'type': 'exit', 'reason': 'detached'})
+            elif payload == b'exit':
+                control({'type': 'exit', 'reason': 'ended'})
                 sys.exit(0)
             else:
                 frame(b'O', b'echo:' + payload)

@@ -3,6 +3,7 @@ import { WebSocket } from 'ws'
 import { parseSessionActivity, unavailableActivity } from '../../shared/activity'
 import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, protocolVersion } from '../../shared/protocol'
+import { FrameDecoder, relayMagic, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
 import { signalValidators } from '../../shared/signals'
 import { terminalService, terminalSize } from '../../shared/terminalService'
 import type { Deployment, Owner } from '../deployment'
@@ -11,35 +12,8 @@ import { protocolResult } from '../process'
 import { imageData, type SessionService, type TargetContext } from '../sessions'
 import type { ConnectTokens, Grant } from './tokens'
 
-// Relay protocol, see docs/ARCHITECTURE.md and runtime/outpost_relay.py.
-export const relayMagic = Buffer.from('\0OUTPOST-RELAY-2\0', 'latin1')
-const maxFrame = 32 * 1024 * 1024
-export function relayFrame(kind: 'I' | 'C', payload: Buffer | string) {
-  const body = typeof payload === 'string' ? Buffer.from(payload) : payload
-  const header = Buffer.alloc(5)
-  header.write(kind, 0, 'latin1')
-  header.writeUInt32BE(body.length, 1)
-  return Buffer.concat([header, body])
-}
-export class RelayDecoder {
-  private buffer: Buffer = Buffer.alloc(0)
-  feed(chunk: Buffer) {
-    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk
-    const frames: { kind: string; payload: Buffer }[] = []
-    while (this.buffer.length >= 5) {
-      const length = this.buffer.readUInt32BE(1)
-      if (length > maxFrame) throw new Error('Relay frame exceeds its size limit')
-      if (this.buffer.length < 5 + length) break
-      frames.push({ kind: this.buffer.toString('latin1', 0, 1), payload: this.buffer.subarray(5, 5 + length) })
-      this.buffer = this.buffer.subarray(5 + length)
-    }
-    return frames
-  }
-}
-
 const highWater = 1024 * 1024
-const closedMessages: Record<'detached' | 'ended' | 'expired', string> = {
-  detached: 'Detached. The session keeps running.',
+const closedMessages: Record<'ended' | 'expired', string> = {
   ended: 'The coding tool exited. Connect again to start it in the same conversation.',
   expired: 'This connection expired. Click Connect in Outpost to open a new terminal.',
 }
@@ -63,13 +37,13 @@ interface Dependencies {
  * Closing either end ends both; the target terminal service keeps the session. */
 class Connection {
   private child: ChildProcessWithoutNullStreams | null = null
-  private decoder = new RelayDecoder()
+  private decoder = new FrameDecoder()
   private prelude: Buffer = Buffer.alloc(0)
   private stderr = ''
   private started = false
   private pending: Buffer[] = []
   private unacked = 0
-  private exitReason: 'detached' | 'ended' | null = null
+  private exitReason: 'ended' | null = null
   private finished = false
   private signals = { count: 0, until: 0 }
   private window = { messages: 0, bytes: 0, until: 0 }
@@ -208,12 +182,16 @@ class Connection {
       if (this.socket.readyState !== WebSocket.OPEN) return reply(false, 'The Outpost terminal disconnected.')
       this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
       reply(true)
-    } else if (message.type === 'exit' && (message.reason === 'detached' || message.reason === 'ended')) {
+    } else if (message.type === 'exit' && message.reason === 'ended') {
       this.exitReason = message.reason
     }
   }
 
-  private relay(message: unknown, frame = relayFrame('C', JSON.stringify(message))) {
+  private relay(message: object) {
+    this.write(terminalControl(message))
+  }
+
+  private write(frame: Buffer) {
     // Until the relay is ready (or even started), keep frames in order.
     if (this.started && this.child) this.child.stdin.write(frame)
     else if (this.pending.length < 256) this.pending.push(frame)
@@ -226,7 +204,7 @@ class Connection {
     if (binary) {
       if (data.length > maxInputMessage || (this.window.bytes += data.length) > 1024 * 1024)
         return this.socket.close(1008, 'Input rate exceeded')
-      return this.relay(null, relayFrame('I', data))
+      return this.write(terminalFrame('I', data))
     }
     let message: ClientMessage
     try {

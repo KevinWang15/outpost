@@ -4,5 +4,6 @@
     "lib": ["ES2022"],
     "types": ["node"]
   },
-  "include": ["*.ts", "backend", "shared"]
+  "include": ["*.ts", "backend", "shared"],
+  "exclude": []
 }

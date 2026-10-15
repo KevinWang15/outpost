@@ -46,13 +46,22 @@ function setup(t: TestContext) {
   Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeSocket })
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 100_000 })
   const states: SocketState[] = []
-  const client = new TerminalSocket('ticket', () => ({ cols: 80, rows: 24 }), {
-    output: (_bytes, rendered) => rendered(),
-    state: state => states.push(state),
-    hello: () => {},
-    signal: () => {},
-    activity: () => {},
-  })
+  const client = new TerminalSocket(
+    'ticket',
+    () => ({ cols: 80, rows: 24 }),
+    {
+      begin: () => {},
+      output: (_bytes, rendered) => rendered(),
+      restore: (_message, rendered) => rendered(),
+      flush: rendered => rendered(),
+    },
+    {
+      state: state => states.push(state),
+      hello: () => {},
+      signal: () => {},
+      activity: () => {},
+    },
+  )
   t.after(() => {
     client.close()
     for (const [key, descriptor] of [
@@ -133,7 +142,7 @@ test('a stale open socket is replaced after the probe deadline, preserving its r
   assert.equal(FakeSocket.instances[1].url.searchParams.get('token'), 'resume-ticket')
 })
 
-for (const reason of ['ended', 'detached', 'expired', 'outdated'] as const) {
+for (const reason of ['ended', 'expired', 'outdated'] as const) {
   test(`returning to a ${reason} session does not reconnect automatically`, async t => {
     const { client, socket, states } = setup(t)
     socket.ready()

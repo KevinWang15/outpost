@@ -7,8 +7,10 @@ import socket
 import struct
 from pathlib import Path
 
+from outpost_frames import HEADER, control, header
+
 PROTOCOL = 1
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 MAX_COLS = 400
 MAX_ROWS = 200
 EXECUTABLE = Path.home() / '.outpost' / 'bin' / 'outpost-terminal'
@@ -29,8 +31,7 @@ def request(path, message):
         pid, uid, _gid = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
         if uid != os.getuid():
             raise ValueError('Terminal service belongs to a different user')
-        data = json.dumps(message).encode()
-        connection.sendall(struct.pack('>cI', b'C', len(data)) + data)
+        connection.sendall(control(message))
 
         def read(size):
             data = bytearray()
@@ -41,8 +42,8 @@ def request(path, message):
                 data.extend(chunk)
             return data
 
-        kind, size = struct.unpack('>cI', read(5))
-        if kind != b'C' or size > 65536:
+        kind, size = header(read(HEADER.size), limit=65536)
+        if kind != b'C':
             raise ValueError('Invalid terminal service response')
         result = json.loads(read(size))
         if result.get('type') == 'error':

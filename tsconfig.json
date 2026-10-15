@@ -17,5 +17,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["frontend", "shared"]
+  "include": ["frontend", "shared"],
+  "exclude": ["shared/node"]
 }

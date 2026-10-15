@@ -125,6 +125,7 @@ existing release. The existing **CI** dispatcher also exposes `suite=terminal`
 and `publish_preview=true`, so it works before GitHub registers the new workflow
 on the default branch. This release is separate from desktop installers.
 
+`shared/terminalState.ts` defines checkpoint wire types, while
 `shared/terminalCheckpoint.ts` is the sole adapter to xterm internals. Keep the
 headless and browser buffer layouts aligned, and bump its schema/protocol when
 they change. Checkpoint restoration transfers cells and modes without replaying

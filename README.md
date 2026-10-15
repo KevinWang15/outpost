@@ -111,7 +111,7 @@ command. Status and error messages remain visible on small screens.
 
 When you return from another app or the network comes back, Outpost checks the
 connection and reconnects if needed. It does not resend prompts automatically.
-An expired login or a deliberately ended/detached session still requires an
+An expired login or a deliberately ended session still requires an
 explicit connection. Your remote coding process continues while the phone is
 away.
 
@@ -160,10 +160,6 @@ conversation/history viewer. Outpost does not force Codex into inline mode.
 The target must stay running: this preserves sessions across browser, app, SSH,
 and Outpost server disconnects/restarts, not target reboots or terminal-service
 crashes. Closing a tab disconnects; **Terminate** explicitly stops the session.
-
-An already-running Codex process keeps its launch configuration. To stop using
-Outpost's previous inline override, exit Codex cleanly and reconnect the same
-session. Reloading the terminal alone does not restart the coding tool.
 
 When the coding tool rings the terminal bell, the page and tab title show
 which session rang, and a short chime plays. Click or type in the terminal

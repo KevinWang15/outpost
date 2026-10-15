@@ -40,12 +40,11 @@ import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
 import { desktop } from '../desktop'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
-import { CheckpointReader, remoteTerminalReplies } from '../../shared/terminalCheckpoint'
+import { TerminalRenderer } from './rendering'
 import { terminalService } from '../../shared/terminalService'
 import { terminalTheme as theme } from '../../shared/terminalTheme'
 
 const closedTitles: Record<CloseReason, string> = {
-  detached: 'Detached',
   ended: 'Session ended',
   expired: 'Connection expired',
   outdated: 'Update required',
@@ -171,28 +170,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       logLevel: 'off',
     })
     const fit = new FitAddon()
-    const checkpoints = new CheckpointReader(term)
-    remoteTerminalReplies(term)
-    // A single render queue orders checkpoints, live bytes and geometry. In
-    // particular, restoring never races an outstanding xterm write callback.
-    let render = Promise.resolve()
-    let restoring = false
-    let renderingStopped = false
     let disposed = false
-    const enqueue = (operation: () => void | Promise<void>, done: () => void) => {
-      render = render
-        .then(() => {
-          if (!disposed && !renderingStopped) return operation()
-        })
-        .then(() => {
-          if (!disposed && !renderingStopped) done()
-        })
-        .catch(error => {
-          if (disposed || renderingStopped) return
-          renderingStopped = true
-          client.fail(`Could not render the terminal: ${(error as Error).message}`)
-        })
-    }
+    const rendering = new TerminalRenderer(term, message => client.fail(message))
     term.loadAddon(fit)
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
@@ -235,32 +214,13 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     const size = () => {
       const proposed = surface.current?.clientWidth ? fit.proposeDimensions() : undefined
       return {
-        cols: Math.max(20, Math.min(400, proposed?.cols ?? 80)),
-        rows: Math.max(5, Math.min(200, proposed?.rows ?? 24)),
+        cols: Math.max(20, Math.min(terminalService.maxCols, proposed?.cols ?? 80)),
+        rows: Math.max(5, Math.min(terminalService.maxRows, proposed?.rows ?? 24)),
       }
     }
-    const client = new TerminalSocket(token, size, {
-      output: (bytes, rendered) =>
-        enqueue(
-          () =>
-            new Promise<void>(resolve => {
-              if (bytes.length) term.write(bytes, resolve)
-              else resolve()
-            }),
-          rendered,
-        ),
-      restore: (message, rendered) =>
-        enqueue(() => {
-          if (message.type === 'geometry') term.resize(message.cols, message.rows)
-          else {
-            if (message.checkpoint.part === 'begin') restoring = true
-            checkpoints.accept(message.checkpoint)
-            if (message.checkpoint.part === 'end') restoring = false
-          }
-        }, rendered),
+    const client = new TerminalSocket(token, size, rendering, {
       state: next => {
         if (disposed) return
-        if (next.kind === 'connecting' || next.kind === 'reconnecting') renderingStopped = false
         setState(next)
         if (next.kind === 'closed' && next.reason === 'expired') lifecycle.current.onExpired?.()
         if (next.kind === 'connected' && !touch() && (!desktop || (host.current.focused && document.hasFocus())))
@@ -341,7 +301,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       clearTimeout(timer)
       timer = setTimeout(() => {
         const { cols, rows } = size()
-        if (!restoring && (term.cols !== cols || term.rows !== rows)) {
+        if (!rendering.restoring && (term.cols !== cols || term.rows !== rows)) {
           client.resize(cols, rows)
         }
       }, 60)
@@ -421,7 +381,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       document.removeEventListener('visibilitychange', activityFocus)
       window.removeEventListener('click', acknowledgeActivity, true)
       window.removeEventListener('keydown', acknowledgeActivity, true)
-      renderingStopped = true
+      rendering.dispose()
       disposed = true
       client.close()
       activityController.dispose()
@@ -458,9 +418,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         ? 'Connecting…'
         : state.kind === 'reconnecting'
           ? `Reconnecting… (${state.attempt})`
-          : state.reason === 'detached'
-            ? 'Detached'
-            : 'Disconnected'
+          : 'Disconnected'
 
   return (
     <div ref={container} className="terminal-view" role="dialog" aria-label={`Web terminal · ${name}`}>

@@ -5,12 +5,12 @@ import type { Static } from 'typebox'
 import type { SessionActivity } from './activity'
 import type { ImageMediaType } from './model'
 import type { connectInput } from './schemas'
-import type { Checkpoint } from './terminalCheckpoint'
+import type { Checkpoint } from './terminalState'
 
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 7
+export const protocolVersion = 8
 export const maxInputMessage = 64 * 1024
 
 export type ClientMessage =
@@ -22,7 +22,7 @@ export type ClientMessage =
   | { type: 'send'; id: string; data: string }
   | { type: 'paste-image'; id: string; mediaType: ImageMediaType; data: string }
 
-export type CloseReason = 'detached' | 'ended' | 'expired' | 'outdated' | 'error'
+export type CloseReason = 'ended' | 'expired' | 'outdated' | 'error'
 export interface SignalMessage {
   type: string
   payload: unknown

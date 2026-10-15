@@ -10,6 +10,7 @@ import type { ConnectResponse } from '../../shared/protocol'
 import { createApp } from '../../backend/app'
 import { LocalDeployment, type Deployment } from '../../backend/deployment'
 import { HostedDeployment } from '../../backend/hosted/deployment'
+import { terminalService } from '../../shared/terminalService'
 import { fixtures, terminalBinary, TerminalClient } from './helpers'
 
 const execute = promisify(execFile)
@@ -72,7 +73,10 @@ async function lifecycle(
     report.software.filter(item => item.status !== 'installed'),
     [],
   )
-  assert.match(report.software.find(item => item.id === 'outpost-terminal')!.version!, /outpost-terminal 1\.0\.0/)
+  assert.equal(
+    report.software.find(item => item.id === 'outpost-terminal')!.version,
+    `outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`,
+  )
   assert.equal(report.environment.home, '/root')
   const session = await call<Session>('POST', `/targets/${added.id}/sessions`, {
     name: 'Over SSH',

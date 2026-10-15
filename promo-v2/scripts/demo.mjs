@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto'
 
 export const demoDate = '2026-01-15T10:00:00.000Z'
 export const demoHome = '/home/demo'
-const environment = { home: demoHome, username: 'demo', uid: 1000, platform: 'linux', shell: '/bin/bash' }
-const requirements = { backends: ['tmux', 'dtach'], tools: ['codex', 'claude', 'kimi'] }
+const environment = { home: demoHome, username: 'demo', uid: 1000, shell: '/bin/bash' }
+const requirements = { tools: ['codex', 'claude', 'kimi'] }
 export const targets = [
   { id: 'demo-atlas', kind: 'ssh', name: 'Atlas development', host: 'atlas.example.com', ...requirements, createdAt: demoDate },
   { id: 'demo-lab', kind: 'ssh', name: 'Research lab', host: 'lab.example.com', ...requirements, createdAt: demoDate },
@@ -21,11 +21,10 @@ function identity(seed, tool) {
   return { cliSessionId: id, cliSessionEnv: { [key]: `${demoHome}/${dir}` } }
 }
 
-function session(id, name, tool, backend, state, status, rootDir) {
+function session(id, name, tool, state, status, rootDir) {
   return {
-    id, name, tool, backend, ...identity(id, tool), rootDir, env: {}, args: '',
-    createdAt: demoDate, lastConnectedAt: demoDate,
-    socketPath: `${demoHome}/.outpost/sockets/${id}.sock`, status,
+    id, name, tool, ...identity(id, tool), rootDir, env: {}, args: '',
+    createdAt: demoDate, lastConnectedAt: demoDate, status,
     activity: {
       state, updatedAt: demoDate, detail: null,
       completionId: state === 'finished' ? createHash('sha256').update(`demo-turn:${id}`).digest('hex') : null,
@@ -36,23 +35,23 @@ function session(id, name, tool, backend, state, status, rootDir) {
 export function demoSessions() {
   return {
     'demo-atlas': [
-      session('demo-dashboard', 'Build the dashboard', 'codex', 'tmux', 'working', 'detached', '/workspaces/demo-dashboard'),
-      session('demo-api', 'Review the API', 'claude', 'tmux', 'finished', 'attached', '/workspaces/demo-api'),
-      session('demo-ideas', 'Explore the next idea', 'kimi', 'dtach', 'idle', 'detached', '/workspaces/demo-lab'),
+      session('demo-dashboard', 'Build the dashboard', 'codex', 'working', 'detached', '/workspaces/demo-dashboard'),
+      session('demo-api', 'Review the API', 'claude', 'finished', 'attached', '/workspaces/demo-api'),
+      session('demo-ideas', 'Explore the next idea', 'kimi', 'idle', 'detached', '/workspaces/demo-lab'),
     ],
     'demo-lab': [
-      session('demo-research', 'Explore a new workflow', 'kimi', 'dtach', 'working', 'detached', '/workspaces/demo-research'),
-      session('demo-prototype', 'Prototype the interface', 'claude', 'tmux', 'idle', 'attached', '/workspaces/demo-prototype'),
+      session('demo-research', 'Explore a new workflow', 'kimi', 'working', 'detached', '/workspaces/demo-research'),
+      session('demo-prototype', 'Prototype the interface', 'claude', 'idle', 'attached', '/workspaces/demo-prototype'),
     ],
     'demo-local': [
-      session('demo-local-ui', 'Polish the interface', 'codex', 'tmux', 'idle', 'attached', '/workspaces/demo-ui'),
-      session('demo-local-tests', 'Write the test plan', 'claude', 'dtach', 'finished', 'detached', '/workspaces/demo-tests'),
+      session('demo-local-ui', 'Polish the interface', 'codex', 'idle', 'attached', '/workspaces/demo-ui'),
+      session('demo-local-tests', 'Write the test plan', 'claude', 'finished', 'detached', '/workspaces/demo-tests'),
     ],
   }
 }
 
 export function softwareReport() {
-  const ids = ['bash', 'python3', ...requirements.backends, ...requirements.tools]
+  const ids = ['bash', 'python3', 'outpost-terminal', ...requirements.tools]
   return {
     environment, checkedAt: demoDate, installation: null,
     software: ids.map(id => ({ id,

@@ -238,11 +238,11 @@ test('the broker relays a terminal and reports attach failures', async t => {
     0,
     'invalid links never reach the client',
   )
-  client.input('detach')
+  client.input('exit')
   assert.deepEqual(await client.message('closed'), {
     type: 'closed',
-    reason: 'detached',
-    message: 'Detached. The session keeps running.',
+    reason: 'ended',
+    message: 'The coding tool exited. Connect again to start it in the same conversation.',
   })
 
   const failing = await setup(t, { ...process.env, FAKE_RELAY: 'fail' })

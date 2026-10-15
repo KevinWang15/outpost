@@ -114,7 +114,7 @@ function tabNode(id: number) {
   }
   return node
 }
-function renderTabs() {
+function renderTabs(panel: WorkspacePanel) {
   if (!state) return
   for (const [id, node] of tabNodes)
     if (!state.tabs.some(tab => tab.id === id)) {
@@ -127,10 +127,12 @@ function renderTabs() {
       node = tabNode(tab.id)
       tabNodes.set(tab.id, node)
     }
-    node.classList.toggle('selected', tab.id === state!.active)
-    node.classList.toggle('visible', state!.split?.ids.includes(tab.id) ?? false)
+    // The active terminal is remembered while a workspace page covers it.
+    const selected = panel === null && tab.id === state!.active
+    node.classList.toggle('selected', selected)
+    node.classList.toggle('visible', panel === null && (state!.split?.ids.includes(tab.id) ?? false))
     const select = node.querySelector<HTMLButtonElement>('.tab-select')!
-    select.setAttribute('aria-selected', String(tab.id === state!.active))
+    select.setAttribute('aria-selected', String(selected))
     select.tabIndex = tab.id === state!.active ? 0 : -1
     const description = `${tabStatusLabel(tab)}${tab.hasDraft ? ' · Unsent message' : ''}`
     select.title = `${tab.label}\n${tab.origin}\n${description}`
@@ -261,20 +263,29 @@ function renderStage() {
 }
 function render(next: WorkspaceSnapshot) {
   const previousActive = state?.active
+  const panel: WorkspacePanel = next.panel ?? (next.active === null ? 'sessions' : null)
   state = next
-  renderTabs()
+  renderTabs(panel)
   renderServers()
   renderMatches()
   renderStage()
   if (previousActive !== next.active && next.active !== null)
     tabNodes.get(next.active)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  const panel: WorkspacePanel = next.panel ?? (next.active === null ? 'sessions' : null)
   const key = JSON.stringify(panel)
   const changedPanel = panelKey !== key
   panelKey = key
   el('panels').hidden = panel === null
   for (const name of ['sessions', 'switcher', 'settings', 'rename'])
     el(`${name}-panel`).hidden = typeof panel === 'object' ? name !== 'rename' || panel === null : panel !== name
+  for (const [id, page] of [
+    ['new-tab', 'sessions'],
+    ['switch', 'switcher'],
+    ['settings', 'settings'],
+  ]) {
+    const control = el(id)
+    if (panel === page) control.setAttribute('aria-current', 'page')
+    else control.removeAttribute('aria-current')
+  }
   el('back').hidden = next.active === null
   el('split').setAttribute('aria-label', next.split ? 'Return to single pane' : 'Split side by side')
   el('split').title = next.split ? 'Return to single pane' : 'Split side by side'

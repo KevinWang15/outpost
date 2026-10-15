@@ -8,6 +8,7 @@ import {
   type TabSummary,
 } from './workspace-api'
 import { paneLayout, type PaneBounds } from './layout'
+import { reconcileElements } from './keyed-elements'
 
 declare global {
   interface Window {
@@ -43,6 +44,9 @@ let panelKey = ''
 let selected = 0
 let matches: TabSummary[] = []
 const tabNodes = new Map<number, HTMLElement>()
+const serverNodes = new Map<string, HTMLElement>()
+const sessionNodes = new Map<number, HTMLElement>()
+const placeholderNodes = new Map<number, HTMLElement>()
 const tabs = el('tabs')
 const divider = el('divider')
 const search = el<HTMLInputElement>('session-search')
@@ -116,36 +120,32 @@ function tabNode(id: number) {
 }
 function renderTabs(panel: WorkspacePanel) {
   if (!state) return
-  for (const [id, node] of tabNodes)
-    if (!state.tabs.some(tab => tab.id === id)) {
-      node.remove()
-      tabNodes.delete(id)
-    }
-  state.tabs.forEach((tab, index) => {
-    let node = tabNodes.get(tab.id)
-    if (!node) {
-      node = tabNode(tab.id)
-      tabNodes.set(tab.id, node)
-    }
-    // The active terminal is remembered while a workspace page covers it.
-    const selected = panel === null && tab.id === state!.active
-    node.classList.toggle('selected', selected)
-    node.classList.toggle('visible', panel === null && (state!.split?.ids.includes(tab.id) ?? false))
-    const select = node.querySelector<HTMLButtonElement>('.tab-select')!
-    select.setAttribute('aria-selected', String(selected))
-    select.tabIndex = tab.id === state!.active ? 0 : -1
-    const description = `${tabStatusLabel(tab)}${tab.hasDraft ? ' · Unsent message' : ''}`
-    select.title = `${tab.label}\n${tab.origin}\n${description}`
-    select.setAttribute('aria-label', `${tab.label} · ${description}`)
-    node.querySelector('.tab-label')!.textContent = tab.label
-    updateTabStatus(node.querySelector<HTMLElement>('.tab-status')!, tab)
-    const close = node.querySelector<HTMLButtonElement>('.tab-close')!
-    close.classList.toggle('draft', tab.hasDraft)
-    close.textContent = tab.hasDraft ? '•' : '×'
-    close.setAttribute('aria-label', `Close ${tab.label}${tab.hasDraft ? ' (unsent message)' : ''}`)
-    close.title = tab.hasDraft ? 'Close tab (unsent message)' : 'Close tab'
-    if (tabs.children[index] !== node) tabs.insertBefore(node, tabs.children[index] ?? null)
-  })
+  reconcileElements(
+    tabs,
+    tabNodes,
+    state.tabs,
+    tab => tab.id,
+    tab => tabNode(tab.id),
+    (node, tab) => {
+      // The active terminal is remembered while a workspace page covers it.
+      const selected = panel === null && tab.id === state!.active
+      node.classList.toggle('selected', selected)
+      node.classList.toggle('visible', panel === null && (state!.split?.ids.includes(tab.id) ?? false))
+      const select = node.querySelector<HTMLButtonElement>('.tab-select')!
+      select.setAttribute('aria-selected', String(selected))
+      select.tabIndex = tab.id === state!.active ? 0 : -1
+      const description = `${tabStatusLabel(tab)}${tab.hasDraft ? ' · Unsent message' : ''}`
+      select.title = `${tab.label}\n${tab.origin}\n${description}`
+      select.setAttribute('aria-label', `${tab.label} · ${description}`)
+      node.querySelector('.tab-label')!.textContent = tab.label
+      updateTabStatus(node.querySelector<HTMLElement>('.tab-status')!, tab)
+      const close = node.querySelector<HTMLButtonElement>('.tab-close')!
+      close.classList.toggle('draft', tab.hasDraft)
+      close.textContent = tab.hasDraft ? '•' : '×'
+      close.setAttribute('aria-label', `Close ${tab.label}${tab.hasDraft ? ' (unsent message)' : ''}`)
+      close.title = tab.hasDraft ? 'Close tab (unsent message)' : 'Close tab'
+    },
+  )
   for (const [id, node] of tabNodes) {
     node.classList.toggle('dragging', Boolean(state.drag?.source && state.drag.id === id))
     node.classList.toggle('merging', Boolean(state.drag?.target && !state.drag.source && state.drag.id === id))
@@ -170,54 +170,69 @@ function renderTabs(panel: WorkspacePanel) {
 }
 function renderServers() {
   const list = el('servers')
-  list.replaceChildren()
-  for (const origin of state!.servers) {
-    const row = document.createElement('li')
-    const open = button(
-      origin + ' ↗',
-      () => {
-        el<HTMLInputElement>('server').value = origin
-        el<HTMLFormElement>('server-form').requestSubmit()
-      },
-      'row-main',
-    )
-    const forget = button('Forget', () => run(api.forgetServer(origin)))
-    forget.setAttribute('aria-label', `Forget ${origin} and close its tabs`)
-    row.append(open, forget)
-    list.append(row)
-  }
+  reconcileElements(
+    list,
+    serverNodes,
+    state!.servers,
+    origin => origin,
+    origin => {
+      const row = document.createElement('li')
+      const open = button(
+        origin + ' ↗',
+        () => {
+          el<HTMLInputElement>('server').value = origin
+          el<HTMLFormElement>('server-form').requestSubmit()
+        },
+        'row-main',
+      )
+      const forget = button('Forget', () => run(api.forgetServer(origin)))
+      forget.setAttribute('aria-label', `Forget ${origin} and close its tabs`)
+      row.append(open, forget)
+      return row
+    },
+  )
   el('no-servers').hidden = state!.servers.length > 0
 }
-function renderMatches() {
+function renderMatches(preserveSelection = true) {
   const query = search.value.trim().toLocaleLowerCase()
+  const selectedId = preserveSelection ? matches[selected]?.id : undefined
   matches = (state?.tabs ?? []).filter(tab =>
     `${tab.label} ${tab.title} ${tab.origin}`.toLocaleLowerCase().includes(query),
   )
-  selected = Math.max(0, Math.min(selected, matches.length - 1))
+  const retained = matches.findIndex(tab => tab.id === selectedId)
+  selected = retained >= 0 ? retained : preserveSelection ? Math.max(0, Math.min(selected, matches.length - 1)) : 0
   const list = el('session-list')
-  list.replaceChildren()
-  matches.forEach((tab, index) => {
-    const row = document.createElement('li')
-    row.classList.toggle('highlighted', index === selected)
-    const open = button('', () => run(api.activate(tab.id)), 'row-main')
-    const title = document.createElement('strong')
-    title.className = 'session-title'
-    const indicator = createTabStatus()
-    updateTabStatus(indicator, tab)
-    const label = document.createElement('span')
-    label.className = 'tab-label'
-    label.textContent = tab.label
-    title.append(indicator, label)
-    const subtitle = document.createElement('small')
-    subtitle.textContent = `${tab.origin} · ${tabStatusLabel(tab)}`
-    open.append(title, subtitle)
-    const pair = button('◫', () => run(api.pair(tab.id)))
-    pair.disabled = tab.id === state?.active || state?.active === null
-    pair.setAttribute('aria-label', `Show ${tab.label} beside current session`)
-    pair.title = 'Show beside current session'
-    row.append(open, pair)
-    list.append(row)
-  })
+  reconcileElements(
+    list,
+    sessionNodes,
+    matches,
+    tab => tab.id,
+    tab => {
+      const row = document.createElement('li')
+      const open = button('', () => run(api.activate(tab.id)), 'row-main')
+      const title = document.createElement('strong')
+      title.className = 'session-title'
+      const indicator = createTabStatus()
+      const label = document.createElement('span')
+      label.className = 'tab-label'
+      title.append(indicator, label)
+      const subtitle = document.createElement('small')
+      open.append(title, subtitle)
+      const pair = button('◫', () => run(api.pair(tab.id)))
+      pair.title = 'Show beside current session'
+      row.append(open, pair)
+      return row
+    },
+    (row, tab, index) => {
+      row.classList.toggle('highlighted', index === selected)
+      updateTabStatus(row.querySelector<HTMLElement>('.tab-status')!, tab)
+      row.querySelector('.tab-label')!.textContent = tab.label
+      row.querySelector('small')!.textContent = `${tab.origin} · ${tabStatusLabel(tab)}`
+      const pair = row.lastElementChild as HTMLButtonElement
+      pair.disabled = tab.id === state?.active || state?.active === null
+      pair.setAttribute('aria-label', `Show ${tab.label} beside current session`)
+    },
+  )
   el('no-matches').hidden = matches.length > 0
 }
 function renderStage() {
@@ -234,25 +249,34 @@ function renderStage() {
       height: `${bounds.height}px`,
     })
   const placeholders = el('placeholders')
-  placeholders.replaceChildren()
-  visible.forEach((id, index) => {
+  const errors = visible.flatMap((id, index) => {
     const tab = state!.tabs.find(tab => tab.id === id)
-    if (!tab?.error) return
-    const box = document.createElement('div')
-    box.className = 'placeholder'
-    place(box, geometry.panes[index])
-    const title = document.createElement('h2')
-    title.textContent = tab.label
-    const message = document.createElement('p')
-    message.textContent = tab.error
-    const actions = document.createElement('div')
-    actions.append(
-      button('Reload terminal', () => run(api.reload(id)), 'primary'),
-      button('Open server ↗', () => run(api.openServer(tab.origin))),
-    )
-    box.append(title, message, actions)
-    placeholders.append(box)
+    return tab?.error ? [{ tab, bounds: geometry.panes[index] }] : []
   })
+  reconcileElements(
+    placeholders,
+    placeholderNodes,
+    errors,
+    item => item.tab.id,
+    ({ tab }) => {
+      const box = document.createElement('div')
+      box.className = 'placeholder'
+      const title = document.createElement('h2')
+      const message = document.createElement('p')
+      const actions = document.createElement('div')
+      actions.append(
+        button('Reload terminal', () => run(api.reload(tab.id)), 'primary'),
+        button('Open server ↗', () => run(api.openServer(tab.origin))),
+      )
+      box.append(title, message, actions)
+      return box
+    },
+    (box, { tab, bounds }) => {
+      place(box, bounds)
+      box.querySelector('h2')!.textContent = tab.label
+      box.querySelector('p')!.textContent = tab.error
+    },
+  )
   divider.hidden = visible.length !== 2
   divider.classList.toggle('row-split', !columns)
   divider.setAttribute('aria-orientation', columns ? 'vertical' : 'horizontal')
@@ -296,8 +320,7 @@ function render(next: WorkspaceSnapshot) {
     // Keep keyboard focus and pointer capture in the source chrome until release.
     if (panel === 'switcher') {
       search.value = ''
-      selected = 0
-      renderMatches()
+      renderMatches(false)
       if (!next.drag) search.focus()
     } else if (panel === 'sessions') {
       if (!next.drag) el('server').focus()
@@ -324,8 +347,7 @@ el('back').onclick = () => run(api.panel(null))
 el('split').onclick = () => run(api.split(state?.split ? null : 'columns'))
 el('updates').onclick = () => run(api.checkUpdates())
 search.oninput = () => {
-  selected = 0
-  renderMatches()
+  renderMatches(false)
 }
 search.onkeydown = event => {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

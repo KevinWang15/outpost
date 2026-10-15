@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { WebSocket } from 'ws'
 import { Ajv } from 'ajv'
-import { parseSessionActivity } from '../../shared/activity'
+import { parseSessionActivity, unavailableActivity } from '../../shared/activity'
 import type { ClientMessage, CloseReason, HistoryNavigation, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, protocolVersion } from '../../shared/protocol'
 import { historyNavigation } from '../../shared/schemas'
@@ -172,7 +172,11 @@ class Connection {
       this.pending = []
       this.send({ type: 'ready' })
     } else if (message.type === 'activity') {
-      this.send({ type: 'activity', activity: parseSessionActivity(message.activity) })
+      this.send({
+        type: 'activity',
+        activity:
+          parseSessionActivity(message.activity) ?? unavailableActivity('The target sent invalid activity metadata.'),
+      })
     } else if (message.type === 'scrollback') {
       const { lines, offset, rows, available, active, alternate } = message
       if (

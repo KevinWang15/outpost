@@ -1,5 +1,5 @@
 import { Bell, CircleHelp, LoaderCircle } from 'lucide-react'
-import { activityLabels, activityState } from '../../shared/activity'
+import { activityLabels } from '../../shared/activity'
 import type { Session } from '../../shared/model'
 
 /** What the coding tool is doing: working, idle, or finished a turn you have not checked. */
@@ -13,7 +13,7 @@ export default function ActivityBadge({
   onCheck: (session: Session) => void
 }) {
   const { activity } = session
-  const state = activityState(activity)
+  const { state } = activity
   if (session.status === 'ready') return <span className="muted">—</span>
   if (state === 'unknown')
     return (

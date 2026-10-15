@@ -237,7 +237,7 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
 | ← client | `hello {resume, session, target}` | Connection accepted |
 | ← client | `ready` | Attached to tmux; subscribe to history metadata |
-| ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes `null` |
+| ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
 | ← client | `scrollback {available, lines, offset, rows, active, alternate, navigation?}` | History extent, position, copy mode, and whether the application owns scrolling |
 | ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / a scrollback seek / `activate` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
@@ -326,14 +326,21 @@ those checkpoints, so every client observes the same acknowledgement.
 `outpost_activity_stream.py` samples this reader immediately after attachment
 and two seconds after each completed read, with one read in flight. Its worker
 starts after the PTY fork and runs separately from history and terminal I/O.
+Only the latest result is retained, so backpressure cannot accumulate a queue
+of observations. Reads that exceed five seconds show Unknown until the reader
+returns; a stalled read never spawns replacement workers. The worker is a daemon,
+and closing the stream stops scheduling reads without making terminal shutdown
+wait for filesystem I/O. Worker startup and read failures become Unknown.
 Only changed metadata is emitted over the existing relay and WebSocket; it
 opens no additional SSH connection or account API request. Polling continues
 without terminal output so completions and acknowledgements from other clients
-are observed. Disconnect disposes the worker, and clients clear stale activity
-on close/reconnect. Read failures report Unknown and do not interrupt the terminal.
+are observed. Clients clear stale activity on close/reconnect.
 
-`shared/activity.ts` owns the `working | idle | finished` enum, `SessionActivity`,
-display labels and Unknown handling. Both `ActivityBadge` and `tab-status.ts`
+`shared/activity.ts` owns the `working | idle | finished | unknown` enum,
+`SessionActivity` and display labels. Unknown is an explicit observation state;
+diagnostics carry details, not a second source of state. A client's `null` means
+no observation has arrived on this connection yet, never a failed observation.
+Both `ActivityBadge` and `tab-status.ts`
 use it; the broker and native IPC use its bounded parser. The relay sends state,
 timestamp, opaque completion ID and any diagnostic, never transcript content.
 The desktop bridge is version 4: server and app must be updated together.
@@ -365,6 +372,11 @@ two-session split and shared pane geometry. Menus resolve the focused window.
 settings. Its `workspace-preload.ts` bridge accepts only enumerated local UI
 actions; one IPC dispatcher verifies the bundled main frame and routes each call
 to that sender's window. Tab actions check ownership before changing a terminal.
+`keyed-elements.ts` preserves DOM nodes in the tab strip, server list, session
+switcher and error panels; metadata refreshes update their contents without
+resetting keyboard focus or icon animations. The switcher retains the selected
+session by ID across updates. Native host-state messages are sent only when
+focus or preferences change, not on every activity refresh.
 The local renderer receives tab labels, connection and activity state, attention and draft
 flags, never grants, terminal bytes or draft contents.
 

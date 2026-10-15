@@ -12,6 +12,7 @@ export interface TerminalHostState extends TerminalPreferences {
 export interface TerminalTabState {
   title: string
   connection: 'connecting' | 'connected' | 'reconnecting' | 'closed'
+  /** null only before the first observation or while disconnected. Failures are unknown. */
   activity: SessionActivity | null
   attention: boolean
   hasDraft: boolean

@@ -44,7 +44,7 @@ export interface SignalMessage {
 export type ServerMessage =
   | { type: 'hello'; resume: string; session: { id: string; name: string }; target: { id: string; name: string } }
   | { type: 'ready' }
-  | { type: 'activity'; activity: SessionActivity | null }
+  | { type: 'activity'; activity: SessionActivity }
   | ({ type: 'scrollback' } & ScrollbackState)
   | { type: 'result'; id: string; ok: boolean; message?: string; reference?: string }
   | { type: 'signal'; signal: SignalMessage }

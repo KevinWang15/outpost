@@ -1,5 +1,5 @@
 /** Native turn state shared by session lists, terminal streams and desktop tabs. */
-export const activityStates = ['working', 'idle', 'finished'] as const
+export const activityStates = ['working', 'idle', 'finished', 'unknown'] as const
 export type ActivityState = (typeof activityStates)[number]
 
 export interface SessionActivity {
@@ -14,11 +14,10 @@ export const activityLabels = {
   idle: 'Idle',
   finished: 'Needs you',
   unknown: 'Unknown',
-} satisfies Record<ActivityState | 'unknown', string>
+} satisfies Record<ActivityState, string>
 
-/** A failed observation is unknown, even though its wire state defaults to idle. */
-export function activityState(activity: SessionActivity | null): ActivityState | 'unknown' {
-  return !activity || activity.detail ? 'unknown' : activity.state
+export function unavailableActivity(detail: string): SessionActivity {
+  return { state: 'unknown', updatedAt: null, completionId: null, detail: detail.slice(0, 4096) }
 }
 
 /** Bound and copy data at the relay and native IPC boundaries. */
@@ -34,8 +33,13 @@ export function parseSessionActivity(value: unknown): SessionActivity | null {
       item.completionId === null ||
       (typeof item.completionId === 'string' && /^[a-f0-9]{64}$/.test(item.completionId))
     ) ||
-    !nullableText(item.detail, 4096)
+    !(item.detail === null || typeof item.detail === 'string')
   )
     return null
-  return { state: item.state, updatedAt: item.updatedAt, completionId: item.completionId, detail: item.detail }
+  return {
+    state: item.state,
+    updatedAt: item.updatedAt,
+    completionId: item.completionId,
+    detail: item.detail?.slice(0, 4096) ?? null,
+  }
 }

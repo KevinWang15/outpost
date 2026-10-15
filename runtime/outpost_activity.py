@@ -89,7 +89,7 @@ def inspect(adapter, session, metadata, running):
 
 def unavailable(detail):
     return {
-        'state': 'idle',
+        'state': 'unknown',
         'updatedAt': None,
         'completionId': None,
         'detail': 'Activity unavailable: ' + str(detail)[:4000],

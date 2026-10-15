@@ -10,6 +10,7 @@ import {
   shell,
   type BrowserWindow,
   type IpcMainInvokeEvent,
+  type WebContents,
 } from 'electron'
 import type { DesktopLaunch, TerminalHostState, TerminalTabState } from '../../shared/desktop'
 import { parseSessionActivity } from '../../shared/activity'
@@ -53,6 +54,7 @@ export class TerminalTabs {
   readonly tabs = new Map<number, TerminalTab>()
   private sessions = new WeakSet<Electron.Session>()
   private sessionTabs = new Map<string, number>()
+  private hostStates = new WeakMap<WebContents, TerminalHostState>()
   constructor(
     private directory: string,
     private host: Host,
@@ -169,8 +171,15 @@ export class TerminalTabs {
   hostState(ids: Iterable<number>) {
     for (const id of ids) {
       const tab = this.tabs.get(id)
-      if (tab && !tab.view.webContents.isDestroyed())
-        tab.view.webContents.send('terminal:host-state', this.host.state(tab.id))
+      if (!tab || tab.view.webContents.isDestroyed()) continue
+      const contents = tab.view.webContents
+      const next = this.host.state(tab.id)
+      const previous = this.hostStates.get(contents)
+      // Activity refreshes repaint chrome; focus and preferences change separately.
+      if (previous?.focused === next.focused && previous.fontSize === next.fontSize && previous.sound === next.sound)
+        continue
+      this.hostStates.set(contents, next)
+      contents.send('terminal:host-state', next)
     }
   }
   dispose(id: number) {
@@ -278,6 +287,7 @@ export class TerminalTabs {
     })
     contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
       if (mainFrame && !inPlace) {
+        this.hostStates.delete(contents)
         clearTimeout(tab.interfaceTimer)
         tab.interfaceReady = false
       }

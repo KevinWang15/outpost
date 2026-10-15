@@ -1,5 +1,5 @@
 import type { TerminalTabState } from '../../shared/desktop'
-import { activityLabels, activityState } from '../../shared/activity'
+import { activityLabels } from '../../shared/activity'
 
 const connectionLabels = {
   connected: 'Connected',
@@ -11,7 +11,7 @@ const connectionLabels = {
 export function tabStatusLabel(tab: TerminalTabState) {
   const parts = [connectionLabels[tab.connection]]
   if (tab.connection === 'connected') {
-    parts.push(tab.activity === null ? 'Checking activity…' : activityLabels[activityState(tab.activity)])
+    parts.push(tab.activity === null ? 'Checking activity…' : activityLabels[tab.activity.state])
     if (tab.activity?.detail) parts.push(tab.activity.detail)
   }
   if (tab.attention) parts.push('Bell rang — needs attention')
@@ -40,7 +40,7 @@ const icons = {
 function tabStatusIcon(tab: TerminalTabState): keyof typeof icons {
   if (tab.connection !== 'connected') return tab.connection === 'reconnecting' ? 'connecting' : tab.connection
   if (tab.attention) return 'attention'
-  return tab.activity === null ? 'connected' : activityState(tab.activity)
+  return tab.activity === null ? 'connected' : tab.activity.state
 }
 
 export function createTabStatus() {

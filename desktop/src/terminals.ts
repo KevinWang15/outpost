@@ -12,6 +12,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import type { DesktopLaunch, TerminalHostState, TerminalTabState } from '../../shared/desktop'
+import { parseSessionActivity } from '../../shared/activity'
 import { pagePaths } from '../../shared/pages'
 import { browserUrl } from '../../shared/signals'
 
@@ -65,10 +66,12 @@ export class TerminalTabs {
       const tab = this.sender(event)
       if (!value || typeof value !== 'object') return
       const state = value as TerminalTabState
+      const activity = parseSessionActivity(state.activity)
       if (
         typeof state.title !== 'string' ||
         state.title.length > 512 ||
         !['connecting', 'connected', 'reconnecting', 'closed'].includes(state.connection) ||
+        (state.activity !== null && activity === null) ||
         typeof state.attention !== 'boolean' ||
         typeof state.hasDraft !== 'boolean'
       )
@@ -76,6 +79,7 @@ export class TerminalTabs {
       tab.state = {
         title: cleanTitle(state.title),
         connection: state.connection,
+        activity: state.connection === 'connected' ? activity : null,
         attention: state.attention,
         hasDraft: state.hasDraft,
       }
@@ -199,7 +203,7 @@ export class TerminalTabs {
           // launches through its existing socket and retains its composer draft.
           tab.pendingLaunches.clear()
           tab.error = null
-          tab.state = { ...tab.state, connection: 'connecting', hasDraft: false }
+          tab.state = { ...tab.state, connection: 'connecting', activity: null, hasDraft: false }
           void tab.view.webContents
             .loadURL(`${launch.server}${pagePaths.desktopTerminal}#token=${launch.token}`)
             .catch(() => {})
@@ -251,7 +255,13 @@ export class TerminalTabs {
       sessionKey,
       pendingLaunches: new Set(),
       interfaceReady: false,
-      state: { title: cleanTitle(launch.title), connection: 'connecting', attention: false, hasDraft: false },
+      state: {
+        title: cleanTitle(launch.title),
+        connection: 'connecting',
+        activity: null,
+        attention: false,
+        hasDraft: false,
+      },
     }
     this.tabs.set(tab.id, tab)
     this.sessionTabs.set(sessionKey, tab.id)
@@ -282,6 +292,7 @@ export class TerminalTabs {
         tab.error =
           'The terminal interface did not initialize. Update Outpost Desktop and your server together, then reload.'
         tab.state.connection = 'closed'
+        tab.state.activity = null
         this.host.changed(tab.id)
       }, 15_000)
     })
@@ -306,11 +317,13 @@ export class TerminalTabs {
       if (!mainFrame || code === -3) return
       tab.error = 'Could not load the terminal. Check the server connection, then reload or open a new connection.'
       tab.state.connection = 'closed'
+      tab.state.activity = null
       this.host.changed(tab.id)
     })
     contents.on('render-process-gone', () => {
       tab.error = 'This terminal stopped responding. Reload it to reconnect. Your remote session keeps running.'
       tab.state.connection = 'closed'
+      tab.state.activity = null
       this.host.changed(tab.id)
     })
     contents.on('destroyed', () => this.dispose(tab.id))

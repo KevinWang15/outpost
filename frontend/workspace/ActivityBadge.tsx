@@ -1,4 +1,5 @@
 import { Bell, CircleHelp, LoaderCircle } from 'lucide-react'
+import { activityLabels, activityState } from '../../shared/activity'
 import type { Session } from '../../shared/model'
 
 /** What the coding tool is doing: working, idle, or finished a turn you have not checked. */
@@ -12,15 +13,16 @@ export default function ActivityBadge({
   onCheck: (session: Session) => void
 }) {
   const { activity } = session
+  const state = activityState(activity)
   if (session.status === 'ready') return <span className="muted">—</span>
-  if (activity.detail)
+  if (state === 'unknown')
     return (
-      <span className="badge unavailable" title={activity.detail}>
+      <span className="badge unavailable" title={activity.detail ?? undefined}>
         <CircleHelp size={12} />
-        Unknown
+        {activityLabels[state]}
       </span>
     )
-  if (activity.state === 'finished') {
+  if (state === 'finished') {
     return (
       <button
         className="badge finished"
@@ -29,21 +31,22 @@ export default function ActivityBadge({
         title="The agent finished and is waiting for you. Click to mark as checked."
         aria-label={`Mark ${session.name} as checked`}
       >
-        {checking ? <LoaderCircle className="spin" size={12} /> : <Bell size={12} />}Needs you
+        {checking ? <LoaderCircle className="spin" size={12} /> : <Bell size={12} />}
+        {activityLabels[state]}
       </button>
     )
   }
-  if (activity.state === 'working')
+  if (state === 'working')
     return (
       <span className="badge working">
         <LoaderCircle className="spin" size={12} />
-        Working
+        {activityLabels[state]}
       </span>
     )
   return (
     <span className="badge idle">
       <i />
-      Idle
+      {activityLabels[state]}
     </span>
   )
 }

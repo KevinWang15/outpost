@@ -1,6 +1,7 @@
 import type { ClientMessage, CloseReason, ScrollbackState, ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
 import type { ImageMediaType } from '../../shared/model'
+import type { SessionActivity } from '../../shared/activity'
 
 export type SocketState =
   | { kind: 'connecting' }
@@ -14,6 +15,7 @@ interface Handlers {
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
   scrollback(state: ScrollbackState | null): void
+  activity(state: SessionActivity | null): void
   notice(message: string): void
 }
 
@@ -49,7 +51,7 @@ export class TerminalSocket {
 
   open() {
     if (this.stopped) return
-    this.resetHistory()
+    this.resetMetadata()
     const { cols, rows } = this.size()
     const url = new URL('/api/terminal', window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -100,6 +102,8 @@ export class TerminalSocket {
         this.send({ type: 'scrollback' })
       } else if (message.type === 'scrollback') {
         this.handlers.scrollback(message)
+      } else if (message.type === 'activity') {
+        this.handlers.activity(message.activity)
       } else if (message.type === 'result') {
         this.pending.get(message.id)?.resolve(message)
         this.pending.delete(message.id)
@@ -110,7 +114,7 @@ export class TerminalSocket {
       clearTimeout(ackTimer)
       if (this.socket !== socket) return
       this.ready = false
-      this.resetHistory()
+      this.resetMetadata()
       this.failPending('The connection closed before Outpost confirmed it. Check the terminal before retrying.')
       if (this.stopped) return
       const message = closed as Extract<ServerMessage, { type: 'closed' }> | null
@@ -160,7 +164,7 @@ export class TerminalSocket {
   close() {
     this.stopped = true
     clearTimeout(this.timer)
-    this.resetHistory()
+    this.resetMetadata()
     this.failPending('The terminal closed.')
     this.socket?.close()
     this.socket = null
@@ -203,11 +207,12 @@ export class TerminalSocket {
       .catch(error => this.handlers.notice((error as Error).message))
   }
 
-  private resetHistory() {
+  private resetMetadata() {
     clearTimeout(this.historyTimer)
     this.historyTimer = undefined
     this.historyOffset = undefined
     this.handlers.scrollback(null)
+    this.handlers.activity(null)
   }
 
   private request(message: ClientMessage & { id: string }) {

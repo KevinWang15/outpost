@@ -20,6 +20,7 @@ import {
 import '@xterm/xterm/css/xterm.css'
 import type { ImageMediaType } from '../../shared/model'
 import type { TerminalHostState } from '../../shared/desktop'
+import type { SessionActivity } from '../../shared/activity'
 import type { CloseReason, ScrollbackState } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
@@ -96,6 +97,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   const clipboard = useRef<ReturnType<typeof attachClipboard> | null>(null)
   const bell = useRef<ReturnType<typeof attachBell> | null>(null)
   const [state, setState] = useState<SocketState>({ kind: 'connecting' })
+  const [activity, setActivity] = useState<SessionActivity | null>(null)
   const [name, setName] = useState(title)
   const sessionInfo = useRef({ id: '', name: title })
   const [bellRinging, setBellRinging] = useState(false)
@@ -136,8 +138,10 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   }, [name, bellRinging])
 
   useEffect(() => {
-    void desktop?.reportState({ title: name, connection: state.kind, attention: bellRinging, hasDraft }).catch(() => {})
-  }, [name, state.kind, bellRinging, hasDraft])
+    void desktop
+      ?.reportState({ title: name, connection: state.kind, activity, attention: bellRinging, hasDraft })
+      .catch(() => {})
+  }, [name, state.kind, activity, bellRinging, hasDraft])
 
   const notify = useCallback((message: string, sticky = false) => {
     setStatus(message)
@@ -240,6 +244,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         setName(sessionInfo.current.name)
       },
       scrollback: next => historyController.update(next),
+      activity: setActivity,
       notice: notify,
       signal: ({ signal }) => {
         if (signal.type !== 'browser.open') return

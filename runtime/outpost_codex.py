@@ -1,4 +1,4 @@
-"""Codex coding-session adapter; history access is loaded only for management operations."""
+"""Codex coding-session adapter; its native store is loaded on demand."""
 
 from functools import cached_property
 

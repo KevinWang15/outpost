@@ -1,5 +1,7 @@
+import type { SessionActivity } from './activity'
+
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 3
+export const desktopBridgeVersion = 4
 export interface TerminalPreferences {
   fontSize: number
   sound: boolean
@@ -10,6 +12,7 @@ export interface TerminalHostState extends TerminalPreferences {
 export interface TerminalTabState {
   title: string
   connection: 'connecting' | 'connected' | 'reconnecting' | 'closed'
+  activity: SessionActivity | null
   attention: boolean
   hasDraft: boolean
 }

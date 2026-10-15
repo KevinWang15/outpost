@@ -439,7 +439,7 @@ export class WorkspaceWindow {
     if (!tab || (tab.state.hasDraft && !(await this.confirmDraft(tab)))) return
     if (!this.has(id)) return
     tab.error = null
-    tab.state = { ...tab.state, hasDraft: false, connection: 'connecting' }
+    tab.state = { ...tab.state, hasDraft: false, connection: 'connecting', activity: null }
     tab.view.webContents.reload()
     this.render()
   }

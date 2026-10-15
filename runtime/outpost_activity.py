@@ -1,4 +1,4 @@
-"""Bounded native turn-marker readers; loaded only for management requests."""
+"""Bounded native turn-marker readers shared by management and terminal streams."""
 
 import datetime
 import hashlib
@@ -87,16 +87,20 @@ def inspect(adapter, session, metadata, running):
         return result, None
 
 
+def unavailable(detail):
+    return {
+        'state': 'idle',
+        'updatedAt': None,
+        'completionId': None,
+        'detail': 'Activity unavailable: ' + str(detail)[:4000],
+    }
+
+
 def describe(activity, running):
     try:
         return inspect(activity.adapter, activity.session, activity.read(), running)[0]
     except (OSError, ValueError) as error:
-        return {
-            'state': 'idle',
-            'updatedAt': None,
-            'completionId': None,
-            'detail': 'Activity unavailable: ' + str(error),
-        }
+        return unavailable(error)
 
 
 def acknowledge(activity, token, running):

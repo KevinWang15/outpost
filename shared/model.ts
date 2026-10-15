@@ -1,4 +1,5 @@
 import type { Static } from 'typebox'
+import type { SessionActivity } from './activity'
 import type { HarnessId } from './harnesses'
 import type * as schemas from './schemas'
 
@@ -25,12 +26,6 @@ export interface Environment {
 export interface SessionLaunchOptions {
   env: Record<string, string>
   args: string
-}
-export interface SessionActivity {
-  state: 'working' | 'idle' | 'finished'
-  updatedAt: string | null
-  completionId: string | null
-  detail: string | null
 }
 export type SessionStatus = 'ready' | 'attached' | 'detached' | 'stopped'
 export interface Session extends SessionLaunchOptions {

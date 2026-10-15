@@ -2,6 +2,7 @@
 // broker. Binary WebSocket frames carry raw terminal bytes; text frames carry
 // these JSON messages. See docs/ARCHITECTURE.md → "Terminal protocol".
 import type { Static } from 'typebox'
+import type { SessionActivity } from './activity'
 import type { ImageMediaType } from './model'
 import type { connectInput, historyNavigation } from './schemas'
 
@@ -43,6 +44,7 @@ export interface SignalMessage {
 export type ServerMessage =
   | { type: 'hello'; resume: string; session: { id: string; name: string }; target: { id: string; name: string } }
   | { type: 'ready' }
+  | { type: 'activity'; activity: SessionActivity | null }
   | ({ type: 'scrollback' } & ScrollbackState)
   | { type: 'result'; id: string; ok: boolean; message?: string; reference?: string }
   | { type: 'signal'; signal: SignalMessage }

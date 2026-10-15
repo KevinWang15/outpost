@@ -229,16 +229,19 @@ input::placeholder {
 .tab-status[data-state='connected'] {
   color: #34d399;
 }
-.tab-status[data-state='connecting'] {
+.tab-status[data-state='working'] {
   color: #60a5fa;
 }
-.tab-status[data-state='connecting'] svg {
-  animation: tab-connecting 1s linear infinite;
+.tab-status[data-state='connecting'] svg,
+.tab-status[data-state='working'] svg {
+  animation: tab-spin 1s linear infinite;
 }
-.tab-status[data-state='attention'] {
+.tab-status[data-state='attention'],
+.tab-status[data-state='finished'] {
   color: #fbbf24;
 }
-.tab-status[data-state='attention'] svg {
+.tab-status[data-state='attention'] svg,
+.tab-status[data-state='finished'] svg {
   transform-origin: 50% 20%;
   animation: tab-bell-ring 2.4s ease-in-out infinite;
 }
@@ -520,7 +523,7 @@ dd {
 .placeholder button {
   margin: 4px;
 }
-@keyframes tab-connecting {
+@keyframes tab-spin {
   to {
     transform: rotate(360deg);
   }

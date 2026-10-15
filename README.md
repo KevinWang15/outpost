@@ -182,6 +182,14 @@ returns to one session. Each tab keeps its connection, terminal buffer and
 message draft while you switch or rearrange it. Up to 32 tabs across 16 windows
 can stay open. Connect and notifications select the session in its owning window.
 
+Tab icons and the session switcher follow the session list's **Activity** field:
+a blue spinner means **Working**, a gray clock means **Idle**, and a ringing
+bell means **Needs you**. They use the coding tool's native turn records and the
+same acknowledgement state, with updates about every two seconds. Unavailable
+activity shows **Unknown**; hover over the icon for details. Connection errors
+take priority, and an unread terminal bell remains highlighted until you return.
+The green check means connected while the first activity reading is pending.
+
 Settings remembers text size and bell sound. The toolbar starts hidden in the
 app and can be revealed from the terminal's upper corner. The same xterm.js
 client handles input, image paste, scrollback and reconnects in both clients.

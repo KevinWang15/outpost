@@ -651,6 +651,9 @@ class AttachHooks:
     def on_input(self):
         self.observer.input()
 
+    def activity(self):
+        return self.observer.describe(alive(self.session))
+
     def scrollback(self, offset=None):
         return self.history.read(offset)
 

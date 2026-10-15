@@ -237,6 +237,7 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
 | ← client | `hello {resume, session, target}` | Connection accepted |
 | ← client | `ready` | Attached to tmux; subscribe to history metadata |
+| ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes `null` |
 | ← client | `scrollback {available, lines, offset, rows, active, alternate, navigation?}` | History extent, position, copy mode, and whether the application owns scrolling |
 | ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / a scrollback seek / `activate` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
@@ -278,7 +279,7 @@ session, missing tmux), its `OUTPOST_RESULT` error becomes the client's
 | --- | --- | --- |
 | `I` | broker → relay | Input bytes for tmux |
 | `O` | relay → broker | Output bytes from tmux |
-| `C` | both | JSON control: `resize`, `send`, `paste-image`, `scrollback`, `signal-result` / `ready`, `result`, `scrollback`, `signal`, `exit` |
+| `C` | both | JSON control: `resize`, `send`, `paste-image`, `scrollback`, `signal-result` / `ready`, `activity`, `result`, `scrollback`, `signal`, `exit` |
 
 Framing replaces in-band escape sequences, so typed or pasted bytes can never
 be mistaken for control messages. The relay owns a PTY for `tmux attach`, so
@@ -312,6 +313,31 @@ allocation or registration. SSH and local targets use their existing
 management transports. If harness allocation fails after Git succeeds, the
 error identifies the created worktree so it can be reused or removed manually.
 
+### Shared session activity
+
+`Activity.describe()` in the target runtime is the source for both the session
+list and live terminal activity. Harness adapters read native turn markers;
+terminal output rate, elapsed silence and local typing never infer Working or
+Idle. The same baseline and acknowledgement checkpoints decide whether a
+completed turn is still unchecked. Reading activity does not acknowledge it.
+The existing input/focus-in observer and the list's explicit check action update
+those checkpoints, so every client observes the same acknowledgement.
+
+`outpost_activity_stream.py` samples this reader immediately after attachment
+and two seconds after each completed read, with one read in flight. Its worker
+starts after the PTY fork and runs separately from history and terminal I/O.
+Only changed metadata is emitted over the existing relay and WebSocket; it
+opens no additional SSH connection or account API request. Polling continues
+without terminal output so completions and acknowledgements from other clients
+are observed. Disconnect disposes the worker, and clients clear stale activity
+on close/reconnect. Read failures report Unknown and do not interrupt the terminal.
+
+`shared/activity.ts` owns the `working | idle | finished` enum, `SessionActivity`,
+display labels and Unknown handling. Both `ActivityBadge` and `tab-status.ts`
+use it; the broker and native IPC use its bounded parser. The relay sends state,
+timestamp, opaque completion ID and any diagnostic, never transcript content.
+The desktop bridge is version 4: server and app must be updated together.
+
 ### Signals
 
 Coding sessions run with `BROWSER=~/.outpost/bin/outpost-browser`. The helper
@@ -339,16 +365,19 @@ two-session split and shared pane geometry. Menus resolve the focused window.
 settings. Its `workspace-preload.ts` bridge accepts only enumerated local UI
 actions; one IPC dispatcher verifies the bundled main frame and routes each call
 to that sender's window. Tab actions check ownership before changing a terminal.
-The local renderer receives tab labels, connection state, attention and draft
+The local renderer receives tab labels, connection and activity state, attention and draft
 flags, never grants, terminal bytes or draft contents.
 
 `tab-status.ts` renders the same status icons and text in tabs and the session
-switcher: a check for connected, spinner while connecting, cross for disconnected,
-and a ringing bell for attention. Hover descriptions and accessible tab names
-include both connection and attention state. Bell animations pause between rings
-and stop with the system's reduced-motion preference; ordinary state updates keep
-the tab's existing icon node so they do not restart animations. Activating the
-session dismisses attention through the existing bell/focus path.
+switcher. Connecting/reconnecting and disconnected states take priority. Connected
+tabs show a blue spinner for Working, a gray clock for Idle, a ringing bell for
+Needs you (`finished`), or a question mark for Unknown. An unread terminal bell
+takes priority over activity. The green connection check remains while waiting
+for the first activity observation. Hover descriptions and accessible tab names
+include connection, activity and bell state. Animations respect reduced motion;
+ordinary state updates keep the existing icon node so they do not restart them.
+Activating the session dismisses terminal-bell attention through the existing
+bell/focus path; unchecked completion follows the shared activity checkpoints.
 
 Activation applies view visibility before restoring or focusing the native window.
 Native focus events may select another visible split pane, but cannot override an

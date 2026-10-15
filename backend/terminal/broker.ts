@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { WebSocket } from 'ws'
 import { Ajv } from 'ajv'
+import { parseSessionActivity } from '../../shared/activity'
 import type { ClientMessage, CloseReason, HistoryNavigation, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, protocolVersion } from '../../shared/protocol'
 import { historyNavigation } from '../../shared/schemas'
@@ -170,6 +171,8 @@ class Connection {
       for (const frame of this.pending) this.child!.stdin.write(frame)
       this.pending = []
       this.send({ type: 'ready' })
+    } else if (message.type === 'activity') {
+      this.send({ type: 'activity', activity: parseSessionActivity(message.activity) })
     } else if (message.type === 'scrollback') {
       const { lines, offset, rows, available, active, alternate } = message
       if (

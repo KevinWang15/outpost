@@ -21,6 +21,8 @@ import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
+from outpost_activity_stream import ActivityStream
+
 MAGIC = b'\x00OUTPOST-RELAY-2\x00'
 HEADER = struct.Struct('>cI')
 MAX_FRAME = 32 * 1024 * 1024
@@ -214,7 +216,7 @@ def winsize(cols, rows):
 
 
 class Relay:
-    """hooks: on_input(), paste_image(extension, data), scrollback(offset)."""
+    """hooks: on_input(), activity(), paste_image(extension, data), scrollback(offset)."""
 
     def __init__(self, command, environment, cols, rows, hooks, signal_path=None):
         self.command = command
@@ -386,6 +388,7 @@ class Relay:
             fcntl.ioctl(0, termios.TIOCSWINSZ, self.size)
             os.execvpe(self.command[0], self.command, self.environment)
         self.observer = InputObserver(self.observed)
+        activity = ActivityStream(self.hooks.activity)
         self.signals = None
         if self.signal_path:
             try:
@@ -412,6 +415,10 @@ class Relay:
                 self.observer.flush()
                 if not eof:
                     self.advance()
+                    if len(self.outgoing) < HIGH_WATER:
+                        state = activity.poll()
+                        if state is not None:
+                            self.send({'type': 'activity', 'activity': state})
                 if self.signals:
                     self.signals.expire()
                 readers = [] if eof or len(self.outgoing) >= HIGH_WATER else [master]
@@ -471,6 +478,7 @@ class Relay:
             child, status = os.waitpid(pid, os.WNOHANG)
             reaped = child == pid
         finally:
+            activity.close()
             if self.history_worker:
                 self.history_worker.shutdown(wait=False, cancel_futures=True)
             os.close(master)

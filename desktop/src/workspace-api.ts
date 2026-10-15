@@ -54,8 +54,8 @@ export interface WorkspaceBridge {
   forgetServer(origin: string): Promise<void>
   preferences(value: TerminalPreferences): Promise<void>
   checkUpdates(): Promise<void>
+  reportError(message: string): Promise<void>
 }
 
-export const tabBarHeight = 48
-export const statusBarHeight = 28
+export const tabBarHeight = 36
 export const splitGap = 8

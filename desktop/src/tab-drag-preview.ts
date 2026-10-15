@@ -1,6 +1,7 @@
 import { BrowserWindow, type Point } from 'electron'
+import { tabBarHeight } from './workspace-api'
 
-const size = { width: 240, height: 42 }
+const size = { width: 240, height: tabBarHeight }
 
 /** A fixed-size native label, independent of tab-strip measurements. */
 export class TabDragPreview {
@@ -38,7 +39,7 @@ export class TabDragPreview {
       .loadURL(
         'data:text/html;charset=utf-8,' +
           encodeURIComponent(
-            `<meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;height:100%}body{padding:10px 14px;color:#e2e8f0;background:#162239;font:13px system-ui;white-space:nowrap;text-overflow:ellipsis;border:1px solid #60a5fa;box-sizing:border-box}</style>${escaped}`,
+            `<meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;height:100%}body{padding:0 12px;color:#e2e8f0;background:#162239;font:13px/${size.height - 2}px system-ui;white-space:nowrap;text-overflow:ellipsis;border:1px solid #60a5fa;box-sizing:border-box}</style>${escaped}`,
           ),
       )
       .then(() => {

@@ -8,7 +8,6 @@ import { TrustedServers } from './store'
 import { TerminalTabs, type TerminalTab } from './terminals'
 import { checkUpdates } from './updates'
 import {
-  statusBarHeight,
   tabBarHeight,
   type SplitDirection,
   type WorkspacePanel,
@@ -38,6 +37,7 @@ export class WorkspaceWindow {
   private geometry: TabGeometry | null = null
   private closing = new Set<number>()
   private confirmingWindow = false
+  private reportingError = false
   private allowWindowClose = false
   private presenting = false
   constructor(
@@ -96,6 +96,7 @@ export class WorkspaceWindow {
     handle('forget-server', (value: string) => this.forgetServer(value))
     handle('preferences', (value: TerminalPreferences) => this.setPreferences(value))
     handle('updates', checkUpdates)
+    handle('report-error', (message: string) => this.reportError(message))
     handle('tab-geometry', (value: TabGeometry) => this.setGeometry(value))
     handle('drag-start', (id: number) => this.host.dragStart(this, id))
     handle('drag-end', (cancel: boolean) => this.host.dragEnd(this, cancel !== false))
@@ -321,11 +322,31 @@ export class WorkspaceWindow {
   restoreFocus() {
     if (this.window?.isFocused()) this.focusTerminal()
   }
+  private async reportError(message: string) {
+    const window = this.window
+    if (!window || window.isDestroyed() || this.reportingError || typeof message !== 'string' || !message.trim()) return
+    this.reportingError = true
+    try {
+      // Native terminal views sit above the workspace DOM. A native dialog
+      // keeps errors visible without reserving a permanent strip of the window.
+      await dialog.showMessageBox(window, {
+        type: 'error',
+        title: 'Outpost',
+        message: 'Could not complete this action',
+        detail: message.slice(0, 4096),
+        buttons: ['OK'],
+        noLink: true,
+      })
+    } finally {
+      this.reportingError = false
+      this.restoreFocus()
+    }
+  }
   render() {
     const window = this.window
     if (!window || window.isDestroyed()) return
     const [width, height] = window.getContentSize()
-    const area = { x: 0, y: tabBarHeight, width, height: Math.max(0, height - tabBarHeight - statusBarHeight) }
+    const area = { x: 0, y: tabBarHeight, width, height: Math.max(0, height - tabBarHeight) }
     const visible = this.layout.visible()
     if (this.layout.split) this.layout.split.ratio = splitRatio(area.width, area.height, this.layout.split)
     const geometry = paneLayout(area.width, area.height, this.layout.split)

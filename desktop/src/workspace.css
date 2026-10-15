@@ -66,7 +66,7 @@ input::placeholder {
   height: var(--tab-bar-height);
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   padding: 0 8px;
   background: #0b1220;
   border-bottom: 1px solid #25324a;
@@ -90,13 +90,13 @@ input::placeholder {
 .icon {
   display: grid;
   place-items: center;
-  flex: 0 0 32px;
-  width: 32px;
-  height: 32px;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   background: transparent;
   border-color: transparent;
-  font-size: 21px;
+  font-size: 19px;
   border-radius: 6px;
 }
 .brand {
@@ -140,8 +140,8 @@ input::placeholder {
   position: relative;
   border: 1px solid transparent;
   border-bottom: 2px solid transparent;
-  margin-top: 4px;
-  border-radius: 8px 8px 0 0;
+  margin-top: 3px;
+  border-radius: 6px 6px 0 0;
 }
 .tab.selected {
   background: #162239;
@@ -175,10 +175,10 @@ input::placeholder {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border: 0;
   background: transparent;
-  padding: 0 8px 0 12px;
+  padding: 0 6px 0 9px;
   color: #aebdd2;
   text-align: left;
 }
@@ -189,28 +189,38 @@ input::placeholder {
   color: #f1f5f9;
 }
 .tab-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: 50%;
-  background: #64748b;
+.tab-status {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: #94a3b8;
 }
-.dot.connected {
-  background: #34d399;
+.tab-status svg {
+  width: 100%;
+  height: 100%;
+  transform-origin: center;
 }
-.dot.connecting,
-.dot.reconnecting {
-  background: #60a5fa;
-  animation: pulse 1.4s ease-in-out infinite;
+.tab-status[data-state='connected'] {
+  color: #34d399;
 }
-.dot.attention {
-  background: #fbbf24;
-  box-shadow: 0 0 0 3px #fbbf2418;
+.tab-status[data-state='connecting'] {
+  color: #60a5fa;
+}
+.tab-status[data-state='connecting'] svg {
+  animation: tab-connecting 1s linear infinite;
+}
+.tab-status[data-state='attention'] {
+  color: #fbbf24;
+}
+.tab-status[data-state='attention'] svg {
+  transform-origin: 50% 20%;
+  animation: tab-bell-ring 2.4s ease-in-out infinite;
 }
 .tab-close {
   width: 25px;
@@ -229,7 +239,7 @@ input::placeholder {
 }
 #stage {
   position: absolute;
-  inset: var(--tab-bar-height) 0 var(--status-bar-height);
+  inset: var(--tab-bar-height) 0 0;
   background: #0f172a;
 }
 #panels {
@@ -364,6 +374,11 @@ label {
   font-size: 11px;
   margin-top: 3px;
 }
+.row-main .session-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .rows .subtle {
   padding: 7px 10px;
   border-color: transparent;
@@ -485,44 +500,38 @@ dd {
 .placeholder button {
   margin: 4px;
 }
-.statusbar {
-  height: var(--status-bar-height);
-  position: absolute;
-  inset: auto 0 0;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 0 12px;
-  background: #0b1220;
-  border-top: 1px solid #25324a;
-  color: #7e93af;
-  font-size: 11px;
-  user-select: none;
+@keyframes tab-connecting {
+  to {
+    transform: rotate(360deg);
+  }
 }
-#connection {
-  flex: 0 1 auto;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-#message {
-  color: #fbbf24;
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-#count {
-  margin-left: auto;
-  white-space: nowrap;
-}
-@keyframes pulse {
-  50% {
-    opacity: 0.35;
+@keyframes tab-bell-ring {
+  0%,
+  28%,
+  100% {
+    transform: rotate(0deg);
+  }
+  4% {
+    transform: rotate(16deg);
+  }
+  8% {
+    transform: rotate(-16deg);
+  }
+  12% {
+    transform: rotate(12deg);
+  }
+  16% {
+    transform: rotate(-12deg);
+  }
+  20% {
+    transform: rotate(6deg);
+  }
+  24% {
+    transform: rotate(-6deg);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dot {
+  .tab-status[data-state] svg {
     animation: none;
   }
 }

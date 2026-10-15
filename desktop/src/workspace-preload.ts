@@ -27,5 +27,6 @@ const bridge: WorkspaceBridge = {
   forgetServer: origin => ipcRenderer.invoke('workspace:action', 'forget-server', origin),
   preferences: value => ipcRenderer.invoke('workspace:action', 'preferences', value),
   checkUpdates: () => ipcRenderer.invoke('workspace:action', 'updates'),
+  reportError: message => ipcRenderer.invoke('workspace:action', 'report-error', message),
 }
 contextBridge.exposeInMainWorld('outpostWorkspace', Object.freeze(bridge))

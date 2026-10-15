@@ -342,6 +342,14 @@ to that sender's window. Tab actions check ownership before changing a terminal.
 The local renderer receives tab labels, connection state, attention and draft
 flags, never grants, terminal bytes or draft contents.
 
+`tab-status.ts` renders the same status icons and text in tabs and the session
+switcher: a check for connected, spinner while connecting, cross for disconnected,
+and a ringing bell for attention. Hover descriptions and accessible tab names
+include both connection and attention state. Bell animations pause between rings
+and stop with the system's reduced-motion preference; ordinary state updates keep
+the tab's existing icon node so they do not restart animations. Activating the
+session dismisses attention through the existing bell/focus path.
+
 Activation applies view visibility before restoring or focusing the native window.
 Native focus events may select another visible split pane, but cannot override an
 activation in progress or reactivate a view already hidden by the current layout.
@@ -384,12 +392,20 @@ and draft stay alive.
 The tab strip replaces the system title bar using Electron's
 `titleBarStyle: 'hidden'` and [Window Controls Overlay](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar#custom-window-controls).
 Native window controls share the same
-`tabBarHeight` as the HTML strip and terminal view offset. CSS uses the overlay's
+36-pixel `tabBarHeight` as the HTML strip, terminal view offset, drag hit testing
+and fixed-size floating tab preview. CSS uses the overlay's
 safe-area geometry to reserve space for OS buttons, including RTL placement;
 the overlay visibility event releases this space in fullscreen. Only the local
 header has a window drag region. Its tab scroller and buttons opt out, and a
 flexible spacer always leaves room to drag the window with a full tab strip.
 Window close, minimize, maximize and fullscreen remain native operations.
+
+Terminal views and workspace panels fill the remaining height to the bottom of
+the window. Connection state lives in the tabs; there is no persistent status
+bar. Workspace action errors use a native dialog owned by the calling window,
+with at most one open per window. This remains visible above native terminal
+views without reserving space. Drag destinations use their existing insertion
+markers, tab highlight and live terminal preview.
 
 `terminals.ts` owns each session's sandboxed `WebContentsView` and native bridge.
 Views use nonpersistent sessions partitioned by server origin. Switching tabs

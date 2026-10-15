@@ -1,6 +1,6 @@
 import { tabDragging } from './tab-drag-ui'
+import { createTabStatus, tabStatusLabel, updateTabStatus } from './tab-status'
 import {
-  statusBarHeight,
   tabBarHeight,
   type WorkspaceBridge,
   type WorkspacePanel,
@@ -19,7 +19,6 @@ declare global {
 }
 const api = window.outpostWorkspace
 document.documentElement.style.setProperty('--tab-bar-height', `${tabBarHeight}px`)
-document.documentElement.style.setProperty('--status-bar-height', `${statusBarHeight}px`)
 const overlay = navigator.windowControlsOverlay
 const titleBarGeometry = () => document.documentElement.toggleAttribute('data-window-controls-overlay', overlay.visible)
 overlay.addEventListener('geometrychange', titleBarGeometry)
@@ -35,7 +34,8 @@ const button = (text: string, action: () => void, className = 'subtle') => {
 }
 const run = (work: Promise<unknown>) => {
   void work.catch(error => {
-    el('message').textContent = error instanceof Error ? error.message : 'Could not complete this action.'
+    const message = error instanceof Error ? error.message : 'Could not complete this action.'
+    void api.reportError(message).catch(reportError => console.error(message, reportError))
   })
 }
 let state: WorkspaceSnapshot | null = null
@@ -46,13 +46,6 @@ const tabNodes = new Map<number, HTMLElement>()
 const tabs = el('tabs')
 const divider = el('divider')
 const search = el<HTMLInputElement>('session-search')
-const statusLabel = (tab: TabSummary) =>
-  tab.attention
-    ? 'Bell'
-    : { connected: 'Connected', connecting: 'Connecting…', reconnecting: 'Reconnecting…', closed: 'Disconnected' }[
-        tab.connection
-      ]
-
 tabDragging(tabs, api, run)
 let geometryFrame = 0
 let scrollFrame = 0
@@ -85,12 +78,9 @@ function tabNode(id: number) {
   node.dataset.tab = String(id)
   const select = button('', () => run(api.activate(id)), 'tab-select')
   select.setAttribute('role', 'tab')
-  const dot = document.createElement('span')
-  dot.className = 'dot'
-  dot.setAttribute('aria-hidden', 'true')
   const label = document.createElement('span')
   label.className = 'tab-label'
-  select.append(dot, label)
+  select.append(createTabStatus(), label)
   select.ondblclick = () => run(api.panel({ rename: id }))
   select.onkeydown = event => {
     if (!state) return
@@ -142,9 +132,11 @@ function renderTabs() {
     const select = node.querySelector<HTMLButtonElement>('.tab-select')!
     select.setAttribute('aria-selected', String(tab.id === state!.active))
     select.tabIndex = tab.id === state!.active ? 0 : -1
-    select.title = `${tab.label}\n${tab.origin}\n${statusLabel(tab)}${tab.hasDraft ? ' · Unsent message' : ''}`
+    const description = `${tabStatusLabel(tab)}${tab.hasDraft ? ' · Unsent message' : ''}`
+    select.title = `${tab.label}\n${tab.origin}\n${description}`
+    select.setAttribute('aria-label', `${tab.label} · ${description}`)
     node.querySelector('.tab-label')!.textContent = tab.label
-    node.querySelector('.dot')!.className = `dot ${tab.attention ? 'attention' : tab.connection}`
+    updateTabStatus(node.querySelector<HTMLElement>('.tab-status')!, tab)
     const close = node.querySelector<HTMLButtonElement>('.tab-close')!
     close.classList.toggle('draft', tab.hasDraft)
     close.textContent = tab.hasDraft ? '•' : '×'
@@ -207,9 +199,15 @@ function renderMatches() {
     row.classList.toggle('highlighted', index === selected)
     const open = button('', () => run(api.activate(tab.id)), 'row-main')
     const title = document.createElement('strong')
-    title.textContent = `${tab.attention ? '● ' : ''}${tab.label}`
+    title.className = 'session-title'
+    const indicator = createTabStatus()
+    updateTabStatus(indicator, tab)
+    const label = document.createElement('span')
+    label.className = 'tab-label'
+    label.textContent = tab.label
+    title.append(indicator, label)
     const subtitle = document.createElement('small')
-    subtitle.textContent = `${tab.origin} · ${statusLabel(tab)}`
+    subtitle.textContent = `${tab.origin} · ${tabStatusLabel(tab)}`
     open.append(title, subtitle)
     const pair = button('◫', () => run(api.pair(tab.id)))
     pair.disabled = tab.id === state?.active || state?.active === null
@@ -281,18 +279,8 @@ function render(next: WorkspaceSnapshot) {
   el('split').setAttribute('aria-label', next.split ? 'Return to single pane' : 'Split side by side')
   el('split').title = next.split ? 'Return to single pane' : 'Split side by side'
   el('split').setAttribute('aria-pressed', String(Boolean(next.split)))
-  const active = next.tabs.find(tab => tab.id === next.active)
-  el('connection').textContent =
-    next.drag?.target && !next.drag.source
-      ? 'Release to move tab here · Escape to cancel'
-      : active
-        ? `${statusLabel(active)} · ${active.origin}`
-        : 'Outpost'
-  el('count').textContent =
-    `${next.tabs.length} session${next.tabs.length === 1 ? '' : 's'}${next.split ? ' · Split view' : ''}`
   el('version').textContent = `Outpost ${next.version} · Preview`
   if (changedPanel) {
-    el('message').textContent = ''
     // A provisional transfer may empty the source or cover the target's panel.
     // Keep keyboard focus and pointer capture in the source chrome until release.
     if (panel === 'switcher') {

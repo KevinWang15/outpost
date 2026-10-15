@@ -80,7 +80,7 @@ test('app tickets attach without a browser login; reload and toolbar changes reu
       url => url.includes('#token=') || url.includes('/api/auth/') || new URL(url).pathname.endsWith('/connect'),
     ),
   ).toBe(false)
-  await expect(page.getByRole('button', { name: /desktop notifications/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: /notifications/i })).toBeVisible()
 
   // Other app windows neither inherit nor overwrite this one's resume grant.
   const other = await context.newPage()
@@ -89,6 +89,8 @@ test('app tickets attach without a browser login; reload and toolbar changes reu
   expect(await other.evaluate(key => sessionStorage.getItem(key), ticketKey)).toBeNull()
   // Replaying the original launch ticket fails at the real broker, and the
   // rejected ticket is cleared so reload cannot retry it indefinitely.
+  // Load a new document as the app does; changing only a fragment does not reload this browser page.
+  await other.goto('about:blank')
   await other.goto(`/terminal/desktop#token=${connection.token}`)
   await expect(other.getByRole('heading', { name: 'Connection expired' })).toBeVisible()
   expect(await other.evaluate(key => sessionStorage.getItem(key), ticketKey)).toBeNull()

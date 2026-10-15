@@ -23,7 +23,7 @@ export function runCommand(
   return new Promise((resolve, reject) => {
     const aborted = () => new AppError(`${command.label} operation aborted`, 502)
     if (options.signal?.aborted) return reject(aborted())
-    // Give short-lived workers their own process group. tmux servers are
+    // Give short-lived workers their own process group. Terminal services are
     // started independently by the runtime and never belong to these groups.
     const child = spawn(command.executable, command.args, {
       stdio: ['pipe', 'pipe', 'pipe'],

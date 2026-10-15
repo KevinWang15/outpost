@@ -28,16 +28,21 @@ export default defineConfig([
     files: [
       '*.{js,ts}',
       'backend/**/*.ts',
+      'terminal-service/**/*.ts',
       'desktop/src/**/*.ts',
       'tests/**/*.{js,ts}',
       'scripts/**/*.mjs',
       'promo-v2/scripts/**/*.mjs',
     ],
-    languageOptions: { globals: globals.node },
+    languageOptions: { globals: { ...globals.node, Bun: 'readonly' } },
   },
   {
     files: ['promo-v2/src/**/*.js', 'desktop/src/workspace-ui.ts', 'desktop/src/preload.ts'],
     languageOptions: { globals: globals.browser },
+  },
+  {
+    files: ['public/terminal-notifications.js'],
+    languageOptions: { globals: globals.serviceworker },
   },
   {
     files: ['frontend/**/*.{ts,tsx}'],

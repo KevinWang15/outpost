@@ -8,7 +8,7 @@
     "dev": "concurrently --kill-others --names api,web \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite",
     "dev:server": "tsx watch --include=backend/** --include=runtime/** backend/server.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.tests.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.tests.json && tsc --noEmit -p terminal-service/tsconfig.json",
     "build": "npm run typecheck && npm run build:client && npm run build:server",
     "build:client": "vite build",
     "build:server": "node scripts/build-server.mjs",
@@ -18,6 +18,7 @@
     "test:python": "python3 -m unittest discover -s tests/runtime",
     "test:integration": "node --import tsx --test 'tests/integration/*.test.ts'",
     "test:ui": "playwright test",
+    "test:mobile": "playwright test --config playwright.mobile.config.ts",
     "check": "npm run lint && npm run lint:python && npm run build && npm test",
     "logo:generate": "node scripts/logo/generate.mjs",
     "promo:capture": "npm --prefix promo-v2 run capture",
@@ -29,7 +30,8 @@
     "docs:capture": "node scripts/screenshots.mjs",
     "dev:debug": "tsx watch --inspect=127.0.0.1:9229 --include=backend/** --include=runtime/** backend/server.ts",
     "lint:python": "ruff check runtime tests && ruff format --check runtime tests",
-    "format": "prettier --write . && ruff format runtime tests && ruff check --fix runtime tests"
+    "format": "prettier --write . && ruff format runtime tests && ruff check --fix runtime tests",
+    "build:terminal": "npm exec --yes --package=bun@1.4.3 -- node scripts/build-terminal.mjs"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.4",
@@ -60,12 +62,14 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
+    "@types/bun": "1.4.3",
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/ws": "^8.18.2",
     "@typescript/native": "npm:typescript@~7.0.2",
     "@vitejs/plugin-react-swc": "^4.3.3",
+    "@xterm/headless": "6.0.0",
     "concurrently": "^10.0.6",
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",

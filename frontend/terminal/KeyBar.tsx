@@ -26,6 +26,8 @@ export default function KeyBar({
   onKey,
   onCopy,
   onPaste,
+  onKeyboard,
+  onSelectText,
 }: {
   enabled: boolean
   modifiers: TerminalModifiers
@@ -33,11 +35,20 @@ export default function KeyBar({
   onKey: (key: string, modifiers?: TerminalModifiers) => void
   onCopy: () => void
   onPaste: () => void
+  onKeyboard: () => void
+  onSelectText: () => void
 }) {
   // Keep focus (and the phone keyboard) on the terminal while tapping keys.
-  const hold = (event: React.PointerEvent) => event.preventDefault()
+  // Cancel mouse focus transfer, not pointerdown: WebKit can suppress the subsequent touch click.
+  const hold = (event: React.MouseEvent) => event.preventDefault()
   return (
     <div className="key-bar" role="group" aria-label="Terminal keys">
+      <button type="button" title="Show or hide keyboard" onMouseDown={hold} onClick={onKeyboard}>
+        Keyboard
+      </button>
+      <button type="button" onMouseDown={hold} onClick={onSelectText}>
+        Select text
+      </button>
       {(['ctrl', 'alt'] as const).map(name => (
         <button
           key={name}
@@ -45,7 +56,7 @@ export default function KeyBar({
           disabled={!enabled}
           aria-pressed={Boolean(modifiers[name])}
           title={`${name === 'ctrl' ? 'Ctrl' : 'Alt'} for the next key`}
-          onPointerDown={hold}
+          onMouseDown={hold}
           onClick={() => onModifiers({ ...modifiers, [name]: !modifiers[name] })}
         >
           {name === 'ctrl' ? 'Ctrl' : 'Alt'}
@@ -58,22 +69,16 @@ export default function KeyBar({
           disabled={!enabled}
           title={item.title}
           aria-label={item.title}
-          onPointerDown={hold}
+          onMouseDown={hold}
           onClick={() => onKey(item.key, item.modifiers)}
         >
           {item.label}
         </button>
       ))}
-      <button type="button" title="Copy selection" onPointerDown={hold} onClick={onCopy}>
+      <button type="button" title="Copy selection" onMouseDown={hold} onClick={onCopy}>
         Copy
       </button>
-      <button
-        type="button"
-        disabled={!enabled}
-        title="Paste from your clipboard"
-        onPointerDown={hold}
-        onClick={onPaste}
-      >
+      <button type="button" disabled={!enabled} title="Paste from your clipboard" onMouseDown={hold} onClick={onPaste}>
         Paste
       </button>
     </div>

@@ -1,6 +1,6 @@
-# A disposable SSH target with the oldest supported tmux (3.2a) and Python 3.10.
+# A disposable SSH target with Python 3.10. The fixture installs the built service.
 FROM ubuntu:22.04
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server python3 tmux git ca-certificates \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server python3 git ca-certificates \
     && rm -rf /var/lib/apt/lists/* && mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh
 COPY coding-tool-fixture.py /usr/local/bin/claude
 RUN chmod +x /usr/local/bin/claude && cp /usr/local/bin/claude /usr/local/bin/codex && cp /usr/local/bin/claude /usr/local/bin/kimi

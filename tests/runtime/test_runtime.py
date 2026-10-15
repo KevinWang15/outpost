@@ -1,4 +1,4 @@
-"""Target runtime and relay against real tmux, in a disposable home."""
+"""Target runtime and relay against the terminal service, in a disposable home."""
 
 import base64
 import json
@@ -20,16 +20,26 @@ FIXTURE = ROOT / 'tests' / 'fixtures' / 'coding-tool-fixture.py'
 sys.path.insert(0, str(RUNTIME))
 from outpost_relay import MAGIC, FrameDecoder, control, encode  # noqa: E402
 
+BINARY = (
+    ROOT
+    / 'terminal-service'
+    / 'dist'
+    / ('outpost-terminal-linux-' + ('arm64' if os.uname().machine == 'aarch64' else 'x64') + '-glibc')
+)
+
 PNG = base64.b64encode(b'\x89PNG\r\n\x1a\n' + b'0' * 64).decode()
 
 
-@unittest.skipUnless(shutil.which('tmux'), 'tmux is required')
+@unittest.skipUnless(BINARY.is_file(), 'npm run build:terminal is required')
 class RuntimeTest(unittest.TestCase):
     def setUp(self):
         self.directory = Path(tempfile.mkdtemp(prefix='outpost-runtime-'))
         self.home = self.directory / "home with 'quotes"
         self.bin = self.home / 'bin'
         self.bin.mkdir(parents=True)
+        service = self.home / '.outpost' / 'bin'
+        service.mkdir(parents=True)
+        shutil.copy(BINARY, service / 'outpost-terminal')
         for tool in ('claude', 'codex', 'kimi'):
             target = self.bin / tool
             shutil.copy(FIXTURE, target)
@@ -210,7 +220,7 @@ class RuntimeTest(unittest.TestCase):
         connection.expect_output(b'90x25')
         self.assertEqual(self.call({'action': 'get', 'id': session['id']})['status'], 'attached')
 
-        # Images travel over the open connection and are pasted into tmux once.
+        # Images travel over the open connection and are pasted into the persistent PTY once.
         connection.send(control({'type': 'paste-image', 'id': 'p1', 'extension': 'png', 'data': PNG}))
         result = connection.expect_control('result')
         self.assertTrue(result['ok'], result)
@@ -242,15 +252,9 @@ class RuntimeTest(unittest.TestCase):
         again = self.attach(session)
         again.expect_output(b'OUTPOST_FIXTURE_READY ' + str(pid).encode())
 
-        # Detaching with Ctrl+\ reports why the client ended.
-        again.send(encode(b'I', b'\x1c'))
-        self.assertEqual(again.expect_control('exit')['reason'], 'detached')
-        self.assertEqual(again.process.wait(timeout=10), 0)
-
-        stopped = self.call({'action': 'terminate', 'id': session['id']})
-        self.assertEqual(stopped['status'], 'stopped')
-        error = self.call({'action': 'attach', 'id': session['id'], 'cols': 1}, expect_ok=False)
-        self.assertEqual(error['message'], 'Invalid terminal size')
+        # Detachment closes the connection; no control key is stolen from the app.
+        again.close()
+        self.assertEqual(self.call({'action': 'terminate', 'id': session['id']})['status'], 'stopped')
         self.call({'action': 'delete', 'id': session['id']})
         self.assertEqual(self.call({'action': 'list'})['sessions'], [])
 
@@ -324,7 +328,23 @@ class Connection:
             if kind == b'O':
                 self.output += payload
             else:
-                self.controls.append(json.loads(payload))
+                message = json.loads(payload)
+                self.controls.append(message)
+                part = message.get('checkpoint', {})
+                if part.get('part') == 'lines':
+                    for line in part['lines']:
+                        data = base64.b64decode(line['cells'])
+                        cells = struct.unpack('<' + 'I' * (len(data) // 4), data)
+                        text = ''
+                        for column in range(len(cells) // 3):
+                            value = cells[column * 3]
+                            if value & 0x200000:
+                                text += line['combined'].get(str(column), '')
+                            elif value & 0x1FFFFF:
+                                text += chr(value & 0x1FFFFF)
+                            else:
+                                text += ' '
+                        self.output += text.rstrip().encode() + b'\n'
 
     def expect_output(self, marker, timeout=15):
         deadline = time.monotonic() + timeout

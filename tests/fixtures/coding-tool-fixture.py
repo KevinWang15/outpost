@@ -200,7 +200,8 @@ while True:
             # Match newly completed controls, including ones split across reads.
             return marker in incoming[max(0, len(input_tail) - len(marker) + 1) :]
 
-        if received(b'clipboard'):
+        # Do not mistake an uploaded /.outpost/clipboard/... image path for this command.
+        if received(b'copy-clipboard'):
             print('\x1b]52;c;T1VUUE9TVF9DTElQQk9BUkRfVEVTVA==\x07', end='', flush=True)
         if received(b'ring-bell'):
             print('\x07', end='', flush=True)

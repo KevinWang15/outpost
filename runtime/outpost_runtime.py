@@ -1,4 +1,4 @@
-"""Target runtime. Executed per operation, locally or through SSH; never installed as an agent."""
+"""Per-operation target management, sent locally or through SSH. Sessions belong to outpost-terminal."""
 
 import base64
 import binascii
@@ -13,7 +13,6 @@ import re
 import shlex
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
@@ -22,6 +21,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+import outpost_terminal as terminal
 from outpost_activity_state import Activity
 from outpost_harness import adapters
 
@@ -263,7 +263,7 @@ def launch_script(session, executable):
 
 def socket_name(session):
     # Relative paths avoid the Unix socket path limit, even with long home directories.
-    return 'sockets/' + session['id'] + '.sock'
+    return 'terminals/' + session['id'] + '.sock'
 
 
 def directory_suggestions(prefix):
@@ -304,70 +304,20 @@ def directory_suggestions(prefix):
     return {'directories': directories[:50], 'truncated': len(directories) > 50}
 
 
-def tmux_command(session, *arguments):
-    return ['tmux', '-S', socket_name(session), '-f', '/dev/null', *arguments]
-
-
-def tmux_environment():
-    environment = dict(os.environ)
-    environment.pop('TMUX', None)
-    environment.pop('TMUX_PANE', None)
-    # SSH without a PTY leaves TERM unset; tmux refuses an unknown terminal.
-    environment['TERM'] = 'xterm-256color'
-    return environment
-
-
-def tmux(session, *arguments):
-    return subprocess.run(
-        tmux_command(session, *arguments),
-        capture_output=True,
-        text=True,
-        env=tmux_environment(),
-        stdin=subprocess.DEVNULL,
-    )
-
-
-def tmux_query(session, template):
-    result = tmux(session, 'display-message', '-p', '-t', '=outpost:', template)
-    if result.returncode or not result.stdout.strip():
-        if not alive(session):
-            return None
-        fail('Could not read the tmux session: ' + result.stderr.strip(), 409)
-    return result.stdout.strip()
-
-
 def alive(session):
-    connection = socket.socket(socket.AF_UNIX)
-    connection.settimeout(1)
-    try:
-        connection.connect(socket_name(session))
-        return True
-    except OSError as error:
-        if error.errno in (errno.ENOENT, errno.ECONNREFUSED):
-            return False
-        raise
-    finally:
-        connection.close()
+    return terminal.status(socket_name(session)) is not None
 
 
 def describe(session):
     status = 'stopped' if session['lastConnectedAt'] else 'ready'
-    if alive(session):
-        clients = tmux_query(session, '#{session_attached}')
-        if clients is not None:
-            status = 'attached' if int(clients) else 'detached'
+    service = terminal.status(socket_name(session))
+    if service:
+        status = 'attached' if service['clients'] else 'detached'
     return dict(session, status=status, activity=activity(session).describe(status in ('attached', 'detached')))
 
 
 def activity(session):
     return Activity(STATE / 'activity', CODING_ADAPTERS[session['tool']], session)
-
-
-def process_executable(pid):
-    try:
-        return os.readlink(Path('/proc', str(pid), 'exe'))
-    except (FileNotFoundError, ProcessLookupError, PermissionError):
-        return ''
 
 
 def process_info(pid):
@@ -420,29 +370,13 @@ def save_image(session, extension, data):
 
 
 def paste_reference(session, reference):
-    # tmux writes to the pane directly; bracketed paste delivers one paste, not keystrokes.
-    result = tmux(
-        session,
-        'set-buffer',
-        '-b',
-        'outpost-image',
-        '--',
-        reference,
-        ';',
-        'paste-buffer',
-        '-p',
-        '-d',
-        '-b',
-        'outpost-image',
-        '-t',
-        '=outpost:',
-    )
-    if result.returncode:
-        raise ValueError('The image was saved to ' + reference + ' but could not be pasted: ' + result.stderr.strip())
+    result = terminal.request(socket_name(session), {'type': 'paste', 'data': reference})
+    if not result.get('ok'):
+        raise ValueError('The image was saved but could not be pasted.')
     try:
         activity(session).input()
     except (OSError, ValueError):
-        pass  # The paste succeeded; activity tracking is best effort.
+        pass
 
 
 def paste_image(session, extension, encoded):
@@ -459,14 +393,14 @@ def terminate_session(session):
         Path(socket_name(session)).unlink(missing_ok=True)
         activity(session).initialize()
         return describe(session)
-    # Each managed session has its own server/socket, so this process tree
-    # cannot include another session or the user's personal tmux.
-    owner = tmux_query(session, '#{pid}')
-    if owner is None:
+    # The Unix socket's SO_PEERCRED verifies the daemon PID and execution user.
+    # Each daemon owns just this session's process tree.
+    service = terminal.status(socket_name(session))
+    if service is None:
         return describe(session)
-    root = process_info(int(owner))
-    if not root or os.path.basename(process_executable(int(owner))) not in ('tmux', 'tmux (deleted)'):
-        fail('Could not identify the live tmux server. No processes were signaled.', 409)
+    root = process_info(service['pid'])
+    if not root:
+        return describe(session)
     processes = {}
     for path in Path('/proc').iterdir():
         if path.name.isdigit():
@@ -549,86 +483,40 @@ def start_session(session, cols, rows):
     Path(socket_name(session)).unlink(missing_ok=True)
     install_helpers()
     activity(session).initialize()
-    # The tmux server owns the PTY independently of any connection.
-    result = subprocess.run(
-        tmux_command(
-            session,
-            'new-session',
-            '-d',
-            '-s',
-            'outpost',
-            '-c',
-            session['rootDir'],
-            '-x',
-            str(cols),
-            '-y',
-            str(rows),
-            command_shell,
-            '-c',
-            launch_script(session, executable),
-            ';',
-            'set-option',
-            '-g',
-            'status',
-            'off',
-            ';',
-            'bind-key',
-            '-n',
-            'C-\\',
-            'detach-client',
-        ),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=tmux_environment(),
-    )
-    if result.returncode:
-        fail('Could not start tmux: ' + result.stderr.strip(), 409)
-    for _ in range(50):
-        if alive(session):
-            return
-        time.sleep(0.02)
-    fail(tool + ' exited before attachment. Check its configuration.', 409)
-
-
-def negotiate_keys(session):
-    """Ask the pane for modifyOtherKeys so tmux can deliver Shift+Enter.
-
-    tmux only honors a modifyOtherKeys request (CSI >4;2m), but kitty-only tools
-    push a protocol tmux cannot parse and disable modifyOtherKeys at startup.
-    Poke the request into the pane tty from outside; tmux reads it as the app's
-    own output. The repeats outlast a slow tool startup."""
-    pane_tty = tmux(session, 'display-message', '-p', '-t', '=outpost:', '#{pane_tty}').stdout.strip()
-    if not re.fullmatch(r'/dev/pts/\d+', pane_tty):
-        return
-    descriptor = None
-    try:
-        # Pin this tty before delaying: its path may be reused if the session
-        # stops, but an open descriptor cannot target the replacement terminal.
-        descriptor = os.open(pane_tty, os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
-        current = tmux(session, 'display-message', '-p', '-t', '=outpost:', '#{pane_tty}')
-        if current.returncode == 0 and current.stdout.strip() == pane_tty:
-            pokes = (
-                'exec 3>&'
-                + str(descriptor)
-                + '; '
-                + '; '.join('sleep ' + str(delay) + '; printf "\\033[>4;2m" >&3 || exit' for delay in (1, 2, 3))
-            )
-            subprocess.Popen(
-                ['bash', '-c', pokes],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=tmux_environment(),
-                start_new_session=True,
-                pass_fds=(descriptor,),
-            )
-    except OSError:
-        pass  # A disappearing pane must not prevent attachment.
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
+    environment = dict(os.environ)
+    environment.pop('TMUX', None)
+    environment.pop('TMUX_PANE', None)
+    environment.update(TERM='xterm-256color', COLORTERM='truecolor')
+    configuration = {
+        'socket': socket_name(session),
+        'command': [command_shell, '-c', launch_script(session, executable)],
+        'cwd': session['rootDir'],
+        'env': environment,
+        'cols': cols,
+        'rows': rows,
+    }
+    logs = STATE / 'logs'
+    logs.mkdir(mode=0o700, exist_ok=True)
+    log = logs / (session['id'] + '.log')
+    with log.open('wb') as output:
+        process = subprocess.Popen(
+            [terminal.command(), 'serve'],
+            stdin=subprocess.PIPE,
+            stdout=output,
+            stderr=output,
+            cwd=STATE,
+            start_new_session=True,
+        )
+        process.stdin.write(json.dumps(configuration).encode())
+        process.stdin.close()
+        for _ in range(100):
+            if process.poll() is not None:
+                fail('Terminal service could not start: ' + log.read_text(errors='replace')[-2000:], 409)
+            if alive(session):
+                return
+            time.sleep(0.05)
+        process.terminate()
+        fail('Terminal service did not become ready. Open Required Software to reinstall it.', 409)
 
 
 class AttachHooks:
@@ -648,89 +536,23 @@ class AttachHooks:
     def paste_image(self, extension, encoded):
         path = save_image(self.session, extension, decode_image(extension, encoded))
         reference = CODING_ADAPTERS[self.session['tool']].image_reference(str(path))
-        paste_reference(self.session, reference)
         return {'reference': reference}
 
 
 def attach_session(session, cols, rows):
-    # tmux supplies persistence and forwards application terminal modes. Local
-    # selection belongs to xterm; application mouse requests still pass through.
-    features = tmux(session, 'show-options', '-sqv', 'terminal-features')
-    wanted = 'xterm*:clipboard:extkeys:RGB:focus'
-    chain = (
-        []
-        if features.returncode == 0 and wanted in features.stdout.split()
-        else [';', 'set-option', '-saq', 'terminal-features', wanted]
-    )
-    # Outpost owns context menus; applications own their history UI. Apply the
-    # policy on every attach, including sessions whose harness is still running.
-    for key in ('<', '>', '[', 'PPage'):
-        chain.extend([';', 'unbind-key', '-q', '-T', 'prefix', key])
-    tmux(
-        session,
-        'set-option',
-        '-s',
-        'escape-time',
-        '10',
-        ';',
-        'set-option',
-        '-g',
-        'assume-paste-time',
-        '0',
-        ';',
-        'set-option',
-        '-sq',
-        'set-clipboard',
-        'on',
-        ';',
-        'set-option',
-        '-gq',
-        'allow-passthrough',
-        'on',
-        ';',
-        'set-option',
-        '-sq',
-        'extended-keys',
-        'on',
-        ';',
-        'set-option',
-        '-sq',
-        'extended-keys-format',
-        'csi-u',
-        ';',
-        'set-option',
-        '-sq',
-        'focus-events',
-        'on',
-        ';',
-        'set-option',
-        '-g',
-        'mouse',
-        'off',
-        ';',
-        'set-option',
-        '-gq',
-        'window-size',
-        'latest',
-        *chain,
-        ';',
-        'if-shell',
-        '-t',
-        '=outpost:',
-        '-F',
-        '#{==:#{pane_mode},copy-mode}',
-        'send-keys -X -t =outpost: cancel',
-    )
-    negotiate_keys(session)
     from outpost_relay import Relay
 
-    command = tmux_command(session, 'attach-session', '-t', '=outpost')
-    return Relay(command, tmux_environment(), cols, rows, AttachHooks(session), 'run/' + session['id'] + '.sock').run()
+    return Relay(socket_name(session), cols, rows, AttachHooks(session), 'run/' + session['id'] + '.sock').run()
 
 
 def terminal_size(request):
     cols, rows = request.get('cols', 80), request.get('rows', 24)
-    if not isinstance(cols, int) or not isinstance(rows, int) or not 2 <= cols <= 1000 or not 2 <= rows <= 1000:
+    if (
+        not isinstance(cols, int)
+        or not isinstance(rows, int)
+        or not 2 <= cols <= terminal.MAX_COLS
+        or not 2 <= rows <= terminal.MAX_ROWS
+    ):
         fail('Invalid terminal size')
     return cols, rows
 
@@ -889,7 +711,7 @@ def main():
         if request.get('tool') not in CODING_ADAPTERS:
             fail('Unsupported coding tool.', 409)
         STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
-        (STATE / 'sockets').mkdir(mode=0o700, exist_ok=True)
+        (STATE / 'terminals').mkdir(mode=0o700, exist_ok=True)
         STATE.chmod(0o700)
     if not STATE.is_dir():
         if action == 'list':
@@ -934,12 +756,12 @@ def main():
                 sessions.remove(session)
                 save(data)
                 Path(socket_name(session)).unlink(missing_ok=True)
+                (STATE / 'logs' / (session['id'] + '.log')).unlink(missing_ok=True)
                 activity(session).remove()
                 result = {'ok': True}
             elif action == 'attach':
                 cols, rows = terminal_size(request)
-                if not shutil.which('tmux'):
-                    fail('tmux is missing on this target. Open Required Software to install it.', 409)
+                terminal.command()
                 if not alive(session):
                     start_session(session, cols, rows)
                 session['lastConnectedAt'] = now()

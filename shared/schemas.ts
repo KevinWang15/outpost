@@ -102,7 +102,7 @@ export const directoryQuery = Type.Object(
 export const connectInput = Type.Object({ terminal: Type.Enum(terminalChoices) }, strict)
 
 // Software ----------------------------------------------------------------------
-export const softwareIds = ['bash', 'python3', 'tmux', ...harnessIds] as const
+export const softwareIds = ['bash', 'python3', 'outpost-terminal', ...harnessIds] as const
 export const installationInput = Type.Object(
   {
     softwareId: Type.Enum(softwareIds),

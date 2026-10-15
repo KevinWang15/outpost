@@ -10,6 +10,7 @@ interface Props {
     copy: () => void
     paste: () => void
     selectAll: () => void
+    selectText: () => void
     pasteImage: () => void
     focus: () => void
   }
@@ -107,6 +108,15 @@ export default function TerminalContextMenu({ children, connected, actions, cont
           </ContextMenu.Item>
           <ContextMenu.Item className="menu-item" onSelect={actions.selectAll}>
             <TextSelect size={15} /> Select all
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            className="menu-item"
+            onSelect={() => {
+              restoreFocus.current = false
+              actions.selectText()
+            }}
+          >
+            <TextSelect size={15} /> Select text…
           </ContextMenu.Item>
           <ContextMenu.Item className="menu-item" disabled={!connected} onSelect={actions.pasteImage}>
             <ImagePlus size={15} /> Paste an image…

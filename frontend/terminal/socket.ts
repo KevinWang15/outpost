@@ -15,6 +15,7 @@ interface Handlers {
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
   activity(state: SessionActivity | null): void
+  restore?(message: Extract<ServerMessage, { type: 'restore' | 'geometry' }>, rendered: () => void): void
 }
 
 const retries = 8
@@ -28,6 +29,9 @@ export class TerminalSocket {
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
   private ready = false
+  private closedReason: CloseReason | null = null
+  private openedAt = 0
+  private probing: WebSocket | null = null
   private pending = new Map<
     string,
     { resolve: (message: Extract<ServerMessage, { type: 'result' }>) => void; reject: (error: Error) => void }
@@ -47,6 +51,8 @@ export class TerminalSocket {
 
   open() {
     if (this.stopped) return
+    clearTimeout(this.timer)
+    this.timer = undefined
     this.handlers.activity(null)
     const { cols, rows } = this.size()
     const url = new URL('/api/terminal', window.location.href)
@@ -58,6 +64,8 @@ export class TerminalSocket {
       protocol: String(protocolVersion),
     }).toString()
     const socket = new WebSocket(url)
+    this.openedAt = Date.now()
+    this.closedReason = null
     socket.binaryType = 'arraybuffer'
     this.socket = socket
     this.ready = false
@@ -72,29 +80,38 @@ export class TerminalSocket {
       acknowledged = 0
       lastAck = performance.now()
     }
+    const rendered = (length: number) => {
+      if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
+      acknowledged += length
+      // A full history checkpoint contains thousands of parts. Batch its ACKs
+      // with live output so restoring cannot trip the input message rate limit.
+      if (acknowledged >= 64 * 1024 && performance.now() - lastAck >= 10) acknowledge()
+      else ackTimer ??= setTimeout(acknowledge, 20)
+    }
     let closed: Extract<ServerMessage, { type: 'closed' }> | null = null
     socket.onmessage = event => {
       if (this.socket !== socket) return
       if (event.data instanceof ArrayBuffer) {
         const bytes = new Uint8Array(event.data)
-        this.handlers.output(bytes, () => {
-          if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
-          acknowledged += bytes.length
-          // Bound latency for small output and avoid a JSON roundtrip per tiny write.
-          if (acknowledged >= 64 * 1024 && performance.now() - lastAck >= 10) acknowledge()
-          else ackTimer ??= setTimeout(acknowledge, 20)
-        })
+        this.handlers.output(bytes, () => rendered(bytes.length))
         return
       }
       const message: ServerMessage = JSON.parse(event.data)
       if (message.type === 'hello') {
         this.token = message.resume
         this.handlers.hello(message)
+      } else if (message.type === 'restore' || message.type === 'geometry') {
+        const length = new TextEncoder().encode(event.data).length
+        if (this.handlers.restore) this.handlers.restore(message, () => rendered(length))
+        else rendered(length)
       } else if (message.type === 'ready') {
-        this.ready = true
-        this.attempts = 0
-        this.handlers.state({ kind: 'connected' })
-        this.send({ type: 'resize', ...this.size() })
+        this.handlers.output(new Uint8Array(), () => {
+          if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
+          this.ready = true
+          this.attempts = 0
+          this.handlers.state({ kind: 'connected' })
+          this.send({ type: 'resize', ...this.size() })
+        })
       } else if (message.type === 'activity') {
         this.handlers.activity(message.activity)
       } else if (message.type === 'result') {
@@ -111,6 +128,7 @@ export class TerminalSocket {
       this.failPending('The connection closed before Outpost confirmed it. Check the terminal before retrying.')
       if (this.stopped) return
       const message = closed as Extract<ServerMessage, { type: 'closed' }> | null
+      this.closedReason = message?.reason ?? 'error'
       if (message && message.reason !== 'error')
         return this.handlers.state({ kind: 'closed', reason: message.reason, message: message.message })
       if (++this.attempts > retries)
@@ -143,6 +161,25 @@ export class TerminalSocket {
     this.open()
   }
 
+  /** A suspended page may still think its old socket is open. Probe before replacing a healthy connection. */
+  resume() {
+    if (this.stopped || !this.socket || (this.closedReason && this.closedReason !== 'error')) return
+    const socket = this.socket
+    if (!this.connected) {
+      if (this.timer || socket.readyState >= WebSocket.CLOSING || Date.now() - this.openedAt > 15_000) this.reconnect()
+      return
+    }
+    if (this.probing === socket) return
+    this.probing = socket
+    void this.request({ type: 'ping', id: crypto.randomUUID() }, 8000)
+      .catch(() => {
+        if (this.socket === socket && !this.stopped && !this.closedReason) this.reconnect()
+      })
+      .finally(() => {
+        if (this.probing === socket) this.probing = null
+      })
+  }
+
   /** Keep a live connection and its draft; use the fresh grant for recovery. */
   async activate(token: string) {
     if (!this.connected) {
@@ -152,6 +189,12 @@ export class TerminalSocket {
     }
     const result = await this.request({ type: 'activate', id: crypto.randomUUID(), token })
     if (!result.ok) throw new Error(result.message)
+  }
+
+  fail(message: string) {
+    this.close()
+    this.closedReason = 'error'
+    this.handlers.state({ kind: 'closed', reason: 'error', message })
   }
 
   close() {
@@ -177,13 +220,13 @@ export class TerminalSocket {
     if (this.connected) this.send({ type: 'resize', cols, rows })
   }
 
-  private request(message: ClientMessage & { id: string }) {
+  private request(message: ClientMessage & { id: string }, timeout = 60_000) {
     if (!this.connected) return Promise.reject(new Error('The terminal is not connected. Your draft is kept.'))
     return new Promise<Extract<ServerMessage, { type: 'result' }>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(message.id)
         reject(new Error('Outpost did not confirm in time. Check the terminal before retrying.'))
-      }, 60_000)
+      }, timeout)
       this.pending.set(message.id, {
         resolve: result => {
           clearTimeout(timer)

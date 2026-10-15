@@ -4,6 +4,7 @@ import { pagePaths } from '../../shared/pages'
 import type { ConnectResponse, ConnectionStatus } from '../../shared/protocol'
 import type { TerminalChoice } from '../../shared/terminals'
 import { api } from '../api'
+import { standaloneBrowser } from '../browser'
 import { useToast } from '../ui/toast-context'
 import { preferredTerminal, setPreferredTerminal } from './preference'
 
@@ -44,8 +45,13 @@ export function useConnect(target: Target, onClose: () => void) {
           session: session.id,
           title: `${session.name} · ${target.name}`,
         })
+        const url = `${pagePaths.terminal}?${query}`
+        if (standaloneBrowser()) {
+          window.location.assign(url)
+          return
+        }
         // Keep window.open synchronous with Connect, including when the chooser is skipped.
-        const popup = window.open(`${pagePaths.terminal}?${query}`, '_blank', 'popup,width=1200,height=800')
+        const popup = window.open(url, '_blank', 'popup,width=1200,height=800')
         if (!popup) throw new Error('Allow pop-ups for Outpost, then try opening the web terminal again.')
         popup.opener = null
         close()

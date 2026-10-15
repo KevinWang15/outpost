@@ -1,0 +1,77 @@
+name: Linux terminal service
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the immutable terminal dependency release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit -p terminal-service/tsconfig.json
+      - run: npm run build:terminal -- x64-glibc
+      - run: npm test
+      - run: npm run build:terminal -- arm64-glibc
+      - run: npm run build:terminal -- x64-musl
+      - run: npm run build:terminal -- arm64-musl
+      - name: Record checksums
+        working-directory: terminal-service/dist
+        run: sha256sum outpost-terminal-* > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: outpost-terminal-linux
+          path: terminal-service/dist/*
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/download-artifact@v4
+        with:
+          name: outpost-terminal-linux
+          path: binaries
+      - name: Publish dependency
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node --experimental-strip-types --input-type=module -e "import { terminalService } from './shared/terminalService.ts'; console.log(terminalService.version)")
+          tag="terminal-v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists. Bump shared/terminalService.ts and runtime/outpost_terminal.py."
+            exit 1
+          fi
+          gh release create "$tag" binaries/* --target "$GITHUB_SHA" --latest=false \
+            --title "Outpost Terminal $version" --notes-file terminal-service/RELEASE_NOTES.md

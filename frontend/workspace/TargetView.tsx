@@ -45,7 +45,7 @@ export default function TargetView({
   const [checking, setChecking] = useState<string[]>([])
   const installed = new Set(software.report?.software.filter(item => item.status === 'installed').map(item => item.id))
   const tools = target.tools.filter(tool => installed.has(tool))
-  const ready = ['bash', 'python3', 'tmux'].every(id => installed.has(id as never)) && tools.length > 0
+  const ready = ['bash', 'python3', 'outpost-terminal'].every(id => installed.has(id as never)) && tools.length > 0
   const close = () => setPanel(null)
 
   function connect(session: Session) {

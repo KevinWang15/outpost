@@ -4,6 +4,7 @@ import { parseSessionActivity, unavailableActivity } from '../../shared/activity
 import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, protocolVersion } from '../../shared/protocol'
 import { signalValidators } from '../../shared/signals'
+import { terminalService, terminalSize } from '../../shared/terminalService'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
 import { protocolResult } from '../process'
@@ -59,7 +60,7 @@ interface Dependencies {
 }
 
 /** One client socket attached to one relay process. Stateless by design
- * (principle 1): closing either end ends both, and tmux keeps the session. */
+ * Closing either end ends both; the target terminal service keeps the session. */
 class Connection {
   private child: ChildProcessWithoutNullStreams | null = null
   private decoder = new RelayDecoder()
@@ -163,7 +164,14 @@ class Connection {
   }
 
   private control(message: { type?: string; [key: string]: unknown }) {
-    if (message.type === 'ready') {
+    if (message.type === 'restore' || message.type === 'geometry') {
+      const data = JSON.stringify(message)
+      this.unacked += Buffer.byteLength(data)
+      if (this.socket.readyState === WebSocket.OPEN) this.socket.send(data)
+      if (this.unacked > highWater) this.child?.stdout.pause()
+    } else if (message.type === 'error') {
+      this.close('error', typeof message.message === 'string' ? message.message : 'Terminal service failed.')
+    } else if (message.type === 'ready') {
       this.started = true
       for (const frame of this.pending) this.child!.stdin.write(frame)
       this.pending = []
@@ -231,9 +239,11 @@ class Connection {
     const id = (message as { id?: unknown }).id
     if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)))
       return this.socket.close(1008, 'Invalid terminal message')
-    if (['send', 'paste-image', 'activate', 'acknowledge'].includes(message.type) && id === undefined)
+    if (['ping', 'send', 'paste-image', 'activate', 'acknowledge'].includes(message.type) && id === undefined)
       return this.socket.close(1008, 'A terminal request ID is required')
     switch (message.type) {
+      case 'ping':
+        return this.send({ type: 'result', id: message.id, ok: true })
       case 'acknowledge':
         if (typeof message.completionId !== 'string' || !/^[a-f0-9]{64}$/.test(message.completionId))
           return this.socket.close(1008, 'Invalid activity acknowledgement')
@@ -253,14 +263,7 @@ class Connection {
         })
       }
       case 'resize':
-        if (
-          Number.isInteger(message.cols) &&
-          Number.isInteger(message.rows) &&
-          message.cols >= 2 &&
-          message.cols <= 1000 &&
-          message.rows >= 2 &&
-          message.rows <= 1000
-        ) {
+        if (terminalSize(message.cols, message.rows)) {
           this.relay({ type: 'resize', cols: message.cols, rows: message.rows })
         }
         return
@@ -322,7 +325,7 @@ class Connection {
     this.broker.forget(this)
     const child = this.child
     if (child && child.exitCode === null && child.signalCode === null) {
-      // EOF lets the relay detach tmux cleanly; force it if the transport hangs.
+      // EOF closes the relay's socket; force it if the transport hangs.
       child.stdin.end()
       const timer = setTimeout(() => child.kill('SIGKILL'), 5000).unref()
       child.once('close', () => clearTimeout(timer))
@@ -389,8 +392,8 @@ export class TerminalBroker {
       const command = this.dependencies.sessions.attach(
         context,
         grant.sessionId,
-        Number.isInteger(cols) ? Math.min(1000, Math.max(2, cols)) : 80,
-        Number.isInteger(rows) ? Math.min(1000, Math.max(2, rows)) : 24,
+        Number.isInteger(cols) ? Math.min(terminalService.maxCols, Math.max(2, cols)) : 80,
+        Number.isInteger(rows) ? Math.min(terminalService.maxRows, Math.max(2, rows)) : 24,
       )
       connection.start(
         spawn(command.executable, command.args, { stdio: 'pipe', env: this.dependencies.env ?? process.env }),

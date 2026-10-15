@@ -1,24 +1,20 @@
 """Framed attachment relay: the target end of one terminal connection.
 
 stdin and stdout carry relay-protocol frames (docs/ARCHITECTURE.md). The relay
-owns the PTY for `tmux attach`; persistence belongs to tmux. When this process
-ends, only the tmux client detaches.
+connects to the session service over a Unix socket. Closing the relay never
+closes the persistent PTY or its process.
 """
 
-import errno
 import fcntl
 import json
 import os
-import pty
 import re
 import select
 import signal
 import socket
 import struct
-import termios
 import time
 import uuid
-from collections import deque
 
 from outpost_activity_stream import ActivityStream
 
@@ -210,26 +206,15 @@ class SignalServer:
             pass
 
 
-def winsize(cols, rows):
-    return struct.pack('HHHH', rows, cols, 0, 0)
-
-
 class Relay:
-    """hooks: on_input(), activity(), acknowledge(completion_id), paste_image(extension, data)."""
+    """Disposable socket adapter. The service owns the PTY and its lifetime."""
 
-    def __init__(self, command, environment, cols, rows, hooks, signal_path=None):
-        self.command = command
-        self.environment = environment
-        self.size = winsize(cols, rows)
-        self.hooks = hooks
-        self.signal_path = signal_path
-        self.incoming = bytearray()
+    def __init__(self, path, cols, rows, hooks, signal_path=None):
+        self.path, self.cols, self.rows = path, cols, rows
+        self.hooks, self.signal_path = hooks, signal_path
         self.outgoing = bytearray()
-        self.tail = b''
+        self.incoming = bytearray()
         self.stopped = False
-        self.actions = deque()
-        self.action_bytes = 0
-        self.input_results = []
 
     def send(self, message):
         self.outgoing += control(message)
@@ -238,59 +223,37 @@ class Relay:
         try:
             self.hooks.on_input()
         except (OSError, ValueError):
-            pass  # Activity observation must never interrupt a coding session.
+            pass
 
-    def queue(self, action, size):
-        self.actions.append({**action, 'size': size})
-        self.action_bytes += size
-
-    def flush_input_results(self):
-        if not self.incoming:
-            for identifier in self.input_results:
-                self.send({'type': 'result', 'id': identifier, 'ok': True})
-            self.input_results.clear()
-
-    def advance(self):
-        """Advance ordered input without blocking the PTY output or signal paths."""
-        # Typed input, drafts and image pastes share one bounded FIFO. Image
-        # paths are pasted via tmux, so earlier PTY input must be flushed first.
-        while self.actions:
-            action = self.actions[0]
-            kind = action['type']
-            if kind in ('input', 'send'):
-                data = action['data'] if kind == 'input' else action['data'].encode()
-                self.observer.feed(data)
-                self.incoming += data
-                if kind == 'send':
-                    self.input_results.append(action['id'])
-            elif kind == 'paste-image':
-                if self.incoming:
-                    break
-                reply = {'type': 'result', 'id': action.get('id')}
-                try:
-                    reply.update(self.hooks.paste_image(action.get('extension'), action.get('data')), ok=True)
-                    self.observed()
-                except (OSError, ValueError) as error:
-                    reply.update(ok=False, message=str(error))
-                self.send(reply)
-            self.actions.popleft()
-            self.action_bytes -= action['size']
-        self.flush_input_results()
-
-    def handle(self, kind, payload, master):
+    def handle(self, kind, payload):
         if kind == b'I':
-            self.queue({'type': 'input', 'data': payload}, len(payload))
+            self.observer.feed(payload)
+            self.incoming += encode(kind, payload)
             return
         if kind != b'C':
             raise ValueError('Unknown relay frame')
         message = json.loads(payload)
-        if message.get('type') == 'resize':
-            cols, rows = message.get('cols'), message.get('rows')
-            if isinstance(cols, int) and isinstance(rows, int) and 0 < cols <= 1000 and 0 < rows <= 1000:
-                fcntl.ioctl(master, termios.TIOCSWINSZ, winsize(cols, rows))
-        elif message.get('type') in ('send', 'paste-image'):
-            self.queue(message, len(payload))
-        elif message.get('type') == 'acknowledge':
+        action = message.get('type')
+        if action in ('resize', 'send'):
+            if action == 'send':
+                self.observer.feed(message['data'].encode())
+            self.incoming += control(message)
+        elif action == 'paste-image':
+            try:
+                result = self.hooks.paste_image(message.get('extension'), message.get('data'))
+                # Image paths share the same FIFO as typed input and drafts.
+                self.incoming += control(
+                    {
+                        'type': 'paste',
+                        'id': message['id'],
+                        'data': result['reference'],
+                        'reference': result['reference'],
+                    }
+                )
+                self.observed()
+            except (OSError, ValueError) as error:
+                self.send({'type': 'result', 'id': message.get('id'), 'ok': False, 'message': str(error)})
+        elif action == 'acknowledge':
             identifier, completion_id = message.get('id'), message.get('completionId')
             valid = (
                 isinstance(identifier, str)
@@ -300,14 +263,16 @@ class Relay:
             )
             if not valid or not self.activity.request_acknowledgement(identifier, completion_id):
                 self.send({'type': 'result', 'id': identifier, 'ok': False, 'message': 'Activity check unavailable.'})
-        elif message.get('type') == 'signal-result' and self.signals:
+        elif action == 'signal-result' and self.signals:
             self.signals.answer(message.get('id'), {'ok': message.get('ok') is True, 'message': message.get('message')})
 
     def run(self):
-        pid, master = pty.fork()
-        if pid == 0:
-            fcntl.ioctl(0, termios.TIOCSWINSZ, self.size)
-            os.execvpe(self.command[0], self.command, self.environment)
+        from outpost_terminal import PROTOCOL
+
+        service = socket.socket(socket.AF_UNIX)
+        service.connect(self.path)
+        service.setblocking(False)
+        self.incoming += control({'type': 'attach', 'protocol': PROTOCOL, 'cols': self.cols, 'rows': self.rows})
         self.observer = InputObserver(self.observed)
         self.activity = ActivityStream(self.hooks.activity, self.hooks.acknowledge)
         self.signals = None
@@ -315,41 +280,38 @@ class Relay:
             try:
                 self.signals = SignalServer(self.signal_path)
             except OSError:
-                pass  # Links are optional; attaching must still work.
+                pass
         decoder = FrameDecoder()
+        service_decoder = FrameDecoder()
         handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGPIPE)}
         flags = {descriptor: fcntl.fcntl(descriptor, fcntl.F_GETFL) for descriptor in (0, 1)}
-        status, reaped, eof = None, False, False
+        eof = False
 
         def stop(_sig, _frame):
             self.stopped = True
 
         try:
             os.write(1, MAGIC)
-            for descriptor in (0, 1, master):
-                fcntl.fcntl(descriptor, fcntl.F_SETFL, fcntl.fcntl(descriptor, fcntl.F_GETFL) | os.O_NONBLOCK)
+            for descriptor in (0, 1):
+                fcntl.fcntl(descriptor, fcntl.F_SETFL, flags[descriptor] | os.O_NONBLOCK)
             signal.signal(signal.SIGHUP, stop)
             signal.signal(signal.SIGTERM, stop)
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-            self.send({'type': 'ready'})
             while not self.stopped and (not eof or self.outgoing):
                 self.observer.flush()
-                if not eof:
-                    self.advance()
-                    if len(self.outgoing) < HIGH_WATER:
-                        state = self.activity.poll()
-                        if state is not None:
-                            self.send({'type': 'activity', 'activity': state})
-                        for result in self.activity.take_results():
-                            self.send(result)
-                if self.signals:
-                    self.signals.expire()
-                readers = [] if eof or len(self.outgoing) >= HIGH_WATER else [master]
-                if len(self.incoming) + self.action_bytes < HIGH_WATER:
+                if len(self.outgoing) < HIGH_WATER:
+                    state = self.activity.poll()
+                    if state is not None:
+                        self.send({'type': 'activity', 'activity': state})
+                    for result in self.activity.take_results():
+                        self.send(result)
+                readers = [] if eof or len(self.outgoing) >= HIGH_WATER else [service.fileno()]
+                if len(self.incoming) < HIGH_WATER:
                     readers.append(0)
                 if self.signals:
+                    self.signals.expire()
                     readers += [self.signals.socket.fileno(), *self.signals.clients]
-                writers = ([master] if self.incoming and not eof else []) + ([1] if self.outgoing else [])
+                writers = ([service.fileno()] if self.incoming and not eof else []) + ([1] if self.outgoing else [])
                 ready, writable, _ = select.select(readers, writers, [], 0.05)
                 for descriptor in ready:
                     if self.signals and descriptor == self.signals.socket.fileno():
@@ -365,10 +327,6 @@ class Relay:
                         data = os.read(descriptor, 65536)
                     except BlockingIOError:
                         continue
-                    except OSError as error:
-                        if descriptor != master or error.errno != errno.EIO:
-                            raise
-                        data = b''
                     if not data:
                         if descriptor == 0:
                             self.stopped = True
@@ -377,50 +335,25 @@ class Relay:
                         continue
                     if descriptor == 0:
                         for kind, payload in decoder.feed(data):
-                            self.handle(kind, payload, master)
+                            self.handle(kind, payload)
                     else:
-                        self.outgoing += encode(b'O', data)
-                        self.tail = (self.tail + data)[-512:]
+                        for kind, payload in service_decoder.feed(data):
+                            self.outgoing += encode(kind, payload)
                 for descriptor in writable:
-                    buffer = self.incoming if descriptor == master else self.outgoing
+                    buffer = self.outgoing if descriptor == 1 else self.incoming
                     try:
                         del buffer[: os.write(descriptor, buffer)]
-                        if descriptor == master:
-                            self.flush_input_results()
                     except BlockingIOError:
                         pass
-                    except OSError as error:
-                        if descriptor == 1:
-                            self.stopped = True  # The broker went away.
-                        elif error.errno == errno.EIO:
-                            eof = True
-                            self.incoming.clear()
-                        else:
-                            raise
-            child, status = os.waitpid(pid, os.WNOHANG)
-            reaped = child == pid
+                    except (BrokenPipeError, ConnectionResetError):
+                        self.stopped = True
         finally:
+            service.close()
             self.activity.close()
-            os.close(master)
             if self.signals:
                 self.signals.close()
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)
-            if not reaped:
-                # Still our unreaped child, so this PID cannot have been reused.
-                try:
-                    os.kill(pid, signal.SIGHUP)
-                except ProcessLookupError:
-                    pass
-                _, status = os.waitpid(pid, 0)
-        if self.stopped:
-            return 0  # The broker closed the connection; tmux keeps the session.
-        # tmux prints why its client ended; only a real detach leaves the session running.
-        reason = 'detached' if b'[detached' in self.tail else 'ended'
-        try:
             for descriptor, value in flags.items():
                 fcntl.fcntl(descriptor, fcntl.F_SETFL, value)
-            os.write(1, control({'type': 'exit', 'reason': reason}))
-        except OSError:
-            pass
-        return os.waitstatus_to_exitcode(status)
+        return 0

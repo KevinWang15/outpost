@@ -10,7 +10,7 @@ import type { ConnectResponse } from '../../shared/protocol'
 import { createApp } from '../../backend/app'
 import { LocalDeployment, type Deployment } from '../../backend/deployment'
 import { HostedDeployment } from '../../backend/hosted/deployment'
-import { fixtures, TerminalClient } from './helpers'
+import { fixtures, terminalBinary, TerminalClient } from './helpers'
 
 const execute = promisify(execFile)
 const docker = await execute('docker', ['info'], { timeout: 20_000 }).then(
@@ -25,6 +25,8 @@ async function container(t: test.TestContext) {
     await execute('docker', ['run', '-d', '--rm', '-p', '127.0.0.1::22', 'outpost-v2-ssh-target'])
   ).stdout.trim()
   t.after(() => execute('docker', ['rm', '-f', id]).catch(() => {}))
+  await execute('docker', ['exec', id, 'mkdir', '-p', '/root/.outpost/bin'])
+  await execute('docker', ['cp', terminalBinary, `${id}:/root/.outpost/bin/outpost-terminal`])
   const port = Number((await execute('docker', ['port', id, '22/tcp'])).stdout.trim().split(':').pop())
   const authorize = (key: string) =>
     new Promise<void>((resolve, reject) => {
@@ -70,7 +72,7 @@ async function lifecycle(
     report.software.filter(item => item.status !== 'installed'),
     [],
   )
-  assert.match(report.software.find(item => item.id === 'tmux')!.version!, /tmux 3\.2/)
+  assert.match(report.software.find(item => item.id === 'outpost-terminal')!.version!, /outpost-terminal 1\.0\.0/)
   assert.equal(report.environment.home, '/root')
   const session = await call<Session>('POST', `/targets/${added.id}/sessions`, {
     name: 'Over SSH',
@@ -108,14 +110,14 @@ async function lifecycle(
   const again = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(hello.resume)}`)
   t.after(() => again.socket.terminate())
   await again.text(`OUTPOST_FIXTURE_READY ${pid}`)
-  again.input('\x1c')
-  assert.equal((await again.message('closed')).reason, 'detached')
+  again.socket.close()
+  await again.closed
   assert.equal((await call<Session>('POST', `/targets/${added.id}/sessions/${session.id}/terminate`)).status, 'stopped')
   await call('DELETE', `/targets/${added.id}/sessions/${session.id}`)
 }
 
 test(
-  'SSH targets in local and hosted mode, with the oldest supported tmux',
+  'SSH targets in local and hosted mode with the standalone terminal service',
   { timeout: 600_000, skip: !docker && 'Docker is unavailable' },
   async t => {
     const target = await container(t)

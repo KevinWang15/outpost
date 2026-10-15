@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { copyFile, mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +8,12 @@ import { WebSocket } from 'ws'
 import type { ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
 import { quote } from '../../backend/shell'
+import headless from '@xterm/headless'
+import { CheckpointReader } from '../../shared/terminalCheckpoint'
+
+export const terminalBinary = fileURLToPath(
+  new URL(`../../terminal-service/dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
+)
 
 export const fixtures = fileURLToPath(new URL('../fixtures/', import.meta.url))
 
@@ -17,6 +23,9 @@ export async function fixtureHome(prefix: string) {
   const home = join(directory, "home with 'quotes")
   const bin = join(home, 'bin')
   await mkdir(bin, { recursive: true })
+  const service = join(home, '.outpost', 'bin')
+  await mkdir(service, { recursive: true })
+  await copyFile(terminalBinary, join(service, 'outpost-terminal'))
   for (const tool of ['claude', 'codex', 'kimi'])
     await copyFile(join(fixtures, 'coding-tool-fixture.py'), join(bin, tool))
   for (const tool of ['claude', 'codex', 'kimi'])
@@ -42,11 +51,21 @@ export function api(base: string) {
   }
 }
 
-/** Stop every fixture tmux server under a disposable home, then remove it. */
+/** Stop every fixture terminal service under a disposable home, then remove it. */
 export async function removeHome(directory: string, home: string) {
-  const sockets = join(home, '.outpost', 'sockets')
-  for (const name of await readdir(sockets).catch(() => [] as string[])) {
-    await new Promise(resolve => execFile('tmux', ['-S', join(sockets, name), 'kill-server'], resolve))
+  const registry = JSON.parse(
+    await readFile(join(home, '.outpost', 'registry.json'), 'utf8').catch(() => '{"sessions":[]}'),
+  )
+  for (const session of registry.sessions) {
+    const request = Buffer.from(JSON.stringify({ action: 'terminate', id: session.id })).toString('base64')
+    await new Promise(resolve =>
+      execFile(
+        'python3',
+        [fileURLToPath(new URL('../../runtime/outpost_runtime.py', import.meta.url)), request],
+        { env: { ...process.env, HOME: home } },
+        resolve,
+      ),
+    )
   }
   await rm(directory, { recursive: true, force: true })
 }
@@ -59,6 +78,8 @@ export class TerminalClient {
   opened: Promise<void>
   closed: Promise<void>
   constructor(url: string) {
+    const term = new headless.Terminal({ allowProposedApi: true, scrollback: 10_000 })
+    const checkpoints = new CheckpointReader(term)
     this.socket = new WebSocket(url.includes('protocol=') ? url : `${url}&protocol=${protocolVersion}`)
     this.opened = new Promise((resolve, reject) => {
       this.socket.once('open', () => resolve())
@@ -70,8 +91,22 @@ export class TerminalClient {
         const bytes = data as Buffer
         this.output += bytes.toString('utf8')
         this.socket.send(JSON.stringify({ type: 'ack', bytes: bytes.length }))
-      } else this.messages.push(JSON.parse(data.toString()))
+      } else {
+        const message = JSON.parse(data.toString())
+        this.messages.push(message)
+        if (message.type === 'restore') {
+          checkpoints.accept(message.checkpoint)
+          if (message.checkpoint.part === 'end') {
+            const buffer = term.buffer.active
+            for (let row = 0; row < buffer.length; row++)
+              this.output += buffer.getLine(row)!.translateToString(true) + '\n'
+          }
+        }
+        if (message.type === 'restore' || message.type === 'geometry')
+          this.send({ type: 'ack', bytes: Buffer.byteLength(data.toString()) })
+      }
     })
+    this.socket.once('close', () => term.dispose())
   }
   async until<T>(check: () => T | undefined | false, label: string, timeout = 15_000): Promise<T> {
     const deadline = Date.now() + timeout

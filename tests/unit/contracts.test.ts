@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { harnesses } from '../../shared/harnesses'
+import { terminalService } from '../../shared/terminalService'
 import { RelayDecoder, relayFrame, relayMagic } from '../../backend/terminal/broker'
 
 const runtime = fileURLToPath(new URL('../../runtime/', import.meta.url))
@@ -15,6 +16,13 @@ function python(code: string, input?: Buffer) {
   })
 }
 const json = (code: string) => JSON.parse(python(code).toString())
+
+test('terminal service: Python and TypeScript agree on the installed contract', () => {
+  const service = json(`import outpost_terminal as t
+print(json.dumps({'version': t.VERSION, 'protocol': t.PROTOCOL, 'maxCols': t.MAX_COLS, 'maxRows': t.MAX_ROWS, 'executable': t.EXECUTABLE.name}))`)
+  for (const key of ['version', 'protocol', 'maxCols', 'maxRows', 'executable'] as const)
+    assert.equal(service[key], terminalService[key], key)
+})
 
 test('coding harnesses: shared/harnesses.ts matches the runtime adapters', () => {
   const adapters = json(

@@ -42,7 +42,7 @@ test(
       [
         ['bash', 'installed'],
         ['python3', 'installed'],
-        ['tmux', 'installed'],
+        ['outpost-terminal', 'installed'],
         ['claude', 'installed'],
         ['codex', 'installed'],
         ['kimi', 'installed'],
@@ -80,6 +80,15 @@ test(
     await client.message('ready')
     await client.text('OUTPOST_FIXTURE_READY')
     await client.text('100x30')
+
+    await t.test('mobile resume probes acknowledge without writing to the process or restarting it', async () => {
+      const starts = await readFile(join(project, 'starts.log'), 'utf8')
+      const before = await readFile(join(project, 'input.bin'), 'utf8').catch(() => '')
+      client.send({ type: 'ping', id: 'mobile-resume-probe' })
+      assert.deepEqual(await client.take('result'), { type: 'result', id: 'mobile-resume-probe', ok: true })
+      assert.equal(await readFile(join(project, 'input.bin'), 'utf8').catch(() => ''), before)
+      assert.equal(await readFile(join(project, 'starts.log'), 'utf8'), starts)
+    })
 
     await t.test('resize and typed input reach the coding tool', async () => {
       client.send({ type: 'resize', cols: 90, rows: 25 })
@@ -143,9 +152,8 @@ test(
       clients.push(again)
       await again.message('ready')
       await again.text(`OUTPOST_FIXTURE_READY ${pid}`)
-      again.input('\x1c')
-      const closed = await again.message('closed')
-      assert.equal(closed.reason, 'detached')
+      again.socket.close()
+      await again.closed
     })
 
     await t.test('terminating closes terminals and keeps the record', async () => {

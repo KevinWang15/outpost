@@ -1,6 +1,6 @@
 # Outpost architecture
 
-Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code) running in tmux
+Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code) running in persistent PTYs
 on Linux machines, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
 
 This document is the source of truth for how Outpost behaves and why. Code
@@ -8,15 +8,15 @@ comments refer back to the principles below by name.
 
 ## Principles
 
-1. **tmux is the only terminal state.** A coding session is a dedicated tmux
-   server on its target. Every connection is disposable: connecting means
-   attaching, reconnecting means attaching again, and tmux redraws the screen.
-   Outpost never holds PTYs, screen snapshots or replay buffers.
+1. **The target owns the terminal.** A dedicated `outpost-terminal` process
+   owns each coding session's PTY, screen and 10,000-line in-memory scrollback.
+   Clients and relays are disposable. Reconnect restores a checkpoint and then
+   follows live output; disconnect never terminates the session.
 2. **One connection path.** Every terminal — browser or Electron —
    uses the same chain:
 
    ```text
-   client ⇄ WebSocket ⇄ Outpost broker ⇄ transport (SSH or local shell) ⇄ relay ⇄ tmux
+   client ⇄ WebSocket ⇄ Outpost broker ⇄ transport (SSH or local shell) ⇄ relay ⇄ terminal service ⇄ PTY
    ```
 
    There is no second way to connect, no copied shell command, and no desktop
@@ -25,9 +25,11 @@ comments refer back to the principles below by name.
    who owns this request, where is their workspace stored, which SSH identity
    do they use, and may they use this computer as a target. Everything else —
    sessions, software, terminals, the UI — is mode-agnostic.
-4. **Agentless targets.** The target runtime is a Python program sent with each
-   operation. Nothing is installed or left running on a target except tmux
-   itself and Outpost's state files in `~/.outpost`.
+4. **One installed target dependency.** Required Software installs a versioned,
+   self-contained Linux executable in `~/.outpost/bin`. Python management code
+   is still sent with each operation. The terminal service opens only a private
+   Unix socket and runs as the execution user; no network daemon or system-wide
+   service is needed.
 5. **The client shims the platform.** Making a remote session feel native
    (paste an image with the usual shortcut, Shift+Enter for a newline, copying
    to your clipboard, opening links on your computer) is the client's job.
@@ -57,7 +59,7 @@ comments refer back to the principles below by name.
                  ┌───────────────┴───────────────────────┐
                  │ Linux target                          │
                  │  runtime (per operation) · relay      │
-                 │  tmux server per session · harness    │
+                 │  terminal service per session · harness    │
                  └───────────────────────────────────────┘
 ```
 
@@ -65,7 +67,8 @@ comments refer back to the principles below by name.
 | --- | --- | --- |
 | `frontend/` | Browser | Workspace UI, Connect dialog, web terminal client |
 | `backend/` | Outpost server | HTTP API, deployments, transports, terminal broker |
-| `runtime/` | Targets | Session registry, tmux control, relay, harness adapters |
+| `terminal-service/` | Linux target | Self-contained persistent PTY executable, headless xterm engine |
+| `runtime/` | Targets | Session registry, service control, relay, harness adapters |
 | `desktop/` | Your computer | Electron shell, native capabilities, trusted servers and installers |
 | `shared/` | Browser + desktop + server | Schemas, harness registry, terminal protocol, desktop bridge contract |
 
@@ -81,7 +84,7 @@ browser page must be registered there so development and production agree.
 
 | Role | Supported |
 | --- | --- |
-| Targets (where sessions run) | Linux with Bash, Python 3.9+ and tmux 3.2+. SSH as root, or the Outpost computer itself when the server runs on Linux (including WSL). |
+| Targets (where sessions run) | Linux with Bash, Python 3.9+ and Outpost Terminal. SSH as root, or the Outpost computer itself when the server runs on Linux (including WSL). |
 | Outpost server | Node.js 24+ with OpenSSH, on Linux (including WSL) or macOS. Hosted deployments run on Linux. |
 | Web terminal | Any current browser, including phones. |
 | Outpost Desktop | Packaged Electron for macOS arm64/x64 and Windows x64. No Python, WSL or installed browser required. |
@@ -117,7 +120,8 @@ branch on the mode.
 both explicit and remembered choices. `ConnectDialog` renders that state. Web
 popups open synchronously from the user's click, including when skipping the
 chooser; effects only poll an existing launch, so Strict Mode cannot launch
-twice. Closing, retrying, or changing targets aborts pending requests, and late
+twice. An installed standalone web app navigates to the terminal in its current
+window, retaining its Home Screen context. Closing, retrying, or changing targets aborts pending requests, and late
 poll results cannot replace a newer attempt.
 
 `preference.ts` stores only an explicitly chosen terminal in browser local
@@ -173,39 +177,55 @@ Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
 clipboard, composer, links, bells and notifications have one web implementation.
 
-`TerminalContextMenu` owns the terminal menu in both clients. On every attach,
-the runtime disables tmux mouse bindings (`mouse off`), including its context
-menus. It removes the prefix `<` / `>` menu and `[` / Page Up copy-mode shortcuts, and
-exits an active copy-mode view. These settings apply to Outpost's isolated tmux
-server without restarting the running harness.
-
-Disabling tmux's mouse bindings leaves application mouse reporting intact:
-tmux forwards the pane's requested terminal modes, and xterm handles those
-standard modes. Without a mouse request, xterm selects text locally. Shift-drag
+`TerminalContextMenu` owns the terminal menu in both clients. Application mouse
+modes pass through to xterm without a multiplexer interpreting clicks.
+Without a mouse request, xterm selects text locally. Shift-drag
 on Windows/Linux or Option-drag on macOS forces local selection when an application
 requests mouse events. `attachClipboard` copies completed local mouse selections
 through the same clipboard path as the context menu. It never enters a remote
 mode or sends a selection gesture. Application OSC 52 copies still work.
 
-Applications own conversation history and scrolling. Outpost exposes no tmux
-history scrollbar, polling worker, seek commands, or application-specific history
-bindings. It does not infer selection or scrolling capabilities from mouse
-reporting or alternate-screen use. The Codex adapter resumes the conversation
-without overriding `tui.alternate_screen`; native configuration and explicit
-arguments determine the mode. An already-running process retains its launch
-arguments until it exits and is resumed.
+The service and renderer use xterm's normal and alternate buffers. The normal
+buffer retains 10,000 scrollback rows; the alternate buffer has no scrollback.
+Screen erase and scrollback erase remain separate operations. Reconnecting
+restores both buffers, including normal-buffer history behind an active
+alternate screen. The renderer's actual xterm scrollbar browses those rows,
+without a remote copy mode or an application-specific scrolling heuristic.
+Full-screen applications own any history not represented by terminal scrollback.
+The Codex adapter does not override `tui.alternate_screen`.
 
-Because tmux attaches using the alternate screen, xterm's local buffer cannot
-replace tmux's retained history. Output from before attachment and older output
-in applications without a history viewer are not exposed by a generic Outpost
-scrollbar. The normal xterm scrolling behavior is retained. Shared terminal CSS
-hides only xterm's empty legacy `.xterm-viewport` scrollbar; its active
-`.xterm-scrollable-element` keeps normal behavior.
+Shared CSS hides only xterm's empty legacy `.xterm-viewport` scrollbar; its active
+`.xterm-scrollable-element` keeps normal behavior. Local selection/copying never
+pauses the service or changes the harness's terminal mode.
+
+`viewport.ts` follows the visual viewport's size and offset using coalesced
+animation frames. The terminal's existing ResizeObserver fits xterm after the
+container changes, including keyboard open/close and rotation. During pinch
+zoom it preserves the last unzoomed layout instead of reflowing terminal text.
+Touch controls use larger targets and 16px form text, and the composer stays
+focused while a send is pending. Notices have their own visible, dismissible
+row rather than being hidden with the title on narrow screens.
+
+`touch.ts` maps a single-finger vertical swipe to xterm's existing wheel handler;
+it owns that touch gesture to avoid also scrolling xterm's local viewport.
+Multi-touch remains available for browser zoom. It does not inspect the harness
+or synthesize remote history commands. `TerminalTextDialog` offers native browser selection
+of a bounded snapshot of the visible xterm rows, joining wrapped lines. Opening
+it sends no PTY input and the live terminal continues rendering behind it. This
+is a clipboard aid, not retained history; the snapshot is discarded on close.
 
 The relay retains a bounded FIFO for typed input, composer drafts and image
-pastes. Image paths are pasted through tmux after earlier PTY input is flushed.
-Drafts are confirmed only after their bytes are written to the PTY; no queued
+pastes. Image paths share the service input FIFO with typed bytes and drafts. The service wraps a path in bracketed-paste delimiters only when the application requested that mode.
+Drafts are confirmed only after the terminal service accepts their bytes into its PTY write queue; no queued
 input is replayed across reconnects.
+
+On visibility restoration, `pageshow`, or `online`, `TerminalSocket.resume()`
+probes an apparently live socket with an authenticated `ping` request. The broker
+answers directly without touching the PTY. A failed eight-second probe replaces
+only the same stale socket; healthy connections remain attached. Recoverable
+disconnects retry immediately, while ended, detached, expired, and outdated
+connections require the existing explicit action. This complements the broker's
+WebSocket ping/pong heartbeat, which browser JavaScript cannot observe.
 
 `useBellNotifications` manages browser permission requests, with an eight-second
 busy timeout and permission refresh on focus. Desktop uses the bridge's native
@@ -214,6 +234,20 @@ rechecks that the window is in the background, groups pending notifications,
 and focuses the owning window when clicked. System Focus / Do Not Disturb
 and notification settings still apply. Shared `bell.ts` owns attention state
 and the chime; the native notification is silent to avoid duplicate sound.
+
+Browser alerts use `notificationTransport.ts` and a notification-only service
+worker (`public/terminal-notifications.js`, scope `/terminal`). Registration and
+activation have deadlines; failures leave a retryable notice. The worker has no
+fetch handler, cache, background session, or Push subscription. Notification
+clicks focus the matching web terminal or open its normal authenticated page;
+data contains only target/session identifiers, never launch/resume credentials.
+Pending notifications are cancelled by generation on acknowledgement/disposal,
+and an old notification's cleanup cannot close a newer notification with the same
+session tag. Browsers without service workers retain the page Notification path.
+The manifest supports Home Screen launch; iOS outside that context gets actionable
+setup instructions instead of an unusable permission prompt. Permission is
+labelled as allowed, not as a promise of background delivery: suspended pages
+cannot receive live bells, and server-side Web Push is not implemented.
 
 Both clients load xterm's WebGL addon after opening the terminal. Initialization
 failure or context loss disposes the addon and falls back to the DOM renderer.
@@ -231,14 +265,15 @@ JSON control messages (`shared/protocol.ts`):
 | --- | --- | --- |
 | → server | `resize {cols, rows}` | Client geometry |
 | → server | `ack {bytes}` | Output rendered; flow control |
+| → server | `ping {id}` | Check a resumed browser's socket without sending terminal input |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
 | → server | `paste-image {id, mediaType, data}` | Upload an image and paste its path |
 | → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
 | → server | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
 | ← client | `hello {resume, session, target}` | Connection accepted |
-| ← client | `ready` | Attached to tmux |
+| ← client | `ready` | Checkpoint restored; attached to the persistent PTY |
 | ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
-| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / `activate` / `acknowledge` |
+| ← client | `result {id, ok, message?, reference?}` | Outcome of `ping` / `send` / `paste-image` / `activate` / `acknowledge` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |
 
@@ -271,26 +306,82 @@ other runtime operation (`ssh -T … "$SHELL -lic …"`, or the login shell
 locally). Login shells may print first; the relay then prints a magic marker
 and exchanges length-prefixed frames: one type byte, a 4-byte big-endian
 length, and the payload. If the runtime fails before the marker (a missing
-session, missing tmux), its `OUTPOST_RESULT` error becomes the client's
+session, missing terminal service), its `OUTPOST_RESULT` error becomes the client's
 `closed` message.
 
 | Type | Direction | Payload |
 | --- | --- | --- |
-| `I` | broker → relay | Input bytes for tmux |
-| `O` | relay → broker | Output bytes from tmux |
-| `C` | both | JSON control: `resize`, `send`, `paste-image`, `acknowledge`, `signal-result` / `ready`, `activity`, `result`, `signal`, `exit` |
+| `I` | broker → relay | Input bytes for the persistent PTY |
+| `O` | relay → broker | Live PTY output |
+| `C` | both | JSON control: `resize`, `send`, `paste-image`, `acknowledge`, `signal-result` / `restore`, `geometry`, `ready`, `activity`, `result`, `signal`, `exit` |
 
-Framing replaces in-band escape sequences, so typed or pasted bytes can never
-be mistaken for control messages. The relay owns a PTY for `tmux attach`, so
-SSH needs no PTY and window sizes travel as `resize` messages.
+Framing separates terminal bytes from control messages. The relay connects to
+`~/.outpost/terminals/<id>.sock` and forwards complete frames, adding activity
+and signal messages only between frames. SSH needs no PTY. Closing the relay
+closes only that socket, leaving the service and harness running.
 
-### tmux, configured to disappear
+### Persistent terminal service
 
-Each session is its own tmux server (`~/.outpost/sockets/<id>.sock`, no user
-configuration) set up so it feels like the tool is running directly in your
-terminal: no status bar, `escape-time 10`, application mouse reporting,
-`set-clipboard on` (OSC 52 out), extended keys for Shift+Enter, truecolor,
-focus events and `Ctrl+\` to detach. Connecting starts a stopped session in the same conversation.
+`outpost-terminal serve` receives launch configuration on stdin, starts a PTY
+with Bun's native terminal API, and runs a pinned `@xterm/headless` engine.
+Python starts it in a new OS session with independent log files and no inherited
+SSH stdio. Each session has its own process; a failure cannot take down every
+session. The service never needs Node or Bun installed separately on the target.
+The helper and its sockets have owner-only permissions. Control RPC authenticates
+the daemon PID and user using Linux `SO_PEERCRED` before lifecycle operations.
+
+The normal buffer retains 10,000 rows in memory. There is no raw output journal,
+copy mode, prefix key, status bar or keyboard negotiation shim. The service
+interprets terminal state and delivers live output to attached renderers. Complete
+UTF-8 and VT sequences are framed before entering xterm so checkpoints never
+split a control sequence. Unterminated control strings are bounded to 1 MiB.
+
+`shared/terminalCheckpoint.ts` is the single versioned adapter to xterm 6.0's
+internal state. Reconnect transfers cells (including styles, combined characters,
+soft wrapping and OSC 8 links), both buffers, cursor/save-cursor state, tabs,
+character sets, scrolling margins, palette and application/mouse modes. It does
+not re-execute old output: bells, OSC 52 and browser requests cannot replay.
+Changes to xterm's internal buffer layout require coordinated headless/renderer
+updates and a checkpoint protocol bump. This coupling is intentional; separate
+terminal parsers would otherwise disagree about screen state.
+
+Snapshot parts are generated synchronously between PTY callbacks, followed by
+live output. The browser applies checkpoints, geometry and bytes through one
+ordered render queue and acknowledges both snapshots and live output. Its
+buffer is replaced on reconnect instead of appending duplicate history.
+The service always processes PTY output, including with no clients attached;
+a client with an excessive output backlog is disconnected and can resynchronize.
+It cannot freeze the harness through transport backpressure. Only the newest
+attached client controls dimensions; all viewers receive the same geometry
+before subsequent output. Input from attached clients is ordered into one PTY.
+
+The headless engine alone answers terminal queries, even when disconnected.
+The browser forwards user input, mouse and focus events, suppressing duplicate
+terminal-generated replies. Palette queries use the same shared terminal theme.
+Resizing updates both engine geometry and the PTY, delivering normal SIGWINCH.
+Ctrl+C and other application keys pass directly through the PTY.
+
+The terminal service persists across client, SSH and Outpost server restarts.
+Its in-memory state and running processes do not survive a target reboot or
+service crash. Explicit Terminate walks the authenticated service's process
+tree using PID/start-time checks (and pidfds where available). Updating the
+installed executable atomically leaves already-running sessions alone.
+
+### Building and installing the dependency
+
+`shared/terminalService.ts` defines the executable version, service protocol,
+and terminal bounds. `runtime/outpost_terminal.py` mirrors the service contract.
+The manual `.github/workflows/terminal.yml` builds baseline x86_64 and ARM64
+binaries for glibc and musl, plus SHA256SUMS. Publishing creates an immutable
+`terminal-v<version>` release. The Required Software installer selects the
+architecture/libc, downloads that exact release, checks SHA-256 and `--version`,
+and renames the verified executable into `~/.outpost/bin/outpost-terminal`.
+It uses the existing editable installation plan, SSH/local transport and log UI.
+Minimal musl targets also receive the `libstdc++` system package.
+
+Before deploying this replacement, stop old tmux-backed sessions with the prior
+Outpost version. Their running processes cannot migrate into the new PTYs;
+conversation files can be resumed. Old tmux sockets are not reused or modified.
 
 **Creation and forking** share a process-owned `creation.lock`, serializing
 allocations without blocking operations on existing sessions. Lock order is
@@ -523,7 +614,7 @@ the remote harness is not inspected for drafts.
 Packaged apps register the protocol through Electron and installer metadata.
 macOS handles `open-url` before app readiness; Windows uses initial arguments
 and `second-instance`. A single app instance owns all workspaces; subsequent
-launches focus an existing tab or add one to the active window. Closing a tab or window never terminates tmux. The server
+launches focus an existing tab or add one to the active window. Closing a tab or window never terminates the target session. The server
 launcher can forget a server and close its tabs. No connection tickets or
 layouts with credentials are persisted; reopening the app starts a fresh
 workspace. The app icon and Windows AppUserModelID belong to Outpost.
@@ -550,7 +641,7 @@ conversation.
 | Data | Location |
 | --- | --- |
 | Session registry | `~/.outpost/registry.json` |
-| tmux sockets | `~/.outpost/sockets/<session>.sock` |
+| Terminal service sockets | `~/.outpost/terminals/<session>.sock` |
 | Activity checkpoints | `~/.outpost/activity/<session>.json` |
 | Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Signal helpers and sockets | `~/.outpost/bin/`, `~/.outpost/run/` |
@@ -591,8 +682,16 @@ the broker, and handle it in the shared client, delegating native actions throug
 
 | Layer | Tests |
 | --- | --- |
-| Runtime and relay | `tests/runtime/` — real tmux in a disposable home: lifecycle, framing, resize, image paste, signals, activity semantics |
+| Runtime and relay | `tests/runtime/` — real terminal service in a disposable home: lifecycle, framing, resize, image paste, signals, activity semantics |
 | Server | `tests/unit/` — tokens, workspace, API validation and network policy, hosted isolation and revocation, broker against a fake relay, TypeScript ⇄ Python contracts |
-| Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with tmux 3.2 in both modes; conversation discovery |
-| Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout |
+| Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with the built service in both modes; conversation discovery |
+| Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout; mobile WebGL rendering, real clipboard copying, and GPU context-loss fallback |
+| Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
 | Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |
+
+Mobile automation uses real browser engines with emulated device sizes. Android swipes use Chromium's trusted
+touch input; WebKit swipe routing and keyboard occlusion use synthetic touch/VisualViewport events because
+the headless port cannot open a phone keyboard. Notification tests cover permission/setup failures and
+cleanup races with browser API doubles, plus actual worker activation in both engines and notification
+registration in Chromium. They do not prove physical iOS selection handles, OS banners, Home Screen installation, or
+background suspension behavior. Those still need a physical iPhone/iPad and Android device check.

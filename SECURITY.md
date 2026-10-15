@@ -39,7 +39,11 @@ usable once. The first message returns a resume token (30 days) that only
 travels inside the WebSocket; both are checked against the live login, so
 signing out closes open terminals within seconds and invalidates their tokens.
 Input rate, message size, unacknowledged output and terminals per account are
-bounded. Closing a terminal never stops the tmux session.
+bounded. Closing a terminal never stops its target-side PTY service. The service listens
+only on an owner-only Unix socket; management authenticates its PID and UID
+with Linux SO_PEERCRED. Checkpoints transfer terminal state without replaying
+clipboard writes, bells or browser requests. Target binaries are installed
+from a fixed release after checksum and version validation.
 
 **Outpost Desktop.** The Electron app confirms trust before loading a server's
 terminal UI. Origins must use HTTPS, except localhost HTTP. Remote windows have

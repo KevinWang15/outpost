@@ -82,7 +82,7 @@ export interface SessionImage {
 export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => [
   'bash',
   'python3',
-  'tmux',
+  'outpost-terminal',
   ...target.tools,
 ]
 export interface SoftwareStatus {

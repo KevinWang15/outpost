@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { bellNotificationPermission, type BellNotificationPermission } from './bell'
 import { desktop } from '../desktop'
+import { prepareBrowserNotifications } from './notificationTransport'
 
 export const notificationLabels: Record<BellNotificationPermission, string> = {
-  default: 'Enable desktop notifications',
-  granted: 'Desktop notifications enabled',
-  denied: 'Desktop notifications blocked',
-  unsupported: 'Desktop notifications unavailable in this browser',
-  insecure: 'Desktop notifications require HTTPS or localhost',
+  default: 'Enable notifications',
+  granted: 'Notifications allowed',
+  denied: 'Notifications blocked',
+  unsupported: 'Notifications unavailable in this browser',
+  insecure: 'Notifications require HTTPS or localhost',
+  'home-screen': 'Add Outpost to Home Screen for notifications',
 }
 const notificationMessages: Record<BellNotificationPermission, string> = {
-  default: 'Desktop notifications were not enabled. Try again or check the site’s notification settings.',
-  granted: 'Desktop notifications enabled. Keep the terminal open to receive alerts.',
+  default: 'Notifications were not enabled. Try again or check the site’s notification settings.',
+  granted:
+    'Notifications are allowed while this terminal is running. Alerts cannot arrive while your browser is suspended or closed.',
   denied: 'Notifications are blocked. Allow them in your browser’s site settings.',
-  unsupported: 'This browser does not support desktop notifications.',
+  unsupported: 'This browser does not support notifications. The terminal’s visual bell still works.',
   insecure: 'Open Outpost over HTTPS or localhost to enable notifications.',
+  'home-screen':
+    'On iPhone or iPad, use Share → Add to Home Screen. Open Outpost from that icon, connect with Web terminal, then enable notifications.',
 }
 const waitingMessage = 'Still waiting for the browser’s permission prompt. Check the site’s notification settings.'
 type Notice = { text: string; sticky: boolean }
@@ -34,6 +39,7 @@ export function useBellNotifications(onNotice: (message: string, sticky: boolean
   const [state, setState] = useState<State>(() => ({ permission: bellNotificationPermission(), requesting: false }))
   const current = useRef(state)
   const requested = useRef(false)
+  const [setupAttempt, setSetupAttempt] = useState(0)
   const publish = useCallback(
     (next: State, notice?: Notice) => {
       current.current = next
@@ -54,6 +60,17 @@ export function useBellNotifications(onNotice: (message: string, sticky: boolean
       publish({ permission, requesting: false }, requested.current ? noticeFor(permission) : undefined)
     return permission
   }, [clearPending, publish])
+
+  useEffect(() => {
+    if (desktop || state.permission !== 'granted') return
+    let disposed = false
+    void prepareBrowserNotifications().catch(() => {
+      if (!disposed) onNotice('Notifications are allowed, but setup failed. Tap the bell to retry.', true)
+    })
+    return () => {
+      disposed = true
+    }
+  }, [state.permission, setupAttempt, onNotice])
 
   useEffect(() => {
     let disposed = false
@@ -85,6 +102,7 @@ export function useBellNotifications(onNotice: (message: string, sticky: boolean
     requested.current = true
     const permission = refresh()
     if (permission !== 'default') {
+      if (permission === 'granted') setSetupAttempt(value => value + 1)
       publish({ permission, requesting: false }, noticeFor(permission))
       return
     }
@@ -105,7 +123,7 @@ export function useBellNotifications(onNotice: (message: string, sticky: boolean
       publish(
         { permission: next, requesting: false },
         failed && next === 'default'
-          ? { text: 'Could not enable desktop notifications. Check your browser’s site settings.', sticky: true }
+          ? { text: 'Could not enable notifications. Check your browser’s site settings.', sticky: true }
           : noticeFor(next),
       )
     }

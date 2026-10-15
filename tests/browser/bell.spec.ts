@@ -25,6 +25,8 @@ declare global {
 
 async function mockNotifications(page: Page, permission: NotificationPermission = 'default') {
   await page.context().addInitScript(permission => {
+    // Exercise the page Notification fallback here; the mobile suite covers service workers.
+    Reflect.deleteProperty(Object.getPrototypeOf(navigator), 'serviceWorker')
     window.bellNotifications = {
       permission,
       result: 'granted',
@@ -81,6 +83,11 @@ async function openTerminal(page: Page, mode: 'web' | 'desktop' = 'web') {
   let socket!: WebSocketRoute
   await page.routeWebSocket(/\/api\/terminal\?/, ws => {
     socket = ws
+    ws.onMessage(data => {
+      if (typeof data !== 'string') return
+      const message = JSON.parse(data)
+      if (message.type === 'ping') ws.send(JSON.stringify({ type: 'result', id: message.id, ok: true }))
+    })
     ws.send(
       JSON.stringify({
         type: 'hello',
@@ -211,10 +218,10 @@ for (const mode of ['web', 'desktop'] as const) {
     expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(0)
 
     await attention(page, true)
-    await page.getByRole('button', { name: 'Enable desktop notifications', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable notifications', exact: true }).click()
     expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(1)
     expect(await page.evaluate(() => window.bellNotifications.gestures)).toEqual([true])
-    await expect(page.getByRole('button', { name: 'Desktop notifications enabled', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Notifications allowed', exact: true })).toBeVisible()
     socket.send(Buffer.from('\x07'))
     await expect(notice).toBeVisible()
     expect(await alerts()).toBe(0)
@@ -283,7 +290,7 @@ for (const mode of ['web', 'desktop'] as const) {
 test('saved notification permission is used and revoking it stops desktop bells', async ({ page }) => {
   await mockNotifications(page, 'granted')
   const socket = await openTerminal(page)
-  await expect(page.getByRole('button', { name: 'Desktop notifications enabled', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Notifications allowed', exact: true })).toBeVisible()
   await attention(page, false)
   socket.send(Buffer.from('\x07'))
   await expect.poll(() => page.evaluate(() => window.bellNotifications.instances.length)).toBe(1)
@@ -294,8 +301,13 @@ test('saved notification permission is used and revoking it stops desktop bells'
   await expect(page).toHaveTitle(/rang a bell/)
   expect(await page.evaluate(() => window.bellNotifications.instances.length)).toBe(1)
   await attention(page, true)
-  await page.getByRole('button', { name: 'Desktop notifications blocked', exact: true }).click()
-  await expect(page.locator('.terminal-status')).toContainText('Allow them in your browser’s site settings')
+  await page.getByRole('button', { name: 'Notifications blocked', exact: true }).click()
+  await expect(
+    page
+      .locator('.terminal-notice')
+      .filter({ hasNot: page.locator('.terminal-bell') })
+      .first(),
+  ).toContainText('Allow them in your browser’s site settings')
   expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(0)
 })
 
@@ -304,15 +316,20 @@ for (const result of ['denied', 'default', 'error'] as const) {
     await mockNotifications(page)
     const socket = await openTerminal(page)
     await page.evaluate(result => (window.bellNotifications.result = result), result)
-    await page.getByRole('button', { name: 'Enable desktop notifications', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable notifications', exact: true }).click()
     const message =
       result === 'denied'
         ? 'Notifications are blocked.'
         : result === 'default'
-          ? 'Desktop notifications were not enabled.'
-          : 'Could not enable desktop notifications.'
-    await expect(page.locator('.terminal-status')).toContainText(message)
-    const label = result === 'denied' ? 'Desktop notifications blocked' : 'Enable desktop notifications'
+          ? 'Notifications were not enabled.'
+          : 'Could not enable notifications.'
+    await expect(
+      page
+        .locator('.terminal-notice')
+        .filter({ hasNot: page.locator('.terminal-bell') })
+        .first(),
+    ).toContainText(message)
+    const label = result === 'denied' ? 'Notifications blocked' : 'Enable notifications'
     await expect(page.getByRole('button', { name: label, exact: true })).toBeEnabled()
     await attention(page, false)
     socket.send(Buffer.from('\x07STILL_CONNECTED\r\n'))
@@ -329,10 +346,13 @@ for (const unavailable of ['unsupported', 'insecure'] as const) {
       else Object.defineProperty(window, 'isSecureContext', { value: false })
     }, unavailable)
     const socket = await openTerminal(page)
-    await page.getByRole('button', { name: /Desktop notifications (unavailable|require)/ }).click()
-    await expect(page.locator('.terminal-status')).toContainText(
-      unavailable === 'unsupported' ? 'does not support desktop notifications' : 'HTTPS or localhost',
-    )
+    await page.getByRole('button', { name: /Notifications (unavailable|require)/ }).click()
+    await expect(
+      page
+        .locator('.terminal-notice')
+        .filter({ hasNot: page.locator('.terminal-bell') })
+        .first(),
+    ).toContainText(unavailable === 'unsupported' ? 'does not support notifications' : 'HTTPS or localhost')
     await attention(page, false)
     socket.send(Buffer.from('\x07STILL_CONNECTED\r\n'))
     await expect(page).toHaveTitle(/rang a bell/)

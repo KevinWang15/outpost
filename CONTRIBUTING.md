@@ -1,22 +1,23 @@
 # Contributing to Outpost
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: it explains the
-principles every change should keep (one connection path, tmux as the only
-terminal state, modes that differ only in identity, agentless targets).
+principles every change should keep (one connection path, target-owned persistent terminal
+state, modes that differ only in identity, one installed target executable).
 
 Outpost is unreleased. Keep one current implementation and schema: remove
 obsolete paths when replacing a feature instead of adding migration readers,
 aliases or compatibility modes. Version checks reject stale inputs; update the
-shared contracts and callers together. Supported OS/browser/tmux handling is
+shared contracts and callers together. Supported OS/browser/terminal-engine handling is
 part of the current platform contract.
 
 ## Local setup
 
-Use Node.js 24+, npm 11+, Python 3.9+, tmux 3.2+, an OpenSSH client and
+Use Node.js 24+, npm 11+, Python 3.9+, an OpenSSH client and
 [ruff](https://docs.astral.sh/ruff/) (`pipx install ruff` or `uv tool install ruff`).
 
 ```sh
 npm ci
+npm run build:terminal
 npm run dev
 ```
 
@@ -32,6 +33,7 @@ credentials, hosted development shows verification links in the UI.
 | `backend/` | TypeScript | Outpost server |
 | `frontend/` | React + SCSS | Browser and Electron renderer |
 | `shared/` | TypeScript | Server, frontend and desktop contracts |
+| `terminal-service/` | TypeScript + bundled Bun | Linux targets, installed executable |
 | `runtime/` | Python 3.9 | Targets, sent with each operation |
 | `desktop/` | TypeScript + Electron | Your computer (macOS, Windows) |
 
@@ -47,7 +49,7 @@ Contracts shared by TypeScript and Python are tested in
 
 ```sh
 npm run check             # lint (incl. ruff), typecheck, build, Node unit tests, Python tests
-npm run test:integration  # real tmux; the SSH test also needs Docker
+npm run test:integration  # persistent PTYs; the SSH test also needs Docker
 npx playwright install chromium
 npm run test:ui           # browser tests against a real local backend
 ```
@@ -109,6 +111,26 @@ reconnect/reload, GPU fallback and app identity before a stable release. Check
 shortcuts with the message box focused as well as the terminal. Do not infer
 OS behavior from a successful packaging job. The app and server must ship the
 same `desktopBridgeVersion`; there are no bridge compatibility shims.
+
+## Linux terminal dependency
+
+Run `npm run build:terminal` before runtime/integration/browser tests. Use
+`npm run build:terminal -- arm64-glibc` (or `x64-musl`, `arm64-musl`) for other
+targets. The build pins Bun; the resulting executable embeds its runtime.
+
+The **Linux terminal service** workflow is manual and builds all four assets.
+Enable **publish** to create `terminal-v<version>` with checksums. Bump the
+shared service version and its Python contract together; never overwrite an
+existing release. The existing **CI** dispatcher also exposes `suite=terminal`
+and `publish_preview=true`, so it works before GitHub registers the new workflow
+on the default branch. This release is separate from desktop installers.
+
+`shared/terminalCheckpoint.ts` is the sole adapter to xterm internals. Keep the
+headless and browser buffer layouts aligned, and bump its schema/protocol when
+they change. Checkpoint restoration transfers cells and modes without replaying
+escape sequences. Any upgrade must preserve scrollback, wrapping, wide/combined
+characters, alternate buffers, saved cursors, links, margins, palettes and input
+modes, and keep live output ordered after the snapshot.
 
 ## Pull requests
 

@@ -1,11 +1,14 @@
 import type { Terminal } from '@xterm/xterm'
 import { desktop } from '../desktop'
+import { appleMobile, standaloneBrowser } from '../browser'
+import { showBrowserNotification, type BrowserBellNotification } from './notificationTransport'
 
-export type BellNotificationPermission = NotificationPermission | 'unsupported' | 'insecure'
+export type BellNotificationPermission = NotificationPermission | 'unsupported' | 'insecure' | 'home-screen'
 
 export function bellNotificationPermission(): BellNotificationPermission {
   if (desktop) return desktop.notificationsSupported ? 'granted' : 'unsupported'
   if (!window.isSecureContext) return 'insecure'
+  if (appleMobile() && !standaloneBrowser()) return 'home-screen'
   if (typeof window.Notification !== 'function') return 'unsupported'
   return Notification.permission
 }
@@ -17,19 +20,21 @@ export function attachBell(
   changed: (ringing: boolean) => void,
   session: () => { id: string; name: string },
   preferences?: { active: () => boolean; sound: () => boolean },
+  onNotificationError?: (message: string) => void,
 ) {
   let audio: AudioContext | null = null
-  let notification: Notification | null = null
+  let notification: BrowserBellNotification | null = null
+  let generation = 0
   let notified = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastSound = -Infinity
   const active = preferences?.active ?? (() => document.visibilityState === 'visible' && document.hasFocus())
   const closeNotification = () => {
+    generation++
     if (desktop) void desktop.dismissBell().catch(() => {})
     const current = notification
     notification = null
     if (!current) return
-    current.onclick = current.onclose = current.onerror = null
     try {
       current.close()
     } catch {
@@ -44,46 +49,45 @@ export function attachBell(
   }
   const showNotification = () => {
     if (active() || notified || bellNotificationPermission() !== 'granted') return
+    const attempt = ++generation
+    notified = true
     if (desktop) {
-      notified = true
       void desktop.notifyBell(session().name).then(
         shown => {
-          if (!shown) notified = false
+          if (!shown && generation === attempt) notified = false
         },
         () => {
-          notified = false
+          if (generation === attempt) notified = false
         },
       )
       return
     }
-    try {
-      const current = new Notification('Outpost · Terminal bell', {
-        body: `${session().name} rang a bell`,
-        icon: '/outpost.png',
-        // Group by the session, never by URL or token.
-        tag: `outpost-bell:${session().id}`,
-      })
-      notification = current
-      notified = true
-      current.onclick = () => {
-        // Preserve the browser's default click action, which activates this tab.
+    const failed = () => {
+      if (generation !== attempt) return
+      closeNotification()
+      notified = false
+      onNotificationError?.('Could not show a notification. Tap the bell to check notification access.')
+    }
+    void showBrowserNotification(
+      session(),
+      () => generation === attempt && !active(),
+      () => {
         window.focus()
         term.focus()
         acknowledge()
-      }
-      current.onclose = () => {
-        if (notification === current) notification = null
-      }
-      current.onerror = () => {
-        if (notification === current) {
-          closeNotification()
-          notified = false
+      },
+      failed,
+    )
+      .then(current => {
+        // Permission/worker setup can finish after a tab was acknowledged or closed.
+        if (generation !== attempt || active()) {
+          current?.close()
+          return
         }
-      }
-    } catch {
-      // Permission can change, and some browsers cannot create notifications.
-      // Keep the visual bell and chime even when desktop alerts are unavailable.
-    }
+        notification = current
+        if (!current) notified = false
+      })
+      .catch(failed)
   }
   const prepareSound = () => {
     try {

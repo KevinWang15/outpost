@@ -76,7 +76,7 @@ class ActivityStream:
         now = time.monotonic()
         if self.worker is None and now >= self.retry_at:
             try:
-                # Starts after pty.fork(). A stuck filesystem read must not keep
+                # A stuck filesystem read must not keep
                 # the relay alive on disconnect; never start a replacement reader.
                 worker = Thread(target=self.observe, name='outpost-activity', daemon=True)
                 worker.start()

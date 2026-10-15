@@ -2,6 +2,8 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/browser',
+  testIgnore: '**/mobile/**',
+  outputDir: 'test-results/browser',
   timeout: 60_000,
   expect: { timeout: 15_000 },
   workers: 1,
@@ -15,7 +17,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: [
-    // SIGTERM lets the backend stop its fixture tmux sessions and remove its home.
+    // SIGTERM lets the backend stop its fixture terminal sessions and remove its home.
     {
       command: 'node --import tsx tests/browser/server.ts',
       url: 'http://127.0.0.1:4179/health',

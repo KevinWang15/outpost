@@ -28,45 +28,28 @@ import { readImage } from '../api'
 import { attachBell } from './bell'
 import { TerminalActivity } from './activity'
 import { openBrowserTab } from './browser'
-import { attachClipboard, imageProblem } from './clipboard'
+import { attachClipboard, imageProblem, screenText } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
 import TerminalContextMenu from './TerminalContextMenu'
+import TerminalTextDialog from './TerminalTextDialog'
+import { attachTouchScroll } from './touch'
+import { touchInput as touch } from '../browser'
+import { useTerminalViewport } from './viewport'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
 import { desktop } from '../desktop'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
+import { CheckpointReader, remoteTerminalReplies } from '../../shared/terminalCheckpoint'
+import { terminalService } from '../../shared/terminalService'
+import { terminalTheme as theme } from '../../shared/terminalTheme'
 
-const touch = () => window.matchMedia('(pointer: coarse)').matches
 const closedTitles: Record<CloseReason, string> = {
   detached: 'Detached',
   ended: 'Session ended',
   expired: 'Connection expired',
   outdated: 'Update required',
   error: 'Disconnected',
-}
-const theme = {
-  background: '#0f172a',
-  foreground: '#e2e8f0',
-  cursor: '#93c5fd',
-  cursorAccent: '#0f172a',
-  selectionBackground: '#334155',
-  black: '#1e293b',
-  red: '#f87171',
-  green: '#4ade80',
-  yellow: '#facc15',
-  blue: '#60a5fa',
-  magenta: '#c084fc',
-  cyan: '#22d3ee',
-  white: '#e2e8f0',
-  brightBlack: '#64748b',
-  brightRed: '#fca5a5',
-  brightGreen: '#86efac',
-  brightYellow: '#fde68a',
-  brightBlue: '#93c5fd',
-  brightMagenta: '#d8b4fe',
-  brightCyan: '#67e8f9',
-  brightWhite: '#f8fafc',
 }
 
 interface Props {
@@ -88,6 +71,8 @@ function savedToolbar() {
 }
 
 export default function TerminalView({ token, title, onClose, onResume, onExpired }: Props) {
+  const container = useRef<HTMLDivElement>(null)
+  useTerminalViewport(container)
   const surface = useRef<HTMLDivElement>(null),
     chooser = useRef<HTMLInputElement>(null)
   const terminal = useRef<Terminal | null>(null),
@@ -104,6 +89,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   const [keysShown, setKeysShown] = useState(touch)
   const [composerShown, setComposerShown] = useState(touch)
   const [draft, setDraft] = useState('')
+  const [textToSelect, setTextToSelect] = useState<string | null>(null)
   const hasDraft = draft.length > 0
   const host = useRef<TerminalHostState>({ focused: false, fontSize: 13.5, sound: true })
   const [modifiers, setModifiers] = useState<TerminalModifiers>({})
@@ -122,7 +108,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     } catch {
       /* The layout preference is optional. */
     }
-    terminal.current?.focus()
+    if (!touch()) terminal.current?.focus()
   }
 
   useEffect(() => {
@@ -145,6 +131,11 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     if (!sticky) statusTimer.current = setTimeout(() => setStatus(''), 4000)
   }, [])
   const notifications = useBellNotifications(notify)
+  const selectText = () => {
+    if (!terminal.current) return
+    setTextToSelect(screenText(terminal.current))
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+  }
   const arm = useCallback((next: TerminalModifiers) => {
     armed.current = next
     setModifiers(next)
@@ -171,7 +162,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
       theme,
       cursorBlink: true,
-      scrollback: 2000,
+      scrollback: terminalService.scrollback,
       allowProposedApi: true,
       macOptionIsMeta: true,
       macOptionClickForcesSelection: true,
@@ -180,6 +171,28 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       logLevel: 'off',
     })
     const fit = new FitAddon()
+    const checkpoints = new CheckpointReader(term)
+    remoteTerminalReplies(term)
+    // A single render queue orders checkpoints, live bytes and geometry. In
+    // particular, restoring never races an outstanding xterm write callback.
+    let render = Promise.resolve()
+    let restoring = false
+    let renderingStopped = false
+    let disposed = false
+    const enqueue = (operation: () => void | Promise<void>, done: () => void) => {
+      render = render
+        .then(() => {
+          if (!disposed && !renderingStopped) return operation()
+        })
+        .then(() => {
+          if (!disposed && !renderingStopped) done()
+        })
+        .catch(error => {
+          if (disposed || renderingStopped) return
+          renderingStopped = true
+          client.fail(`Could not render the terminal: ${(error as Error).message}`)
+        })
+    }
     term.loadAddon(fit)
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
@@ -203,6 +216,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       // Remote desktops, driver failures and older browsers use the DOM renderer.
     }
     term.textarea?.setAttribute('aria-label', 'Terminal input')
+    term.textarea?.setAttribute('enterkeyhint', 'enter')
+    const stopTouch = attachTouchScroll(term)
     terminal.current = term
     const bells = attachBell(
       term,
@@ -214,6 +229,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             sound: () => host.current.sound,
           }
         : undefined,
+      message => notify(message, true),
     )
     bell.current = bells
     const size = () => {
@@ -224,8 +240,27 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       }
     }
     const client = new TerminalSocket(token, size, {
-      output: (bytes, rendered) => term.write(bytes, rendered),
+      output: (bytes, rendered) =>
+        enqueue(
+          () =>
+            new Promise<void>(resolve => {
+              if (bytes.length) term.write(bytes, resolve)
+              else resolve()
+            }),
+          rendered,
+        ),
+      restore: (message, rendered) =>
+        enqueue(() => {
+          if (message.type === 'geometry') term.resize(message.cols, message.rows)
+          else {
+            if (message.checkpoint.part === 'begin') restoring = true
+            checkpoints.accept(message.checkpoint)
+            if (message.checkpoint.part === 'end') restoring = false
+          }
+        }, rendered),
       state: next => {
+        if (disposed) return
+        if (next.kind === 'connecting' || next.kind === 'reconnecting') renderingStopped = false
         setState(next)
         if (next.kind === 'closed' && next.reason === 'expired') lifecycle.current.onExpired?.()
         if (next.kind === 'connected' && !touch() && (!desktop || (host.current.focused && document.hasFocus())))
@@ -272,6 +307,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       connected: () => client.connected,
       pasteImage: file => void pasteImage(file),
       status: notify,
+      pasteFallback: () => setComposerShown(true),
     })
     clipboard.current = shims
     term.onData(data => {
@@ -305,15 +341,19 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       clearTimeout(timer)
       timer = setTimeout(() => {
         const { cols, rows } = size()
-        if (term.cols !== cols || term.rows !== rows) {
-          term.resize(cols, rows)
+        if (!restoring && (term.cols !== cols || term.rows !== rows)) {
           client.resize(cols, rows)
         }
       }, 60)
     }
     const observer = new ResizeObserver(refit)
     observer.observe(surface.current!)
-    window.visualViewport?.addEventListener('resize', refit)
+    const resume = () => {
+      if (document.visibilityState === 'visible') client.resume()
+    }
+    window.addEventListener('pageshow', resume)
+    window.addEventListener('online', resume)
+    document.addEventListener('visibilitychange', resume)
     const initial = size()
     term.resize(initial.cols, initial.rows)
     const focusInput = () => {
@@ -373,16 +413,21 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       clearTimeout(start)
       clearTimeout(timer)
       observer.disconnect()
-      window.visualViewport?.removeEventListener('resize', refit)
+      window.removeEventListener('pageshow', resume)
+      window.removeEventListener('online', resume)
+      document.removeEventListener('visibilitychange', resume)
       window.removeEventListener('focus', activityFocus)
       window.removeEventListener('blur', activityFocus)
       document.removeEventListener('visibilitychange', activityFocus)
       window.removeEventListener('click', acknowledgeActivity, true)
       window.removeEventListener('keydown', acknowledgeActivity, true)
+      renderingStopped = true
+      disposed = true
       client.close()
       activityController.dispose()
       bells.dispose()
       shims.dispose()
+      stopTouch()
       stopCommands?.()
       stopHost?.()
       stopLaunches?.()
@@ -418,23 +463,18 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             : 'Disconnected'
 
   return (
-    <div className="terminal-view" role="dialog" aria-label={`Web terminal · ${name}`}>
+    <div ref={container} className="terminal-view" role="dialog" aria-label={`Web terminal · ${name}`}>
       <header className="terminal-bar" hidden={!toolbarShown}>
         <div className="terminal-title">
           <strong>{name}</strong>
-          <span className={`terminal-state ${state.kind}`}>
+          <span className={`terminal-state ${state.kind}`} role="status" aria-label={label}>
             {state.kind === 'connecting' || state.kind === 'reconnecting' ? (
               <LoaderCircle className="spin" size={12} />
             ) : (
               <i />
             )}
-            {label}
+            <span className="terminal-state-label">{label}</span>
           </span>
-          {status && (
-            <span className="terminal-status" role="status">
-              {status}
-            </span>
-          )}
         </div>
         <div className="terminal-actions">
           <button
@@ -511,21 +551,24 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         </div>
       </header>
       {!toolbarShown && (
-        <>
-          <button
-            className="icon-button terminal-show-toolbar"
-            title="Show terminal toolbar"
-            aria-label="Show terminal toolbar"
-            onClick={() => showToolbar(true)}
-          >
-            <PanelTopOpen size={17} />
-          </button>
-          {(status || state.kind === 'connecting' || state.kind === 'reconnecting') && (
-            <div className="terminal-notice" role="status">
-              {status || label}
-            </div>
+        <button
+          className="icon-button terminal-show-toolbar"
+          title="Show terminal toolbar"
+          aria-label="Show terminal toolbar"
+          onClick={() => showToolbar(true)}
+        >
+          <PanelTopOpen size={17} />
+        </button>
+      )}
+      {(status || (!toolbarShown && (state.kind === 'connecting' || state.kind === 'reconnecting'))) && (
+        <div className="terminal-notice" role="status">
+          <span>{status || label}</span>
+          {status && (
+            <button className="icon-button" aria-label="Dismiss notice" onClick={() => setStatus('')}>
+              <X size={16} />
+            </button>
           )}
-        </>
+        </div>
       )}
       {blockedLink && (
         <div className="terminal-notice">
@@ -562,8 +605,11 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             copy: () => void clipboard.current?.copy(),
             paste: () => void clipboard.current?.paste(),
             selectAll: () => terminal.current?.selectAll(),
+            selectText,
             pasteImage: () => chooser.current?.click(),
-            focus: () => terminal.current?.focus(),
+            focus: () => {
+              if (!touch()) terminal.current?.focus()
+            },
           }}
           controls={[
             { label: 'Terminal toolbar', shown: toolbarShown, onChange: showToolbar },
@@ -620,11 +666,21 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             if (!touch()) terminal.current?.focus()
           }}
           onKey={press}
-          onCopy={() => void clipboard.current?.copy()}
+          onCopy={() => {
+            if (touch() && !clipboard.current?.canCopy()) selectText()
+            else void clipboard.current?.copy()
+          }}
           onPaste={() => void clipboard.current?.paste()}
+          onSelectText={selectText}
+          onKeyboard={() => {
+            const active = document.activeElement
+            if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) active.blur()
+            else terminal.current?.focus()
+          }}
         />
       )}
       <Composer enabled={connected} visible={composerShown} text={draft} onChange={setDraft} onSend={send} />
+      {textToSelect !== null && <TerminalTextDialog text={textToSelect} onClose={() => setTextToSelect(null)} />}
     </div>
   )
 }

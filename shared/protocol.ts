@@ -5,14 +5,16 @@ import type { Static } from 'typebox'
 import type { SessionActivity } from './activity'
 import type { ImageMediaType } from './model'
 import type { connectInput } from './schemas'
+import type { Checkpoint } from './terminalCheckpoint'
 
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 5
+export const protocolVersion = 7
 export const maxInputMessage = 64 * 1024
 
 export type ClientMessage =
+  | { type: 'ping'; id: string }
   | { type: 'activate'; id: string; token: string }
   | { type: 'acknowledge'; id: string; completionId: string }
   | { type: 'resize'; cols: number; rows: number }
@@ -28,6 +30,8 @@ export interface SignalMessage {
 export type ServerMessage =
   | { type: 'hello'; resume: string; session: { id: string; name: string }; target: { id: string; name: string } }
   | { type: 'ready' }
+  | { type: 'restore'; checkpoint: Checkpoint }
+  | { type: 'geometry'; cols: number; rows: number }
   | { type: 'activity'; activity: SessionActivity }
   | { type: 'result'; id: string; ok: boolean; message?: string; reference?: string }
   | { type: 'signal'; signal: SignalMessage }

@@ -1,6 +1,20 @@
 import type { Terminal } from '@xterm/xterm'
 import { imageMediaTypes, maxImageBytes } from '../../shared/model'
 import { desktop } from '../desktop'
+import { touchInput } from '../browser'
+
+/** Only text already visible in xterm; no remote history request or mode change. */
+export function screenText(term: Terminal) {
+  const buffer = term.buffer.active
+  let text = ''
+  for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row++) {
+    const line = buffer.getLine(row)
+    if (!line) break
+    if (row > buffer.viewportY && !line.isWrapped) text += '\n'
+    text += line.translateToString(!buffer.getLine(row + 1)?.isWrapped)
+  }
+  return text.replace(/\n+$/, '')
+}
 
 export function imageProblem(file: Blob): string | null {
   if (!(imageMediaTypes as readonly string[]).includes(file.type)) return 'That is not a PNG, JPEG, GIF, or WebP image.'
@@ -16,6 +30,7 @@ export function attachClipboard(
     connected: () => boolean
     pasteImage: (file: File) => void
     status: (message: string) => void
+    pasteFallback?: () => void
   },
 ) {
   const mac = /Mac/.test(navigator.platform)
@@ -130,7 +145,12 @@ export function attachClipboard(
         } else term.paste(await navigator.clipboard.readText())
         term.focus()
       } catch {
-        options.status(`Paste was blocked. Press ${mac ? 'Command+V' : 'Ctrl+V'} instead.`)
+        if (touchInput()) options.pasteFallback?.()
+        options.status(
+          touchInput()
+            ? 'Touch and hold the message box to paste, then tap Send.'
+            : `Paste was blocked. Press ${mac ? 'Command+V' : 'Ctrl+V'} instead.`,
+        )
       }
     },
     /** Add Ctrl+V on macOS; leave native paste shortcuts to their paste events. */

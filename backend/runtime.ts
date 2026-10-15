@@ -2,8 +2,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { deflateSync } from 'node:zlib'
 import { quote, supportingPath } from './shell'
 
-// The target runtime is sent with every operation (principle: agentless
-// targets). Modules are registered under their file names, then the entry runs.
+// Target management is sent with each operation; the installed terminal service
+// owns persistent PTYs. Modules load under their file names before the entry runs.
 const directory = new URL('../runtime/', import.meta.url)
 const read = (name: string) => readFileSync(new URL(name, directory), 'utf8')
 const modules = readdirSync(directory)

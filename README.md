@@ -2,7 +2,7 @@
 
 ![Outpost — keep the session, keep your flow.](docs/images/banner.png)
 
-Outpost keeps your **Claude Code, Codex and Kimi Code** sessions running in tmux
+Outpost keeps your **Claude Code, Codex and Kimi Code** sessions running in persistent terminals
 on your Linux machines, and lets you come back to them from your browser or
 Outpost Desktop — with paste, copy, Shift+Enter and links working as if
 the agent ran on your computer.
@@ -20,7 +20,7 @@ the agent ran on your computer.
 
 | Where | What you need |
 | --- | --- |
-| Targets — where sessions run | Linux with Bash, Python 3.9+ and tmux 3.2+, reachable over SSH as root. The computer running Outpost can be a target too when it runs Linux (including WSL). Outpost can install missing software for you. |
+| Targets — where sessions run | Linux with Bash, Python 3.9+ and Outpost Terminal, reachable over SSH as root. The computer running Outpost can be a target too when it runs Linux (including WSL). Outpost can install missing software for you. |
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Web terminal | Any current browser, including on phones. |
 | Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Bundles Electron; no browser, Python or WSL installation needed. |
@@ -74,7 +74,7 @@ or desktop server trust requirements.
 | Web terminal | A regular browser window; also works on phones | None | Your Outpost browser login requests a session ticket |
 | Outpost Desktop | An Electron window with its own Outpost Dock/taskbar identity | Outpost Desktop | Transfers a session ticket from your signed-in browser; no second login |
 
-Every choice attaches to the same tmux session. Closing a client disconnects
+Every choice attaches to the same persistent session. Closing a client disconnects
 it; the coding session keeps running. You can change clients later.
 
 Desktop Connect brings the app forward and selects the session's tab. If that
@@ -88,6 +88,43 @@ Opens full-window in the browser. Paste images with your normal paste shortcut
 or the image button. On phones, an on-screen key bar (Esc, Tab, Ctrl, Alt,
 arrows, ⇧↩, ^C) and a message box are shown. Dropped connections reconnect by
 themselves.
+
+#### Phones and tablets
+
+Open your hosted Outpost address in the phone's browser and choose **Connect →
+Web terminal**. The terminal and its controls follow the visible area above the
+keyboard. Use the message box for longer prompts; **Send** keeps the keyboard
+open and clears an unchanged draft only after delivery is confirmed; edits made
+while waiting are kept. **Keyboard** in the
+key bar shows or hides the keyboard for direct terminal input. Swipe the key bar
+sideways to reach the other keys.
+
+Swipe vertically over terminal output to send the same scrolling gesture as a
+mouse wheel. The application decides what that does; it does not pause remote output or add a history buffer. **Select text** in the key bar or context menu
+opens a copy of the text currently on screen, where the phone's normal text
+selection handles work. Use **Copy selection** or **Copy all**, then **Done** to
+return. This does not pause the running session or retrieve older output.
+
+Use the image button to choose a supported image from your phone. If clipboard
+paste is blocked, touch and hold the message box and use the browser's Paste
+command. Status and error messages remain visible on small screens.
+
+When you return from another app or the network comes back, Outpost checks the
+connection and reconnects if needed. It does not resend prompts automatically.
+An expired login or a deliberately ended/detached session still requires an
+explicit connection. Your remote coding process continues while the phone is
+away.
+
+For iPhone/iPad notifications, use **Share → Add to Home Screen**, open Outpost
+from that icon, connect with **Web terminal**, and tap the bell to allow
+notifications. Android browsers with notification support can use the bell
+directly. Home Screen web apps keep terminal navigation inside the app.
+**Notifications require HTTPS and a running terminal page.** There is no
+background push delivery while the browser is suspended or closed, and no offline
+terminal. The notification button reports permission; browser/OS notification
+settings still control whether an alert is displayed.
+
+#### Keyboard, clipboard, and history
 
 On macOS, **Ctrl+V** also pastes an image or text with the terminal focused,
 in both the browser and Outpost Desktop. **Command+V** continues to work.
@@ -107,19 +144,22 @@ Browser clipboard access may ask for permission; if Paste is blocked, use your
 normal paste shortcut. The message box keeps its usual text-editing menu.
 
 Text selection is local to the terminal and copies when you release the mouse.
-It does not enter tmux copy mode or pause the remote display. Applications that
+It does not pause the remote display. Applications that
 request mouse events receive them normally; to select text locally in such an
 application, hold **Shift** while dragging on Windows/Linux or **Option** on
 macOS. You can also use **Copy** from the context menu or your usual copy shortcut.
 
-Scrolling and conversation history belong to the running application. Outpost
-has no separate tmux history scrollbar, history shortcuts, or frozen-output mode.
-Its terminal cannot browse tmux's retained output, including output from before
-you connected; use the application's history or transcript commands instead.
-Apps without their own history viewer consequently have limited access to older
-output. Outpost does not infer selection or scrolling capabilities from mouse
-support, and does not force Codex into inline mode: the tool's own configuration
-and explicit launch arguments determine its display mode.
+The terminal retains up to **10,000 lines of scrollback in memory**, including
+output produced while you are disconnected. Reconnecting restores that history,
+the screen and terminal modes. The existing scrollbar browses actual local
+terminal history; selecting text does not freeze the process. Screen clearing,
+explicit scrollback clearing, and alternate-screen applications follow normal
+terminal semantics. Full-screen applications can still provide their own
+conversation/history viewer. Outpost does not force Codex into inline mode.
+
+The target must stay running: this preserves sessions across browser, app, SSH,
+and Outpost server disconnects/restarts, not target reboots or terminal-service
+crashes. Closing a tab disconnects; **Terminate** explicitly stops the session.
 
 An already-running Codex process keeps its launch configuration. To stop using
 Outpost's previous inline override, exit Codex cleanly and reconnect the same
@@ -130,7 +170,7 @@ which session rang, and a short chime plays. Click or type in the terminal
 once to enable sound. Bells received while you are away stay marked until
 you return; repeated bells are limited to one chime per second.
 
-Click the bell button in the terminal toolbar to enable desktop notifications,
+Click the bell button in the terminal toolbar to enable notifications,
 then allow notifications in your browser. On Windows and macOS, bells also show
 a system notification while the terminal is in the background. Clicking it
 returns to the terminal; repeated bells produce one notification until you
@@ -289,22 +329,36 @@ instance per data directory.
 ## How it works
 
 ```text
-web terminal / Outpost Desktop ⇄ WebSocket ⇄ Outpost ⇄ SSH or local shell ⇄ relay ⇄ tmux ⇄ coding tool
+web terminal / Outpost Desktop ⇄ WebSocket ⇄ Outpost ⇄ SSH or local shell ⇄ relay ⇄ Outpost Terminal ⇄ PTY ⇄ coding tool
 ```
 
-Every connection takes this one path; tmux is the only place terminal state
-lives, so connections are disposable. The target runtime is a Python program
-sent with each operation — nothing is installed on targets besides tmux and
-`~/.outpost` state. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-principles, protocols, security model and how to extend desktop capabilities or add a coding tool.
+Every connection takes this one path. A dedicated `outpost-terminal` process
+owns each session's PTY and terminal state on the target. Python management
+operations and the disposable relay still travel through the existing SSH or
+local-shell transport. The helper has no public listening port.
+
+**Required Software → Outpost Terminal → Install** downloads the matching Linux
+executable into `~/.outpost/bin`, verifies its SHA-256 checksum and installs it
+atomically. x86_64 and ARM64 targets with glibc or musl are supported. The runtime
+is bundled; targets need neither Node.js nor Bun. Minimal musl installations also
+receive the system `libstdc++` package. Existing sessions keep
+their running helper when its executable is upgraded.
+
+The **Linux terminal service** GitHub Actions workflow is manual. Enable
+**Publish** to create the versioned dependency release used by the installer.
+See [terminal-service/RELEASE_NOTES.md](terminal-service/RELEASE_NOTES.md) for
+upgrade instructions, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
+protocol and ownership model.
 
 ## Development
 
 ```sh
+npm run build:terminal   # build the target helper before runtime/browser tests
 npm run check            # lint, typecheck, build, unit and Python tests
-npm run test:integration # real tmux: local targets and SSH in Docker
-npx playwright install chromium
+npm run test:integration # persistent PTYs: local targets and SSH in Docker
+npx playwright install chromium webkit
 npm run test:ui          # browser tests against a real backend
+npm run test:mobile      # Android Chromium, iPhone WebKit, iPad WebKit
 npm run docs:capture     # refresh README screenshots
 ```
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import type { ConnectResponse } from '../../shared/protocol'
 import { api } from '../api'
+import { standaloneBrowser } from '../browser'
 import TerminalView from './TerminalView'
 
 export default function TerminalPage() {
@@ -52,7 +53,7 @@ export default function TerminalPage() {
         token={token}
         title={title}
         onClose={() => {
-          window.close()
+          if (!standaloneBrowser()) window.close()
           window.location.replace('/')
         }}
       />

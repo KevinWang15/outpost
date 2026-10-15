@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["bun"], "lib": ["ES2022", "DOM"] },
+  "include": ["./*.ts", "../shared/terminalCheckpoint.ts", "../shared/terminalService.ts"]
+}

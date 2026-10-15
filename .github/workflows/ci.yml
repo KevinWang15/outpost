@@ -6,10 +6,10 @@ on:
       suite:
         description: Checks to run
         type: choice
-        options: [full, desktop]
+        options: [full, desktop, terminal]
         default: full
       publish_preview:
-        description: Publish unsigned installers when running the desktop suite
+        description: Publish the selected desktop or terminal dependency release
         type: boolean
         default: false
 
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   linux:
-    if: inputs.suite != 'desktop'
+    if: inputs.suite == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -27,9 +27,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tmux
       - run: pipx install ruff
       - run: npm ci
+      - run: npm run build:terminal
       - run: npm audit --audit-level=high
       - run: npm run check
       - run: npm run test:integration
@@ -37,7 +37,7 @@ jobs:
       - run: npm run test:ui
 
   python-3-9:
-    if: inputs.suite != 'desktop'
+    if: inputs.suite == 'full'
     # Target runtimes support Python 3.9.
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -46,7 +46,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.9'
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tmux
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build:terminal
       - run: python -m unittest discover -s tests/runtime
 
   desktop:
@@ -54,5 +59,13 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/desktop.yml
+    with:
+      publish: ${{ inputs.publish_preview }}
+
+  terminal:
+    if: inputs.suite == 'terminal'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/terminal.yml
     with:
       publish: ${{ inputs.publish_preview }}

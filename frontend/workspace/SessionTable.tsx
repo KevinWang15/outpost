@@ -93,7 +93,7 @@ export default function SessionTable({
         <div className="empty">
           <SquareTerminal size={28} strokeWidth={1.5} />
           <h3>No sessions yet</h3>
-          <p>A session runs a coding tool in tmux on this target and keeps running when you disconnect.</p>
+          <p>A session runs a coding tool on this target and keeps running when you disconnect.</p>
           <button className="button primary" disabled={!canCreate} onClick={onCreate}>
             <Plus size={15} />
             New session

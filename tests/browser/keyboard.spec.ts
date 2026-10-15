@@ -56,7 +56,7 @@ test('Ctrl+/ reaches the coding process once, from the keyboard and the on-scree
   await expect.poll(received).toBe(expected + '\x1f/|')
 
   // Modified Enter uses a negotiated protocol. Check the browser encoding
-  // independently of the fixture's tmux startup negotiation.
+  // independently of the fixture's terminal-mode negotiation.
   sent.length = 0
   await input.press('Shift+Enter')
   await expect.poll(() => Buffer.concat(sent).toString('latin1')).toBe('\x1b[13;2u')

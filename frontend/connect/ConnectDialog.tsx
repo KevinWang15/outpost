@@ -130,7 +130,7 @@ export default function ConnectDialog({
         Remember my choice
       </label>
       <p className="hint" id="connect-remember-hint">
-        Skip this choice next time in this browser. Change or clear it in Connection preferences in the sidebar.
+        Connect directly next time without this dialog. Change or clear it in Connection preferences in the sidebar.
       </p>
       <p className="hint">
         <a href={pagePaths.desktop} target="_blank" rel="noopener noreferrer">

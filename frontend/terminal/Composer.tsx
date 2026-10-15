@@ -8,15 +8,16 @@ export default function Composer({
   text,
   onChange,
   onSend,
+  onError,
 }: {
   enabled: boolean
   visible: boolean
   text: string
   onChange: (text: string) => void
   onSend: (text: string) => Promise<void>
+  onError: (message: string) => void
 }) {
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
   const field = useRef<HTMLTextAreaElement>(null)
   const revision = useRef(0)
   useLayoutEffect(() => {
@@ -27,14 +28,13 @@ export default function Composer({
   async function submit() {
     if (!enabled || busy || !text) return
     setBusy(true)
-    setError('')
     const submittedRevision = revision.current
     try {
       await onSend(text)
       // Keep the field editable/focused while waiting, without erasing newer edits on acknowledgement.
       if (revision.current === submittedRevision) onChange('')
     } catch (problem) {
-      setError((problem as Error).message)
+      onError((problem as Error).message)
     } finally {
       setBusy(false)
     }
@@ -64,7 +64,6 @@ export default function Composer({
         onChange={event => {
           revision.current++
           onChange(event.target.value)
-          setError('')
         }}
         onKeyDown={event => {
           if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
@@ -81,11 +80,6 @@ export default function Composer({
       >
         {busy ? <LoaderCircle className="spin" size={16} /> : <SendHorizontal size={16} />}
       </button>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
     </form>
   )
 }

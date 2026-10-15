@@ -64,7 +64,9 @@ paths produce an error without creating a session.
 
 Click **Connect** next to a session and choose a terminal. Check **Remember my
 choice** first to open that terminal directly on future connections. This applies
-to all sessions on this Outpost server in the current browser. To change it or
+to all sessions on this Outpost server in the current browser. Remembered
+connections skip the dialog, including desktop opening and success messages;
+the dialog returns if opening fails or takes longer than six seconds. To change it or
 show the chooser again, open **Connection preferences** in the sidebar, choose a
 terminal or **Ask every time**, and save. This preference does not change login
 or desktop server trust requirements.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -73,6 +73,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   const container = useRef<HTMLDivElement>(null)
   useTerminalViewport(container)
   const surface = useRef<HTMLDivElement>(null),
+    recovery = useRef<HTMLDivElement>(null),
     chooser = useRef<HTMLInputElement>(null)
   const terminal = useRef<Terminal | null>(null),
     socket = useRef<TerminalSocket | null>(null)
@@ -109,6 +110,21 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     }
     if (!touch()) terminal.current?.focus()
   }
+
+  const focusRecovery = useCallback(() => {
+    const panel = recovery.current
+    if (!panel) return false
+    if (!panel.contains(document.activeElement)) panel.querySelector('button')?.focus({ preventScroll: true })
+    return true
+  }, [])
+
+  useLayoutEffect(() => {
+    if (state.kind !== 'closed' || !document.hasFocus() || (desktop && !host.current.focused)) return
+    // Inert removes focus from xterm. Give keyboard users a recovery action,
+    // while preserving any toolbar, message-box, or dialog control they are using.
+    const active = document.activeElement
+    if (active === document.body || surface.current?.contains(active)) focusRecovery()
+  }, [state.kind, focusRecovery])
 
   useEffect(() => {
     const previous = document.title
@@ -318,10 +334,15 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     term.resize(initial.cols, initial.rows)
     const focusInput = () => {
       const active = document.activeElement
-      // Native pane activation can arrive after the local menu has opened.
-      if (active instanceof HTMLElement && active.closest('[role="menu"]')) active.focus()
-      else if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) active.focus()
-      else term.focus()
+      // Native pane activation can arrive after a click has focused a local control.
+      if (
+        active instanceof HTMLElement &&
+        active !== term.textarea &&
+        (active.closest('[role="menu"]') ||
+          active.matches('button, a[href], input, textarea, select, [contenteditable="true"]'))
+      )
+        return
+      if (!focusRecovery()) term.focus()
     }
     const stopCommands = desktop?.onCommand(command => {
       if (command === 'focus') {
@@ -335,7 +356,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         const active = document.activeElement
         if (active !== term.textarea && (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement))
           active.select()
-        else term.selectAll()
+        else if (!recovery.current) term.selectAll()
       }
     })
     const stopHost = desktop?.onHostState(next => {
@@ -397,7 +418,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       clipboard.current = null
       bell.current = null
     }
-  }, [token, arm, notify, pasteImage])
+  }, [token, arm, notify, pasteImage, focusRecovery])
 
   const press = (key: string, extra?: TerminalModifiers) => {
     const data = terminalKey(key, { ...armed.current, ...extra }, terminal.current?.modes.applicationCursorKeysMode)
@@ -518,43 +539,6 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           <PanelTopOpen size={17} />
         </button>
       )}
-      {(status || (!toolbarShown && (state.kind === 'connecting' || state.kind === 'reconnecting'))) && (
-        <div className="terminal-notice" role="status">
-          <span>{status || label}</span>
-          {status && (
-            <button className="icon-button" aria-label="Dismiss notice" onClick={() => setStatus('')}>
-              <X size={16} />
-            </button>
-          )}
-        </div>
-      )}
-      {blockedLink && (
-        <div className="terminal-notice">
-          <span>
-            The session wants to open <code>{blockedLink}</code>
-          </span>
-          <button
-            className="button small primary"
-            onClick={() => {
-              void openBrowserTab(blockedLink).then(opened => {
-                if (opened) setBlockedLink(null)
-                else
-                  notify(
-                    desktop
-                      ? 'Could not open your default browser. Copy the link and open it in your browser.'
-                      : 'Allow pop-ups for Outpost, then try again, or copy the link into your browser.',
-                    true,
-                  )
-              })
-            }}
-          >
-            Open link
-          </button>
-          <button className="button small" onClick={() => setBlockedLink(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
       <div className="terminal-body">
         <TerminalContextMenu
           connected={connected}
@@ -575,23 +559,63 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             { label: 'On-screen keys', shown: keysShown, onChange: setKeysShown },
           ]}
         >
-          <div className="terminal-surface" ref={surface} />
+          <div className="terminal-surface" ref={surface} inert={state.kind === 'closed'} />
         </TerminalContextMenu>
-        {bellRinging && (
-          <div className="terminal-notice terminal-bell" role="status">
-            <Bell size={16} aria-hidden="true" />
-            <span>{name} rang a bell</span>
-            <button
-              className="icon-button"
-              aria-label="Dismiss bell notification"
-              onClick={() => bell.current?.acknowledge()}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
+        {/* Notices float over the screen; they must never change PTY geometry. */}
+        <div className={`terminal-notices${toolbarShown ? '' : ' toolbar-hidden'}`}>
+          {(status || (!toolbarShown && (state.kind === 'connecting' || state.kind === 'reconnecting'))) && (
+            <div className="terminal-notice" role="status">
+              <span>{status || label}</span>
+              {status && (
+                <button className="icon-button" aria-label="Dismiss notice" onClick={() => setStatus('')}>
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          )}
+          {blockedLink && (
+            <div className="terminal-notice terminal-notice-link">
+              <span>
+                The session wants to open <code>{blockedLink}</code>
+              </span>
+              <button
+                className="button small primary"
+                onClick={() => {
+                  void openBrowserTab(blockedLink).then(opened => {
+                    if (opened) setBlockedLink(null)
+                    else
+                      notify(
+                        desktop
+                          ? 'Could not open your default browser. Copy the link and open it in your browser.'
+                          : 'Allow pop-ups for Outpost, then try again, or copy the link into your browser.',
+                        true,
+                      )
+                  })
+                }}
+              >
+                Open link
+              </button>
+              <button className="button small" onClick={() => setBlockedLink(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
+          {bellRinging && (
+            <div className="terminal-notice terminal-bell" role="status">
+              <Bell size={16} aria-hidden="true" />
+              <span>{name} rang a bell</span>
+              <button
+                className="icon-button"
+                aria-label="Dismiss bell notification"
+                onClick={() => bell.current?.acknowledge()}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
+        </div>
         {state.kind === 'closed' && (
-          <div className="terminal-closed">
+          <div className="terminal-closed" ref={recovery}>
             <h3>{closedTitles[state.reason]}</h3>
             <p>{state.message}</p>
             <div>
@@ -637,7 +661,14 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           }}
         />
       )}
-      <Composer enabled={connected} visible={composerShown} text={draft} onChange={setDraft} onSend={send} />
+      <Composer
+        enabled={connected}
+        visible={composerShown}
+        text={draft}
+        onChange={setDraft}
+        onSend={send}
+        onError={message => notify(message, true)}
+      />
       {textToSelect !== null && <TerminalTextDialog text={textToSelect} onClose={() => setTextToSelect(null)} />}
     </div>
   )

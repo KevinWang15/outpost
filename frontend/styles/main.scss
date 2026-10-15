@@ -1506,17 +1506,40 @@ kbd {
   flex-shrink: 0;
   gap: 2px;
 }
+.terminal-notices {
+  // Transient UI must not participate in the terminal's flex layout or resize its PTY.
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: min(560px, calc(100% - 24px));
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  color-scheme: dark;
+  &.toolbar-hidden {
+    // Leave the floating toolbar button reachable, including its mobile touch target.
+    right: 64px;
+    max-width: min(560px, calc(100% - 76px));
+  }
+}
 .terminal-notice {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 8px 16px;
+  border: 1px solid #334155;
+  border-radius: 6px;
   background: #1e293b;
+  box-shadow: 0 4px 16px #0004;
   font-size: 13px;
   flex-shrink: 0;
-  max-height: 30%;
-  overflow-y: auto;
   > span {
     flex: 1;
     min-width: 0;
@@ -1529,34 +1552,29 @@ kbd {
     color: #93c5fd;
     overflow-wrap: anywhere;
   }
+  &.terminal-notice-link > span {
+    flex-basis: 100%;
+  }
 }
 .terminal-body {
   position: relative;
+  isolation: isolate;
   flex: 1;
   min-height: 0;
 }
 .terminal-bell {
-  position: absolute;
-  z-index: 1;
-  top: 8px;
-  right: 12px;
   flex-wrap: nowrap;
-  max-width: calc(100% - 24px);
-  border: 1px solid #854d0e;
-  border-radius: 6px;
+  border-color: #854d0e;
   background: #422006;
-  box-shadow: 0 4px 16px #0004;
   color: #fde68a;
   > svg {
     flex-shrink: 0;
   }
-  span {
-    flex: 1;
-    overflow-wrap: anywhere;
-  }
 }
 .terminal-surface {
   position: absolute;
+  // Keep xterm's canvases, IME helpers, decorations and scrollbar below Outpost's overlays.
+  z-index: 0;
   inset: 8px 12px 4px;
   // Geometry arrives in output order from the target. Clip the old screen while
   // a smaller viewport waits for that acknowledgement, including mobile keyboards.
@@ -1574,6 +1592,7 @@ kbd {
 }
 .terminal-closed {
   position: absolute;
+  z-index: 2;
   inset: 0;
   display: grid;
   place-content: center;
@@ -1656,10 +1675,6 @@ kbd {
   }
   .button {
     height: 38px;
-  }
-  .error {
-    width: 100%;
-    color: #fca5a5;
   }
 }
 .terminal-text-dialog {

@@ -20,9 +20,13 @@ export interface ConnectionState {
   error: string
 }
 
+interface ConnectionAttempt extends ConnectionState {
+  showDialog: boolean
+}
+
 /** Explicit and remembered choices share one launch path, invoked from the click gesture. */
 export function useConnect(target: Target, onClose: () => void) {
-  const [connection, setConnection] = useState<ConnectionState | null>(null)
+  const [connection, setConnection] = useState<ConnectionAttempt | null>(null)
   const pending = useRef<AbortController | null>(null)
   const toast = useToast()
   const close = useCallback(() => {
@@ -33,11 +37,11 @@ export function useConnect(target: Target, onClose: () => void) {
 
   useEffect(() => () => pending.current?.abort(), [])
 
-  async function launch(session: Session, terminal: TerminalChoice) {
+  async function launch(session: Session, terminal: TerminalChoice, showDialog = true) {
     pending.current?.abort()
     const controller = new AbortController()
     pending.current = controller
-    setConnection({ session, phase: { kind: 'requesting', terminal }, error: '' })
+    setConnection({ session, phase: { kind: 'requesting', terminal }, error: '', showDialog })
     try {
       if (terminal === 'web') {
         const query = new URLSearchParams({
@@ -65,21 +69,25 @@ export function useConnect(target: Target, onClose: () => void) {
       )
       if (controller.signal.aborted) return
       if (!result.url) throw new Error('Outpost did not return a desktop connection link. Please try again.')
-      setConnection({ session, phase: { kind: 'opening', id: result.id, slow: false }, error: '' })
+      setConnection(current =>
+        current && !controller.signal.aborted
+          ? { ...current, phase: { kind: 'opening', id: result.id, slow: false } }
+          : current,
+      )
       window.location.assign(result.url)
     } catch (problem) {
       if (!controller.signal.aborted)
-        setConnection({ session, phase: { kind: 'choose' }, error: (problem as Error).message })
+        setConnection({ session, phase: { kind: 'choose' }, error: (problem as Error).message, showDialog: true })
     }
   }
 
   function connect(session: Session) {
     // Read on every click so changes in other browser tabs take effect too.
     const terminal = preferredTerminal()
-    if (terminal) void launch(session, terminal)
+    if (terminal) void launch(session, terminal, false)
     else {
       pending.current?.abort()
-      setConnection({ session, phase: { kind: 'choose' }, error: '' })
+      setConnection({ session, phase: { kind: 'choose' }, error: '', showDialog: true })
     }
   }
 
@@ -96,14 +104,35 @@ export function useConnect(target: Target, onClose: () => void) {
 
   function back() {
     pending.current?.abort()
-    setConnection(current => (current ? { ...current, phase: { kind: 'choose' }, error: '' } : null))
+    setConnection(current => (current ? { ...current, phase: { kind: 'choose' }, error: '', showDialog: true } : null))
   }
 
+  const phase = connection?.phase.kind
+  const sessionId = connection?.session.id
   const openingId = connection?.phase.kind === 'opening' ? connection.phase.id : null
+  useEffect(() => {
+    if (phase !== 'requesting' && phase !== 'opening') return
+    // Recover visibly even when a launch request or status poll is still waiting on the network.
+    const timer = setTimeout(() => {
+      setConnection(current =>
+        current &&
+        current.session.id === sessionId &&
+        current.phase.kind === phase &&
+        (current.phase.kind !== 'opening' || current.phase.id === openingId)
+          ? {
+              ...current,
+              showDialog: true,
+              phase: current.phase.kind === 'opening' ? { ...current.phase, slow: true } : current.phase,
+            }
+          : current,
+      )
+    }, 6000)
+    return () => clearTimeout(timer)
+  }, [phase, sessionId, openingId])
+
   useEffect(() => {
     if (!openingId) return
     const controller = new AbortController()
-    const started = Date.now()
     let timer: ReturnType<typeof setTimeout>
     const update = (phase: Phase) =>
       setConnection(current =>
@@ -121,7 +150,6 @@ export function useConnect(target: Target, onClose: () => void) {
         // Retrying, choosing another terminal, and downloading remain available offline.
       }
       if (controller.signal.aborted) return
-      if (Date.now() - started > 6000) update({ kind: 'opening', id: openingId, slow: true })
       timer = setTimeout(() => void poll(), 1000)
     }
     timer = setTimeout(() => void poll(), 1000)
@@ -131,11 +159,12 @@ export function useConnect(target: Target, onClose: () => void) {
     }
   }, [openingId])
 
+  const showDialog = connection?.showDialog ?? false
   useEffect(() => {
-    if (connection?.phase.kind !== 'connected') return
-    const timer = setTimeout(close, 1500)
+    if (phase !== 'connected') return
+    const timer = setTimeout(close, showDialog ? 1500 : 0)
     return () => clearTimeout(timer)
-  }, [connection?.phase.kind, close])
+  }, [phase, showDialog, close])
 
-  return { connection, connect, choose, back, close }
+  return { connection: showDialog ? connection : null, connect, choose, back, close }
 }

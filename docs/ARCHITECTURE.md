@@ -124,6 +124,12 @@ twice. An installed standalone web app navigates to the terminal in its current
 window, retaining its Home Screen context. Closing, retrying, or changing targets aborts pending requests, and late
 poll results cannot replace a newer attempt.
 
+Remembered launches keep their request and desktop handoff state in the hook
+without mounting a dialog. Successful handoffs clear silently. Launch errors
+reopen the chooser; a separate six-second timer reveals progress and recovery
+actions for a stalled request or handoff, even when a status poll is blocked on
+the network. Explicit choices keep the usual progress and success dialog.
+
 `preference.ts` stores only an explicitly chosen terminal in browser local
 storage for the current origin. Connect reads it on each click, including changes
 made in other tabs. The sidebar's **Connection preferences** works in local and
@@ -145,7 +151,8 @@ authentication or desktop trust confirmation.
    Both grants remain bound to the originating login and one session; logout
    revokes them and closes live connections. Resume tokens never appear in
    OS links or page URLs. Proxies must not log WebSocket query strings.
-4. The desktop Connect dialog polls `/api/connections/:id` until attached.
+4. The connection hook polls `/api/connections/:id` until desktop is attached,
+   including when the dialog is skipped for a remembered choice.
    Retrying issues a fresh ticket. Electron identifies tabs by normalized server
    origin and an opaque `sessionKey`, derived from the login, target and session.
    Every Connect activates that tab; a connected tab acknowledges the new ticket
@@ -176,6 +183,18 @@ but reload requires a fresh Connect.
 Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
 clipboard, composer, links, bells and notifications have one web implementation.
+Transient status messages, message-send errors, session link prompts, and bell alerts share an
+absolutely positioned notice stack inside the terminal body. The stack is bounded
+and scrolls independently on small screens. Showing, updating, or dismissing a
+notice cannot change the terminal surface dimensions or trigger a PTY resize.
+The resize observer still handles window/pane size, mobile keyboard, font-size,
+and explicit terminal-control layout changes.
+The terminal surface has its own stacking context beneath notices and the closed
+screen, containing xterm's internal canvas, input-helper, and scrollbar layers.
+While the closed screen is shown, the surface is inert so it cannot capture mouse,
+touch, or keyboard input. Recovery receives focus when the terminal had it;
+desktop activation preserves focused UI controls and otherwise selects a recovery
+button instead of the inactive terminal.
 
 `TerminalContextMenu` owns the terminal menu in both clients. Application mouse
 modes pass through to xterm without a multiplexer interpreting clicks.
@@ -203,8 +222,8 @@ animation frames. The terminal's existing ResizeObserver fits xterm after the
 container changes, including keyboard open/close and rotation. During pinch
 zoom it preserves the last unzoomed layout instead of reflowing terminal text.
 Touch controls use larger targets and 16px form text, and the composer stays
-focused while a send is pending. Notices have their own visible, dismissible
-row rather than being hidden with the title on narrow screens.
+focused while a send is pending. Floating notices remain visible and dismissible
+on narrow screens, and leave the toolbar toggle reachable when the toolbar is hidden.
 
 `touch.ts` maps a single-finger vertical swipe to xterm's existing wheel handler;
 it owns that touch gesture to avoid also scrolling xterm's local viewport.

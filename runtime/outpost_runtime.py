@@ -480,6 +480,9 @@ def start_session(session, cols, rows):
     command_shell = shutil.which('bash')
     if not command_shell:
         fail('Bash is missing on this target. Open Required Software to install it.', 409)
+    # Socket storage belongs to process startup, including an existing session
+    # whose terminal has never run or whose socket directory was removed.
+    (STATE / 'terminals').mkdir(mode=0o700, exist_ok=True)
     Path(socket_name(session)).unlink(missing_ok=True)
     install_helpers()
     activity(session).initialize()
@@ -711,7 +714,6 @@ def main():
         if request.get('tool') not in CODING_ADAPTERS:
             fail('Unsupported coding tool.', 409)
         STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
-        (STATE / 'terminals').mkdir(mode=0o700, exist_ok=True)
         STATE.chmod(0o700)
     if not STATE.is_dir():
         if action == 'list':

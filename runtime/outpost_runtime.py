@@ -688,23 +688,21 @@ def attach_session(session, cols, rows):
         ('prefix', '>'),
     ):
         chain.extend([';', 'unbind-key', '-q', '-T', table, key])
-    # Mouse copies must not cancel copy mode: doing so discards the history
-    # position and jumps to live output on release. Keep OSC 52 copying and
-    # clear the highlight, but leave navigation to the user. Cover word/line
-    # selection too, in both key tables (EDITOR can select the vi table).
+    # Preserve a scrolled-back position after copying, but do not leave a live
+    # screen frozen in copy mode just because the user selected text. Evaluate
+    # the position when copying, including after a word/line selection delay.
+    copy = (
+        'if-shell -F "#{>:#{scroll_position},0}" "send-keys -X copy-selection" "send-keys -X copy-selection-and-cancel"'
+    )
     for table in ('copy-mode', 'copy-mode-vi'):
-        for key, command in (
-            ('MouseDragEnd1Pane', 'send-keys -X copy-selection'),
-            (
-                'DoubleClick1Pane',
-                'select-pane; send-keys -X select-word; run-shell -d0.3; send-keys -X copy-selection',
-            ),
-            (
-                'TripleClick1Pane',
-                'select-pane; send-keys -X select-line; run-shell -d0.3; send-keys -X copy-selection',
-            ),
+        # Escape consistently resumes the session, including with a vi EDITOR.
+        chain.extend([';', 'bind-key', '-T', table, 'Escape', 'send-keys', '-X', 'cancel'])
+        for key, selection in (
+            ('MouseDragEnd1Pane', ''),
+            ('DoubleClick1Pane', 'select-pane; send-keys -X select-word; run-shell -d0.3; '),
+            ('TripleClick1Pane', 'select-pane; send-keys -X select-line; run-shell -d0.3; '),
         ):
-            chain.extend([';', 'bind-key', '-T', table, key, command])
+            chain.extend([';', 'bind-key', '-T', table, key, selection + copy])
     tmux(
         session,
         'set-option',

@@ -169,6 +169,7 @@ export default function ScrollbackBar({ state, enabled, controls, onScroll, onLi
         className="icon-button terminal-scroll-live"
         title="Return to live output"
         aria-label="Return to live output"
+        data-active={enabled && state?.active}
         disabled={!usable || !state?.active}
         onClick={onLive}
       >

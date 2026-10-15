@@ -110,10 +110,15 @@ a screen at a time; when the scrollbar has keyboard focus, **Home / End**
 jumps to the oldest output or back to live output. These controls work in
 both the web terminal and Outpost Desktop, including with the toolbar hidden.
 
-While browsing history, dragging to select text copies it when you release the
+While scrolled back, dragging to select text copies it when you release the
 mouse and keeps your scroll position. Double-clicking a word or triple-clicking
-a line also copies without leaving history. Use **Return to live output** when
-you are ready to resume following the session.
+a line also preserves that position. Copying at the live bottom resumes output
+automatically. A pulsing amber **Viewing saved output** notice and animated
+return arrow appear whenever history is open: the display is a snapshot, while
+the coding session continues running. Reduced-motion settings keep the amber
+highlight without animation.
+Press **Esc** with the terminal focused or click **Return to live output** to
+resume viewing and interacting with the session.
 
 Outpost starts Codex in inline mode so its output enters terminal history.
 An already-running full-screen Codex session keeps its original mode: its

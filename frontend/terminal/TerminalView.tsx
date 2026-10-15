@@ -5,6 +5,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import {
+  ArrowDownToLine,
   Bell,
   BellOff,
   BellRing,
@@ -390,6 +391,10 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     const bracketed = terminal.current?.modes.bracketedPasteMode
     await socket.current!.submit(`${bracketed ? `\x1b[200~${normalized}\x1b[201~` : normalized}\r`)
   }
+  const returnToLive = () => {
+    historyControls.current?.scrollTo(0)
+    terminal.current?.focus()
+  }
   const label =
     state.kind === 'connected'
       ? 'Connected'
@@ -567,10 +572,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           enabled={connected}
           controls={terminalId}
           onScroll={offset => historyControls.current?.scrollTo(offset)}
-          onLive={() => {
-            historyControls.current?.scrollTo(0)
-            terminal.current?.focus()
-          }}
+          onLive={returnToLive}
           onNavigate={action => {
             historyControls.current?.navigate(action)
             terminal.current?.focus()
@@ -579,6 +581,15 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             if (history?.navigation) notify(history.navigation.help, true)
           }}
         />
+        {connected && history?.active && (
+          <div className="terminal-history-notice" role="status">
+            <span>Viewing saved output</span>
+            <button type="button" onClick={returnToLive}>
+              <ArrowDownToLine size={16} aria-hidden="true" />
+              Return to live output <kbd>Esc</kbd>
+            </button>
+          </div>
+        )}
         {bellRinging && (
           <div className="terminal-notice terminal-bell" role="status">
             <Bell size={16} aria-hidden="true" />

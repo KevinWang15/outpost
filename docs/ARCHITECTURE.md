@@ -165,12 +165,19 @@ isolated tmux server, including existing sessions on reconnect. Mouse reporting,
 wheel scrolling and copy-mode selection remain enabled.
 
 On the same attach path, mouse drag release and double/triple clicks in both
-`copy-mode` and `copy-mode-vi` use `copy-selection`, which copies through the
-existing OSC 52 clipboard path and clears the highlight without exiting copy
-mode. tmux's default `copy-pipe-and-cancel` binding exits copy mode and loses the
-reader's scroll position. This policy belongs to the target runtime, so browser
-and desktop behave identically and existing sessions pick it up on reconnect.
-Returning to live output remains an explicit history action.
+`copy-mode` and `copy-mode-vi` inspect `scroll_position` when the copy runs.
+Above the bottom they use `copy-selection`, preserving the reader's position;
+at offset zero they use `copy-selection-and-cancel` to resume live output.
+Both use the existing OSC 52 clipboard path and clear the highlight. Keeping
+copy mode unconditionally would freeze the visible screen and intercept input
+after ordinary live-screen selection. Escape cancels copy mode in both tables.
+This policy belongs to the target runtime, so browser and desktop behave
+identically and existing sessions pick it up on reconnect. The shared terminal
+shows a **Viewing saved output** notice with an explicit return action whenever
+copy mode is active, including at offset zero. The notice and sidebar return
+arrow pulse amber every 2.4 seconds; the arrows also move gently. Reduced-motion
+settings retain the color without animation. The notice overlays the snapshot
+without changing PTY dimensions or scroll position.
 
 `ScrollbackBar` displays tmux's history position, not xterm's local buffer:
 tmux uses the alternate screen, so xterm's scrollbar cannot reach that history.

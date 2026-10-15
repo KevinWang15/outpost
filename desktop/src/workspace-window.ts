@@ -6,6 +6,7 @@ import { paneLayout, splitRatio, TabLayout, type TabLayoutState } from './layout
 import { defaultPreferences, Preferences, validPreferences } from './preferences'
 import { TrustedServers } from './store'
 import { TerminalTabs, type TerminalTab } from './terminals'
+import { attachTabShortcuts } from './tab-shortcuts'
 import { checkUpdates } from './updates'
 import {
   tabBarHeight,
@@ -196,6 +197,10 @@ export class WorkspaceWindow {
       },
     })
     this.window = window
+    attachTabShortcuts(window.webContents, delta => {
+      this.host.dragCancel(this)
+      this.cycle(delta)
+    })
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
     window.webContents.on('did-finish-load', () => this.render())

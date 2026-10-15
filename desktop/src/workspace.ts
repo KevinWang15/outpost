@@ -31,6 +31,10 @@ export class DesktopWorkspace {
         this.owners.get(id)?.activate(id)
       },
       focus: id => this.owners.get(id)?.focus(id),
+      cycle: (id, delta) => {
+        this.drag.cancel()
+        this.owners.get(id)?.cycle(delta)
+      },
       close: async id => {
         this.drag.cancel()
         await this.owners.get(id)?.close(id)

@@ -403,6 +403,13 @@ Activation applies view visibility before restoring or focusing the native windo
 Native focus events may select another visible split pane, but cannot override an
 activation in progress or reactivate a view already hidden by the current layout.
 
+`tab-shortcuts.ts` reserves Ctrl+Tab and Ctrl+Shift+Tab in Electron's
+`before-input-event` for both the workspace and terminal web contents. It prevents
+renderer delivery and the duplicate menu accelerator, then uses the existing
+`TabLayout.cycle` order and activation path. Terminal callbacks resolve the
+current owner after cancelling provisional drags, so shortcuts follow moved tabs
+without adding renderer IPC or keeping a second tab order.
+
 `tab-drag-ui.ts` starts a drag after an eight-pixel threshold, transferring pointer
 capture from the tab button to the stable strip so removing a tab node cannot
 cancel the gesture. `tab-drag.ts` owns one drag across the app and resolves drop

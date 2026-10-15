@@ -16,6 +16,7 @@ import type { DesktopLaunch, TerminalHostState, TerminalTabState } from '../../s
 import { parseSessionActivity } from '../../shared/activity'
 import { pagePaths } from '../../shared/pages'
 import { browserUrl } from '../../shared/signals'
+import { attachTabShortcuts } from './tab-shortcuts'
 
 export interface TerminalTab {
   id: number
@@ -37,6 +38,7 @@ interface Host {
   focused(id: number): boolean
   activate(id: number): void
   focus(id: number): void
+  cycle(id: number, delta: 1 | -1): void
   close(id: number): Promise<void>
   removing(id: number): void
   removed(id: number): void
@@ -274,6 +276,7 @@ export class TerminalTabs {
     }
     this.tabs.set(tab.id, tab)
     this.sessionTabs.set(sessionKey, tab.id)
+    attachTabShortcuts(contents, delta => this.host.cycle(tab.id, delta))
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
     contents.on('will-attach-webview', event => event.preventDefault())
     contents.on('will-frame-navigate', event => {

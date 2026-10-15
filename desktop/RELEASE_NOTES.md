@@ -1,18 +1,18 @@
-# Outpost Desktop 0.3.2 preview
+# Outpost Desktop 0.4.0 preview
 
-More room for your terminal and clearer tab status on macOS and Windows.
+Shared session activity, reliable tab shortcuts and smoother history browsing on macOS and Windows.
 
 ## What's new
 
-- **Compact title bar:** the tab strip is 36px tall, down from 48px, with smaller controls and matching drag previews. Native window controls, terminal bounds and drag destinations use the same height.
-- **More terminal space:** the bottom status bar is removed. Terminals, split panes and workspace panels extend to the bottom edge, reclaiming another 28px.
-- **Ringing bell:** a yellow animated bell replaces the attention dot. It pauses between rings and clears when you return to the session. Animations respect the system's reduced-motion preference.
-- **Clear connection indicators:** tabs and the session switcher show a green check for connected, a blue spinner while connecting and a gray cross for disconnected. Hover descriptions and accessible tab labels explain both connection and attention state.
-- **Visible action errors:** workspace errors appear in a native dialog above the terminal. Drag destinations keep their insertion markers, highlighted tab and live terminal preview.
+- **Tab navigation:** Ctrl+Tab and Ctrl+Shift+Tab cycle through the current window's tabs in order, wrapping at either end. Native key handling reserves these shortcuts even when the terminal or a workspace panel has focus. Both platforms use Control.
+- **Shared activity indicators:** tabs and the session switcher show Working, Idle, Needs you or Unknown using the same native coding-tool records and acknowledgement state as the server's session list. Unread terminal bells remain highlighted. Hover over an icon for details.
+- **Stable workspace controls:** activity refreshes preserve keyboard focus, session-switcher selection and indicator animations. Workspace pages highlight their own toolbar button, and toolbar icons use consistent SVG sizing and alignment.
+- **Text size shortcuts:** Ctrl+= on Windows and Command+= on macOS increase terminal text size, alongside the existing Plus shortcut. Minus decreases it and 0 resets it.
+- **Copy without losing your place:** the updated server keeps the history position after mouse-drag, word and line copies. This works in both the web terminal and desktop app; use Return to live output when you are ready to follow the session again.
 
 Use ⌘T on Mac or Ctrl+Shift+T on Windows to choose another session. The Settings page lists all shortcuts. Up to 32 tabs across 16 windows can stay open. Closing the app leaves remote sessions running; reconnect through your Outpost server after reopening. Local shells and extensions are not included.
 
-This preview works with the current Outpost server. Install the desktop update to get the new layout and indicators.
+**Update the Outpost server and desktop app together.** This preview uses desktop bridge version 4 for shared activity metadata. Older server pages or desktop apps are incompatible with the new bridge. Self-hosted users should update their server from the same source revision as this release. Reconnect existing terminals to apply the history-copy behavior; running coding sessions do not need restarting.
 
 ## Install
 

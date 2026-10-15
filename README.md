@@ -187,6 +187,11 @@ returns to one session. Each tab keeps its connection, terminal buffer and
 message draft while you switch or rearrange it. Up to 32 tabs across 16 windows
 can stay open. Connect and notifications select the session in its owning window.
 
+**Ctrl+Tab** selects the next tab and **Ctrl+Shift+Tab** the previous one in the
+current window, wrapping at either end of the tab strip. Both shortcuts use
+Control on macOS and Windows and work while the terminal or a workspace panel
+has focus.
+
 Tab icons and the session switcher follow the session list's **Activity** field:
 a blue spinner means **Working**, a gray clock means **Idle**, and a ringing
 bell means **Needs you**. They use the coding tool's native turn records and the

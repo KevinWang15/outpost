@@ -64,6 +64,7 @@ function receive(value: string) {
 function menus() {
   const mac = process.platform === 'darwin'
   const shortcut = (key: string) => (mac ? 'Cmd+' : 'Ctrl+Shift+') + key
+  const increaseFontSize = () => workspace!.forAction().fontSize(1)
   const template: MenuItemConstructorOptions[] = [
     ...(mac ? [{ role: 'appMenu' as const }] : []),
     {
@@ -112,7 +113,15 @@ function menus() {
         {
           label: 'Larger terminal text',
           accelerator: 'CmdOrCtrl+Plus',
-          click: () => workspace!.forAction().fontSize(1),
+          click: increaseFontSize,
+        },
+        {
+          // Accept the unshifted = key without adding a duplicate menu entry.
+          label: 'Larger terminal text',
+          accelerator: 'CmdOrCtrl+=',
+          visible: false,
+          acceleratorWorksWhenHidden: true,
+          click: increaseFontSize,
         },
         {
           label: 'Smaller terminal text',

@@ -208,7 +208,9 @@ for manual installation; remote sessions survive closing or upgrading the app.
 | Go to tab 1–8 / last tab | ⌘1–9 | Alt+1–9 |
 | Split side by side | ⌘D | Ctrl+Shift+D |
 | Focus other pane | ⌘Option+Right | Ctrl+Alt+Right |
-| Change / reset text size | ⌘Plus / Minus / 0 | Ctrl+Plus / Minus / 0 |
+| Larger terminal text | ⌘= or ⌘Plus | Ctrl+= or Ctrl+Plus |
+| Smaller terminal text | ⌘Minus | Ctrl+Minus |
+| Reset terminal text size | ⌘0 | Ctrl+0 |
 | Close tab | ⌘W | Ctrl+Shift+W |
 | Close window | ⌘Shift+W | Alt+F4 |
 

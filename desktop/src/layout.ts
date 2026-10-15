@@ -46,6 +46,13 @@ export class TabLayout {
   split: WorkspaceSnapshot['split'] = null
   panel: WorkspacePanel = 'sessions'
 
+  snapshot(): TabLayoutState {
+    return structuredClone({ ids: this.ids, active: this.active, split: this.split, panel: this.panel })
+  }
+  restore(state: TabLayoutState) {
+    Object.assign(this, structuredClone(state))
+  }
+
   add(id: number) {
     this.ids.push(id)
     this.activate(id)
@@ -97,3 +104,5 @@ export class TabLayout {
     return this.split?.ids ?? [this.active]
   }
 }
+
+export type TabLayoutState = Pick<TabLayout, 'ids' | 'active' | 'split' | 'panel'>

@@ -1,9 +1,12 @@
-# Outpost Desktop 0.3 preview
+# Outpost Desktop 0.3.1 preview
 
 Arrange your coding sessions across tabbed windows on macOS and Windows.
 
 ## What's new
 
+- **Live merge previews:** hover a tab over another window's tab bar to see its live terminal there. An empty source window disappears during the preview. Release to keep the move; moving away or pressing Escape restores the original selections, split panes and panels.
+- **Stable drag labels:** the floating tab label keeps a fixed size, including on Windows displays with scaling, and disappears while the destination is previewing the tab.
+- **Dark startup:** the matching server update keeps new terminal tabs dark during initial loading and error screens.
 - **Move tabs between windows:** drag a tab outside the tab bar and release to give it a window, or drop it into another Outpost window's tab bar to merge. Connections, drafts and terminal buffers stay with the tab. Moving the last tab into another window closes its empty source window.
 - **Drag feedback:** a tab preview and insertion marker show where the tab will land. Hover at the edges to scroll a long tab bar; Escape cancels. Right-click also offers **Move tab to new window** and **Move tab to window**.
 - **New window:** use ⌘Shift+N on macOS or Ctrl+Shift+N on Windows. Menus apply to the focused window; Connect and notifications find an existing session across all windows.

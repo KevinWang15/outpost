@@ -1,10 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import { loopbackHost } from './shared/loopback.ts'
+import { pageHtml } from './shared/pageHtml.ts'
 
 export default defineConfig({
   plugins: [
     react(),
+    {
+      name: 'outpost-page-theme',
+      transformIndexHtml(html, context) {
+        return pageHtml(html, (context.originalUrl ?? context.path).split('?')[0])
+      },
+    },
     {
       name: 'outpost-loopback',
       configResolved(config) {

@@ -1,4 +1,6 @@
 import Fastify, { LogController } from 'fastify'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import staticFiles from '@fastify/static'
 import cookies from '@fastify/cookie'
 import websocket from '@fastify/websocket'
@@ -13,6 +15,7 @@ import { sessionRoutes } from './routes/sessions'
 import { terminalRoutes } from './routes/terminal'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
+import { pageHtml } from '../shared/pageHtml'
 
 export interface AppOptions {
   deployment: Deployment
@@ -98,11 +101,13 @@ export async function createApp(options: AppOptions) {
   terminalRoutes(app, services)
 
   if (options.frontendRoot) {
+    const html = await readFile(join(options.frontendRoot, 'index.html'), 'utf8')
     await app.register(staticFiles, { root: options.frontendRoot })
     const pages = new Set<string>(Object.values(pagePaths))
     app.setNotFoundHandler((request, reply) => {
-      if (['GET', 'HEAD'].includes(request.method) && pages.has(request.url.split('?')[0]))
-        return reply.sendFile('index.html')
+      const pathname = request.url.split('?')[0]
+      if (['GET', 'HEAD'].includes(request.method) && pages.has(pathname))
+        return reply.type('text/html').send(pageHtml(html, pathname))
       return reply.code(404).send({ message: 'Not found' })
     })
   }

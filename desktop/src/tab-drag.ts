@@ -1,11 +1,14 @@
-import { BrowserWindow, screen, type Point } from 'electron'
+import { screen, type Point } from 'electron'
 import type { WorkspaceWindow } from './workspace-window'
 import type { TabDragState } from './workspace-api'
+import { TabDragPreview } from './tab-drag-preview'
 
 interface Host {
   windows(): WorkspaceWindow[]
   changed(): void
-  drop(id: number, target: WorkspaceWindow | null, before: number | null, point: Point): void
+  preview(id: number, target: WorkspaceWindow, before: number | null): { restore(): void }
+  drop(source: WorkspaceWindow, id: number, target: WorkspaceWindow | null, before: number | null, point: Point): void
+  failed(error: unknown): void
 }
 interface Drag {
   source: WorkspaceWindow
@@ -13,10 +16,12 @@ interface Drag {
   target: WorkspaceWindow | null
   before: number | null
   scroll: number
-  preview: BrowserWindow
+  preview: TabDragPreview
+  transfer: { restore(): void } | null
+  sourceOpacity: number | null
 }
 
-/** A drag changes ownership only on release. Escape/blur/close are cancellations. */
+/** Hover moves the live view provisionally; release commits, cancellation restores. */
 export class TabDrag {
   private drag: Drag | null = null
   private timer?: ReturnType<typeof setInterval>
@@ -24,42 +29,20 @@ export class TabDrag {
 
   start(source: WorkspaceWindow, id: number, title: string) {
     this.cancel()
-    const point = screen.getCursorScreenPoint()
-    const preview = new BrowserWindow({
-      x: point.x + 12,
-      y: point.y + 16,
-      width: 240,
-      height: 42,
-      frame: false,
-      show: false,
-      focusable: false,
-      skipTaskbar: true,
-      autoHideMenuBar: true,
-      hiddenInMissionControl: true,
-      alwaysOnTop: true,
-      resizable: false,
-      backgroundColor: '#162239',
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false },
-    })
-    preview.setMenu(null)
-    preview.setIgnoreMouseEvents(true)
-    const escaped = title.replace(/[&<>"']/g, character => `&#${character.charCodeAt(0)};`)
-    void preview
-      .loadURL(
-        'data:text/html;charset=utf-8,' +
-          encodeURIComponent(
-            `<meta charset="utf-8"><style>body{margin:0;padding:10px 14px;color:#e2e8f0;background:#162239;font:13px system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid #60a5fa;box-sizing:border-box;height:100vh}</style>${escaped}`,
-          ),
-      )
-      .then(() => {
-        if (!preview.isDestroyed()) preview.showInactive()
-      })
-      .catch(() => {})
-    this.drag = { source, id, target: null, before: null, scroll: 0, preview }
-    // Native DIP coordinates also work while the pointer is outside the source
-    // window and while a stationary pointer scrolls a destination's tab strip.
-    this.timer = setInterval(() => this.update(source), 32)
-    this.update(source)
+    const preview = new TabDragPreview(title, screen.getCursorScreenPoint())
+    this.drag = { source, id, target: null, before: null, scroll: 0, preview, transfer: null, sourceOpacity: null }
+    // Native DIP coordinates work outside the source window and while a
+    // stationary pointer scrolls a destination's tab strip.
+    const update = () => {
+      try {
+        this.update(source)
+      } catch (error) {
+        this.cancel()
+        this.host.failed(error)
+      }
+    }
+    this.timer = setInterval(update, 32)
+    update()
     this.host.changed()
   }
 
@@ -76,16 +59,26 @@ export class TabDrag {
       : null
   }
 
+  private restoreOpacity(drag: Drag) {
+    const window = drag.source.browserWindow
+    if (drag.sourceOpacity !== null && window && !window.isDestroyed()) window.setOpacity(drag.sourceOpacity)
+    drag.sourceOpacity = null
+  }
+
   update(source: WorkspaceWindow) {
     const drag = this.drag
     if (!drag || drag.source !== source) return
     const point = screen.getCursorScreenPoint()
-    drag.preview.setPosition(point.x + 12, point.y + 16)
     let target: WorkspaceWindow | null = null,
       before: number | null = null
-    for (const candidate of this.host.windows()) {
+    // moveTop() raises the hover destination without stealing the source's
+    // pointer capture. Reflect that temporary native stacking order in hit tests.
+    const windows = this.host.windows()
+    if (drag.transfer && drag.target) windows.unshift(drag.target)
+    for (const candidate of new Set(windows)) {
       const window = candidate.browserWindow
       if (!window || !window.isVisible() || window.isMinimized()) continue
+      if (candidate === source && drag.sourceOpacity !== null) continue
       const bounds = window.getBounds()
       if (
         point.x < bounds.x ||
@@ -94,32 +87,79 @@ export class TabDrag {
         point.y >= bounds.y + bounds.height
       )
         continue
-      const position = candidate.dropAt(point)
+      const position = candidate.dropAt(point, drag.id)
       if (position !== undefined) {
         target = candidate
-        before = position
+        before = position === drag.id && candidate !== source ? drag.before : position
       }
       break // Do not drop through an overlapping Outpost window into one behind it.
     }
     const scroll = target?.scrollAt(point) ?? 0
-    if (drag.target !== target || drag.before !== before || drag.scroll !== scroll) {
+    const targetChanged = drag.target !== target
+    if (targetChanged || drag.before !== before || drag.scroll !== scroll) {
+      if (targetChanged && drag.transfer) {
+        drag.transfer.restore()
+        drag.transfer = null
+        if (this.drag !== drag) return
+        this.restoreOpacity(drag)
+        source.browserWindow?.moveTop()
+      }
       drag.target = target
       drag.before = before
       drag.scroll = scroll
+      if (target && target !== source) {
+        if (!drag.transfer) {
+          const transfer = this.host.preview(drag.id, target, before)
+          if (this.drag !== drag) {
+            transfer.restore()
+            return
+          }
+          drag.transfer = transfer
+          if (!source.hasTabs && source.browserWindow) {
+            // hide() loses native capture. Opacity hides the empty source while
+            // its stable chrome still receives mouse-up and Escape on macOS/Windows.
+            drag.sourceOpacity = source.browserWindow.getOpacity()
+            source.browserWindow.setOpacity(0)
+          }
+          if (this.drag !== drag) return
+          target.browserWindow?.moveTop()
+        } else target.placeTab(drag.id, before)
+      }
       this.host.changed()
     }
+    if (target) drag.preview.hide()
+    else drag.preview.show(point)
   }
 
   end(source: WorkspaceWindow, cancel: boolean) {
     const drag = this.drag
     if (!drag || drag.source !== source) return
-    if (!cancel) this.update(source)
-    const point = screen.getCursorScreenPoint()
-    this.cancel()
-    if (!cancel) this.host.drop(drag.id, drag.target, drag.before, point)
+    if (cancel) return this.cancel()
+    try {
+      this.update(source)
+      if (this.drag !== drag) return
+      // Leave a hover transfer in place on commit: no bounce through the source
+      // view, second load, or extra resize before activating the destination.
+      this.drag = null
+      clearInterval(this.timer)
+      drag.preview.destroy()
+      this.host.drop(source, drag.id, drag.target, drag.before, screen.getCursorScreenPoint())
+    } catch (error) {
+      this.drag = null
+      clearInterval(this.timer)
+      drag.preview.destroy()
+      drag.transfer?.restore()
+      throw error
+    } finally {
+      this.restoreOpacity(drag)
+      this.host.changed()
+    }
   }
   cancelTab(id: number) {
     if (this.drag?.id === id) this.cancel()
+  }
+  cancelWindow(window: WorkspaceWindow) {
+    if (this.drag?.source === window || this.drag?.target === window) this.cancel()
   }
   cancel() {
     const drag = this.drag
@@ -127,6 +167,15 @@ export class TabDrag {
     this.drag = null
     clearInterval(this.timer)
     drag.preview.destroy()
-    this.host.changed()
+    try {
+      drag.transfer?.restore()
+    } finally {
+      this.restoreOpacity(drag)
+      if (drag.source.browserWindow?.isFocused()) {
+        drag.source.browserWindow.moveTop()
+        drag.source.restoreFocus()
+      }
+      this.host.changed()
+    }
   }
 }

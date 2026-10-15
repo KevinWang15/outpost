@@ -4,6 +4,7 @@ import { Preferences } from './preferences'
 import { TrustedServers } from './store'
 import { TerminalTabs } from './terminals'
 import { TabDrag } from './tab-drag'
+import { transferTab } from './tab-transfer'
 import { WorkspaceWindow } from './workspace-window'
 
 /** App-wide terminal identity and ownership; moving a tab never recreates its view. */
@@ -25,16 +26,23 @@ export class DesktopWorkspace {
     this.terminals = new TerminalTabs(directory, {
       window: id => this.owners.get(id)?.browserWindow ?? null,
       focused: id => this.owners.get(id)?.focused(id) ?? false,
-      activate: id => this.owners.get(id)?.activate(id),
+      activate: id => {
+        this.drag.cancel()
+        this.owners.get(id)?.activate(id)
+      },
       focus: id => this.owners.get(id)?.focus(id),
       close: async id => {
+        this.drag.cancel()
         await this.owners.get(id)?.close(id)
+      },
+      removing: id => {
+        const owner = this.owners.get(id)
+        if (owner) this.drag.cancelWindow(owner)
       },
       removed: id => {
         const owner = this.owners.get(id)
         this.owners.delete(id)
         owner?.remove(id)
-        this.drag.cancelTab(id)
       },
       changed: id => this.owners.get(id)?.render(),
       state: id => ({ ...preferences.value, focused: this.owners.get(id)?.focused(id) ?? false }),
@@ -42,7 +50,21 @@ export class DesktopWorkspace {
     this.drag = new TabDrag({
       windows: () => this.recent.flatMap(id => this.windows.get(id) ?? []),
       changed: () => this.render(),
-      drop: (id, destination, before, point) => this.move(id, destination, before, point),
+      preview: (id, target, before) => {
+        const source = this.owners.get(id),
+          tab = this.terminals.tabs.get(id)
+        if (!source || !tab) throw new Error('This terminal is no longer available.')
+        return transferTab(tab, source, target, before, window => this.owners.set(id, window))
+      },
+      drop: (source, id, destination, before, point) => {
+        this.move(id, destination, before, point)
+        source.closeEmpty()
+      },
+      failed: error =>
+        dialog.showErrorBox(
+          'Could not move tab',
+          error instanceof Error ? error.message : 'Try dragging the tab again.',
+        ),
     })
     ipcMain.handle('workspace:action', (event, name: unknown, ...values: unknown[]) => {
       const window = [...this.windows.values()].find(item => item.browserWindow?.webContents === event.sender)
@@ -62,10 +84,16 @@ export class DesktopWorkspace {
       this.create()
     )
   }
+  forAction() {
+    // Menu/OS actions finish any provisional drag before resolving ownership.
+    this.drag.cancel()
+    return this.current
+  }
   show() {
-    this.current.show()
+    this.forAction().show()
   }
   newWindow() {
+    this.drag.cancel()
     try {
       this.create().show()
     } catch (error) {
@@ -82,7 +110,7 @@ export class DesktopWorkspace {
         this.recent = [id, ...this.recent.filter(value => value !== id)]
       },
       closed: window => {
-        this.drag.end(window, true)
+        this.drag.cancelWindow(window)
         for (const [id, item] of this.windows)
           if (item === window) {
             this.windows.delete(id)
@@ -113,6 +141,7 @@ export class DesktopWorkspace {
         this.drag.start(source, id, tab.label || tab.state.title)
       },
       dragEnd: (source, cancel) => this.drag.end(source, cancel),
+      dragCancel: window => this.drag.cancelWindow(window),
       dragState: window => this.drag.state(window),
     })
     const window = workspace.ensureWindow()
@@ -122,6 +151,7 @@ export class DesktopWorkspace {
   }
 
   open(launch: DesktopLaunch) {
+    this.drag.cancel()
     const { tab, created } = this.terminals.open(launch)
     let owner = this.owners.get(tab.id)
     if (created) {
@@ -162,16 +192,9 @@ export class DesktopWorkspace {
     }
     const target = destination ?? this.create()
     if (!destination) this.position(target.browserWindow!, source.browserWindow, point)
-    const following = source.ids[source.ids.indexOf(id) + 1] ?? null
-    source.release(id)
     try {
-      this.owners.set(id, target)
-      target.add(tab, before)
+      transferTab(tab, source, target, before, window => this.owners.set(id, window))
     } catch (error) {
-      target.release(id)
-      this.owners.set(id, source)
-      source.add(tab, following)
-      source.activate(id)
       if (!destination) target.closeEmpty()
       throw error
     }

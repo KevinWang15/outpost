@@ -31,6 +31,22 @@
   -webkit-font-smoothing: antialiased;
   font-synthesis: none;
 }
+// Desktop terminal documents stay dark before React mounts and throughout
+// loading, reconnect instructions, and update errors.
+:root[data-theme='terminal'] {
+  color-scheme: dark;
+  --canvas: #0f172a;
+  --surface: #0f172a;
+  --surface-muted: #1e293b;
+  --ink: #e2e8f0;
+  --text: #cbd5e1;
+  --muted: #94a3b8;
+  --border: #334155;
+  --border-strong: #475569;
+  .auth-loading a {
+    color: #93c5fd;
+  }
+}
 * {
   box-sizing: border-box;
 }

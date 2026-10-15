@@ -41,6 +41,10 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
     if (!current.started) {
       if (Math.hypot(event.clientX - current.x, event.clientY - current.y) < 8) return
       current.started = true
+      // Keep normal clicks targeted at the button. Once dragging starts, the
+      // tab node may leave this window, so capture its stable strip instead.
+      current.capture = tabs
+      tabs.setPointerCapture(event.pointerId)
       report(
         api.dragStart(current.id).catch(error => {
           finish(true)
@@ -53,7 +57,10 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
     if (gesture?.pointer === event.pointerId) finish(false)
   })
   window.addEventListener('pointercancel', () => finish(true))
-  tabs.addEventListener('lostpointercapture', () => finish(true))
+  tabs.addEventListener('lostpointercapture', event => {
+    // Transferring capture from the button to the strip is intentional.
+    if (event.target === gesture?.capture) finish(true)
+  })
   window.addEventListener('blur', () => finish(true))
   window.addEventListener(
     'keydown',

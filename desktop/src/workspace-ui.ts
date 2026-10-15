@@ -154,12 +154,13 @@ function renderTabs() {
   })
   for (const [id, node] of tabNodes) {
     node.classList.toggle('dragging', Boolean(state.drag?.source && state.drag.id === id))
+    node.classList.toggle('merging', Boolean(state.drag?.target && !state.drag.source && state.drag.id === id))
     delete node.dataset.drop
   }
   const drag = state.drag
   document.documentElement.classList.toggle('tab-dragging', Boolean(drag?.source))
   tabs.classList.toggle('drop-empty', Boolean(drag?.target && !state.tabs.length))
-  if (drag?.target) {
+  if (drag?.target && drag.source) {
     const id = drag.before ?? state.tabs.at(-1)?.id
     const node = id === undefined ? undefined : tabNodes.get(id)
     if (node) node.dataset.drop = drag.before === null ? 'after' : 'before'
@@ -281,19 +282,27 @@ function render(next: WorkspaceSnapshot) {
   el('split').title = next.split ? 'Return to single pane' : 'Split side by side'
   el('split').setAttribute('aria-pressed', String(Boolean(next.split)))
   const active = next.tabs.find(tab => tab.id === next.active)
-  el('connection').textContent = active ? `${statusLabel(active)} · ${active.origin}` : 'Outpost'
+  el('connection').textContent =
+    next.drag?.target && !next.drag.source
+      ? 'Release to move tab here · Escape to cancel'
+      : active
+        ? `${statusLabel(active)} · ${active.origin}`
+        : 'Outpost'
   el('count').textContent =
     `${next.tabs.length} session${next.tabs.length === 1 ? '' : 's'}${next.split ? ' · Split view' : ''}`
   el('version').textContent = `Outpost ${next.version} · Preview`
   if (changedPanel) {
     el('message').textContent = ''
+    // A provisional transfer may empty the source or cover the target's panel.
+    // Keep keyboard focus and pointer capture in the source chrome until release.
     if (panel === 'switcher') {
       search.value = ''
       selected = 0
       renderMatches()
-      search.focus()
-    } else if (panel === 'sessions') el('server').focus()
-    else if (panel === 'settings') {
+      if (!next.drag) search.focus()
+    } else if (panel === 'sessions') {
+      if (!next.drag) el('server').focus()
+    } else if (panel === 'settings') {
       el<HTMLInputElement>('font-size').value = String(next.preferences.fontSize)
       el<HTMLInputElement>('sound').checked = next.preferences.sound
       el('saved').textContent = ''
@@ -301,8 +310,10 @@ function render(next: WorkspaceSnapshot) {
       const tab = next.tabs.find(tab => tab.id === panel.rename)
       const field = el<HTMLInputElement>('tab-name')
       field.value = tab?.label ?? ''
-      field.focus()
-      field.select()
+      if (!next.drag) {
+        field.focus()
+        field.select()
+      }
     }
   }
 }

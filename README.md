@@ -163,8 +163,11 @@ or use the session switcher to find an open session by name or server.
 
 Drag a tab outside the tab bar and release to give it a window. Drop it into
 another Outpost window's tab bar to merge it there; an insertion marker shows
-the position. Hover at either edge to scroll a long tab bar. **Esc** cancels a
-drag. Right-click also offers **Move tab to new window** and **Move tab to window**.
+the position when reordering. Hovering over another window's tab bar shows the
+live terminal there and hides its empty source window. Release to keep the move;
+moving away or pressing **Esc** restores the original layouts. Hover at either
+edge to scroll a long tab bar. Right-click also offers **Move tab to new window**
+and **Move tab to window**.
 Moving a tab preserves its live connection, terminal buffer and message draft.
 Moving the last tab into another window closes the empty source window.
 

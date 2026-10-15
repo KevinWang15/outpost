@@ -36,6 +36,7 @@ interface Host {
   activate(id: number): void
   focus(id: number): void
   close(id: number): Promise<void>
+  removing(id: number): void
   removed(id: number): void
   changed(id: number): void
   state(id: number): TerminalHostState
@@ -171,6 +172,8 @@ export class TerminalTabs {
   dispose(id: number) {
     const tab = this.tabs.get(id)
     if (!tab) return
+    // A hover transfer must be restored before destroying its native view.
+    this.host.removing(id)
     this.dismiss(tab)
     clearTimeout(tab.interfaceTimer)
     this.tabs.delete(id)

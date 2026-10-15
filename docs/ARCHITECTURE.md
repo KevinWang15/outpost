@@ -337,23 +337,40 @@ Activation applies view visibility before restoring or focusing the native windo
 Native focus events may select another visible split pane, but cannot override an
 activation in progress or reactivate a view already hidden by the current layout.
 
-`tab-drag-ui.ts` captures pointer events and starts a drag after an eight-pixel threshold. The
-original view and layout remain intact during the gesture. `tab-drag.ts` owns
-one drag across the app, shows a noninteractive native tab preview, and resolves
-drop positions from native DIP cursor coordinates and each chrome's measured
-tab geometry. A 32 ms timer runs only during a drag, including while edge scrolling.
-It considers visible, nonminimized Outpost windows in focus order and never drops
-through an overlapping Outpost window. Escape, capture loss, blur, renderer failure
-or source closure cancel the drag. No grant or terminal data enters drag payloads.
+`tab-drag-ui.ts` starts a drag after an eight-pixel threshold, transferring pointer
+capture from the tab button to the stable strip so removing a tab node cannot
+cancel the gesture. `tab-drag.ts` owns one drag across the app and resolves drop
+positions from native DIP cursor coordinates and each chrome's measured geometry.
+A 32 ms timer runs only during a drag, including while edge scrolling. Hit testing
+respects the temporary stacking order of the raised hover destination and never
+drops through an overlapping Outpost window. Holding the pointer over the inserted
+tab retains its position, so changing flex widths cannot cause a reorder loop.
 
-On release, a tab-bar drop reorders or transfers the existing `WebContentsView`;
-an outside drop creates a window. A lone tab instead moves its existing window.
-The same transfer method serves the tab context menu. It detaches the view,
-updates ownership and reparents it without reloading, reconnecting or consuming
-a ticket. Failed attachment restores the source. Moving the last tab into another
-window closes the empty source only after attachment succeeds. A source split
-collapses to its remaining session. New window bounds are clamped to the destination
-display's work area. The renderer, connection, terminal buffer and draft stay alive.
+Hovering over another tab bar provisionally transfers the **live** terminal using
+`tab-transfer.ts`, the same ownership/reparenting path used for permanent moves.
+It saves both `TabLayout` snapshots first. The destination selects the incoming
+tab and displays its live view; an empty source becomes transparent using native
+window opacity. The source is kept open and focused so it retains mouse-up and
+Escape; `hide()` would discard that capture. The destination is raised without
+taking focus. Leaving its strip restores both layouts, including split panes,
+selection and panels. Release commits the provisional move without a second
+reparent. Escape, capture loss, blur, renderer failure, tab disposal or closing
+either participating window restore it. Menu and launch actions cancel before
+resolving ownership. No grant or terminal data enters drag payloads.
+
+Outside tab bars, `tab-drag-preview.ts` shows a noninteractive native label. It
+always supplies a fixed width and height when moving and disables Windows resize
+insets. No native move occurs for a stationary pointer, and no read-back window
+dimensions feed the next update. Asynchronous loading cannot reshow a hidden or
+destroyed preview.
+
+A release inside the source strip reorders; an outside drop creates a window.
+A lone tab instead moves its existing window. Transfers never reload, reconnect
+or consume another ticket. Failed attachment restores both layouts. Moving the
+last tab into another window closes the empty source only after the move commits.
+A source split collapses to its remaining session. New window bounds are clamped
+to the destination display's work area. The renderer, connection, terminal buffer
+and draft stay alive.
 
 The tab strip replaces the system title bar using Electron's
 `titleBarStyle: 'hidden'` and [Window Controls Overlay](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar#custom-window-controls).

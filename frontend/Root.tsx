@@ -11,7 +11,13 @@ const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
  * authorizes every connection; workspace routes require the normal AuthGate. */
 export default function Root({ desktopTerminal, ticket }: { desktopTerminal: boolean; ticket: string | null }) {
   return (
-    <Suspense fallback={<div className="auth-loading">Opening terminal…</div>}>
+    <Suspense
+      fallback={
+        <div className="auth-loading" role="status">
+          Opening terminal…
+        </div>
+      }
+    >
       {window.location.pathname === pagePaths.desktop ? (
         <DesktopDownloadPage />
       ) : desktopTerminal ? (

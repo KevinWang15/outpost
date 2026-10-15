@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, Menu, shell, type IpcMainInvokeEvent, type 
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { desktopOrigin, type TerminalPreferences } from '../../shared/desktop'
-import { paneLayout, splitRatio, TabLayout } from './layout'
+import { paneLayout, splitRatio, TabLayout, type TabLayoutState } from './layout'
 import { defaultPreferences, Preferences, validPreferences } from './preferences'
 import { TrustedServers } from './store'
 import { TerminalTabs, type TerminalTab } from './terminals'
@@ -26,6 +26,7 @@ export interface WorkspaceHost {
   destinations(source: WorkspaceWindow): { id: number; label: string }[]
   dragStart(source: WorkspaceWindow, id: number): void
   dragEnd(source: WorkspaceWindow, cancel: boolean): void
+  dragCancel(window: WorkspaceWindow): void
   dragState(window: WorkspaceWindow): TabDragState | null
 }
 
@@ -110,6 +111,7 @@ export class WorkspaceWindow {
       throw new Error('This action is only available in the Outpost workspace.')
     const action = typeof name === 'string' ? this.actions.get(name) : undefined
     if (!action) throw new Error('Unknown workspace action.')
+    if (!['state', 'tab-geometry', 'drag-start', 'drag-end'].includes(name as string)) this.host.dragCancel(this)
     return action(...values)
   }
   get browserWindow() {
@@ -130,13 +132,20 @@ export class WorkspaceWindow {
   focused(id: number) {
     return Boolean(
       this.window?.isFocused() &&
+      !this.host.dragState(this) &&
       this.layout.panel === null &&
       this.layout.active === id &&
       !this.terminals.tabs.get(id)?.error,
     )
   }
   focus(id: number) {
-    if (!this.presenting && this.layout.visible().includes(id) && this.layout.active !== id) this.activate(id)
+    if (
+      !this.host.dragState(this) &&
+      !this.presenting &&
+      this.layout.visible().includes(id) &&
+      this.layout.active !== id
+    )
+      this.activate(id)
   }
   private snapshot(): WorkspaceSnapshot {
     return {
@@ -189,23 +198,25 @@ export class WorkspaceWindow {
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
     window.webContents.on('did-finish-load', () => this.render())
-    window.webContents.on('did-start-loading', () => this.host.dragEnd(this, true))
+    window.webContents.on('did-start-loading', () => this.host.dragCancel(this))
     window.webContents.on('render-process-gone', () => {
-      this.host.dragEnd(this, true)
+      this.host.dragCancel(this)
       // Terminal views survive a local chrome crash; reload only the chrome.
       if (!window.isDestroyed()) void window.loadFile(join(this.directory, 'workspace.html')).catch(() => {})
     })
     window.on('resize', () => this.render())
+    window.on('hide', () => this.host.dragCancel(this))
+    window.on('minimize', () => this.host.dragCancel(this))
     window.on('focus', () => {
       this.host.focused(this)
       this.terminals.hostState(this.ids)
     })
     window.on('blur', () => {
-      this.host.dragEnd(this, true)
+      this.host.dragCancel(this)
       this.terminals.hostState(this.ids)
     })
     window.on('close', event => {
-      this.host.dragEnd(this, true)
+      this.host.dragCancel(this)
       if (this.allowWindowClose || this.host.quitting() || !this.needsWindowConfirmation()) return
       event.preventDefault()
       if (this.confirmingWindow) return
@@ -253,10 +264,22 @@ export class WorkspaceWindow {
     this.layout.add(tab.id)
     this.layout.move(tab.id, before)
   }
+  captureLayout() {
+    return this.layout.snapshot()
+  }
+  restoreLayout(state: TabLayoutState) {
+    this.layout.restore(state)
+    for (const id of this.ids) {
+      const tab = this.terminals.tabs.get(id)
+      if (!tab || tab.view.webContents.isDestroyed()) this.layout.remove(id)
+    }
+    this.geometry = null
+    this.render()
+  }
   release(id: number) {
     const tab = this.terminals.tabs.get(id)
     if (!tab) return
-    tab.view.setVisible(false)
+    if (!tab.view.webContents.isDestroyed()) tab.view.setVisible(false)
     this.window?.contentView.removeChildView(tab.view)
     this.remove(id)
   }
@@ -268,6 +291,9 @@ export class WorkspaceWindow {
   reorder(id: number, before: number | null) {
     this.layout.move(id, before)
     this.activate(id)
+  }
+  placeTab(id: number, before: number | null) {
+    this.layout.move(id, before)
   }
   closeEmpty() {
     if (!this.hasTabs) this.window?.close()
@@ -291,6 +317,9 @@ export class WorkspaceWindow {
       tab.view.webContents.focus()
       tab.view.webContents.send('terminal:command', 'focus')
     }
+  }
+  restoreFocus() {
+    if (this.window?.isFocused()) this.focusTerminal()
   }
   render() {
     const window = this.window
@@ -522,12 +551,17 @@ export class WorkspaceWindow {
       return
     this.geometry = value
   }
-  dropAt(point: Point): number | null | undefined {
+  dropAt(point: Point, dragged?: number): number | null | undefined {
     if (!this.window || !this.geometry) return undefined
     const bounds = this.window.getContentBounds()
     const x = point.x - bounds.x,
       y = point.y - bounds.y
     if (y < 0 || y >= tabBarHeight || x < this.geometry.left || x >= this.geometry.right) return undefined
+    // Keep a provisional insertion stable while the pointer is over it. Its
+    // arrival changes flex widths; feeding those changes straight back into the
+    // insertion decision makes a stationary pointer shuffle tabs indefinitely.
+    const moving = this.geometry.tabs.find(tab => tab.id === dragged)
+    if (moving && x >= moving.left && x < moving.right) return dragged
     return this.geometry.tabs.find(tab => x < (tab.left + tab.right) / 2)?.id ?? null
   }
   scrollAt(point: Point) {

@@ -99,7 +99,7 @@ class Connection {
     if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message))
   }
 
-  start(child: ChildProcessWithoutNullStreams) {
+  start(child: ChildProcessWithoutNullStreams, input?: Buffer) {
     if (this.finished) {
       child.kill()
       return
@@ -126,6 +126,7 @@ class Connection {
       }
       this.close('error', 'The connection to the target was lost.')
     })
+    if (input) child.stdin.write(input)
   }
 
   private output(chunk: Buffer) {
@@ -424,6 +425,7 @@ export class TerminalBroker {
       )
       connection.start(
         spawn(command.executable, command.args, { stdio: 'pipe', env: this.dependencies.env ?? process.env }),
+        command.input,
       )
     } catch (error) {
       connection.close(

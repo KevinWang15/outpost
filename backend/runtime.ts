@@ -34,11 +34,30 @@ const program = deflateSync(
     read('outpost_runtime.py'),
   ].join('\n'),
   { level: 9 },
-).toString('base64')
+)
 
-/** Shell text that runs one runtime request on the target. */
+// Read only the upload bytes: buffered stdin could consume the relay frames or
+// image data that follow them. Neither the program nor request belongs in argv.
+const bootstrap = [
+  'import os, sys, zlib',
+  'def read_exact(size):',
+  '    data = bytearray()',
+  '    while len(data) < size:',
+  '        chunk = os.read(0, min(size - len(data), 65536))',
+  '        if not chunk:',
+  "            raise EOFError('Incomplete Outpost runtime upload')",
+  '        data.extend(chunk)',
+  '    return data',
+  '_program = read_exact(int(sys.argv[1]))',
+  "sys.argv = ['-c', read_exact(int(sys.argv[2])).decode('ascii')]",
+  'exec(zlib.decompress(_program))',
+].join('\n')
+
+/** A short shell command and its stdin prefix, followed by operation-specific input. */
 export function runtimeOperation(request: object) {
-  const payload = Buffer.from(JSON.stringify(request)).toString('base64')
-  const bootstrap = `import base64,zlib;exec(zlib.decompress(base64.b64decode("${program}")))`
-  return `${supportingPath}; exec python3 -c ${quote(bootstrap)} ${quote(payload)}`
+  const payload = Buffer.from(Buffer.from(JSON.stringify(request)).toString('base64'), 'ascii')
+  return {
+    script: `${supportingPath}; exec python3 -c ${quote(bootstrap)} ${program.length} ${payload.length}`,
+    input: Buffer.concat([program, payload]),
+  }
 }

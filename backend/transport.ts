@@ -12,12 +12,12 @@ export interface SshIdentity {
   knownHostsFile: string
 }
 
-/** How commands reach a target. Management operations read a POSIX script on
- * stdin; attachments run one runtime operation with stdio as the relay channel. */
+/** How commands reach a target. Software management reads a POSIX script on
+ * stdin; runtime operations use a short command with their payload on stdin. */
 export interface Transport {
   readonly label: string
   management(): Command
-  attach(operation: string): Command
+  runtime(operation: string): Command
 }
 
 export interface TransportOptions {
@@ -107,7 +107,7 @@ class SshTransport implements Transport {
       label: 'SSH',
     }
   }
-  attach(operation: string): Command {
+  runtime(operation: string): Command {
     const shell = this.target.environment ? quote(this.target.environment.shell) : 'bash'
     return {
       executable: 'ssh',
@@ -127,7 +127,7 @@ class LocalTransport implements Transport {
   management(): Command {
     return { executable: 'sh', args: ['-c', loginScriptShell], label: this.label }
   }
-  attach(operation: string): Command {
+  runtime(operation: string): Command {
     return { executable: this.target.environment?.shell ?? 'bash', args: ['-lic', operation], label: this.label }
   }
 }

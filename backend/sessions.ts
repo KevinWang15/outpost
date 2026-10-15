@@ -28,6 +28,7 @@ export interface TargetContext {
 }
 
 type Request =
+  | { action: 'attach'; id: string; cols: number; rows: number }
   | { action: 'list' }
   | ({ action: 'coding-search' } & ConversationSearch)
   | { action: 'directories'; path: string }
@@ -71,9 +72,12 @@ export interface SessionService {
 
 export class SessionClient implements SessionService {
   constructor(private env: NodeJS.ProcessEnv = process.env) {}
-  private run<T>({ transport }: TargetContext, request: Request, signal?: AbortSignal, stdin = '') {
+  private command({ transport }: TargetContext, request: Request): Command {
     const operation = runtimeOperation(request)
-    return runProtocol<T>(transport.management(), `set -eu\n${operation}${stdin}\n`, {
+    return { ...transport.runtime(operation.script), input: operation.input }
+  }
+  private run<T>(context: TargetContext, request: Request, signal?: AbortSignal, stdin = '') {
+    return runProtocol<T>(this.command(context, request), stdin, {
       signal,
       env: this.env,
       timeoutMs: request.action === 'fork' ? 120_000 : undefined,
@@ -108,15 +112,9 @@ export class SessionClient implements SessionService {
   }
   pasteImage(context: TargetContext, id: string, image: SessionImageInput) {
     const { extension, data } = imageData(image)
-    // The image rides the script's stdin as a heredoc; arguments are limited to a fraction of ARG_MAX.
-    return this.run<SessionImage>(
-      context,
-      { action: 'paste-image', id, extension },
-      undefined,
-      ` <<'OUTPOST_IMAGE'\n${data}\nOUTPOST_IMAGE`,
-    )
+    return this.run<SessionImage>(context, { action: 'paste-image', id, extension }, undefined, data)
   }
-  attach({ transport }: TargetContext, id: string, cols: number, rows: number) {
-    return transport.attach(runtimeOperation({ action: 'attach', id, cols, rows }))
+  attach(context: TargetContext, id: string, cols: number, rows: number) {
+    return this.command(context, { action: 'attach', id, cols, rows })
   }
 }

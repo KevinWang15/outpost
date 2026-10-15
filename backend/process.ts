@@ -5,6 +5,8 @@ export interface Command {
   executable: string
   args: string[]
   label: string
+  /** Bytes sent before ordinary stdin (a script, image, or live relay frames). */
+  input?: Buffer
 }
 interface CommandOptions {
   signal?: AbortSignal
@@ -84,6 +86,7 @@ export function runCommand(
       cleanup()
       resolve({ code, stdout, stderr })
     })
+    if (command.input) child.stdin.write(command.input)
     child.stdin.end(script)
   })
 }

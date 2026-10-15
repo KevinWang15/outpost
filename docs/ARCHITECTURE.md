@@ -257,6 +257,15 @@ target and session independently of the selected UI.
 
 ### Relay protocol (broker ⇄ relay, stdio)
 
+All session operations use one runtime upload path. The process arguments carry
+only a short Python bootstrap and the byte lengths of the compressed runtime
+and request. The runtime and request travel on stdin, avoiding operating-system
+command-line limits (including Windows' 32,767-character limit). The bootstrap
+uses exact, unbuffered reads, leaving subsequent stdin bytes for image data or
+live relay frames. It creates no temporary runtime files or persistent agent.
+Software inspection and installation use the separate POSIX script transport,
+which can run before Python is installed.
+
 The broker starts the relay through the target's transport exactly like any
 other runtime operation (`ssh -T … "$SHELL -lic …"`, or the login shell
 locally). Login shells may print first; the relay then prints a magic marker

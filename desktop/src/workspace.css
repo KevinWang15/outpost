@@ -96,14 +96,29 @@ input::placeholder {
   padding: 0;
   background: transparent;
   border-color: transparent;
-  font-size: 19px;
+  line-height: 0;
   border-radius: 6px;
+}
+.icon svg,
+.icon img {
+  display: block;
+  pointer-events: none;
+}
+.icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .brand {
   margin-right: 4px;
 }
 .tools {
   display: flex;
+  align-items: center;
   flex-shrink: 0;
   padding-left: 5px;
   border-left: 1px solid #25324a;

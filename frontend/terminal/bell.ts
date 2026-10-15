@@ -59,7 +59,7 @@ export function attachBell(
       const current = new Notification('Outpost · Terminal bell', {
         body: `${session().name} rang a bell`,
         icon: '/outpost.png',
-        // App windows share a page URL. Group by the session, never by URL or token.
+        // Group by the session, never by URL or token.
         tag: `outpost-bell:${session().id}`,
       })
       notification = current

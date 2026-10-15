@@ -9,7 +9,7 @@ export const notificationLabels: Record<BellNotificationPermission, string> = {
   unsupported: 'Desktop notifications unavailable in this browser',
   insecure: 'Desktop notifications require HTTPS or localhost',
 }
-export const notificationMessages: Record<BellNotificationPermission, string> = {
+const notificationMessages: Record<BellNotificationPermission, string> = {
   default: 'Desktop notifications were not enabled. Try again or check the site’s notification settings.',
   granted: 'Desktop notifications enabled. Keep the terminal open to receive alerts.',
   denied: 'Notifications are blocked. Allow them in your browser’s site settings.',
@@ -19,11 +19,7 @@ export const notificationMessages: Record<BellNotificationPermission, string> = 
 const waitingMessage = 'Still waiting for the browser’s permission prompt. Check the site’s notification settings.'
 type Notice = { text: string; sticky: boolean }
 type PermissionRequest = { timer?: ReturnType<typeof setTimeout> }
-type State = {
-  permission: BellNotificationPermission
-  requesting: boolean
-  notice: Notice | null
-}
+type State = { permission: BellNotificationPermission; requesting: boolean }
 const noticeFor = (permission: BellNotificationPermission): Notice => ({
   text:
     desktop && permission === 'granted'
@@ -32,20 +28,17 @@ const noticeFor = (permission: BellNotificationPermission): Notice => ({
   sticky: permission !== 'granted',
 })
 
-/** Permission belongs to the browser profile and origin, independently of login
- * or terminal tickets. A hidden browser prompt may never settle its promise. */
-export function useBellNotifications(onNotice?: (message: string, sticky: boolean) => void) {
-  const [state, setState] = useState<State>(() => ({
-    permission: bellNotificationPermission(),
-    requesting: false,
-    notice: null,
-  }))
+/** Browser permission is requested by the terminal's bell button. Electron
+ * supplies native notifications; an unanswered browser prompt must not trap the UI. */
+export function useBellNotifications(onNotice: (message: string, sticky: boolean) => void) {
+  const [state, setState] = useState<State>(() => ({ permission: bellNotificationPermission(), requesting: false }))
   const current = useRef(state)
+  const requested = useRef(false)
   const publish = useCallback(
-    (next: State) => {
+    (next: State, notice?: Notice) => {
       current.current = next
       setState(next)
-      if (next.notice) onNotice?.(next.notice.text, next.notice.sticky)
+      if (notice) onNotice(notice.text, notice.sticky)
     },
     [onNotice],
   )
@@ -58,7 +51,7 @@ export function useBellNotifications(onNotice?: (message: string, sticky: boolea
     const permission = bellNotificationPermission()
     if (permission !== 'default') clearPending()
     if (permission !== current.current.permission)
-      publish({ permission, requesting: false, notice: current.current.notice ? noticeFor(permission) : null })
+      publish({ permission, requesting: false }, requested.current ? noticeFor(permission) : undefined)
     return permission
   }, [clearPending, publish])
 
@@ -67,8 +60,8 @@ export function useBellNotifications(onNotice?: (message: string, sticky: boolea
     let permissionStatus: PermissionStatus | undefined
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', refresh)
-    // Chrome/Edge notify app windows when permission is changed in another tab.
-    // Focus/visibility remain the fallback where this query is unsupported.
+    // Watch site-setting changes while open; focus also refreshes browsers
+    // without a notification Permissions API implementation.
     if (!desktop)
       void navigator.permissions
         ?.query({ name: 'notifications' })
@@ -89,45 +82,42 @@ export function useBellNotifications(onNotice?: (message: string, sticky: boolea
   }, [clearPending, refresh])
 
   const request = () => {
+    requested.current = true
     const permission = refresh()
     if (permission !== 'default') {
-      publish({ permission, requesting: false, notice: noticeFor(permission) })
+      publish({ permission, requesting: false }, noticeFor(permission))
       return
     }
     if (pending.current) {
-      publish({ permission, requesting: false, notice: { text: waitingMessage, sticky: true } })
+      publish({ permission, requesting: false }, { text: waitingMessage, sticky: true })
       return
     }
     const attempt: PermissionRequest = {}
     pending.current = attempt
-    publish({
-      permission,
-      requesting: true,
-      notice: { text: 'Allow notifications in your browser’s permission prompt.', sticky: true },
-    })
+    publish(
+      { permission, requesting: true },
+      { text: 'Allow notifications in your browser’s permission prompt.', sticky: true },
+    )
     const finish = (failed = false) => {
       if (pending.current !== attempt) return
       clearPending()
       const next = bellNotificationPermission()
-      publish({
-        permission: next,
-        requesting: false,
-        notice:
-          failed && next === 'default'
-            ? { text: 'Could not enable desktop notifications. Check your browser’s site settings.', sticky: true }
-            : noticeFor(next),
-      })
+      publish(
+        { permission: next, requesting: false },
+        failed && next === 'default'
+          ? { text: 'Could not enable desktop notifications. Check your browser’s site settings.', sticky: true }
+          : noticeFor(next),
+      )
     }
     attempt.timer = setTimeout(() => {
       if (pending.current !== attempt) return
       const next = refresh()
       if (next !== 'default') return
-      // This releases the UI, not the browser request. Observe late answers and
-      // avoid stacking more prompts while the original request is still pending.
-      publish({ permission: next, requesting: false, notice: { text: waitingMessage, sticky: true } })
+      // Release the busy indicator while observing the original request's late answer.
+      publish({ permission: next, requesting: false }, { text: waitingMessage, sticky: true })
     }, 8000)
     try {
-      // Keep this in the click handler's synchronous call stack for user activation.
+      // Stay in the click handler's synchronous stack to preserve user activation.
       void Notification.requestPermission().then(
         () => finish(),
         () => finish(true),
@@ -137,9 +127,5 @@ export function useBellNotifications(onNotice?: (message: string, sticky: boolea
     }
   }
 
-  return {
-    ...state,
-    request,
-    needsSetup: state.notice !== null && (state.permission === 'default' || state.permission === 'denied'),
-  }
+  return { ...state, request }
 }

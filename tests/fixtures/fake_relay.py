@@ -70,7 +70,7 @@ while True:
             elif message['type'] == 'paste-image':
                 control(
                     {
-                        'type': 'paste-result',
+                        'type': 'result',
                         'id': message['id'],
                         'ok': True,
                         'reference': '/root/.outpost/clipboard/x.' + message['extension'],

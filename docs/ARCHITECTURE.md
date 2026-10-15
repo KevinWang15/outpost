@@ -1,4 +1,4 @@
-# Outpost v2 architecture
+# Outpost architecture
 
 Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code) running in tmux
 on Linux machines, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
@@ -135,14 +135,13 @@ branch on the mode.
 | Choice | Entry | Authorization | Native integration |
 | --- | --- | --- | --- |
 | Web terminal | `TerminalPage`, `/terminal` | Browser login requests a grant | Browser permissions and clipboard APIs |
-| Outpost Desktop | `DesktopTerminalPage`, `/terminal/desktop` | `appTicket` consumes the launch fragment | Versioned `DesktopBridge` through a sandboxed preload |
+| Outpost Desktop | `DesktopTerminalPage`, `/terminal/desktop` | `desktopTicket` consumes the launch fragment | Versioned `DesktopBridge` through a sandboxed preload |
 
-`/terminal/desktop`, `/desktop` (downloads) and `/notifications` (browser setup)
-are public page shells. The terminal broker authorizes each connection; these
-pages confer no account API access. Desktop needs no copied login cookie or
-second authentication system.
+`/terminal/desktop` and `/desktop` (downloads) are public page shells. The terminal
+broker authorizes each connection; these pages confer no account API access.
+Desktop needs no copied login cookie or second authentication system.
 
-`appTicket` erases the fragment before React renders, replaces the launch ticket
+`desktopTicket` erases the fragment before React renders, replaces the launch ticket
 with the resume grant on `hello`, and clears it on explicit Close or expiry.
 Window-scoped session storage permits reloads. Electron uses nonpersistent
 partitions per server, so no browser login or terminal ticket is written to
@@ -155,12 +154,12 @@ clipboard, composer, links, bells and notifications have one web implementation.
 
 `ScrollbackBar` displays tmux's history position, not xterm's local buffer:
 tmux uses the alternate screen, so xterm's scrollbar cannot reach that history.
-The relay advertises `ready.scrollback`; interested clients subscribe with a
-`scrollback` control message over the existing socket. Only metadata (line
-count, offset, rows and copy-mode availability) returns to the browser. The
+On `ready`, both clients subscribe with a `scrollback` control message over
+the existing socket. History support is part of the current protocol. Only metadata
+(line count, offset, rows and copy-mode availability) returns to the browser. The
 target's `Scrollback` adapter uses tmux `copy-mode`, `goto-line` and `cancel`;
 tmux redraws through the usual PTY stream. Seeking the bottom exits copy mode.
-Both clients subscribe. Compatibility remains tmux 3.2+.
+The target requires tmux 3.2+.
 
 Metadata reads are triggered by input/output/resize, capped at two per second
 and skipped when idle. Drag destinations are coalesced, capped at ten per
@@ -168,7 +167,7 @@ second in the relay, and executed by one background worker with command
 timeouts. A bounded FIFO orders seeks, input, composer drafts and image pastes.
 Metadata reads do not block typing; a seek holds subsequent input until tmux
 confirms the mode change. Only adjacent seeks can coalesce, preserving input
-between them. Each seek with an ID receives fresh metadata followed by a
+between them. Each seek receives fresh metadata followed by a
 `result`, including when its position did not change. Failed seeks reject queued
 requests and discard buffered typing with a visible error, instead of sending
 it into an uncertain pane mode. Drafts are confirmed only after their bytes are
@@ -183,16 +182,15 @@ history. Such screens do not display a draggable thumb or a made-up extent.
 The Codex adapter defaults `tui.alternate_screen` to `never`, preserving output
 in tmux's normal history. This is a per-launch CLI configuration override, not
 a change to the user's Codex config; an explicit later `-c` can override it.
-Existing processes retain their launch mode. For full-screen Codex the runtime
-advertises the adapter's `history_navigation` capability (label, help, and
-bindings for oldest/pageUp/pageDown/latest). The broker validates this against
+For full-screen Codex the runtime advertises the adapter's `history_navigation`
+capability (label, help, and bindings for oldest/pageUp/pageDown/latest).
+The broker validates this against
 `shared/schemas.ts`; it contains no harness-specific dispatch. The shared
 `TerminalHistory` controller uses those bindings for both the sidebar and
 Shift+Page Up/Down. Codex supplies Page Up/Down and Ctrl+Home/End; additional
 harnesses can supply their own bindings without changing the broker or views.
 Copy mode still takes precedence when explicitly entered.
-These controls expose no invented history length. A clean exit and reconnect
-of the same conversation applies the inline default and enables the scrollbar.
+These controls expose no invented history length.
 
 `useBellNotifications` manages browser permission requests, with an eight-second
 busy timeout and permission refresh on focus. Desktop uses the bridge's native
@@ -220,22 +218,23 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `ack {bytes}` | Output rendered; flow control |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
 | → server | `paste-image {id, mediaType, data}` | Upload an image and paste its path |
-| → server | `scrollback {offset?, id?}` | Subscribe to history metadata; seek a line offset from the bottom (`0` = live, `-1` = oldest) |
+| → server | `scrollback {offset?, id?}` | Without fields, subscribe to history metadata; with both `offset` and `id`, seek from the bottom (`0` = live, `-1` = oldest) |
 | ← client | `hello {resume, session, target}` | Connection accepted |
-| ← client | `ready {scrollback?}` | Attached to tmux, with optional history controls |
-| ← client | `scrollback {available, lines, offset, rows, active, alternate?, navigation?}` | History extent, position, copy mode, and whether the application owns scrolling |
-| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / an identified scrollback seek |
+| ← client | `ready` | Attached to tmux; subscribe to history metadata |
+| ← client | `scrollback {available, lines, offset, rows, active, alternate, navigation?}` | History extent, position, copy mode, and whether the application owns scrolling |
+| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / a scrollback seek |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |
 
 The server pauses the transport when more than 1 MiB is unacknowledged.
 
-**Compatibility.** Both clients send `protocolVersion` from `shared/protocol.ts`.
+**Current contracts.** Both clients send `protocolVersion` from `shared/protocol.ts`.
 A mismatch returns `outdated` before redeeming the launch ticket and asks the
 user to reload. Desktop loads the same frontend from its server. Changes to the
 native bridge use `desktopBridgeVersion`; new native capabilities require an
-app release. Additive wire changes may keep the protocol version; changes that
-an old client would misread bump it.
+app release. Version checks reject unsupported input; there are no protocol
+translators or historical readers. Connection grants authorize an owner/login,
+target and session independently of the selected UI.
 
 ### Relay protocol (broker ⇄ relay, stdio)
 
@@ -251,7 +250,7 @@ session, missing tmux), its `OUTPOST_RESULT` error becomes the client's
 | --- | --- | --- |
 | `I` | broker → relay | Input bytes for tmux |
 | `O` | relay → broker | Output bytes from tmux |
-| `C` | both | JSON control: `resize`, `send`, `paste-image`, `scrollback`, `signal-result` / `ready`, `result`, `paste-result`, `scrollback`, `signal`, `exit` |
+| `C` | both | JSON control: `resize`, `send`, `paste-image`, `scrollback`, `signal-result` / `ready`, `result`, `scrollback`, `signal`, `exit` |
 
 Framing replaces in-band escape sequences, so typed or pasted bytes can never
 be mistaken for control messages. The relay owns a PTY for `tmux attach`, so
@@ -327,9 +326,6 @@ manual; no build runs on push. `updates.ts` checks GitHub desktop releases only
 when asked and opens a newer release for manual installation. There is no
 background updater for these previews. See [desktop development](../CONTRIBUTING.md).
 
-The Python connector, native-terminal profiles and PWA manifest are removed.
-Their replacement and offline uninstall steps are documented in the README.
-
 ## Coding harnesses
 
 `shared/harnesses.ts` lists harnesses for the UI and validation (id, label,
@@ -344,14 +340,16 @@ conversation.
 
 | Data | Location |
 | --- | --- |
-| Session registry | `~/.outpost/registry.json` (v1 `sessions.json` tmux records are imported once) |
+| Session registry | `~/.outpost/registry.json` |
 | tmux sockets | `~/.outpost/sockets/<session>.sock` |
 | Activity checkpoints | `~/.outpost/activity/<session>.json` |
 | Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Signal helpers and sockets | `~/.outpost/bin/`, `~/.outpost/run/` |
 
 Registry writes take `flock` and replace the file atomically. Records are
-validated strictly; invalid data is reported, never rewritten.
+validated strictly; invalid data is reported, never rewritten. Outpost reads
+only its current workspace and registry schemas. A missing current file starts
+an empty store; there is no automatic import of earlier layouts.
 
 ## Security model
 
@@ -384,8 +382,8 @@ the broker, and handle it in the shared client, delegating native actions throug
 
 | Layer | Tests |
 | --- | --- |
-| Runtime and relay | `tests/runtime/` — real tmux in a disposable home: lifecycle, framing, resize, image paste, signals, v1 import, activity semantics |
-| Server | `tests/unit/` — tokens, workspace and import, API validation and network policy, hosted isolation and revocation, broker against a fake relay, TypeScript ⇄ Python contracts |
+| Runtime and relay | `tests/runtime/` — real tmux in a disposable home: lifecycle, framing, resize, image paste, signals, activity semantics |
+| Server | `tests/unit/` — tokens, workspace, API validation and network policy, hosted isolation and revocation, broker against a fake relay, TypeScript ⇄ Python contracts |
 | Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with tmux 3.2 in both modes; conversation discovery |
 | Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout |
 | Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |

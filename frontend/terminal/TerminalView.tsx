@@ -33,7 +33,6 @@ import { TerminalHistory } from './history'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
 import { desktop } from '../desktop'
-import { pagePaths } from '../../shared/pages'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
 
 const touch = () => window.matchMedia('(pointer: coarse)').matches
@@ -99,7 +98,6 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   const [bellRinging, setBellRinging] = useState(false)
   const [history, setHistory] = useState<ScrollbackState | null>(null)
   const historyControls = useRef<TerminalHistory | null>(null)
-  const [notificationHelpShown, setNotificationHelpShown] = useState(false)
   const [status, setStatus] = useState('')
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
   const [keysShown, setKeysShown] = useState(touch)
@@ -368,10 +366,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             title={notificationLabels[notifications.permission]}
             aria-label={notificationLabels[notifications.permission]}
             disabled={notifications.requesting}
-            onClick={() => {
-              setNotificationHelpShown(true)
-              notifications.request()
-            }}
+            onClick={notifications.request}
           >
             {notifications.requesting ? (
               <LoaderCircle className="spin" size={17} />
@@ -447,21 +442,6 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             </div>
           )}
         </>
-      )}
-      {notificationHelpShown && notifications.needsSetup && (
-        <div className="terminal-notice">
-          <span>Allow notifications in the same browser and profile as this terminal.</span>
-          <a href={pagePaths.notifications} target="_blank" rel="noopener noreferrer">
-            Open notification setup
-          </a>
-          <button
-            className="icon-button"
-            aria-label="Dismiss notification setup"
-            onClick={() => setNotificationHelpShown(false)}
-          >
-            <X size={16} />
-          </button>
-        </div>
       )}
       {blockedLink && (
         <div className="terminal-notice">

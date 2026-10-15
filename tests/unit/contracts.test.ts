@@ -7,18 +7,17 @@ import test from 'node:test'
 import { harnesses } from '../../shared/harnesses'
 import { RelayDecoder, relayFrame, relayMagic } from '../../backend/terminal/broker'
 
-const root = fileURLToPath(new URL('../../', import.meta.url))
-function python(directory: 'runtime', code: string, input?: Buffer) {
+const runtime = fileURLToPath(new URL('../../runtime/', import.meta.url))
+function python(code: string, input?: Buffer) {
   return execFileSync('python3', ['-c', `import json, sys\n${code}`], {
-    env: { ...process.env, PYTHONPATH: root + directory, PYTHONDONTWRITEBYTECODE: '1' },
+    env: { ...process.env, PYTHONPATH: runtime, PYTHONDONTWRITEBYTECODE: '1' },
     input,
   })
 }
-const json = (directory: 'runtime', code: string) => JSON.parse(python(directory, code).toString())
+const json = (code: string) => JSON.parse(python(code).toString())
 
 test('coding harnesses: shared/harnesses.ts matches the runtime adapters', () => {
   const adapters = json(
-    'runtime',
     `from outpost_harness import adapters
 print(json.dumps({tool: {'storage': a.storage_key, 'id': a.id_pattern} for tool, a in adapters().items()}))`,
   )
@@ -31,7 +30,6 @@ print(json.dumps({tool: {'storage': a.storage_key, 'id': a.id_pattern} for tool,
 
 test('relay protocol: broker and relay agree on the marker and frames', () => {
   const relay = json(
-    'runtime',
     `import outpost_relay as relay
 print(json.dumps({'magic': list(relay.MAGIC)}))`,
   )
@@ -43,7 +41,6 @@ print(json.dumps({'magic': list(relay.MAGIC)}))`,
   ])
   const output = JSON.parse(
     python(
-      'runtime',
       `from outpost_relay import FrameDecoder
 data, decoder, frames = sys.stdin.buffer.read(), FrameDecoder(), []
 for index in range(len(data)):
@@ -58,7 +55,6 @@ print(json.dumps([[kind.decode(), list(payload)] for kind, payload in frames]))`
   ])
   // Relay frames decode in the broker.
   const encoded = python(
-    'runtime',
     `import outpost_relay as relay
 sys.stdout.buffer.write(relay.encode(b'O', bytes([0, 27, 255])) + relay.control({'type': 'ready'}))`,
   )

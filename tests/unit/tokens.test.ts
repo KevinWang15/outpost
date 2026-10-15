@@ -3,7 +3,7 @@ import test from 'node:test'
 import { ConnectTokens } from '../../backend/terminal/tokens'
 
 const owner = { userId: 'local', loginId: 'local' }
-const grant = { owner, targetId: 'target', sessionId: 'session', terminal: 'desktop' as const }
+const grant = { owner, targetId: 'target', sessionId: 'session' }
 
 test('launch tokens are single use and bound to their grant', () => {
   const tokens = new ConnectTokens('a'.repeat(64))

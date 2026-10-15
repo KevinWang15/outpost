@@ -50,7 +50,6 @@ export interface TerminalQuery {
   cols?: string
   rows?: string
   protocol?: string
-  client?: string
 }
 
 interface Dependencies {
@@ -157,6 +156,8 @@ class Connection {
         } catch {
           return this.close('error', 'The target sent an invalid control message.')
         }
+        if (!message || typeof message !== 'object' || Array.isArray(message))
+          return this.close('error', 'The target sent an invalid control message.')
         this.control(message)
       }
     }
@@ -167,9 +168,9 @@ class Connection {
       this.started = true
       for (const frame of this.pending) this.child!.stdin.write(frame)
       this.pending = []
-      this.send({ type: 'ready', ...(message.scrollback === true ? { scrollback: true } : {}) })
+      this.send({ type: 'ready' })
     } else if (message.type === 'scrollback') {
-      const { lines, offset, rows, available, active } = message
+      const { lines, offset, rows, available, active, alternate } = message
       if (
         typeof lines === 'number' &&
         Number.isSafeInteger(lines) &&
@@ -183,7 +184,8 @@ class Connection {
         rows >= 1 &&
         rows <= 1000 &&
         typeof available === 'boolean' &&
-        typeof active === 'boolean'
+        typeof active === 'boolean' &&
+        typeof alternate === 'boolean'
       )
         this.send({
           type: 'scrollback',
@@ -192,10 +194,10 @@ class Connection {
           rows,
           available,
           active,
-          ...(typeof message.alternate === 'boolean' ? { alternate: message.alternate } : {}),
+          alternate,
           ...(validHistoryNavigation(message.navigation) ? { navigation: message.navigation } : {}),
         })
-    } else if ((message.type === 'paste-result' || message.type === 'result') && typeof message.id === 'string') {
+    } else if (message.type === 'result' && typeof message.id === 'string') {
       this.send({
         type: 'result',
         id: message.id,
@@ -247,20 +249,25 @@ class Connection {
     } catch {
       return this.socket.close(1008, 'Invalid terminal message')
     }
+    if (!message || typeof message !== 'object' || Array.isArray(message))
+      return this.socket.close(1008, 'Invalid terminal message')
     const id = (message as { id?: unknown }).id
     if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)))
       return this.socket.close(1008, 'Invalid terminal message')
+    if ((message.type === 'send' || message.type === 'paste-image') && id === undefined)
+      return this.socket.close(1008, 'A terminal request ID is required')
     switch (message.type) {
       case 'scrollback':
+        if (message.offset === undefined && id === undefined) return this.relay({ type: 'scrollback' })
         if (
           message.offset === undefined ||
-          (Number.isSafeInteger(message.offset) && message.offset >= -1 && message.offset <= 1_000_000)
+          id === undefined ||
+          !Number.isSafeInteger(message.offset) ||
+          message.offset < -1 ||
+          message.offset > 1_000_000
         )
-          this.relay({
-            type: 'scrollback',
-            ...(message.offset !== undefined ? { offset: message.offset } : {}),
-            ...(id !== undefined ? { id } : {}),
-          })
+          return this.socket.close(1008, 'Invalid terminal history request')
+        this.relay({ type: 'scrollback', offset: message.offset, id })
         return
       case 'resize':
         if (

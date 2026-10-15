@@ -3,12 +3,12 @@ import { createRoot } from 'react-dom/client'
 import Root from './Root'
 import { ToastProvider } from './ui/Toast'
 import './styles/main.scss'
-import { takeAppTicket } from './terminal/appTicket'
+import { takeDesktopTicket } from './terminal/desktopTicket'
 import { pagePaths } from '../shared/pages'
 
 const desktopTerminal = window.location.pathname === pagePaths.desktopTerminal
 // Strip launch credentials before rendering anything or making API requests.
-const ticket = desktopTerminal ? takeAppTicket() : null
+const ticket = desktopTerminal ? takeDesktopTicket() : null
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

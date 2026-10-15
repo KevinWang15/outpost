@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { pagePaths } from '../../shared/pages'
 import { desktop } from '../desktop'
 import TerminalView from './TerminalView'
-import { saveAppTicket } from './appTicket'
+import { saveDesktopTicket } from './desktopTicket'
 import { openBrowserTab } from './browser'
 
 export default function DesktopTerminalPage({ token: initial }: { token: string | null }) {
@@ -26,10 +26,10 @@ export default function DesktopTerminalPage({ token: initial }: { token: string 
     <TerminalView
       token={token}
       title="Outpost Desktop"
-      onResume={saveAppTicket}
-      onExpired={() => saveAppTicket(null)}
+      onResume={saveDesktopTicket}
+      onExpired={() => saveDesktopTicket(null)}
       onClose={() => {
-        saveAppTicket(null)
+        saveDesktopTicket(null)
         if (desktop) void desktop.close()
         else {
           window.close()

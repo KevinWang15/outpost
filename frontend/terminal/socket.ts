@@ -13,8 +13,8 @@ interface Handlers {
   state(state: SocketState): void
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
-  scrollback?(state: ScrollbackState | null): void
-  notice?(message: string): void
+  scrollback(state: ScrollbackState | null): void
+  notice(message: string): void
 }
 
 const retries = 8
@@ -28,7 +28,6 @@ export class TerminalSocket {
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
   private ready = false
-  private historySupported = false
   private historyTimer: ReturnType<typeof setTimeout> | undefined
   private historyOffset: number | undefined
   private pending = new Map<
@@ -58,7 +57,6 @@ export class TerminalSocket {
       token: this.token,
       cols: String(cols),
       rows: String(rows),
-      client: 'web',
       protocol: String(protocolVersion),
     }).toString()
     const socket = new WebSocket(url)
@@ -99,10 +97,9 @@ export class TerminalSocket {
         this.attempts = 0
         this.handlers.state({ kind: 'connected' })
         this.send({ type: 'resize', ...this.size() })
-        this.historySupported = message.scrollback === true
-        if (this.historySupported && this.handlers.scrollback) this.send({ type: 'scrollback' })
+        this.send({ type: 'scrollback' })
       } else if (message.type === 'scrollback') {
-        this.handlers.scrollback?.(message)
+        this.handlers.scrollback(message)
       } else if (message.type === 'result') {
         this.pending.get(message.id)?.resolve(message)
         this.pending.delete(message.id)
@@ -174,7 +171,7 @@ export class TerminalSocket {
   }
 
   scrollTo(offset: number) {
-    if (!this.connected || !this.historySupported) return
+    if (!this.connected) return
     this.historyOffset = Math.max(-1, Math.min(1_000_000, Math.round(offset)))
     // Jump endpoints immediately. Keep only the latest position during a drag.
     if (offset <= 0) {
@@ -192,15 +189,14 @@ export class TerminalSocket {
       .then(result => {
         if (!result.ok) throw new Error(result.message)
       })
-      .catch(error => this.handlers.notice?.((error as Error).message))
+      .catch(error => this.handlers.notice((error as Error).message))
   }
 
   private resetHistory() {
     clearTimeout(this.historyTimer)
     this.historyTimer = undefined
     this.historyOffset = undefined
-    this.historySupported = false
-    this.handlers.scrollback?.(null)
+    this.handlers.scrollback(null)
   }
 
   private request(message: ClientMessage & { id: string }) {

@@ -213,7 +213,7 @@ export class TerminalWindows {
         })
     })
     window.once('ready-to-show', () => this.focus(window))
-    // appTicket erases this single-use fragment before the shared UI renders.
+    // desktopTicket erases this single-use fragment before the shared UI renders.
     void window.loadURL(`${launch.server}${pagePaths.desktopTerminal}#token=${launch.token}`).catch(() => {})
   }
 }

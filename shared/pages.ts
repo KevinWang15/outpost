@@ -4,7 +4,6 @@ export const pagePaths = {
   terminal: '/terminal',
   desktopTerminal: '/terminal/desktop',
   desktop: '/desktop',
-  notifications: '/notifications',
   login: '/login',
   signup: '/signup',
   verifyEmail: '/verify-email',

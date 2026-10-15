@@ -4,6 +4,12 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: it explains the
 principles every change should keep (one connection path, tmux as the only
 terminal state, modes that differ only in identity, agentless targets).
 
+Outpost is unreleased. Keep one current implementation and schema: remove
+obsolete paths when replacing a feature instead of adding migration readers,
+aliases or compatibility modes. Version checks reject stale inputs; update the
+shared contracts and callers together. Supported OS/browser/tmux handling is
+part of the current platform contract.
+
 ## Local setup
 
 Use Node.js 24+, npm 11+, Python 3.9+, tmux 3.2+, an OpenSSH client and

@@ -212,7 +212,7 @@ class RuntimeTest(unittest.TestCase):
 
         # Images travel over the open connection and are pasted into tmux once.
         connection.send(control({'type': 'paste-image', 'id': 'p1', 'extension': 'png', 'data': PNG}))
-        result = connection.expect_control('paste-result')
+        result = connection.expect_control('result')
         self.assertTrue(result['ok'], result)
         reference = result['reference']
         self.assertTrue(reference.startswith(str(self.home / '.outpost' / 'clipboard' / session['id'])))
@@ -283,39 +283,6 @@ class RuntimeTest(unittest.TestCase):
         self.assertIn('Invalid session registry', error['message'])
         self.assertIn('"extra": true', registry.read_text())
         registry.write_text(json.dumps(data))
-
-    def test_imports_v1_tmux_sessions_once(self):
-        state = self.home / '.outpost'
-        state.mkdir(mode=0o700)
-        base = {
-            'rootDir': str(self.project),
-            'createdAt': '2026-01-01T00:00:00+00:00',
-            'lastConnectedAt': None,
-            'tool': 'claude',
-            'env': {},
-            'args': '',
-            'cliSessionEnv': {'CLAUDE_CONFIG_DIR': str(self.home / '.claude')},
-        }
-        legacy = {
-            'sessions': [
-                {**base, 'id': str(uuid.uuid4()), 'name': 'Kept', 'backend': 'tmux', 'cliSessionId': str(uuid.uuid4())},
-                {**base, 'id': str(uuid.uuid4()), 'name': 'Kept', 'backend': 'tmux', 'cliSessionId': str(uuid.uuid4())},
-                {
-                    **base,
-                    'id': str(uuid.uuid4()),
-                    'name': 'Old dtach',
-                    'backend': 'dtach',
-                    'cliSessionId': str(uuid.uuid4()),
-                },
-            ]
-        }
-        (state / 'sessions.json').write_text(json.dumps(legacy))
-        names = [session['name'] for session in self.call({'action': 'list'})['sessions']]
-        self.assertEqual(names, ['Kept', 'Kept (2)'])
-        self.assertFalse((state / 'registry.json').exists(), 'listing never writes')
-        self.create('New')
-        self.assertEqual(json.loads((state / 'sessions.json').read_text()), legacy, 'v1 file is untouched')
-        self.assertEqual(len(json.loads((state / 'registry.json').read_text())['sessions']), 3)
 
     def test_management_image_upload_pastes_into_a_running_session(self):
         session = self.create()

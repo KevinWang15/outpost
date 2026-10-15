@@ -10,8 +10,6 @@ The macOS and Windows app shares Outpost's web terminal, with its own Dock/taskb
 
 On macOS, drag Outpost to Applications and open it once. These previews have no Developer ID signature or notarization; after the first launch attempt, use **System Settings → Privacy & Security → Open Anyway** if macOS blocks the app. Windows may show **SmartScreen → More info → Run anyway**. Only proceed with a release you trust. `SHA256SUMS` lists the artifact checksums.
 
-If you used the old Python connector, uninstall it **before** installing this app: run `~/.outpost-connector/bin/outpost-connector uninstall` in Terminal on macOS or WSL on Windows. Remove any old Outpost browser app separately. Python, Chrome and WSL are not required for Outpost Desktop.
-
 ## Notifications and updates
 
 Enable **Outpost** in system notification settings. Focus / Do Not Disturb can suppress alerts. A bell from a background terminal opens a notification; clicking it returns to that session. Sound starts after your first interaction with the terminal.

@@ -69,8 +69,7 @@ test('targets and sessions are validated strictly', async t => {
     400,
   )
   assert.equal(
-    (await call('POST', '/targets', { kind: 'ssh', name: 'x', host: 'dev', tools: ['claude'], backends: ['dtach'] }))
-      .status,
+    (await call('POST', '/targets', { kind: 'ssh', name: 'x', host: 'dev', tools: ['claude'], unknown: true })).status,
     400,
   )
   assert.equal(
@@ -282,7 +281,7 @@ test('clients speaking another protocol version are told to update, without spen
     await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: 'desktop' })
   ).body as ConnectResponse
   const base = `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`
-  const page = new TerminalClient(`${base}&client=web&protocol=`)
+  const page = new TerminalClient(`${base}&protocol=`)
   t.after(() => page.socket.terminate())
   assert.equal((await page.message('closed')).message, 'Outpost was updated. Reload this terminal to reconnect.')
   const current = new TerminalClient(base)

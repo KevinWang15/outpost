@@ -115,9 +115,9 @@ or [macOS System Settings → Notifications](https://support.apple.com/guide/saf
 including Focus / Do Not Disturb. Disable notifications through your browser's
 site settings.
 
-If a browser permission prompt is hidden, **Open notification setup** provides
-an ordinary page with site permission controls. Use the same browser and profile
-as your terminal; Chrome and Edge have separate permissions.
+If a browser permission prompt is hidden, open the site controls beside the
+address bar and allow Notifications. The terminal refreshes permission when
+you return to it.
 
 ![The web terminal](docs/images/web-terminal.png)
 
@@ -164,21 +164,6 @@ stay in memory; the app stores neither your account password nor login cookies.
 Use HTTPS, or HTTP on localhost for a local Outpost server / SSH port forward.
 The app needs a network connection and an open terminal window for bells.
 
-### Replacing the old connector / PWA
-
-The Python connector, iTerm2 / Windows Terminal launchers, and browser-installed
-PWA are retired. Before installing Outpost Desktop, run this in Terminal on
-macOS or your WSL shell on Windows:
-
-```sh
-~/.outpost-connector/bin/outpost-connector uninstall
-```
-
-Uninstall any old Outpost browser app separately through its browser. Then
-install/open Outpost Desktop so it owns `outpost://` links. This migration
-leaves server data and running sessions intact. The old server installer URL
-is no longer served; the installed uninstall command still works offline.
-
 ## Run a hosted service
 
 Set `OUTPOST_MODE=hosted`. Users sign up with a verified email, get their own
@@ -214,21 +199,6 @@ proxy_read_timeout 75s;
 port 3000 as user 1000. Mount persistent storage at `/state` and back up the
 whole data directory (accounts, workspaces, SSH keys, secret). Run one
 instance per data directory.
-
-## Upgrading from v1
-
-v2 reads v1 data without changing it:
-
-- Targets from `targets.json` are imported into `workspace.json`. Windows (WSL
-  distribution) targets are not imported; add WSL as an SSH target or run
-  Outpost inside WSL.
-- On each target, tmux sessions from `~/.outpost/sessions.json` are imported
-  into `~/.outpost/registry.json`, and running ones stay attached to the same
-  tmux server. dtach sessions are left in the v1 file.
-- Removed in v2: dtach, macOS targets, desktop terminal launching, copied
-  connection commands, uploaded web-terminal keys and the separate signal
-  channel. Running v1 sessions should be restarted once so links from the
-  agent reach your terminal.
 
 ## How it works
 

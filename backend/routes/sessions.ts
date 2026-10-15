@@ -104,7 +104,6 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
           owner: context.owner,
           targetId: context.target.id,
           sessionId: session.id,
-          terminal,
         })
         const link: DesktopLaunch | null =
           terminal === 'desktop'

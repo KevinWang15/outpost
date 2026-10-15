@@ -1,23 +1,19 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
-import type { TerminalChoice } from '../../shared/terminals'
-import { terminalChoices } from '../../shared/terminals'
 import type { Owner } from '../deployment'
 
 export interface Grant {
   owner: Owner
   targetId: string
   sessionId: string
-  terminal: TerminalChoice
 }
 interface Payload {
-  v: 1
+  v: 2
   k: 'launch' | 'resume'
   i: string
   u: string
   l: string
   t: string
   s: string
-  c: TerminalChoice
   e: number
 }
 const launchLifetime = 5 * 60_000
@@ -51,28 +47,26 @@ export class ConnectTokens {
       id,
       expiresAt: new Date(expires).toISOString(),
       token: this.encode({
-        v: 1,
+        v: 2,
         k: 'launch',
         i: id,
         u: grant.owner.userId,
         l: grant.owner.loginId,
         t: grant.targetId,
         s: grant.sessionId,
-        c: grant.terminal,
         e: expires,
       }),
     }
   }
   resume(id: string, grant: Grant) {
     return this.encode({
-      v: 1,
+      v: 2,
       k: 'resume',
       i: id,
       u: grant.owner.userId,
       l: grant.owner.loginId,
       t: grant.targetId,
       s: grant.sessionId,
-      c: grant.terminal,
       e: Date.now() + resumeLifetime,
     })
   }
@@ -90,10 +84,9 @@ export class ConnectTokens {
       return null
     }
     if (
-      payload?.v !== 1 ||
+      payload?.v !== 2 ||
       !['launch', 'resume'].includes(payload.k) ||
       ![payload.i, payload.u, payload.l, payload.t, payload.s].every(text) ||
-      !terminalChoices.includes(payload.c) ||
       !Number.isSafeInteger(payload.e) ||
       payload.e <= Date.now()
     )
@@ -110,7 +103,6 @@ export class ConnectTokens {
         owner: { userId: payload.u, loginId: payload.l },
         targetId: payload.t,
         sessionId: payload.s,
-        terminal: payload.c,
       },
     }
   }

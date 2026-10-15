@@ -31,7 +31,6 @@ CODING_ADAPTERS = adapters()
 os.umask(0o077)
 STATE = Path.home() / '.outpost'
 REGISTRY = STATE / 'registry.json'
-LEGACY_REGISTRY = STATE / 'sessions.json'
 HELPERS = STATE / 'bin'
 FIELDS = {
     'id',
@@ -176,33 +175,9 @@ def validate(data):
     return data
 
 
-def legacy_sessions():
-    """Import Outpost v1 tmux records once. dtach records cannot be attached by
-    v2 and stay in the untouched v1 file."""
-    try:
-        legacy = json.loads(LEGACY_REGISTRY.read_text())
-        entries = legacy['sessions']
-        imported = [
-            {key: entry[key] for key in FIELDS}
-            for entry in entries
-            if isinstance(entry, dict) and entry.get('backend') == 'tmux' and FIELDS <= set(entry)
-        ]
-        names = set()
-        for entry in imported:
-            # v1 names were unique per backend; v2 names are unique per target.
-            name, suffix = entry['name'], 2
-            while entry['name'].casefold() in names:
-                entry['name'] = name[:74] + ' (' + str(suffix) + ')'
-                suffix += 1
-            names.add(entry['name'].casefold())
-        return validate({'version': 2, 'sessions': imported})['sessions']
-    except (OSError, ValueError, TypeError, KeyError):
-        return []
-
-
 def read_registry():
     if not REGISTRY.exists():
-        return {'version': 2, 'sessions': legacy_sessions()}
+        return {'version': 2, 'sessions': []}
     try:
         return validate(json.loads(REGISTRY.read_text()))
     except (ValueError, TypeError, KeyError):

@@ -1626,7 +1626,6 @@ kbd {
 }
 
 /* Accounts */
-.notification-setup,
 .desktop-setup {
   display: grid;
   gap: 20px;
@@ -1876,9 +1875,6 @@ kbd {
 }
 @media (max-width: 560px) {
   .page-actions .button:not(.primary) {
-    display: none;
-  }
-  .choice-keys {
     display: none;
   }
   .form-row,

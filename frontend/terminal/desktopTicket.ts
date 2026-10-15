@@ -4,7 +4,7 @@ const key = 'outpost.desktop.ticket'
 const valid = (value: string | null): value is string =>
   value !== null && value.length <= 8192 && /^[\w-]+\.[\w-]+$/.test(value)
 
-export function saveAppTicket(token: string | null) {
+export function saveDesktopTicket(token: string | null) {
   try {
     if (token === null) sessionStorage.removeItem(key)
     else sessionStorage.setItem(key, token)
@@ -16,13 +16,13 @@ export function saveAppTicket(token: string | null) {
 /** Called once at entry, before React (including StrictMode) or AuthGate.
  * Consume and erase even a malformed fragment, so it cannot revive an older
  * session or remain in browser history. The broker validates the signature. */
-export function takeAppTicket() {
+export function takeDesktopTicket() {
   if (window.location.hash) {
     const params = new URLSearchParams(window.location.hash.slice(1))
     window.history.replaceState(null, '', window.location.pathname)
     const token = params.get('token')
     const ticket = valid(token) ? token : null
-    saveAppTicket(ticket)
+    saveDesktopTicket(ticket)
     return ticket
   }
   try {

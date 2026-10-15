@@ -36,11 +36,6 @@ export default function DesktopDownloadPage() {
         Enable Outpost in system notification settings to receive alerts. Use Help → Check for updates in the app to
         install newer previews.
       </p>
-      <p className="hint">
-        Upgrading from the old Python connector? Uninstall it before installing Outpost Desktop. Run{' '}
-        <code>~/.outpost-connector/bin/outpost-connector uninstall</code> in Terminal on macOS or WSL on Windows. The
-        new app registers the same Outpost links.
-      </p>
       <a href={pagePaths.workspace}>Back to Outpost</a>
     </main>
   )

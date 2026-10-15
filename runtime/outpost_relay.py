@@ -214,7 +214,7 @@ def winsize(cols, rows):
 
 
 class Relay:
-    """hooks: on_input(), paste_image(extension, data), optional scrollback(offset)."""
+    """hooks: on_input(), paste_image(extension, data), scrollback(offset)."""
 
     def __init__(self, command, environment, cols, rows, hooks, signal_path=None):
         self.command = command
@@ -277,7 +277,14 @@ class Relay:
                 if request is not None:
                     self.observed()
             except (OSError, ValueError) as error:
-                unavailable = {'available': False, 'lines': 0, 'offset': 0, 'rows': 1, 'active': False}
+                unavailable = {
+                    'available': False,
+                    'lines': 0,
+                    'offset': 0,
+                    'rows': 1,
+                    'active': False,
+                    'alternate': False,
+                }
                 state = (self.history_last or unavailable) if request is not None else unavailable
                 if request is not None:
                     self.history_dirty = True  # Refresh once; keep the last controls available for retry.
@@ -321,7 +328,7 @@ class Relay:
                     self.history_request = action
                     self.start_history(action['offset'])
                 elif kind == 'paste-image':
-                    reply = {'type': 'paste-result', 'id': action.get('id')}
+                    reply = {'type': 'result', 'id': action.get('id')}
                     try:
                         reply.update(self.hooks.paste_image(action.get('extension'), action.get('data')), ok=True)
                         self.observed()
@@ -357,7 +364,7 @@ class Relay:
         if kind != b'C':
             raise ValueError('Unknown relay frame')
         message = json.loads(payload)
-        if message.get('type') == 'scrollback' and hasattr(self.hooks, 'scrollback'):
+        if message.get('type') == 'scrollback':
             offset = message.get('offset')
             if offset is None or (type(offset) is int and -1 <= offset <= 1000000):
                 self.history_subscribed = self.history_dirty = True
@@ -400,7 +407,7 @@ class Relay:
             signal.signal(signal.SIGHUP, stop)
             signal.signal(signal.SIGTERM, stop)
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-            self.send({'type': 'ready', 'scrollback': hasattr(self.hooks, 'scrollback')})
+            self.send({'type': 'ready'})
             while not self.stopped and (not eof or self.outgoing):
                 self.observer.flush()
                 if not eof:

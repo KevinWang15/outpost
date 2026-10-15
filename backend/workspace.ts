@@ -17,26 +17,6 @@ const validFile = ajv.compile<WorkspaceFile>(
   Type.Object({ version: Type.Literal(2), targets: Type.Array(targetRecord) }, { additionalProperties: false }),
 )
 
-/** Convert an Outpost v1 `targets.json` once. Windows/WSL targets cannot run on v2. */
-export function importV1(config: unknown): Target[] {
-  if (!config || typeof config !== 'object' || !Array.isArray((config as { targets?: unknown }).targets)) return []
-  return (config as { targets: Record<string, unknown>[] }).targets.flatMap(entry => {
-    if (!entry || typeof entry !== 'object' || entry.distribution) return []
-    const target: Record<string, unknown> = { ...entry }
-    const previous = entry.environment as (ExecutionEnvironment & { platform?: string }) | undefined
-    delete target.backends
-    delete target.environment
-    if (previous && previous.platform !== 'darwin')
-      target.environment = {
-        home: previous.home,
-        username: previous.username,
-        uid: previous.uid,
-        shell: previous.shell,
-      }
-    return validTarget(target) ? [target] : []
-  })
-}
-
 /** Target settings live with the server. Sessions are always read from their target. */
 export class Workspace {
   private queue: Promise<unknown> = Promise.resolve()
@@ -50,14 +30,7 @@ export class Workspace {
       raw = await readFile(this.path, 'utf8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      try {
-        return {
-          version: 2,
-          targets: importV1(JSON.parse(await readFile(join(this.directory, 'targets.json'), 'utf8'))),
-        }
-      } catch {
-        return { version: 2, targets: [] }
-      }
+      return { version: 2, targets: [] }
     }
     let data: unknown
     try {

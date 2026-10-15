@@ -688,6 +688,23 @@ def attach_session(session, cols, rows):
         ('prefix', '>'),
     ):
         chain.extend([';', 'unbind-key', '-q', '-T', table, key])
+    # Mouse copies must not cancel copy mode: doing so discards the history
+    # position and jumps to live output on release. Keep OSC 52 copying and
+    # clear the highlight, but leave navigation to the user. Cover word/line
+    # selection too, in both key tables (EDITOR can select the vi table).
+    for table in ('copy-mode', 'copy-mode-vi'):
+        for key, command in (
+            ('MouseDragEnd1Pane', 'send-keys -X copy-selection'),
+            (
+                'DoubleClick1Pane',
+                'select-pane; send-keys -X select-word; run-shell -d0.3; send-keys -X copy-selection',
+            ),
+            (
+                'TripleClick1Pane',
+                'select-pane; send-keys -X select-line; run-shell -d0.3; send-keys -X copy-selection',
+            ),
+        ):
+            chain.extend([';', 'bind-key', '-T', table, key, command])
     tmux(
         session,
         'set-option',

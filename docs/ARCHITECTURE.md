@@ -164,6 +164,14 @@ bindings and its prefix `<` / `>` menu shortcuts. This applies to Outpost's
 isolated tmux server, including existing sessions on reconnect. Mouse reporting,
 wheel scrolling and copy-mode selection remain enabled.
 
+On the same attach path, mouse drag release and double/triple clicks in both
+`copy-mode` and `copy-mode-vi` use `copy-selection`, which copies through the
+existing OSC 52 clipboard path and clears the highlight without exiting copy
+mode. tmux's default `copy-pipe-and-cancel` binding exits copy mode and loses the
+reader's scroll position. This policy belongs to the target runtime, so browser
+and desktop behave identically and existing sessions pick it up on reconnect.
+Returning to live output remains an explicit history action.
+
 `ScrollbackBar` displays tmux's history position, not xterm's local buffer:
 tmux uses the alternate screen, so xterm's scrollbar cannot reach that history.
 Shared terminal CSS suppresses the native scrollbar on xterm's empty legacy

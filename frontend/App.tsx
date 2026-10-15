@@ -1,9 +1,10 @@
 import { useEffect, useReducer, useState } from 'react'
-import { LoaderCircle, LogOut, Monitor, Plus, Server, UserRound } from 'lucide-react'
+import { LoaderCircle, LogOut, Monitor, Plus, Server, Settings2, UserRound } from 'lucide-react'
 import type { Target, TargetInput } from '../shared/model'
 import { api } from './api'
 import AccountDialog from './auth/AccountDialog'
 import { useAuth } from './auth/useAuth'
+import ConnectionPreferences from './connect/ConnectionPreferences'
 import { Menu } from './ui/Menu'
 import TargetDialog from './workspace/TargetDialog'
 import TargetView from './workspace/TargetView'
@@ -54,7 +55,8 @@ export default function App() {
   const [{ targets, selected, visit }, dispatch] = useReducer(reducer, { targets: null, selected: '', visit: 0 })
   const [error, setError] = useState('')
   const [adding, setAdding] = useState(false),
-    [account, setAccount] = useState(false)
+    [account, setAccount] = useState(false),
+    [connectionPreferences, setConnectionPreferences] = useState(false)
   const target = targets?.find(item => item.id === selected)
 
   useEffect(() => {
@@ -115,6 +117,10 @@ export default function App() {
           })}
         </nav>
         <div className="sidebar-footer">
+          <button className="connection-preferences" onClick={() => setConnectionPreferences(true)}>
+            <Settings2 size={16} />
+            Connection preferences
+          </button>
           {mode === 'hosted' && user ? (
             <Menu
               label="Account"
@@ -203,6 +209,7 @@ export default function App() {
         />
       )}
       {account && <AccountDialog onClose={() => setAccount(false)} />}
+      {connectionPreferences && <ConnectionPreferences onClose={() => setConnectionPreferences(false)} />}
     </div>
   )
 }

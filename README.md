@@ -62,7 +62,12 @@ paths produce an error without creating a session.
 
 ## Connect
 
-Click **Connect** next to a session and choose a terminal. Your last choice is remembered.
+Click **Connect** next to a session and choose a terminal. Check **Remember my
+choice** first to open that terminal directly on future connections. This applies
+to all sessions on this Outpost server in the current browser. To change it or
+show the chooser again, open **Connection preferences** in the sidebar, choose a
+terminal or **Ask every time**, and save. This preference does not change login
+or desktop server trust requirements.
 
 | Choice | Opens in | Installation | Authorization |
 | --- | --- | --- | --- |

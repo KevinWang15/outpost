@@ -532,6 +532,22 @@ kbd {
   border-top: 1px solid var(--border);
   font-size: 12px;
 }
+.connection-preferences {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  &:hover {
+    background: var(--surface-muted);
+  }
+}
 .account-button {
   display: flex;
   align-items: center;
@@ -1142,9 +1158,6 @@ kbd {
       transform: translateX(2px);
     }
   }
-  &.last {
-    border-color: var(--accent-border);
-  }
   &:disabled {
     opacity: 1;
   }
@@ -1179,6 +1192,12 @@ kbd {
   transition:
     transform 0.12s,
     color 0.12s;
+}
+.connect-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
 }
 .connect-progress {
   display: flex;
@@ -1832,7 +1851,19 @@ kbd {
       max-width: 220px;
     }
     .sidebar-footer {
-      display: none;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 16px;
+      padding-top: 8px;
+      > .muted {
+        display: none;
+      }
+      .connection-preferences,
+      .account-button {
+        width: auto;
+        margin: 0;
+      }
     }
   }
   .content {

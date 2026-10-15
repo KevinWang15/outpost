@@ -113,6 +113,21 @@ branch on the mode.
 
 ### Connect flow
 
+`frontend/connect/useConnect.ts` owns launching and desktop handoff polling for
+both explicit and remembered choices. `ConnectDialog` renders that state. Web
+popups open synchronously from the user's click, including when skipping the
+chooser; effects only poll an existing launch, so Strict Mode cannot launch
+twice. Closing, retrying, or changing targets aborts pending requests, and late
+poll results cannot replace a newer attempt.
+
+`preference.ts` stores only an explicitly chosen terminal in browser local
+storage for the current origin. Connect reads it on each click, including changes
+made in other tabs. The sidebar's **Connection preferences** works in local and
+hosted modes; **Ask every time** removes the choice. Missing or invalid preferences
+show the chooser, storage write failures are reported without blocking connection,
+and launch errors return to the chooser. This never stores credentials or skips
+authentication or desktop trust confirmation.
+
 1. The UI chooses `web` or `desktop` (`shared/terminals.ts`). The authenticated
    `POST /api/targets/:t/sessions/:s/connect` route checks ownership and issues a
    signed, single-use launch ticket valid for five minutes.

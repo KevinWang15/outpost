@@ -4,6 +4,7 @@ import type { ConversationMatch, Session, SessionInput, Target, TargetUpdate } f
 import { harnessLabel } from '../../shared/harnesses'
 import { api } from '../api'
 import ConnectDialog from '../connect/ConnectDialog'
+import { useConnect } from '../connect/useConnect'
 import { Confirm } from '../ui/Dialog'
 import { Menu } from '../ui/Menu'
 import { useToast } from '../ui/toast-context'
@@ -21,7 +22,6 @@ import { address } from './labels'
 type Panel =
   | { kind: 'session'; conversation: ConversationMatch | null }
   | { kind: 'finder' }
-  | { kind: 'connect'; session: Session }
   | { kind: 'image'; session: Session }
   | { kind: 'fork'; session: Session }
   | { kind: 'edit' }
@@ -39,6 +39,7 @@ export default function TargetView({
 }) {
   const toast = useToast()
   const { sessions, error, refreshing, refresh } = useSessions(target.id)
+  const connectFlow = useConnect(target, refresh)
   const software = useSoftware(target.id, target.tools.join(','))
   const [panel, setPanel] = useState<Panel | null>(null)
   const [checking, setChecking] = useState<string[]>([])
@@ -46,6 +47,11 @@ export default function TargetView({
   const tools = target.tools.filter(tool => installed.has(tool))
   const ready = ['bash', 'python3', 'tmux'].every(id => installed.has(id as never)) && tools.length > 0
   const close = () => setPanel(null)
+
+  function connect(session: Session) {
+    close()
+    connectFlow.connect(session)
+  }
 
   async function check(session: Session) {
     if (!session.activity.completionId) return
@@ -120,7 +126,7 @@ export default function TargetView({
         checking={checking}
         onRefresh={() => void refresh()}
         onCreate={() => setPanel({ kind: 'session', conversation: null })}
-        onConnect={session => setPanel({ kind: 'connect', session })}
+        onConnect={connect}
         onImage={session => setPanel({ kind: 'image', session })}
         onFork={session => setPanel({ kind: 'fork', session })}
         onCheck={session => void check(session)}
@@ -148,7 +154,7 @@ export default function TargetView({
           tools={tools}
           onClose={close}
           onLink={conversation => setPanel({ kind: 'session', conversation })}
-          onConnect={session => setPanel({ kind: 'connect', session })}
+          onConnect={connect}
         />
       )}
       {panel?.kind === 'fork' && (
@@ -164,14 +170,13 @@ export default function TargetView({
           }}
         />
       )}
-      {panel?.kind === 'connect' && (
+      {connectFlow.connection && (
         <ConnectDialog
           target={target}
-          session={panel.session}
-          onClose={() => {
-            close()
-            void refresh()
-          }}
+          connection={connectFlow.connection}
+          onChoose={connectFlow.choose}
+          onBack={connectFlow.back}
+          onClose={connectFlow.close}
         />
       )}
       {panel?.kind === 'image' && <ImageDialog targetId={target.id} session={panel.session} onClose={close} />}

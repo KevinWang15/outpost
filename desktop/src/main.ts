@@ -1,39 +1,25 @@
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  Menu,
-  shell,
-  type IpcMainInvokeEvent,
-  type MenuItemConstructorOptions,
-} from 'electron'
+import { app, dialog, Menu, type MenuItemConstructorOptions } from 'electron'
 import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { desktopOrigin } from '../../shared/desktop'
 import { parseLaunch } from './launch'
+import { Preferences } from './preferences'
 import { TrustedServers } from './store'
-import { TerminalWindows } from './terminals'
+import { DesktopWorkspace } from './workspace'
 import { checkUpdates } from './updates'
 
 app.setName('Outpost')
 app.setAppUserModelId('dev.outpost.desktop')
-const directory = __dirname
-const homeUrl = pathToFileURL(join(directory, 'home.html')).href
 const trusted = new TrustedServers(join(app.getPath('userData'), 'servers.json'))
-let terminals: TerminalWindows
-let home: BrowserWindow | null = null
-let ready = false
+const preferences = new Preferences(join(app.getPath('userData'), 'preferences.json'))
+let workspace: DesktopWorkspace | undefined
 const waiting: string[] = []
 let operations = Promise.resolve()
 let pending = 0
-const report = () =>
+const report = (message: string) =>
   dialog.showMessageBox({
     type: 'error',
     title: 'Outpost',
-    message: 'Could not open the session.',
-    detail:
-      'Check the server address and use Connect → Outpost Desktop again. The app accepts HTTPS servers and HTTP on localhost.',
+    message,
+    detail: 'Check the server address and use Connect → Outpost Desktop again.',
     buttons: ['OK'],
   })
 
@@ -54,9 +40,8 @@ async function trust(origin: string) {
   await trusted.set(origin, true)
   return true
 }
-
 function receive(value: string) {
-  if (!ready) {
+  if (!workspace) {
     if (waiting.length < 16) waiting.push(value)
     return
   }
@@ -65,89 +50,82 @@ function receive(value: string) {
   operations = operations
     .then(async () => {
       const launch = parseLaunch(value)
-      if (await trust(launch.server)) terminals.open(launch)
+      if (await trust(launch.server)) workspace!.open(launch)
     })
-    .catch(async () => {
-      await report()
+    .catch(async error => {
+      await report(error instanceof Error ? error.message : 'Could not open the session.')
     })
     .finally(() => {
       pending--
-      if (BrowserWindow.getAllWindows().length === 0) showHome()
+      workspace!.show()
     })
 }
-
-function showHome() {
-  if (home && !home.isDestroyed()) {
-    terminals.focus(home)
-    return
-  }
-  home = new BrowserWindow({
-    title: 'Outpost',
-    width: 680,
-    height: 640,
-    minWidth: 480,
-    minHeight: 400,
-    backgroundColor: '#f7f9fc',
-    icon: join(directory, 'outpost.png'),
-    webPreferences: {
-      preload: join(directory, 'home-preload.cjs'),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    },
-  })
-  home.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  home.webContents.on('will-navigate', event => event.preventDefault())
-  home.on('closed', () => {
-    home = null
-  })
-  void home.loadFile(join(directory, 'home.html')).catch(() => {})
-}
-
-function fromHome(event: IpcMainInvokeEvent) {
-  if (
-    !home ||
-    event.sender !== home.webContents ||
-    event.senderFrame !== event.sender.mainFrame ||
-    event.senderFrame.url !== homeUrl
-  )
-    throw new Error('This action is only available in the Outpost app home.')
-}
-
 function menus() {
   const mac = process.platform === 'darwin'
+  const shortcut = (key: string) => (mac ? 'Cmd+' : 'Ctrl+Shift+') + key
   const template: MenuItemConstructorOptions[] = [
     ...(mac ? [{ role: 'appMenu' as const }] : []),
     {
       label: 'File',
       submenu: [
-        { label: 'Open Outpost…', accelerator: 'CmdOrCtrl+Shift+O', click: showHome },
+        { label: 'New tab…', accelerator: shortcut('T'), click: () => workspace!.panel('sessions') },
+        { label: 'Switch session…', accelerator: shortcut('P'), click: () => workspace!.panel('switcher') },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => workspace!.panel('settings') },
         { type: 'separator' },
-        { role: 'close', accelerator: mac ? 'Cmd+W' : 'Ctrl+Shift+W' },
+        {
+          label: 'Close tab',
+          accelerator: shortcut('W'),
+          click: () => {
+            void workspace!.close()
+          },
+        },
+        { role: 'close', label: 'Close window', accelerator: mac ? 'Cmd+Shift+W' : 'Alt+F4' },
         ...(!mac ? [{ role: 'quit' as const }] : []),
       ],
     },
     {
       label: 'Edit',
       submenu: [
-        { role: 'copy', accelerator: mac ? 'Cmd+C' : 'Ctrl+Shift+C' },
-        { role: 'paste', accelerator: mac ? 'Cmd+V' : 'Ctrl+Shift+V' },
-        {
-          label: 'Select all',
-          accelerator: mac ? 'Cmd+A' : 'Ctrl+Shift+A',
-          click: () => terminals.selectAll(BrowserWindow.getFocusedWindow()),
-        },
+        { label: 'Copy', accelerator: shortcut('C'), click: () => workspace!.edit('copy') },
+        { label: 'Paste', accelerator: shortcut('V'), click: () => workspace!.edit('paste') },
+        { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.command('select-all') },
       ],
     },
     {
       label: 'View',
       submenu: [
-        { role: 'reload', accelerator: mac ? 'Cmd+R' : 'Ctrl+Shift+R' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        { label: 'Split side by side', accelerator: shortcut('D'), click: () => workspace!.split('columns') },
+        { label: 'Split top and bottom', click: () => workspace!.split('rows') },
+        { label: 'Single pane', click: () => workspace!.split(null) },
+        { label: 'Focus other pane', accelerator: 'CmdOrCtrl+Alt+Right', click: () => workspace!.otherPane() },
+        { type: 'separator' },
+        { label: 'Larger terminal text', accelerator: 'CmdOrCtrl+Plus', click: () => workspace!.fontSize(1) },
+        { label: 'Smaller terminal text', accelerator: 'CmdOrCtrl+-', click: () => workspace!.fontSize(-1) },
+        { label: 'Reset terminal text size', accelerator: 'CmdOrCtrl+0', click: () => workspace!.fontSize(null) },
+        { type: 'separator' },
+        { label: 'Reconnect terminal', click: () => workspace!.command('reconnect') },
+        {
+          label: 'Reload terminal',
+          accelerator: shortcut('R'),
+          click: () => {
+            void workspace!.reload()
+          },
+        },
         { role: 'togglefullscreen' },
         ...(!app.isPackaged ? [{ role: 'toggleDevTools' as const }] : []),
+      ],
+    },
+    {
+      label: 'Tabs',
+      submenu: [
+        { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => workspace!.cycle(1) },
+        { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => workspace!.cycle(-1) },
+        { type: 'separator' },
+        ...Array.from({ length: 9 }, (_, index) => ({
+          label: index === 8 ? 'Last tab' : `Tab ${index + 1}`,
+          accelerator: `${mac ? 'Cmd' : 'Alt'}+${index + 1}`,
+          click: () => workspace!.select(index),
+        })),
       ],
     },
     { role: 'windowMenu' },
@@ -166,7 +144,6 @@ function menus() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
-// Register before ready: Launch Services can deliver a cold-start URL immediately.
 app.on('open-url', (event, url) => {
   event.preventDefault()
   receive(url)
@@ -176,58 +153,38 @@ else {
   app.on('second-instance', (_event, argv) => {
     const urls = argv.filter(argument => argument.startsWith('outpost:'))
     if (urls.length) for (const url of urls.slice(0, 16)) receive(url)
-    else if (ready) showHome()
+    else workspace?.show()
   })
   for (const argument of process.argv) if (argument.startsWith('outpost:')) receive(argument)
   void app
     .whenReady()
     .then(async () => {
-      await trusted.load()
-      terminals = new TerminalWindows(directory)
+      await Promise.all([trusted.load(), preferences.load()])
+      workspace = new DesktopWorkspace(__dirname, trusted, preferences, trust)
       app.setAboutPanelOptions({
         applicationName: 'Outpost',
         applicationVersion: app.getVersion(),
         copyright: 'Outpost contributors',
-        iconPath: join(directory, 'outpost.png'),
+        iconPath: join(__dirname, 'outpost.png'),
       })
       if (app.isPackaged) app.setAsDefaultProtocolClient('outpost')
       else if (process.platform === 'win32' && process.argv[1])
         app.setAsDefaultProtocolClient('outpost', process.execPath, [resolve(process.argv[1])])
-      ipcMain.handle('home:status', event => {
-        fromHome(event)
-        return { version: app.getVersion(), servers: trusted.list() }
-      })
-      ipcMain.handle('home:open-server', async (event, value: unknown) => {
-        fromHome(event)
-        if (typeof value !== 'string') throw new Error('Enter an Outpost server URL.')
-        const origin = desktopOrigin(value)
-        if (!(await trust(origin))) return false
-        await shell.openExternal(origin)
-        return true
-      })
-      ipcMain.handle('home:forget-server', async (event, value: unknown) => {
-        fromHome(event)
-        if (typeof value !== 'string') throw new Error('Invalid server.')
-        const origin = desktopOrigin(value)
-        terminals.forget(origin)
-        await trusted.set(origin, false)
-      })
-      ipcMain.handle('home:updates', event => {
-        fromHome(event)
-        return checkUpdates()
-      })
       menus()
-      ready = true
-      if (waiting.length) for (const url of waiting.splice(0)) receive(url)
-      else showHome()
-      app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) showHome()
-      })
+      workspace.show()
+      for (const url of waiting.splice(0)) receive(url)
+      app.on('activate', () => workspace!.show())
     })
-    .catch(async () => {
-      await report()
+    .catch(async error => {
+      await report(error instanceof Error ? error.message : 'Could not start Outpost.')
       app.quit()
     })
+  app.on('before-quit', event => {
+    if (workspace?.hasTabs && !workspace.quitting) {
+      event.preventDefault()
+      void workspace.quit()
+    }
+  })
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin' && pending === 0) app.quit()
   })

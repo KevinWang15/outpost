@@ -154,6 +154,9 @@ clipboard, composer, links, bells and notifications have one web implementation.
 
 `ScrollbackBar` displays tmux's history position, not xterm's local buffer:
 tmux uses the alternate screen, so xterm's scrollbar cannot reach that history.
+Shared terminal CSS suppresses the native scrollbar on xterm's empty legacy
+`.xterm-viewport` layer; the active `.xterm-scrollable-element` keeps its normal
+behavior. This prevents a stray Windows scrollbar arrow beside `ScrollbackBar`.
 On `ready`, both clients subscribe with a `scrollback` control message over
 the existing socket. History support is part of the current protocol. Only metadata
 (line count, offset, rows and copy-mode availability) returns to the browser. The
@@ -298,26 +301,75 @@ fails with a clear message.
 
 `desktop/` is a separate npm package, so server builds never download Electron.
 `main.ts` owns app lifecycle, menus, server trust and `outpost://` dispatch.
-`launch.ts` validates the envelope; `store.ts` atomically serializes only trusted
-origins. `terminals.ts` owns terminal windows and validates every IPC sender.
-The local home page has a different preload and capability set from remote
-terminal windows. No generic IPC or Node API is exposed.
+`launch.ts` validates the envelope; `store.ts` atomically serializes trusted
+origins, and `preferences.ts` serializes font size and bell sound only.
 
-Remote windows use sandboxing, context isolation, no Node integration, no
+One `BrowserWindow` hosts local workspace chrome. `workspace.ts` owns it, tab
+activation and close/reload confirmation. `layout.ts` owns ordered tab IDs,
+the active session, an optional two-session split and shared pane geometry.
+`workspace-ui.ts` renders the tab strip, session switcher, server launcher and
+settings. Its `workspace-preload.ts` bridge accepts only enumerated local UI
+actions; the main process verifies that calls came from its bundled main frame.
+The local renderer receives tab labels, connection state, attention and draft
+flags, never grants, terminal bytes or draft contents.
+
+The tab strip replaces the system title bar using Electron's
+`titleBarStyle: 'hidden'` and [Window Controls Overlay](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar#custom-window-controls).
+Native window controls share the same
+`tabBarHeight` as the HTML strip and terminal view offset. CSS uses the overlay's
+safe-area geometry to reserve space for OS buttons, including RTL placement;
+the overlay visibility event releases this space in fullscreen. Only the local
+header has a window drag region. Its tab scroller and buttons opt out, and a
+flexible spacer always leaves room to drag the window with a full tab strip.
+Window close, minimize, maximize and fullscreen remain native operations.
+
+`terminals.ts` owns each session's sandboxed `WebContentsView` and native bridge.
+Views use nonpersistent sessions partitioned by server origin. Switching tabs
+only changes visibility; hidden views retain their size and keep processing
+output and acknowledgements. A split displays two existing views and changes
+their bounds. Moving/reordering tabs never redeems another grant. There is a
+32-tab limit. Closing a tab explicitly destroys its web contents; child views
+are also closed when the owning window is destroyed. Renderer failures are
+shown per tab and do not reset the workspace or other sessions.
+
+Remote views use sandboxing, context isolation, no Node integration, no
 webviews and no popups/downloads. Top-level navigation is restricted to the
 selected server's desktop terminal entry; TLS failures are not bypassed.
 Clipboard reads use native paste events. The paste bridge checks transient user
 activation in its isolated preload; web clipboard permissions are denied.
-Only that window's main frame may invoke the bridge. External links pass the
+Only that view's main frame may invoke the bridge. External links pass the
 same HTTP(S), no-credentials validator as broker signals and open through
 Electron's shell API, without constructing shell commands. Clipboard copying
-is focused-window only and bounded to 1 MiB. OSC 52 queries remain ignored.
+requires the active, focused view and is bounded to 1 MiB. OSC 52 queries remain ignored.
+
+`TerminalContextMenu` is shared by browser and desktop terminals. It delegates
+clipboard actions to `attachClipboard` (including image paste and pending OSC 52
+copies), history to `TerminalHistory`, and display changes to `TerminalView`.
+The same clipboard controller maps macOS Ctrl+V to its explicit paste action;
+native paste shortcuts continue to use clipboard events. The alias runs only
+on a non-repeated keydown, within the user's clipboard permission gesture.
+Right-click and keyboard menu gestures stay local; opening the menu preserves
+the xterm selection. Radix handles menu navigation, dismissal and viewport
+positioning. The desktop native context menu is only for editable fields such
+as the message composer; there is no separate native list of terminal actions.
+
+The versioned bridge reports session metadata and receives focus, preferences
+and explicit terminal commands. Native focus is authoritative for bells, so a
+hidden tab can notify even while another tab is focused. Notification clicks
+activate the owning tab and restore the window. The frontend never infers tab
+focus from the BrowserWindow alone. Font size is applied to xterm and refitted
+through the existing resize path, without page zoom or reconnecting. The message
+composer keeps its draft while hidden; only a Boolean draft flag reaches the
+main process for close/reload/quit confirmation. Terminal input already sent to
+the remote harness is not inspected for drafts.
 
 Packaged apps register the protocol through Electron and installer metadata.
 macOS handles `open-url` before app readiness; Windows uses initial arguments
-and `second-instance`. A single app instance owns independent session windows.
-Closing a window never terminates tmux. App home can forget a server and close
-its windows. The app icon and Windows AppUserModelID belong to Outpost.
+and `second-instance`. A single app instance owns the workspace; subsequent
+launches add tabs. Closing a tab or window never terminates tmux. The server
+launcher can forget a server and close its tabs. No connection tickets or
+layouts with credentials are persisted; reopening the app starts a fresh
+workspace. The app icon and Windows AppUserModelID belong to Outpost.
 
 `electron-builder.yml` packages unsigned preview DMG/ZIP files for both Mac
 architectures and an NSIS installer for Windows x64. Apple silicon uses ad-hoc

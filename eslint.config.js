@@ -36,7 +36,7 @@ export default defineConfig([
     languageOptions: { globals: globals.node },
   },
   {
-    files: ['promo-v2/src/**/*.js', 'desktop/src/home.ts', 'desktop/src/preload.ts'],
+    files: ['promo-v2/src/**/*.js', 'desktop/src/workspace-ui.ts', 'desktop/src/preload.ts'],
     languageOptions: { globals: globals.browser },
   },
   {

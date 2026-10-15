@@ -9,7 +9,7 @@ await rm(dist, { recursive: true, force: true })
 await mkdir(dist, { recursive: true })
 await build({
   absWorkingDir,
-  entryPoints: ['desktop/src/main.ts', 'desktop/src/preload.ts', 'desktop/src/home-preload.ts'],
+  entryPoints: ['desktop/src/main.ts', 'desktop/src/preload.ts', 'desktop/src/workspace-preload.ts'],
   outdir: 'desktop/dist',
   outExtension: { '.js': '.cjs' },
   bundle: true,
@@ -22,15 +22,15 @@ await build({
 })
 await build({
   absWorkingDir,
-  entryPoints: ['desktop/src/home.ts'],
-  outfile: 'desktop/dist/home.js',
+  entryPoints: ['desktop/src/workspace-ui.ts'],
+  outfile: 'desktop/dist/workspace-ui.js',
   bundle: true,
   platform: 'browser',
   target: 'chrome140',
   format: 'iife',
   logLevel: 'info',
 })
-for (const file of ['home.html', 'home.css']) await cp(new URL('src/' + file, root), new URL(file, dist))
+for (const file of ['workspace.html', 'workspace.css']) await cp(new URL('src/' + file, root), new URL(file, dist))
 const png = await readFile(new URL('../public/outpost.png', import.meta.url))
 await writeFile(new URL('outpost.png', dist), png)
 await mkdir(new URL('resources/', root), { recursive: true })

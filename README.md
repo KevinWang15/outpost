@@ -79,9 +79,23 @@ or the image button. On phones, an on-screen key bar (Esc, Tab, Ctrl, Alt,
 arrows, ⇧↩, ^C) and a message box are shown. Dropped connections reconnect by
 themselves.
 
+On macOS, **Ctrl+V** also pastes an image or text with the terminal focused,
+in both the browser and Outpost Desktop. **Command+V** continues to work.
+The browser may ask for clipboard permission for Ctrl+V; if access is blocked,
+use Command+V instead.
+
 Use **Hide terminal toolbar** for more screen space; the small button at the
 top right restores it. This preference also applies to Outpost Desktop. Connection
 errors, link prompts and bell notices remain visible while the toolbar is hidden.
+
+Right-click the terminal (or press **Shift+F10** / the **Menu** key) for **Copy**,
+**Paste**, **Select all**, image upload, history navigation, and toggles for the
+toolbar, message box and on-screen keys. This menu is shared by the web terminal
+and Outpost Desktop on macOS and Windows. Copy uses the terminal selection;
+Select all selects output currently loaded in the terminal, not the entire
+remote history. History actions follow the same controls as the sidebar.
+Browser clipboard access may ask for permission; if Paste is blocked, use your
+normal paste shortcut. The message box keeps its usual text-editing menu.
 
 The scrollbar on the right navigates the session's saved terminal output,
 including output from before you opened this window (up to 50,000 lines).
@@ -138,31 +152,55 @@ require **System Settings → Privacy & Security → Open Anyway**. Windows may
 show **SmartScreen → More info → Run anyway**. Only proceed with a release
 you trust; release artifacts include checksums.
 
-The app has its own Outpost icon, independent terminal windows, native system
-notifications and a hideable toolbar. The same xterm.js client handles input,
-image paste, scrollback and reconnects in both clients. WebGL accelerates
-rendering when available, with a DOM renderer fallback. Tabs, split panes and
-local shells are future work; this release connects to Outpost sessions.
+The app brings your sessions into one tabbed workspace, with its own Outpost
+icon and native notifications. Drag tabs to reorder, double-click to rename,
+or use the session switcher to find an open session by name or server.
+
+Tabs share the top row with the native macOS or Windows window controls, with
+no separate title bar. Drag the empty space between the new-tab button and
+the workspace tools to move the window, even when many tabs are open.
+
+Open two sessions, then right-click a tab and choose **Show beside current tab**.
+**View → Split side by side / Split top and bottom** also pairs open sessions.
+Drag the divider to resize; double-click it to reset. **View → Single pane**
+returns to one session. Each tab keeps its connection, terminal buffer and
+message draft while you switch or rearrange it. Up to 32 tabs can stay open.
+
+Settings remembers text size and bell sound. The toolbar starts hidden in the
+app and can be revealed from the terminal's upper corner. The same xterm.js
+client handles input, image paste, scrollback and reconnects in both clients.
+WebGL accelerates rendering when available, with a DOM renderer fallback.
+Outpost Desktop connects to remote Outpost sessions; it does not run local shells.
 
 Desktop bells use Outpost's system notification permission. Allow **Outpost**
 in macOS or Windows notification settings and check Focus / Do Not Disturb.
-No browser permission page is needed. Sound starts after you interact with
-the terminal. **Help → Check for updates** opens newer previews for manual
-installation; remote sessions survive closing or upgrading the app.
+An inactive tab gets a bell indicator; clicking a system notification returns
+to that exact session, including when the app is minimized. Sound starts after
+you interact with the terminal. **Help → Check for updates** opens newer previews
+for manual installation; remote sessions survive closing or upgrading the app.
 
 | Action | macOS | Windows |
 | --- | --- | --- |
 | Copy selection | ⌘C | Ctrl+Shift+C |
-| Paste text or an image | ⌘V | Ctrl+Shift+V |
+| Paste text or an image into the terminal | ⌘V or Ctrl+V | Ctrl+Shift+V |
 | Newline in coding tool | Shift+Enter | Shift+Enter |
-| Open app home | ⌘Shift+O | Ctrl+Shift+O |
-| Close window | ⌘W | Ctrl+Shift+W |
+| New tab / choose a session | ⌘T | Ctrl+Shift+T |
+| Switch session | ⌘P | Ctrl+Shift+P |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Go to tab 1–8 / last tab | ⌘1–9 | Alt+1–9 |
+| Split side by side | ⌘D | Ctrl+Shift+D |
+| Focus other pane | ⌘Option+Right | Ctrl+Alt+Right |
+| Change / reset text size | ⌘Plus / Minus / 0 | Ctrl+Plus / Minus / 0 |
+| Close tab | ⌘W | Ctrl+Shift+W |
+| Close window | ⌘Shift+W | Alt+F4 |
 
-The app home remembers trusted servers and opens their workspaces in your
-browser. Removing a server closes its terminal windows. Launch/resume tickets
-stay in memory; the app stores neither your account password nor login cookies.
+The app remembers trusted servers and opens their workspaces in your browser.
+Removing a server closes its tabs. Closing multiple tabs or discarding a message
+draft asks for confirmation. Hiding the message box preserves its draft.
+Launch/resume tickets stay in memory; the app stores neither your account
+password nor login cookies. After quitting, connect through your server again.
 Use HTTPS, or HTTP on localhost for a local Outpost server / SSH port forward.
-The app needs a network connection and an open terminal window for bells.
+The app needs a network connection and an open terminal tab for bells.
 
 ## Run a hosted service
 

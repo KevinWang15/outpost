@@ -1,37 +1,82 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import {
-  BrowserWindow,
   Menu,
   Notification,
+  WebContentsView,
   clipboard,
-  dialog,
   ipcMain,
   session,
   shell,
+  type BrowserWindow,
   type IpcMainInvokeEvent,
 } from 'electron'
-import type { DesktopLaunch } from '../../shared/desktop'
+import type { DesktopLaunch, TerminalHostState, TerminalTabState } from '../../shared/desktop'
 import { pagePaths } from '../../shared/pages'
 import { browserUrl } from '../../shared/signals'
 
-interface TerminalWindow {
-  window: BrowserWindow
+export interface TerminalTab {
+  id: number
+  view: WebContentsView
   origin: string
+  label: string | null
+  state: TerminalTabState
+  error: string | null
   notification: Notification | null
   externalAt: number
+  launchKey: string
 }
+interface Host {
+  window(): BrowserWindow | null
+  focused(id: number): boolean
+  activate(id: number): void
+  close(id: number): Promise<void>
+  removed(id: number): void
+  changed(): void
+  state(id: number): TerminalHostState
+}
+const cleanTitle = (value: string) =>
+  [...value]
+    .filter(c => c.charCodeAt(0) >= 32 && c.charCodeAt(0) !== 127)
+    .join('')
+    .slice(0, 512)
 
-export class TerminalWindows {
-  private windows = new Map<number, TerminalWindow>()
+/** Owns isolated terminal contents and their narrow native capabilities. */
+export class TerminalTabs {
+  readonly tabs = new Map<number, TerminalTab>()
   private sessions = new WeakSet<Electron.Session>()
-  private launches = new Map<string, BrowserWindow>()
-  constructor(private directory: string) {
+  private launches = new Map<string, number>()
+  constructor(
+    private directory: string,
+    private host: Host,
+  ) {
+    ipcMain.handle('terminal:host-state', event => this.host.state(this.sender(event).id))
+    ipcMain.handle('terminal:state', (event, value: unknown) => {
+      const tab = this.sender(event)
+      if (!value || typeof value !== 'object') return
+      const state = value as TerminalTabState
+      if (
+        typeof state.title !== 'string' ||
+        state.title.length > 512 ||
+        !['connecting', 'connected', 'reconnecting', 'closed'].includes(state.connection) ||
+        typeof state.attention !== 'boolean' ||
+        typeof state.hasDraft !== 'boolean'
+      )
+        return
+      tab.state = {
+        title: cleanTitle(state.title),
+        connection: state.connection,
+        attention: state.attention,
+        hasDraft: state.hasDraft,
+      }
+      tab.error = null
+      this.host.changed()
+    })
     ipcMain.handle('terminal:open-external', async (event, value: unknown) => {
-      const state = this.sender(event)
+      const tab = this.sender(event)
       const url = browserUrl({ url: value })
-      if (Date.now() - state.externalAt < 500) return false
-      state.externalAt = Date.now()
+      if (Date.now() - tab.externalAt < 500) return false
+      tab.externalAt = Date.now()
       try {
         await shell.openExternal(url)
         return true
@@ -40,40 +85,47 @@ export class TerminalWindows {
       }
     })
     ipcMain.handle('terminal:copy', (event, value: unknown) => {
-      const { window } = this.sender(event)
-      if (!window.isFocused() || typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 1024 * 1024)
+      const tab = this.sender(event)
+      if (
+        !this.host.focused(tab.id) ||
+        !tab.view.webContents.isFocused() ||
+        typeof value !== 'string' ||
+        Buffer.byteLength(value, 'utf8') > 1024 * 1024
+      )
         return false
       clipboard.writeText(value)
       return true
     })
     ipcMain.handle('terminal:paste', event => {
-      const { window } = this.sender(event)
-      if (!window.isFocused()) return false
-      window.webContents.paste()
+      const tab = this.sender(event)
+      if (!this.host.focused(tab.id) || !tab.view.webContents.isFocused()) return false
+      tab.view.webContents.paste()
       return true
     })
     ipcMain.handle('terminal:bell', (event, name: unknown) => {
-      const state = this.sender(event)
-      if (typeof name !== 'string' || name.length > 512) return false
-      if (!Notification.isSupported() || state.window.isFocused()) return false
-      if (state.notification) return true
+      const tab = this.sender(event)
+      if (typeof name !== 'string' || name.length > 512 || this.host.focused(tab.id)) return false
+      tab.state.attention = true
+      this.host.changed()
+      if (!Notification.isSupported()) return false
+      if (tab.notification) return true
       const notification = new Notification({
         title: 'Outpost · Terminal bell',
-        body: `${[...name].filter(character => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127).join('')} rang a bell`,
+        body: `${cleanTitle(name)} rang a bell`,
         icon: join(this.directory, 'outpost.png'),
         silent: true,
       })
-      state.notification = notification
-      notification.on('click', () => this.focus(state.window))
+      tab.notification = notification
+      notification.on('click', () => this.host.activate(tab.id))
       notification.on('close', () => {
-        if (state.notification === notification) state.notification = null
+        if (tab.notification === notification) tab.notification = null
       })
-      notification.on('failed', () => this.dismiss(state))
+      notification.on('failed', () => this.dismiss(tab))
       notification.show()
       return true
     })
     ipcMain.handle('terminal:dismiss-bell', event => this.dismiss(this.sender(event)))
-    ipcMain.handle('terminal:close', event => this.sender(event).window.close())
+    ipcMain.handle('terminal:close', event => this.host.close(this.sender(event).id))
   }
 
   private allowed(value: string, origin: string) {
@@ -84,68 +136,50 @@ export class TerminalWindows {
       return false
     }
   }
-
   private sender(event: IpcMainInvokeEvent) {
-    const state = this.windows.get(event.sender.id)
-    if (!state || event.senderFrame !== event.sender.mainFrame || !this.allowed(event.senderFrame.url, state.origin))
+    const tab = this.tabs.get(event.sender.id)
+    if (!tab || event.senderFrame !== event.sender.mainFrame || !this.allowed(event.senderFrame.url, tab.origin))
       throw new Error('Desktop action is unavailable in this page.')
-    return state
+    return tab
   }
-
-  private dismiss(state: TerminalWindow) {
-    const notification = state.notification
-    state.notification = null
+  dismiss(tab: TerminalTab) {
+    const notification = tab.notification
+    tab.notification = null
     if (notification) {
       notification.removeAllListeners()
       notification.close()
     }
   }
-
-  focus(window: BrowserWindow) {
-    if (window.isDestroyed()) return
-    if (window.isMinimized()) window.restore()
-    window.show()
-    window.focus()
-    window.webContents.focus()
+  hostState() {
+    for (const tab of this.tabs.values())
+      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.send('terminal:host-state', this.host.state(tab.id))
   }
-
-  selectAll(window: BrowserWindow | null) {
-    if (!window || window.isDestroyed()) return
-    if (this.windows.has(window.webContents.id)) window.webContents.send('terminal:select-all')
-    else window.webContents.selectAll()
+  dispose(id: number) {
+    const tab = this.tabs.get(id)
+    if (!tab) return
+    this.dismiss(tab)
+    this.tabs.delete(id)
+    this.launches.delete(tab.launchKey)
+    const window = this.host.window()
+    if (window && !window.isDestroyed()) window.contentView.removeChildView(tab.view)
+    // Native child views are not destroyed with the BrowserWindow automatically.
+    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close({ waitForBeforeUnload: false })
+    this.host.removed(id)
   }
-
-  forget(origin: string) {
-    for (const state of this.windows.values()) if (state.origin === origin) state.window.close()
-  }
-
   open(launch: DesktopLaunch) {
-    const existing = this.launches.get(launch.token)
-    if (existing && !existing.isDestroyed()) {
-      this.focus(existing)
-      return
-    }
-    if (this.windows.size >= 16) throw new Error('Close a terminal window before opening another one.')
-    // Non-persistent sessions isolate servers; the desktop never imports browser cookies.
+    const launchKey = createHash('sha256').update(launch.token).digest('hex')
+    const existing = this.launches.get(launchKey)
+    if (existing !== undefined) return { tab: this.tabs.get(existing)!, created: false }
+    if (this.tabs.size >= 32) throw new Error('Close a tab before opening another session (32 tabs maximum).')
     const partition = 'outpost-' + createHash('sha256').update(launch.server).digest('hex')
     const browserSession = session.fromPartition(partition, { cache: false })
     if (!this.sessions.has(browserSession)) {
       this.sessions.add(browserSession)
-      // Native paste events handle text/images; do not grant arbitrary web clipboard reads.
       browserSession.setPermissionCheckHandler(() => false)
       browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
       browserSession.on('will-download', event => event.preventDefault())
     }
-    const window = new BrowserWindow({
-      title: 'Outpost',
-      width: 1200,
-      height: 800,
-      minWidth: 480,
-      minHeight: 320,
-      backgroundColor: '#0f172a',
-      icon: join(this.directory, 'outpost.png'),
-      show: false,
-      autoHideMenuBar: true,
+    const view = new WebContentsView({
       webPreferences: {
         preload: join(this.directory, 'preload.cjs'),
         session: browserSession,
@@ -161,59 +195,63 @@ export class TerminalWindows {
         additionalArguments: Notification.isSupported() ? ['--outpost-notifications'] : [],
       },
     })
-    const state: TerminalWindow = { window, origin: launch.server, notification: null, externalAt: 0 }
-    const id = window.webContents.id
-    this.windows.set(id, state)
-    this.launches.set(launch.token, window)
-    window.on('focus', () => this.dismiss(state))
-    window.on('closed', () => {
-      this.dismiss(state)
-      this.windows.delete(id)
-      this.launches.delete(launch.token)
-    })
-    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    window.webContents.on('will-attach-webview', event => event.preventDefault())
-    const navigation = (event: Electron.Event, url: string) => {
-      if (!this.allowed(url, launch.server)) event.preventDefault()
+    view.setBackgroundColor('#0f172a')
+    const contents = view.webContents
+    const tab: TerminalTab = {
+      id: contents.id,
+      view,
+      origin: launch.server,
+      label: null,
+      error: null,
+      notification: null,
+      externalAt: 0,
+      launchKey,
+      state: { title: cleanTitle(launch.title), connection: 'connecting', attention: false, hasDraft: false },
     }
-    window.webContents.on('will-navigate', navigation)
-    window.webContents.on('will-redirect', navigation)
-    window.webContents.on('context-menu', (_event, params) => {
-      // Keep Chromium's editing gestures, including image paste, in the shared UI.
+    this.tabs.set(tab.id, tab)
+    this.launches.set(launchKey, tab.id)
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    contents.on('will-attach-webview', event => event.preventDefault())
+    contents.on('will-frame-navigate', event => {
+      if (!event.isMainFrame || !this.allowed(event.url, tab.origin)) event.preventDefault()
+    })
+    contents.on('will-redirect', (event, url) => {
+      if (!this.allowed(url, tab.origin)) event.preventDefault()
+    })
+    contents.on('focus', () => {
+      if (view.getVisible() && this.host.window()?.isFocused() && !this.host.focused(tab.id)) this.host.activate(tab.id)
+    })
+    contents.on('context-menu', (_event, params) => {
+      // TerminalView owns the terminal menu in both clients and prevents the
+      // native event. Keep OS editing actions for the message box and other fields.
+      if (!params.isEditable) return
       const menu = Menu.buildFromTemplate([
-        { role: 'copy', enabled: params.selectionText.length > 0 },
-        { role: 'paste' },
+        { label: 'Undo', enabled: params.editFlags.canUndo, click: () => contents.undo() },
+        { label: 'Redo', enabled: params.editFlags.canRedo, click: () => contents.redo() },
         { type: 'separator' },
-        { label: 'Select all', click: () => this.selectAll(window) },
+        { label: 'Cut', enabled: params.editFlags.canCut, click: () => contents.cut() },
+        { label: 'Copy', enabled: params.editFlags.canCopy, click: () => contents.copy() },
+        { label: 'Paste', enabled: params.editFlags.canPaste, click: () => contents.paste() },
+        { type: 'separator' },
+        { label: 'Select all', enabled: params.editFlags.canSelectAll, click: () => contents.selectAll() },
       ])
-      menu.popup({ window })
+      const window = this.host.window()
+      if (window) menu.popup({ window })
     })
-    let reporting = false
-    window.webContents.on('did-fail-load', async (_event, code, _description, _url, mainFrame) => {
-      if (!mainFrame || code === -3 || reporting || window.isDestroyed()) return
-      reporting = true
-      window.show()
-      await dialog.showMessageBox(window, {
-        type: 'error',
-        title: 'Outpost',
-        message: 'Could not load the terminal.',
-        detail: `Check your connection to ${launch.server}, then connect again from Outpost.`,
-        buttons: ['OK'],
-      })
-      reporting = false
+    contents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
+      if (!mainFrame || code === -3) return
+      tab.error = 'Could not load the terminal. Check the server connection, then reload or open a new connection.'
+      tab.state.connection = 'closed'
+      this.host.changed()
     })
-    window.webContents.on('render-process-gone', () => {
-      if (!window.isDestroyed())
-        void dialog.showMessageBox(window, {
-          type: 'error',
-          title: 'Outpost',
-          message: 'The terminal window stopped responding.',
-          detail: 'Reload the window to reconnect. Your remote session keeps running.',
-          buttons: ['OK'],
-        })
+    contents.on('render-process-gone', () => {
+      tab.error = 'This terminal stopped responding. Reload it to reconnect. Your remote session keeps running.'
+      tab.state.connection = 'closed'
+      this.host.changed()
     })
-    window.once('ready-to-show', () => this.focus(window))
-    // desktopTicket erases this single-use fragment before the shared UI renders.
-    void window.loadURL(`${launch.server}${pagePaths.desktopTerminal}#token=${launch.token}`).catch(() => {})
+    contents.on('destroyed', () => this.dispose(tab.id))
+    // The shared entry erases the fragment before rendering. No credentials reach the local chrome.
+    void contents.loadURL(`${launch.server}${pagePaths.desktopTerminal}#token=${launch.token}`).catch(() => {})
+    return { tab, created: true }
   }
 }

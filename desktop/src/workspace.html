@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Outpost</title>
+    <link rel="stylesheet" href="workspace.css" />
+    <script src="workspace-ui.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <button id="home" class="icon brand" aria-label="Servers and sessions" title="Servers and sessions"><img src="outpost.png" alt="" width="24" height="24" /></button>
+      <nav id="tabs" role="tablist" aria-label="Terminal sessions"></nav>
+      <button id="new-tab" class="icon" aria-label="New tab" title="New tab">＋</button>
+      <div class="window-drag" aria-hidden="true"></div>
+      <div class="tools">
+        <button id="switch" class="icon" aria-label="Switch session" title="Switch session">⌕</button>
+        <button id="split" class="icon" aria-label="Split side by side" title="Split side by side">◫</button>
+        <button id="settings" class="icon" aria-label="Settings" title="Settings">⚙</button>
+      </div>
+    </header>
+    <div id="stage">
+      <div id="placeholders"></div>
+      <div id="divider" role="separator" tabindex="0" aria-label="Resize terminal panes" hidden></div>
+      <main id="panels">
+        <button id="back" class="back" hidden>← Back to terminal <kbd>Esc</kbd></button>
+        <section id="sessions-panel" hidden>
+          <div class="intro"><img src="outpost.png" width="52" height="52" alt="" /><div><p class="eyebrow">YOUR TERMINAL WORKSPACE</p><h1>A place for every session.</h1></div></div>
+          <p class="description">Choose a session in your Outpost server, then <strong>Connect → Outpost Desktop</strong>. It opens here as a new tab.</p>
+          <form id="server-form"><label for="server">Outpost server</label><div class="address"><input id="server" type="url" placeholder="https://outpost.example.com" required autocomplete="url" /><button class="primary" type="submit">Open server ↗</button></div></form>
+          <h2>Trusted servers</h2><ul id="servers" class="rows"></ul>
+          <p id="no-servers" class="hint">Add your server address above to get started.</p>
+          <div class="tip"><strong>One workspace. Sessions that keep running.</strong><p>Drag tabs to reorder. Double-click to rename. Right-click a tab to show it beside another session. Closing a tab leaves its remote session running.</p></div>
+          <p id="open-result" role="status" aria-live="polite"></p>
+        </section>
+        <section id="switcher-panel" hidden>
+          <p class="eyebrow">OPEN SESSIONS</p><h1>Jump back in.</h1>
+          <input id="session-search" type="search" placeholder="Find a session or server…" aria-label="Find an open session" autocomplete="off" />
+          <ul id="session-list" class="rows"></ul><p id="no-matches" class="hint" hidden>No matching sessions.</p>
+          <p class="hint">↑ ↓ to choose · Enter to switch · Esc to return. Use ◫ to show a session beside the current one.</p>
+        </section>
+        <section id="settings-panel" hidden>
+          <p class="eyebrow">MAKE IT YOURS</p><h1>Terminal settings</h1>
+          <form id="preferences-form">
+            <div class="setting"><div><label for="font-size">Text size</label><p>Applied to all terminal tabs.</p></div><input id="font-size" type="number" min="10" max="28" step="0.5" required /><span>px</span></div>
+            <div class="setting"><div><label for="sound">Bell sound</label><p>Visual indicators and system notifications stay available.</p></div><input id="sound" type="checkbox" /></div>
+            <button class="primary" type="submit">Save settings</button><span id="saved" role="status"></span>
+          </form>
+          <h2>Keyboard shortcuts</h2><dl id="shortcuts"></dl>
+          <div class="tip"><strong>Your sessions are remote.</strong><p>Tabs stay connected while the app is open. After quitting, reconnect through your server. The app saves trusted servers and preferences; it does not save account passwords or connection tickets.</p></div>
+          <footer><span id="version"></span><button id="updates" type="button">Check for updates</button></footer>
+        </section>
+        <section id="rename-panel" hidden>
+          <p class="eyebrow">ORGANIZE YOUR WORKSPACE</p><h1>Rename tab</h1>
+          <form id="rename-form"><label for="tab-name">Tab name</label><input id="tab-name" maxlength="120" autocomplete="off" /><p class="hint">Leave blank to use the session name. This only changes the tab label.</p><button class="primary" type="submit">Save name</button></form>
+        </section>
+      </main>
+    </div>
+    <footer class="statusbar"><span id="connection"></span><span id="message" role="status" aria-live="polite"></span><span id="count"></span></footer>
+  </body>
+</html>

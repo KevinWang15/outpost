@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 import type { ImageMediaType } from '../../shared/model'
+import type { TerminalHostState } from '../../shared/desktop'
 import type { CloseReason, ScrollbackState } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
@@ -29,6 +30,7 @@ import { attachClipboard, imageProblem } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
 import ScrollbackBar from './ScrollbackBar'
+import TerminalContextMenu from './TerminalContextMenu'
 import { TerminalHistory } from './history'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
@@ -78,7 +80,8 @@ interface Props {
 const toolbarPreference = 'outpost.terminal.toolbar-hidden'
 function savedToolbar() {
   try {
-    return localStorage.getItem(toolbarPreference) !== 'true'
+    const stored = localStorage.getItem(toolbarPreference)
+    return stored === null ? !desktop : stored !== 'true'
   } catch {
     return true
   }
@@ -102,6 +105,9 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
   const [keysShown, setKeysShown] = useState(touch)
   const [composerShown, setComposerShown] = useState(touch)
+  const [draft, setDraft] = useState('')
+  const hasDraft = draft.length > 0
+  const host = useRef<TerminalHostState>({ focused: false, fontSize: 13.5, sound: true })
   const [modifiers, setModifiers] = useState<TerminalModifiers>({})
   const armed = useRef<TerminalModifiers>({})
   const statusTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -128,6 +134,10 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       document.title = previous
     }
   }, [name, bellRinging])
+
+  useEffect(() => {
+    void desktop?.reportState({ title: name, connection: state.kind, attention: bellRinging, hasDraft }).catch(() => {})
+  }, [name, state.kind, bellRinging, hasDraft])
 
   const notify = useCallback((message: string, sticky = false) => {
     setStatus(message)
@@ -165,6 +175,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       allowProposedApi: true,
       macOptionIsMeta: true,
       macOptionClickForcesSelection: true,
+      // The shared context menu keeps the current selection on every platform.
+      rightClickSelectsWord: false,
       logLevel: 'off',
     })
     const fit = new FitAddon()
@@ -191,14 +203,18 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       // Remote desktops, driver failures and older browsers use the DOM renderer.
     }
     term.textarea?.setAttribute('aria-label', 'Terminal input')
-    const stopSelectAll = desktop?.onSelectAll(() => {
-      const active = document.activeElement
-      if (active !== term.textarea && (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement))
-        active.select()
-      else term.selectAll()
-    })
     terminal.current = term
-    const bells = attachBell(term, setBellRinging, () => sessionInfo.current)
+    const bells = attachBell(
+      term,
+      setBellRinging,
+      () => sessionInfo.current,
+      desktop
+        ? {
+            active: () => host.current.focused,
+            sound: () => host.current.sound,
+          }
+        : undefined,
+    )
     bell.current = bells
     const size = () => {
       const proposed = surface.current?.clientWidth ? fit.proposeDimensions() : undefined
@@ -212,7 +228,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       state: next => {
         setState(next)
         if (next.kind === 'closed' && next.reason === 'expired') lifecycle.current.onExpired?.()
-        if (next.kind === 'connected' && !touch()) term.focus()
+        if (next.kind === 'connected' && !touch() && (!desktop || host.current.focused)) term.focus()
       },
       hello: message => {
         lifecycle.current.onResume?.(message.resume)
@@ -289,6 +305,35 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     window.visualViewport?.addEventListener('resize', refit)
     const initial = size()
     term.resize(initial.cols, initial.rows)
+    const focusInput = () => {
+      const active = document.activeElement
+      // Native pane activation can arrive after the local menu has opened.
+      if (active instanceof HTMLElement && active.closest('[role="menu"]')) active.focus()
+      else if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) active.focus()
+      else term.focus()
+    }
+    const stopCommands = desktop?.onCommand(command => {
+      if (command === 'focus') focusInput()
+      else if (command === 'reconnect') client.reconnect()
+      else {
+        const active = document.activeElement
+        if (active !== term.textarea && (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement))
+          active.select()
+        else term.selectAll()
+      }
+    })
+    const stopHost = desktop?.onHostState(next => {
+      const focused = next.focused && !host.current.focused
+      host.current = next
+      if (term.options.fontSize !== next.fontSize) {
+        term.options.fontSize = next.fontSize
+        refit()
+      }
+      if (focused) {
+        bells.acknowledge()
+        focusInput()
+      }
+    })
     // Launch tokens are single use: open after the commit, so a discarded
     // render (React StrictMode) never spends the token.
     const start = setTimeout(() => client.open(), 0)
@@ -300,7 +345,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       client.close()
       bells.dispose()
       shims.dispose()
-      stopSelectAll?.()
+      stopCommands?.()
+      stopHost?.()
       term.dispose()
       socket.current = null
       historyControls.current = null
@@ -464,7 +510,29 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         </div>
       )}
       <div className="terminal-body">
-        <div className="terminal-surface" id={terminalId} ref={surface} />
+        <TerminalContextMenu
+          connected={connected}
+          history={history}
+          actions={{
+            canCopy: () => clipboard.current?.canCopy() ?? false,
+            copy: () => void clipboard.current?.copy(),
+            paste: () => void clipboard.current?.paste(),
+            selectAll: () => terminal.current?.selectAll(),
+            pasteImage: () => chooser.current?.click(),
+            history: edge => {
+              if (history?.navigation && !history.active) historyControls.current?.navigate(edge)
+              else historyControls.current?.scrollTo(edge === 'oldest' ? -1 : 0)
+            },
+            focus: () => terminal.current?.focus(),
+          }}
+          controls={[
+            { label: 'Terminal toolbar', shown: toolbarShown, onChange: showToolbar },
+            { label: 'Message box', shown: composerShown, onChange: setComposerShown },
+            { label: 'On-screen keys', shown: keysShown, onChange: setKeysShown },
+          ]}
+        >
+          <div className="terminal-surface" id={terminalId} ref={surface} />
+        </TerminalContextMenu>
         <ScrollbackBar
           state={history}
           enabled={connected}
@@ -533,7 +601,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           onPaste={() => void clipboard.current?.paste()}
         />
       )}
-      {composerShown && <Composer enabled={connected} onSend={send} />}
+      <Composer enabled={connected} visible={composerShown} text={draft} onChange={setDraft} onSend={send} />
     </div>
   )
 }

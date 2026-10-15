@@ -29,9 +29,9 @@ export default function DesktopTerminalPage({ token: initial }: { token: string 
       onResume={saveDesktopTicket}
       onExpired={() => saveDesktopTicket(null)}
       onClose={() => {
-        saveDesktopTicket(null)
         if (desktop) void desktop.close()
         else {
+          saveDesktopTicket(null)
           window.close()
           window.location.replace(pagePaths.workspace)
         }

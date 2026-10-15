@@ -1051,6 +1051,10 @@ kbd {
   &[data-highlighted] {
     background: var(--surface-muted);
   }
+  &[data-disabled] {
+    opacity: 0.4;
+    pointer-events: none;
+  }
   &.danger {
     color: var(--danger);
     svg {
@@ -1366,6 +1370,26 @@ kbd {
 }
 
 /* Web terminal */
+.terminal-menu {
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --border: #334155;
+  --surface: #0f172a;
+  --surface-muted: #1e293b;
+  min-width: 220px;
+  max-width: calc(100vw - 16px);
+  max-height: var(--radix-context-menu-content-available-height);
+  overflow-y: auto;
+  .terminal-menu-check {
+    display: flex;
+    width: 15px;
+    flex-shrink: 0;
+  }
+  svg {
+    display: block;
+    flex-shrink: 0;
+  }
+}
 .terminal-view {
   position: fixed;
   z-index: 40;
@@ -1494,7 +1518,11 @@ kbd {
   .xterm {
     height: 100%;
   }
-  .xterm-viewport {
+  .xterm .xterm-viewport {
+    // xterm's empty legacy viewport still forces a native scrollbar. Its active
+    // scrolling lives in .xterm-scrollable-element; hide only this leftover layer's bar.
+    // Keep this selector more specific than the lazily loaded xterm stylesheet.
+    overflow: hidden;
     background-color: transparent !important;
   }
 }
@@ -1598,6 +1626,9 @@ kbd {
   }
 }
 .composer {
+  &[hidden] {
+    display: none;
+  }
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;

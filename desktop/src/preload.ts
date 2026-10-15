@@ -4,13 +4,29 @@ import { desktopBridgeVersion, type DesktopBridge } from '../../shared/desktop'
 const bridge: DesktopBridge = {
   version: desktopBridgeVersion,
   notificationsSupported: process.argv.includes('--outpost-notifications'),
-  onSelectAll: listener => {
-    const handle = () => listener()
-    ipcRenderer.on('terminal:select-all', handle)
+  onCommand: listener => {
+    const handle = (_event: Electron.IpcRendererEvent, command: Parameters<typeof listener>[0]) => listener(command)
+    ipcRenderer.on('terminal:command', handle)
     return () => {
-      ipcRenderer.removeListener('terminal:select-all', handle)
+      ipcRenderer.removeListener('terminal:command', handle)
     }
   },
+  onHostState: listener => {
+    let disposed = false
+    const handle = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)
+    ipcRenderer.on('terminal:host-state', handle)
+    void ipcRenderer
+      .invoke('terminal:host-state')
+      .then(state => {
+        if (!disposed) listener(state)
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      ipcRenderer.removeListener('terminal:host-state', handle)
+    }
+  },
+  reportState: state => ipcRenderer.invoke('terminal:state', state),
   openExternal: (url: string) => ipcRenderer.invoke('terminal:open-external', url),
   // This check runs in the isolated preload world, outside renderer scripts.
   pasteClipboard: () =>

@@ -1,10 +1,26 @@
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 1
+export const desktopBridgeVersion = 2
+export interface TerminalPreferences {
+  fontSize: number
+  sound: boolean
+}
+export interface TerminalHostState extends TerminalPreferences {
+  focused: boolean
+}
+export interface TerminalTabState {
+  title: string
+  connection: 'connecting' | 'connected' | 'reconnecting' | 'closed'
+  attention: boolean
+  hasDraft: boolean
+}
+export type TerminalCommand = 'select-all' | 'focus' | 'reconnect'
 export interface DesktopBridge {
   version: number
   notificationsSupported: boolean
   openExternal(url: string): Promise<boolean>
-  onSelectAll(listener: () => void): () => void
+  onCommand(listener: (command: TerminalCommand) => void): () => void
+  onHostState(listener: (state: TerminalHostState) => void): () => void
+  reportState(state: TerminalTabState): Promise<void>
   pasteClipboard(): Promise<boolean>
   copyText(text: string): Promise<boolean>
   notifyBell(name: string): Promise<boolean>

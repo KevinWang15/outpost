@@ -76,8 +76,13 @@ browser and use Connect → Outpost Desktop. macOS protocol handlers require a
 packaged app installed in Applications. Development Windows runs register the
 current Electron executable; reinstall the packaged app to restore its handler.
 
-The shell bundles only native integration and a local home page. It loads the
-shared terminal from the trusted server. Desktop dependencies and its lockfile
+The shell bundles native integration and local workspace chrome. Each session
+loads the shared terminal in an isolated `WebContentsView` from its trusted server.
+`layout.ts` owns tab order and split geometry; `workspace.ts` owns window layout,
+menus' actions and the local chrome bridge; `terminals.ts` owns terminal views
+and validates their native IPC. Keep UI metadata separate from grants and
+terminal contents. Never recreate a view to switch tabs or change a split.
+Desktop dependencies and its lockfile
 are isolated from the server package. `scripts/build-desktop.mjs` builds the
 preloads and shell and wraps approved logo PNGs into ICNS/ICO containers.
 `npm run logo:generate` derives these PNGs from the canonical SVG.
@@ -94,10 +99,16 @@ The existing **CI** workflow can also call this same packaging workflow with
 mode. This entry works while `desktop.yml` exists only on the `v2` branch and
 GitHub has not registered it on the default branch yet.
 
-On each native platform, exercise cold/warm `outpost://` launches, multiple
-windows, trust cancellation/removal, clipboard text and images, notification
-click-through, reconnect/reload, GPU fallback and app identity before a stable
-release. Do not infer OS behavior from a successful packaging job.
+On each native platform, exercise cold/warm `outpost://` launches, tab switching
+and reordering, title-bar dragging with a full tab strip, native window controls,
+fullscreen entry/exit and display scaling, both split directions and divider
+dragging, focus between panes,
+hidden-tab output and bells, draft-close cancellation, multi-tab quit, trust
+cancellation/removal, clipboard text and images, notification click-through,
+reconnect/reload, GPU fallback and app identity before a stable release. Check
+shortcuts with the message box focused as well as the terminal. Do not infer
+OS behavior from a successful packaging job. The app and server must ship the
+same `desktopBridgeVersion`; there are no bridge compatibility shims.
 
 ## Pull requests
 

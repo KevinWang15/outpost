@@ -16,13 +16,14 @@ export function attachBell(
   term: Terminal,
   changed: (ringing: boolean) => void,
   session: () => { id: string; name: string },
+  preferences?: { active: () => boolean; sound: () => boolean },
 ) {
   let audio: AudioContext | null = null
   let notification: Notification | null = null
   let notified = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastSound = -Infinity
-  const active = () => document.visibilityState === 'visible' && document.hasFocus()
+  const active = preferences?.active ?? (() => document.visibilityState === 'visible' && document.hasFocus())
   const closeNotification = () => {
     if (desktop) void desktop.dismissBell().catch(() => {})
     const current = notification
@@ -93,6 +94,7 @@ export function attachBell(
     }
   }
   const playSound = () => {
+    if (preferences && !preferences.sound()) return
     prepareSound()
     if (!audio || audio.state !== 'running' || performance.now() - lastSound < 1000) return
     try {

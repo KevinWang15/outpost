@@ -18,6 +18,7 @@ export function attachClipboard(
     status: (message: string) => void
   },
 ) {
+  const mac = /Mac/.test(navigator.platform)
   let disposed = false,
     pendingCopy: string | null = null
   const element = term.element!
@@ -74,8 +75,11 @@ export function attachClipboard(
     return true
   })
   return {
+    canCopy() {
+      return term.hasSelection() || pendingCopy !== null
+    },
     async copy() {
-      const text = pendingCopy ?? (term.hasSelection() ? term.getSelection() : null)
+      const text = term.hasSelection() ? term.getSelection() : pendingCopy
       if (text === null) return options.status('Select text to copy.')
       await writeClipboard(text, false)
     },
@@ -100,14 +104,21 @@ export function attachClipboard(
         } else term.paste(await navigator.clipboard.readText())
         term.focus()
       } catch {
-        options.status('Paste was blocked. Use your paste shortcut instead.')
+        options.status(`Paste was blocked. Press ${mac ? 'Command+V' : 'Ctrl+V'} instead.`)
       }
     },
-    /** Let the browser deliver Cmd/Ctrl+V as a paste event instead of sending ^V. */
+    /** Add Ctrl+V on macOS; leave native paste shortcuts to their paste events. */
     handleKey(event: KeyboardEvent) {
       if (event.isComposing || event.altKey) return true
       const key = event.key.toLowerCase(),
         modifier = event.ctrlKey || event.metaKey
+      if (mac && event.ctrlKey && !event.metaKey && !event.shiftKey && key === 'v') {
+        // macOS does not produce a native paste event for Ctrl+V. Invoke the same
+        // image-aware paste path as the context menu, during this user gesture.
+        event.preventDefault()
+        if (event.type === 'keydown' && !event.repeat) void this.paste()
+        return false
+      }
       if ((modifier && key === 'v') || (event.shiftKey && key === 'insert')) return false
       if (modifier && key === 'c' && (term.hasSelection() || event.metaKey || event.shiftKey)) {
         if (event.type === 'keydown' && !term.hasSelection()) {

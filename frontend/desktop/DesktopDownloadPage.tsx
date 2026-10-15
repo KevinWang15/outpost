@@ -7,8 +7,8 @@ export default function DesktopDownloadPage() {
       <img src="/outpost.svg" width="48" height="48" alt="" />
       <h1>Outpost Desktop</h1>
       <p>
-        Your coding sessions in their own app, with an Outpost Dock or taskbar icon, desktop notifications, and the same
-        terminal as your browser.
+        Your coding sessions in one workspace, with tabs, split panes, desktop notifications, and the same terminal as
+        your browser.
       </p>
       <a className="button primary" href={desktopReleases} target="_blank" rel="noopener noreferrer">
         Download for macOS or Windows

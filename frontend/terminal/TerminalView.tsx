@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import {
-  ArrowDownToLine,
   Bell,
   BellOff,
   BellRing,
@@ -22,18 +21,17 @@ import '@xterm/xterm/css/xterm.css'
 import type { ImageMediaType } from '../../shared/model'
 import type { TerminalHostState } from '../../shared/desktop'
 import type { SessionActivity } from '../../shared/activity'
-import type { CloseReason, ScrollbackState } from '../../shared/protocol'
+import type { CloseReason } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
 import { readImage } from '../api'
 import { attachBell } from './bell'
+import { TerminalActivity } from './activity'
 import { openBrowserTab } from './browser'
 import { attachClipboard, imageProblem } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
-import ScrollbackBar from './ScrollbackBar'
 import TerminalContextMenu from './TerminalContextMenu'
-import { TerminalHistory } from './history'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { TerminalSocket, type SocketState } from './socket'
 import { desktop } from '../desktop'
@@ -90,7 +88,6 @@ function savedToolbar() {
 }
 
 export default function TerminalView({ token, title, onClose, onResume, onExpired }: Props) {
-  const terminalId = useId()
   const surface = useRef<HTMLDivElement>(null),
     chooser = useRef<HTMLInputElement>(null)
   const terminal = useRef<Terminal | null>(null),
@@ -102,8 +99,6 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
   const [name, setName] = useState(title)
   const sessionInfo = useRef({ id: '', name: title })
   const [bellRinging, setBellRinging] = useState(false)
-  const [history, setHistory] = useState<ScrollbackState | null>(null)
-  const historyControls = useRef<TerminalHistory | null>(null)
   const [status, setStatus] = useState('')
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
   const [keysShown, setKeysShown] = useState(touch)
@@ -244,9 +239,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         }
         setName(sessionInfo.current.name)
       },
-      scrollback: next => historyController.update(next),
-      activity: setActivity,
-      notice: notify,
+      activity: next => activityController.update(next),
       signal: ({ signal }) => {
         if (signal.type !== 'browser.open') return
         let url: string
@@ -261,8 +254,20 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       },
     })
     socket.current = client
-    const historyController = new TerminalHistory(client, setHistory)
-    historyControls.current = historyController
+    const activityController = new TerminalActivity(client, setActivity, message => notify(message, true))
+    const active = () =>
+      desktop ? host.current.focused : document.visibilityState === 'visible' && document.hasFocus()
+    const activityFocus = () => activityController.setActive(active())
+    const acknowledgeActivity = () => {
+      activityFocus()
+      activityController.acknowledge()
+    }
+    activityFocus()
+    window.addEventListener('focus', activityFocus)
+    window.addEventListener('blur', activityFocus)
+    document.addEventListener('visibilitychange', activityFocus)
+    window.addEventListener('click', acknowledgeActivity, true)
+    window.addEventListener('keydown', acknowledgeActivity, true)
     const shims = attachClipboard(term, {
       connected: () => client.connected,
       pasteImage: file => void pasteImage(file),
@@ -280,7 +285,6 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     term.onBinary(data => client.input(Uint8Array.from(data, character => character.charCodeAt(0))))
     term.attachCustomKeyEventHandler(event => {
       if (!shims.handleKey(event)) return false
-      if (historyController.handleKey(event)) return false
       // Coding tools read Shift+Enter as a newline; xterm would send a plain Enter.
       if (
         event.type === 'keydown' &&
@@ -320,8 +324,13 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       else term.focus()
     }
     const stopCommands = desktop?.onCommand(command => {
-      if (command === 'focus') focusInput()
-      else if (command === 'reconnect') client.reconnect()
+      if (command === 'focus') {
+        focusInput()
+        if (active()) {
+          bells.acknowledge()
+          acknowledgeActivity()
+        }
+      } else if (command === 'reconnect') client.reconnect()
       else {
         const active = document.activeElement
         if (active !== term.textarea && (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement))
@@ -332,6 +341,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     const stopHost = desktop?.onHostState(next => {
       const focused = next.focused && !host.current.focused
       host.current = next
+      activityFocus()
       if (term.options.fontSize !== next.fontSize) {
         term.options.fontSize = next.fontSize
         refit()
@@ -364,7 +374,13 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       clearTimeout(timer)
       observer.disconnect()
       window.visualViewport?.removeEventListener('resize', refit)
+      window.removeEventListener('focus', activityFocus)
+      window.removeEventListener('blur', activityFocus)
+      document.removeEventListener('visibilitychange', activityFocus)
+      window.removeEventListener('click', acknowledgeActivity, true)
+      window.removeEventListener('keydown', acknowledgeActivity, true)
       client.close()
+      activityController.dispose()
       bells.dispose()
       shims.dispose()
       stopCommands?.()
@@ -372,7 +388,6 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       stopLaunches?.()
       term.dispose()
       socket.current = null
-      historyControls.current = null
       terminal.current = null
       clipboard.current = null
       bell.current = null
@@ -390,10 +405,6 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     const normalized = text.replace(/\r?\n/g, '\r')
     const bracketed = terminal.current?.modes.bracketedPasteMode
     await socket.current!.submit(`${bracketed ? `\x1b[200~${normalized}\x1b[201~` : normalized}\r`)
-  }
-  const returnToLive = () => {
-    historyControls.current?.scrollTo(0)
-    terminal.current?.focus()
   }
   const label =
     state.kind === 'connected'
@@ -546,17 +557,12 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       <div className="terminal-body">
         <TerminalContextMenu
           connected={connected}
-          history={history}
           actions={{
             canCopy: () => clipboard.current?.canCopy() ?? false,
             copy: () => void clipboard.current?.copy(),
             paste: () => void clipboard.current?.paste(),
             selectAll: () => terminal.current?.selectAll(),
             pasteImage: () => chooser.current?.click(),
-            history: edge => {
-              if (history?.navigation && !history.active) historyControls.current?.navigate(edge)
-              else historyControls.current?.scrollTo(edge === 'oldest' ? -1 : 0)
-            },
             focus: () => terminal.current?.focus(),
           }}
           controls={[
@@ -565,31 +571,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             { label: 'On-screen keys', shown: keysShown, onChange: setKeysShown },
           ]}
         >
-          <div className="terminal-surface" id={terminalId} ref={surface} />
+          <div className="terminal-surface" ref={surface} />
         </TerminalContextMenu>
-        <ScrollbackBar
-          state={history}
-          enabled={connected}
-          controls={terminalId}
-          onScroll={offset => historyControls.current?.scrollTo(offset)}
-          onLive={returnToLive}
-          onNavigate={action => {
-            historyControls.current?.navigate(action)
-            terminal.current?.focus()
-          }}
-          onHelp={() => {
-            if (history?.navigation) notify(history.navigation.help, true)
-          }}
-        />
-        {connected && history?.active && (
-          <div className="terminal-history-notice" role="status">
-            <span>Viewing saved output</span>
-            <button type="button" onClick={returnToLive}>
-              <ArrowDownToLine size={16} aria-hidden="true" />
-              Return to live output <kbd>Esc</kbd>
-            </button>
-          </div>
-        )}
         {bellRinging && (
           <div className="terminal-notice terminal-bell" role="status">
             <Bell size={16} aria-hidden="true" />

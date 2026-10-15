@@ -10,17 +10,6 @@ class CodexAdapter(CodingSessionAdapter):
     storage_key = 'CODEX_HOME'
     storage_directory = '.codex'
     selection_options = ('--last',)
-    history_navigation = {
-        'label': 'Codex history',
-        'help': 'Codex controls this full-screen history. Use the page and jump buttons now. '
-        'Exit Codex cleanly and reconnect this session to enable the draggable scrollbar.',
-        'keys': {
-            'oldest': {'key': 'Home', 'ctrl': True},
-            'pageUp': {'key': 'PageUp'},
-            'pageDown': {'key': 'PageDown'},
-            'latest': {'key': 'End', 'ctrl': True},
-        },
-    }
 
     @cached_property
     def sessions(self):
@@ -29,11 +18,7 @@ class CodexAdapter(CodingSessionAdapter):
         return CodexSessionStore(self)
 
     def arguments(self, session):
-        # Codex's full-screen transcript lives inside the application and is
-        # invisible to tmux. Inline mode gives every terminal the same history.
-        # A default config override also accepts an existing --no-alt-screen
-        # argument, and lets an explicit later -c override choose full screen.
-        return ['resume', session['cliSessionId'], '-c', 'tui.alternate_screen="never"']
+        return ['resume', session['cliSessionId']]
 
     def activity_files(self, session):
         home = self.home(session['cliSessionEnv'], session['rootDir'])

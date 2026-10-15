@@ -307,9 +307,6 @@ export class WorkspaceWindow {
   activate(id: number) {
     if (!this.has(id)) return
     this.layout.activate(id)
-    const tab = this.terminals.tabs.get(id)!
-    tab.state.attention = false
-    this.terminals.dismiss(tab)
     this.show()
   }
   panel(panel: WorkspacePanel) {

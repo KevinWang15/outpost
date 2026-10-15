@@ -4,37 +4,21 @@
 import type { Static } from 'typebox'
 import type { SessionActivity } from './activity'
 import type { ImageMediaType } from './model'
-import type { connectInput, historyNavigation } from './schemas'
+import type { connectInput } from './schemas'
 
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 4
+export const protocolVersion = 5
 export const maxInputMessage = 64 * 1024
-
-export type HistoryNavigation = Static<typeof historyNavigation>
-export type HistoryAction = keyof HistoryNavigation['keys']
-
-export interface ScrollbackState {
-  available: boolean
-  lines: number
-  offset: number
-  rows: number
-  active: boolean
-  alternate: boolean
-  navigation?: HistoryNavigation
-}
 
 export type ClientMessage =
   | { type: 'activate'; id: string; token: string }
+  | { type: 'acknowledge'; id: string; completionId: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ack'; bytes: number }
   | { type: 'send'; id: string; data: string }
   | { type: 'paste-image'; id: string; mediaType: ImageMediaType; data: string }
-  // No offset subscribes to metadata; 0 returns live, -1 seeks the oldest line.
-  // Every seek publishes metadata, then its result, before later input.
-  | { type: 'scrollback'; offset?: undefined; id?: undefined }
-  | { type: 'scrollback'; offset: number; id: string }
 
 export type CloseReason = 'detached' | 'ended' | 'expired' | 'outdated' | 'error'
 export interface SignalMessage {
@@ -45,7 +29,6 @@ export type ServerMessage =
   | { type: 'hello'; resume: string; session: { id: string; name: string }; target: { id: string; name: string } }
   | { type: 'ready' }
   | { type: 'activity'; activity: SessionActivity }
-  | ({ type: 'scrollback' } & ScrollbackState)
   | { type: 'result'; id: string; ok: boolean; message?: string; reference?: string }
   | { type: 'signal'; signal: SignalMessage }
   | { type: 'closed'; reason: CloseReason; message: string }

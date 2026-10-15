@@ -159,68 +159,38 @@ uses its existing observer and never opens another connection. Keyboard,
 clipboard, composer, links, bells and notifications have one web implementation.
 
 `TerminalContextMenu` owns the terminal menu in both clients. On every attach,
-the runtime removes tmux's right-click and Alt+right-click pane/status menu
-bindings and its prefix `<` / `>` menu shortcuts. This applies to Outpost's
-isolated tmux server, including existing sessions on reconnect. Mouse reporting,
-wheel scrolling and copy-mode selection remain enabled.
+the runtime disables tmux mouse bindings (`mouse off`), including its context
+menus. It removes the prefix `<` / `>` menu and `[` / Page Up copy-mode shortcuts, and
+exits an active copy-mode view. These settings apply to Outpost's isolated tmux
+server without restarting the running harness.
 
-On the same attach path, mouse drag release and double/triple clicks in both
-`copy-mode` and `copy-mode-vi` inspect `scroll_position` when the copy runs.
-Above the bottom they use `copy-selection`, preserving the reader's position;
-at offset zero they use `copy-selection-and-cancel` to resume live output.
-Both use the existing OSC 52 clipboard path and clear the highlight. Keeping
-copy mode unconditionally would freeze the visible screen and intercept input
-after ordinary live-screen selection. Escape cancels copy mode in both tables.
-This policy belongs to the target runtime, so browser and desktop behave
-identically and existing sessions pick it up on reconnect. The shared terminal
-shows a **Viewing saved output** notice with an explicit return action whenever
-copy mode is active, including at offset zero. The notice and sidebar return
-arrow pulse amber every 2.4 seconds; the arrows also move gently. Reduced-motion
-settings retain the color without animation. The notice overlays the snapshot
-without changing PTY dimensions or scroll position.
+Disabling tmux's mouse bindings leaves application mouse reporting intact:
+tmux forwards the pane's requested terminal modes, and xterm handles those
+standard modes. Without a mouse request, xterm selects text locally. Shift-drag
+on Windows/Linux or Option-drag on macOS forces local selection when an application
+requests mouse events. `attachClipboard` copies completed local mouse selections
+through the same clipboard path as the context menu. It never enters a remote
+mode or sends a selection gesture. Application OSC 52 copies still work.
 
-`ScrollbackBar` displays tmux's history position, not xterm's local buffer:
-tmux uses the alternate screen, so xterm's scrollbar cannot reach that history.
-Shared terminal CSS suppresses the native scrollbar on xterm's empty legacy
-`.xterm-viewport` layer; the active `.xterm-scrollable-element` keeps its normal
-behavior. This prevents a stray Windows scrollbar arrow beside `ScrollbackBar`.
-On `ready`, both clients subscribe with a `scrollback` control message over
-the existing socket. History support is part of the current protocol. Only metadata
-(line count, offset, rows and copy-mode availability) returns to the browser. The
-target's `Scrollback` adapter uses tmux `copy-mode`, `goto-line` and `cancel`;
-tmux redraws through the usual PTY stream. Seeking the bottom exits copy mode.
-The target requires tmux 3.2+.
+Applications own conversation history and scrolling. Outpost exposes no tmux
+history scrollbar, polling worker, seek commands, or application-specific history
+bindings. It does not infer selection or scrolling capabilities from mouse
+reporting or alternate-screen use. The Codex adapter resumes the conversation
+without overriding `tui.alternate_screen`; native configuration and explicit
+arguments determine the mode. An already-running process retains its launch
+arguments until it exits and is resumed.
 
-Metadata reads are triggered by input/output/resize, capped at two per second
-and skipped when idle. Drag destinations are coalesced, capped at ten per
-second in the relay, and executed by one background worker with command
-timeouts. A bounded FIFO orders seeks, input, composer drafts and image pastes.
-Metadata reads do not block typing; a seek holds subsequent input until tmux
-confirms the mode change. Only adjacent seeks can coalesce, preserving input
-between them. Each seek receives fresh metadata followed by a
-`result`, including when its position did not change. Failed seeks reject queued
-requests and discard buffered typing with a visible error, instead of sending
-it into an uncertain pane mode. Drafts are confirmed only after their bytes are
-written to the PTY. No queued input is replayed across reconnects. Copy-mode
-history size is remembered on older tmux releases which do not expose the snapshot's
-size; newer releases expose it directly. This stores no terminal content.
-The scrollbar follows the pane's shared copy mode, including mouse-wheel
-changes and changes made by other attached clients. The runtime also reports
-`alternate_on`: an application's alternate-screen transcript is not tmux
-history. Such screens do not display a draggable thumb or a made-up extent.
+Because tmux attaches using the alternate screen, xterm's local buffer cannot
+replace tmux's retained history. Output from before attachment and older output
+in applications without a history viewer are not exposed by a generic Outpost
+scrollbar. The normal xterm scrolling behavior is retained. Shared terminal CSS
+hides only xterm's empty legacy `.xterm-viewport` scrollbar; its active
+`.xterm-scrollable-element` keeps normal behavior.
 
-The Codex adapter defaults `tui.alternate_screen` to `never`, preserving output
-in tmux's normal history. This is a per-launch CLI configuration override, not
-a change to the user's Codex config; an explicit later `-c` can override it.
-For full-screen Codex the runtime advertises the adapter's `history_navigation`
-capability (label, help, and bindings for oldest/pageUp/pageDown/latest).
-The broker validates this against
-`shared/schemas.ts`; it contains no harness-specific dispatch. The shared
-`TerminalHistory` controller uses those bindings for both the sidebar and
-Shift+Page Up/Down. Codex supplies Page Up/Down and Ctrl+Home/End; additional
-harnesses can supply their own bindings without changing the broker or views.
-Copy mode still takes precedence when explicitly entered.
-These controls expose no invented history length.
+The relay retains a bounded FIFO for typed input, composer drafts and image
+pastes. Image paths are pasted through tmux after earlier PTY input is flushed.
+Drafts are confirmed only after their bytes are written to the PTY; no queued
+input is replayed across reconnects.
 
 `useBellNotifications` manages browser permission requests, with an eight-second
 busy timeout and permission refresh on focus. Desktop uses the bridge's native
@@ -248,13 +218,12 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `ack {bytes}` | Output rendered; flow control |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
 | → server | `paste-image {id, mediaType, data}` | Upload an image and paste its path |
-| → server | `scrollback {offset?, id?}` | Without fields, subscribe to history metadata; with both `offset` and `id`, seek from the bottom (`0` = live, `-1` = oldest) |
 | → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
+| → server | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
 | ← client | `hello {resume, session, target}` | Connection accepted |
-| ← client | `ready` | Attached to tmux; subscribe to history metadata |
+| ← client | `ready` | Attached to tmux |
 | ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
-| ← client | `scrollback {available, lines, offset, rows, active, alternate, navigation?}` | History extent, position, copy mode, and whether the application owns scrolling |
-| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / a scrollback seek / `activate` |
+| ← client | `result {id, ok, message?, reference?}` | Outcome of `send` / `paste-image` / `activate` / `acknowledge` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `detached`, `ended`, `expired`, `outdated`, `error` |
 
@@ -294,7 +263,7 @@ session, missing tmux), its `OUTPOST_RESULT` error becomes the client's
 | --- | --- | --- |
 | `I` | broker → relay | Input bytes for tmux |
 | `O` | relay → broker | Output bytes from tmux |
-| `C` | both | JSON control: `resize`, `send`, `paste-image`, `scrollback`, `signal-result` / `ready`, `activity`, `result`, `scrollback`, `signal`, `exit` |
+| `C` | both | JSON control: `resize`, `send`, `paste-image`, `acknowledge`, `signal-result` / `ready`, `activity`, `result`, `signal`, `exit` |
 
 Framing replaces in-band escape sequences, so typed or pasted bytes can never
 be mistaken for control messages. The relay owns a PTY for `tmux attach`, so
@@ -304,10 +273,9 @@ SSH needs no PTY and window sizes travel as `resize` messages.
 
 Each session is its own tmux server (`~/.outpost/sockets/<id>.sock`, no user
 configuration) set up so it feels like the tool is running directly in your
-terminal: no status bar, `escape-time 10`, mouse scrolling and selection with
-copy on release, `set-clipboard on` (OSC 52 out), extended keys for
-Shift+Enter, truecolor, focus events, 50,000 lines of history and `Ctrl+\` to
-detach. Connecting starts a stopped session in the same conversation.
+terminal: no status bar, `escape-time 10`, application mouse reporting,
+`set-clipboard on` (OSC 52 out), extended keys for Shift+Enter, truecolor,
+focus events and `Ctrl+\` to detach. Connecting starts a stopped session in the same conversation.
 
 **Creation and forking** share a process-owned `creation.lock`, serializing
 allocations without blocking operations on existing sessions. Lock order is
@@ -335,17 +303,32 @@ list and live terminal activity. Harness adapters read native turn markers;
 terminal output rate, elapsed silence and local typing never infer Working or
 Idle. The same baseline and acknowledgement checkpoints decide whether a
 completed turn is still unchecked. Reading activity does not acknowledge it.
-The existing input/focus-in observer and the list's explicit check action update
-those checkpoints, so every client observes the same acknowledgement.
+Actual terminal input, the list's explicit check action and the terminal's
+explicit completion acknowledgement update those checkpoints. Focus-report
+escape sequences and attachment itself do not advance the watermark.
+
+`TerminalActivity` acknowledges the displayed completion on activation or a
+local click/key gesture, through the existing terminal socket. Native host focus
+covers tab clicks, keyboard cycling and window activation; browser focus and
+visibility events use the same controller. Activation before the first observation
+checks that first result only while still active. Later completions require a new
+activation or interaction. Pending and confirmed completion IDs suppress stale
+echoes locally; only that ID is shown as Idle, and a failed request restores the
+unchecked state with a notice. A bounded set retains recent confirmations, and
+connection generations discard results from an old attachment.
 
 `outpost_activity_stream.py` samples this reader immediately after attachment
 and two seconds after each completed read, with one read in flight. Its worker
-starts after the PTY fork and runs separately from history and terminal I/O.
+starts after the PTY fork and runs separately from terminal I/O.
 Only the latest result is retained, so backpressure cannot accumulate a queue
 of observations. Reads that exceed five seconds show Unknown until the reader
 returns; a stalled read never spawns replacement workers. The worker is a daemon,
 and closing the stream stops scheduling reads without making terminal shutdown
 wait for filesystem I/O. Worker startup and read failures become Unknown.
+Completion acknowledgements wake the same worker immediately and reuse the list's
+exact-ID check under the target's activity lock. At most 32 requests can be queued,
+in flight or awaiting delivery combined. They run outside the PTY loop, refresh
+the observation after saving, and return request results on the existing stream.
 Only changed metadata is emitted over the existing relay and WebSocket; it
 opens no additional SSH connection or account API request. Polling continues
 without terminal output so completions and acknowledgements from other clients
@@ -359,6 +342,12 @@ Both `ActivityBadge` and `tab-status.ts`
 use it; the broker and native IPC use its bounded parser. The relay sends state,
 timestamp, opaque completion ID and any diagnostic, never transcript content.
 The desktop bridge is version 4: server and app must be updated together.
+The renderer alone owns the terminal bell flag. The native shell displays reported
+state and owns OS notifications, but does not independently rewrite attention on
+activation or notification creation. Both a host focus transition and an explicit
+focus command acknowledge the bell, including reselecting the active tab. The
+preload ignores an initial host-state response if a newer focus event arrived
+while that response was in flight.
 
 ### Signals
 
@@ -497,7 +486,7 @@ requires the active, focused view and is bounded to 1 MiB. OSC 52 queries remain
 
 `TerminalContextMenu` is shared by browser and desktop terminals. It delegates
 clipboard actions to `attachClipboard` (including image paste and pending OSC 52
-copies), history to `TerminalHistory`, and display changes to `TerminalView`.
+copies), and display changes to `TerminalView`.
 The same clipboard controller maps macOS Ctrl+V to its explicit paste action;
 native paste shortcuts continue to use clipboard events. The alias runs only
 on a non-repeated keydown, within the user's clipboard permission gesture.

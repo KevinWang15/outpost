@@ -1,19 +1,16 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { ArrowDownToLine, ArrowUpToLine, Check, ClipboardPaste, Copy, ImagePlus, TextSelect } from 'lucide-react'
-import type { ScrollbackState } from '../../shared/protocol'
+import { Check, ClipboardPaste, Copy, ImagePlus, TextSelect } from 'lucide-react'
 
 interface Props {
   children: ReactElement
   connected: boolean
-  history: ScrollbackState | null
   actions: {
     canCopy: () => boolean
     copy: () => void
     paste: () => void
     selectAll: () => void
     pasteImage: () => void
-    history: (edge: 'oldest' | 'latest') => void
     focus: () => void
   }
   controls: { label: string; shown: boolean; onChange: (shown: boolean) => void }[]
@@ -21,7 +18,7 @@ interface Props {
 
 /** One menu for both terminal clients. All commands use the existing terminal
  * controllers; opening it never sends a mouse click or key to the remote app. */
-export default function TerminalContextMenu({ children, connected, history, actions, controls }: Props) {
+export default function TerminalContextMenu({ children, connected, actions, controls }: Props) {
   const [open, setOpen] = useState(false)
   const [canCopy, setCanCopy] = useState(false)
   const restoreFocus = useRef(true)
@@ -43,9 +40,6 @@ export default function TerminalContextMenu({ children, connected, history, acti
       document.removeEventListener('visibilitychange', hidden)
     }
   }, [open])
-  const applicationHistory = history?.navigation && !history.active
-  const canBrowse = connected && (applicationHistory || (history?.available && history.lines > 0))
-  const canReturn = connected && (applicationHistory || (history?.available && history.active))
   return (
     <ContextMenu.Root
       open={open}
@@ -116,13 +110,6 @@ export default function TerminalContextMenu({ children, connected, history, acti
           </ContextMenu.Item>
           <ContextMenu.Item className="menu-item" disabled={!connected} onSelect={actions.pasteImage}>
             <ImagePlus size={15} /> Paste an image…
-          </ContextMenu.Item>
-          <ContextMenu.Separator className="menu-separator" />
-          <ContextMenu.Item className="menu-item" disabled={!canBrowse} onSelect={() => actions.history('oldest')}>
-            <ArrowUpToLine size={15} /> Oldest output
-          </ContextMenu.Item>
-          <ContextMenu.Item className="menu-item" disabled={!canReturn} onSelect={() => actions.history('latest')}>
-            <ArrowDownToLine size={15} /> {applicationHistory ? 'Latest output' : 'Return to live output'}
           </ContextMenu.Item>
           <ContextMenu.Separator className="menu-separator" />
           {controls.map(control => (

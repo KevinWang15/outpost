@@ -1,10 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { WebSocket } from 'ws'
-import { Ajv } from 'ajv'
 import { parseSessionActivity, unavailableActivity } from '../../shared/activity'
-import type { ClientMessage, CloseReason, HistoryNavigation, ServerMessage } from '../../shared/protocol'
+import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, protocolVersion } from '../../shared/protocol'
-import { historyNavigation } from '../../shared/schemas'
 import { signalValidators } from '../../shared/signals'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
@@ -39,7 +37,6 @@ export class RelayDecoder {
 }
 
 const highWater = 1024 * 1024
-const validHistoryNavigation = new Ajv().compile<HistoryNavigation>(historyNavigation)
 const closedMessages: Record<'detached' | 'ended' | 'expired', string> = {
   detached: 'Detached. The session keeps running.',
   ended: 'The coding tool exited. Connect again to start it in the same conversation.',
@@ -177,34 +174,6 @@ class Connection {
         activity:
           parseSessionActivity(message.activity) ?? unavailableActivity('The target sent invalid activity metadata.'),
       })
-    } else if (message.type === 'scrollback') {
-      const { lines, offset, rows, available, active, alternate } = message
-      if (
-        typeof lines === 'number' &&
-        Number.isSafeInteger(lines) &&
-        lines >= 0 &&
-        typeof offset === 'number' &&
-        Number.isSafeInteger(offset) &&
-        offset >= 0 &&
-        offset <= lines &&
-        typeof rows === 'number' &&
-        Number.isSafeInteger(rows) &&
-        rows >= 1 &&
-        rows <= 1000 &&
-        typeof available === 'boolean' &&
-        typeof active === 'boolean' &&
-        typeof alternate === 'boolean'
-      )
-        this.send({
-          type: 'scrollback',
-          lines,
-          offset,
-          rows,
-          available,
-          active,
-          alternate,
-          ...(validHistoryNavigation(message.navigation) ? { navigation: message.navigation } : {}),
-        })
     } else if (message.type === 'result' && typeof message.id === 'string') {
       this.send({
         type: 'result',
@@ -262,9 +231,14 @@ class Connection {
     const id = (message as { id?: unknown }).id
     if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)))
       return this.socket.close(1008, 'Invalid terminal message')
-    if ((message.type === 'send' || message.type === 'paste-image' || message.type === 'activate') && id === undefined)
+    if (['send', 'paste-image', 'activate', 'acknowledge'].includes(message.type) && id === undefined)
       return this.socket.close(1008, 'A terminal request ID is required')
     switch (message.type) {
+      case 'acknowledge':
+        if (typeof message.completionId !== 'string' || !/^[a-f0-9]{64}$/.test(message.completionId))
+          return this.socket.close(1008, 'Invalid activity acknowledgement')
+        this.relay(message)
+        return
       case 'activate': {
         const ok =
           this.started &&
@@ -278,18 +252,6 @@ class Connection {
           ...(!ok && { message: 'Could not accept this launch ticket. Use Connect in Outpost again.' }),
         })
       }
-      case 'scrollback':
-        if (message.offset === undefined && id === undefined) return this.relay({ type: 'scrollback' })
-        if (
-          message.offset === undefined ||
-          id === undefined ||
-          !Number.isSafeInteger(message.offset) ||
-          message.offset < -1 ||
-          message.offset > 1_000_000
-        )
-          return this.socket.close(1008, 'Invalid terminal history request')
-        this.relay({ type: 'scrollback', offset: message.offset, id })
-        return
       case 'resize':
         if (
           Number.isInteger(message.cols) &&

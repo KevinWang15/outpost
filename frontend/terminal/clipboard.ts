@@ -22,6 +22,8 @@ export function attachClipboard(
   let disposed = false,
     pendingCopy: string | null = null
   const element = term.element!
+  let selecting = false,
+    selectionChanged = false
   const writeClipboard = async (text: string, remote: boolean) => {
     pendingCopy = text
     try {
@@ -56,6 +58,30 @@ export function attachClipboard(
     pendingCopy = null
     options.status('Copied to your clipboard')
   }
+  // Preserve copy-on-release for xterm's local selection without sending a
+  // mouse gesture or changing a mode on the remote side. Application-owned
+  // mouse gestures produce no local selection and keep their own behavior.
+  const selectionStart = (event: MouseEvent) => {
+    selecting = event.button === 0
+    selectionChanged = false
+  }
+  const selection = term.onSelectionChange(() => {
+    if (selecting) selectionChanged = true
+  })
+  const selectionEnd = (event: MouseEvent) => {
+    if (event.button !== 0) return
+    const copy = selecting && selectionChanged && term.hasSelection()
+    selecting = false
+    if (copy) void writeClipboard(term.getSelection(), false)
+  }
+  const cancelSelection = () => {
+    selecting = false
+  }
+  element.addEventListener('mousedown', selectionStart, true)
+  // xterm finalizes selection on document mouseup; window runs afterward,
+  // including when a drag finishes outside the terminal surface.
+  window.addEventListener('mouseup', selectionEnd)
+  window.addEventListener('blur', cancelSelection)
   element.addEventListener('paste', nativePaste, true)
   element.addEventListener('copy', nativeCopy, true)
   const osc = term.parser.registerOscHandler(52, data => {
@@ -131,6 +157,10 @@ export function attachClipboard(
     },
     dispose() {
       disposed = true
+      element.removeEventListener('mousedown', selectionStart, true)
+      window.removeEventListener('mouseup', selectionEnd)
+      window.removeEventListener('blur', cancelSelection)
+      selection.dispose()
       element.removeEventListener('paste', nativePaste, true)
       element.removeEventListener('copy', nativeCopy, true)
       osc.dispose()

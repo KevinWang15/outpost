@@ -31,12 +31,17 @@ const bridge: DesktopBridge = {
   launchHandled: token => ipcRenderer.invoke('terminal:launch-handled', token),
   onHostState: listener => {
     let disposed = false
-    const handle = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)
+    let received = false
+    const handle = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => {
+      received = true
+      listener(state)
+    }
     ipcRenderer.on('terminal:host-state', handle)
     void ipcRenderer
       .invoke('terminal:host-state')
       .then(state => {
-        if (!disposed) listener(state)
+        // A live focus update supersedes an older initial snapshot in flight.
+        if (!disposed && !received) listener(state)
       })
       .catch(() => {})
     return () => {

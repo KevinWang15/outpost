@@ -24,7 +24,6 @@ from pathlib import Path
 
 from outpost_activity_state import Activity
 from outpost_harness import adapters
-from outpost_scrollback import Scrollback
 
 CODING_ADAPTERS = adapters()
 
@@ -550,18 +549,10 @@ def start_session(session, cols, rows):
     Path(socket_name(session)).unlink(missing_ok=True)
     install_helpers()
     activity(session).initialize()
-    # The tmux server owns the PTY independently of any connection. Options
-    # that only apply to new panes must be set before the session exists.
+    # The tmux server owns the PTY independently of any connection.
     result = subprocess.run(
         tmux_command(
             session,
-            'start-server',
-            ';',
-            'set-option',
-            '-g',
-            'history-limit',
-            '50000',
-            ';',
             'new-session',
             '-d',
             '-s',
@@ -644,9 +635,6 @@ class AttachHooks:
     def __init__(self, session):
         self.session = session
         self.observer = activity(session)
-        self.history = Scrollback(
-            tmux_command(session), tmux_environment(), CODING_ADAPTERS[session['tool']].history_navigation
-        )
 
     def on_input(self):
         self.observer.input()
@@ -654,8 +642,8 @@ class AttachHooks:
     def activity(self):
         return self.observer.describe(alive(self.session))
 
-    def scrollback(self, offset=None):
-        return self.history.read(offset)
+    def acknowledge(self, completion_id):
+        self.observer.acknowledge(completion_id, alive(self.session))
 
     def paste_image(self, extension, encoded):
         path = save_image(self.session, extension, decode_image(extension, encoded))
@@ -665,8 +653,8 @@ class AttachHooks:
 
 
 def attach_session(session, cols, rows):
-    # Native feel: no status bar, fast Escape, wheel scrolling and selection
-    # through tmux, OSC 52 copy, Shift+Enter via extended keys, truecolor.
+    # tmux supplies persistence and forwards application terminal modes. Local
+    # selection belongs to xterm; application mouse requests still pass through.
     features = tmux(session, 'show-options', '-sqv', 'terminal-features')
     wanted = 'xterm*:clipboard:extkeys:RGB:focus'
     chain = (
@@ -674,35 +662,10 @@ def attach_session(session, cols, rows):
         if features.returncode == 0 and wanted in features.stdout.split()
         else [';', 'set-option', '-saq', 'terminal-features', wanted]
     )
-    # Outpost owns context menus. Remove tmux's menu bindings on every attach
-    # so existing sessions pick up the policy without restarting their harness.
-    # Keep mouse reporting, wheel scrolling and copy-mode selection enabled.
-    for table, key in (
-        ('root', 'MouseDown3Pane'),
-        ('root', 'M-MouseDown3Pane'),
-        ('root', 'MouseDown3Status'),
-        ('root', 'M-MouseDown3Status'),
-        ('root', 'MouseDown3StatusLeft'),
-        ('root', 'M-MouseDown3StatusLeft'),
-        ('prefix', '<'),
-        ('prefix', '>'),
-    ):
-        chain.extend([';', 'unbind-key', '-q', '-T', table, key])
-    # Preserve a scrolled-back position after copying, but do not leave a live
-    # screen frozen in copy mode just because the user selected text. Evaluate
-    # the position when copying, including after a word/line selection delay.
-    copy = (
-        'if-shell -F "#{>:#{scroll_position},0}" "send-keys -X copy-selection" "send-keys -X copy-selection-and-cancel"'
-    )
-    for table in ('copy-mode', 'copy-mode-vi'):
-        # Escape consistently resumes the session, including with a vi EDITOR.
-        chain.extend([';', 'bind-key', '-T', table, 'Escape', 'send-keys', '-X', 'cancel'])
-        for key, selection in (
-            ('MouseDragEnd1Pane', ''),
-            ('DoubleClick1Pane', 'select-pane; send-keys -X select-word; run-shell -d0.3; '),
-            ('TripleClick1Pane', 'select-pane; send-keys -X select-line; run-shell -d0.3; '),
-        ):
-            chain.extend([';', 'bind-key', '-T', table, key, selection + copy])
+    # Outpost owns context menus; applications own their history UI. Apply the
+    # policy on every attach, including sessions whose harness is still running.
+    for key in ('<', '>', '[', 'PPage'):
+        chain.extend([';', 'unbind-key', '-q', '-T', 'prefix', key])
     tmux(
         session,
         'set-option',
@@ -743,20 +706,22 @@ def attach_session(session, cols, rows):
         'set-option',
         '-g',
         'mouse',
-        'on',
+        'off',
         ';',
         'set-option',
         '-gq',
         'window-size',
         'latest',
         *chain,
+        ';',
+        'if-shell',
+        '-t',
+        '=outpost:',
+        '-F',
+        '#{==:#{pane_mode},copy-mode}',
+        'send-keys -X -t =outpost: cancel',
     )
     negotiate_keys(session)
-    observer = activity(session)
-    try:
-        observer.input()  # Returning to this terminal checks the existing completion.
-    except (OSError, ValueError):
-        pass  # Missing activity signals must not prevent attachment.
     from outpost_relay import Relay
 
     command = tmux_command(session, 'attach-session', '-t', '=outpost')

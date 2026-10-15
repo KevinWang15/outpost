@@ -19,7 +19,6 @@ import termios
 import time
 import uuid
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
 
 from outpost_activity_stream import ActivityStream
 
@@ -58,9 +57,9 @@ class FrameDecoder:
 
 
 class InputObserver:
-    """Ignore automatic terminal replies; acknowledge actual input and focus-in."""
+    """Acknowledge actual input; ignore automatic replies and focus reports."""
 
-    replies = re.compile(rb'\x1b\[(?:[?>]?[0-9;]*[cRn]|\?[0-9;]*u|\??[0-9;]*\$y|O)$')
+    replies = re.compile(rb'\x1b\[(?:[?>]?[0-9;]*[cRn]|\?[0-9;]*u|\??[0-9;]*\$y|[IO])$')
 
     def __init__(self, callback):
         self.callback = callback
@@ -216,7 +215,7 @@ def winsize(cols, rows):
 
 
 class Relay:
-    """hooks: on_input(), activity(), paste_image(extension, data), scrollback(offset)."""
+    """hooks: on_input(), activity(), acknowledge(completion_id), paste_image(extension, data)."""
 
     def __init__(self, command, environment, cols, rows, hooks, signal_path=None):
         self.command = command
@@ -228,13 +227,6 @@ class Relay:
         self.outgoing = bytearray()
         self.tail = b''
         self.stopped = False
-        self.history_subscribed = False
-        self.history_dirty = False
-        self.history_checked = 0
-        self.history_last = None
-        self.history_worker = None
-        self.history_future = None
-        self.history_request = None
         self.actions = deque()
         self.action_bytes = 0
         self.input_results = []
@@ -248,116 +240,42 @@ class Relay:
         except (OSError, ValueError):
             pass  # Activity observation must never interrupt a coding session.
 
-    def result(self, request, ok=True, message=None):
-        for identifier in request.get('ids', [request.get('id')]):
-            if identifier is not None:
-                self.send({'type': 'result', 'id': identifier, 'ok': ok, **({'message': message} if message else {})})
-
     def queue(self, action, size):
-        # Only adjacent seeks may merge. Input between them is an ordering barrier.
-        if action['type'] == 'scrollback' and self.actions and self.actions[-1]['type'] == 'scrollback':
-            previous = self.actions[-1]
-            previous['offset'] = action['offset']
-            previous['ids'].extend(action['ids'])
-            previous['size'] += size
-        else:
-            self.actions.append({**action, 'size': size})
+        self.actions.append({**action, 'size': size})
         self.action_bytes += size
 
     def flush_input_results(self):
         if not self.incoming:
             for identifier in self.input_results:
-                self.result({'id': identifier})
+                self.send({'type': 'result', 'id': identifier, 'ok': True})
             self.input_results.clear()
-
-    def complete_history(self):
-        if self.history_future is not None and self.history_future.done():
-            request = self.history_request
-            error_message = None
-            try:
-                state = self.history_future.result()
-                if request is not None:
-                    self.observed()
-            except (OSError, ValueError) as error:
-                unavailable = {
-                    'available': False,
-                    'lines': 0,
-                    'offset': 0,
-                    'rows': 1,
-                    'active': False,
-                    'alternate': False,
-                }
-                state = (self.history_last or unavailable) if request is not None else unavailable
-                if request is not None:
-                    self.history_dirty = True  # Refresh once; keep the last controls available for retry.
-                error_message = str(error)
-            self.history_future = self.history_request = None
-            # A seek always publishes its final state, even when unchanged, so
-            # clients can reconcile optimistic positions before its result.
-            if request is not None or state != self.history_last:
-                self.history_last = state
-                self.send({'type': 'scrollback', **state})
-            if request is not None:
-                if error_message:
-                    error_message += ' Input queued during the history change was not sent. Try again.'
-                    # Never replay buffered typing into an uncertain tmux mode.
-                    while self.actions:
-                        self.result(self.actions.popleft(), False, error_message)
-                    self.action_bytes = 0
-                self.result(request, error_message is None, error_message)
 
     def advance(self):
         """Advance ordered input without blocking the PTY output or signal paths."""
-        self.complete_history()
-        # Mode changes, typed input, drafts and image pastes share one FIFO.
-        # Polling stays asynchronous; only a mutating seek holds later input.
-        while self.actions and self.history_request is None:
+        # Typed input, drafts and image pastes share one bounded FIFO. Image
+        # paths are pasted via tmux, so earlier PTY input must be flushed first.
+        while self.actions:
             action = self.actions[0]
             kind = action['type']
             if kind in ('input', 'send'):
                 data = action['data'] if kind == 'input' else action['data'].encode()
                 self.observer.feed(data)
                 self.incoming += data
-                self.history_dirty = True
                 if kind == 'send':
                     self.input_results.append(action['id'])
-            else:
+            elif kind == 'paste-image':
                 if self.incoming:
-                    break  # Flush earlier input before changing the pane mode.
-                if kind == 'scrollback':
-                    if self.history_future is not None or time.monotonic() - self.history_checked < 0.1:
-                        break
-                    self.history_request = action
-                    self.start_history(action['offset'])
-                elif kind == 'paste-image':
-                    reply = {'type': 'result', 'id': action.get('id')}
-                    try:
-                        reply.update(self.hooks.paste_image(action.get('extension'), action.get('data')), ok=True)
-                        self.observed()
-                    except (OSError, ValueError) as error:
-                        reply.update(ok=False, message=str(error))
-                    self.send(reply)
-                    self.history_dirty = True
+                    break
+                reply = {'type': 'result', 'id': action.get('id')}
+                try:
+                    reply.update(self.hooks.paste_image(action.get('extension'), action.get('data')), ok=True)
+                    self.observed()
+                except (OSError, ValueError) as error:
+                    reply.update(ok=False, message=str(error))
+                self.send(reply)
             self.actions.popleft()
             self.action_bytes -= action['size']
         self.flush_input_results()
-        if (
-            self.history_subscribed
-            and self.history_dirty
-            and self.history_future is None
-            and not self.actions
-            and len(self.outgoing) < HIGH_WATER
-            and time.monotonic() - self.history_checked >= 0.5
-        ):
-            self.start_history(None)
-
-    def start_history(self, offset):
-        self.history_dirty = False
-        self.history_checked = time.monotonic()
-        if self.history_worker is None:
-            # Created after pty.fork(); never fork a process with worker threads.
-            self.history_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='outpost-history')
-        self.history_future = self.history_worker.submit(self.hooks.scrollback, offset)
 
     def handle(self, kind, payload, master):
         if kind == b'I':
@@ -366,19 +284,22 @@ class Relay:
         if kind != b'C':
             raise ValueError('Unknown relay frame')
         message = json.loads(payload)
-        if message.get('type') == 'scrollback':
-            offset = message.get('offset')
-            if offset is None or (type(offset) is int and -1 <= offset <= 1000000):
-                self.history_subscribed = self.history_dirty = True
-                if offset is not None:
-                    self.queue({'type': 'scrollback', 'offset': offset, 'ids': [message.get('id')]}, len(payload))
-        elif message.get('type') == 'resize':
-            self.history_dirty = True
+        if message.get('type') == 'resize':
             cols, rows = message.get('cols'), message.get('rows')
             if isinstance(cols, int) and isinstance(rows, int) and 0 < cols <= 1000 and 0 < rows <= 1000:
                 fcntl.ioctl(master, termios.TIOCSWINSZ, winsize(cols, rows))
         elif message.get('type') in ('send', 'paste-image'):
             self.queue(message, len(payload))
+        elif message.get('type') == 'acknowledge':
+            identifier, completion_id = message.get('id'), message.get('completionId')
+            valid = (
+                isinstance(identifier, str)
+                and re.fullmatch(r'[A-Za-z0-9_-]{1,80}', identifier)
+                and isinstance(completion_id, str)
+                and re.fullmatch(r'[a-f0-9]{64}', completion_id)
+            )
+            if not valid or not self.activity.request_acknowledgement(identifier, completion_id):
+                self.send({'type': 'result', 'id': identifier, 'ok': False, 'message': 'Activity check unavailable.'})
         elif message.get('type') == 'signal-result' and self.signals:
             self.signals.answer(message.get('id'), {'ok': message.get('ok') is True, 'message': message.get('message')})
 
@@ -388,7 +309,7 @@ class Relay:
             fcntl.ioctl(0, termios.TIOCSWINSZ, self.size)
             os.execvpe(self.command[0], self.command, self.environment)
         self.observer = InputObserver(self.observed)
-        activity = ActivityStream(self.hooks.activity)
+        self.activity = ActivityStream(self.hooks.activity, self.hooks.acknowledge)
         self.signals = None
         if self.signal_path:
             try:
@@ -416,9 +337,11 @@ class Relay:
                 if not eof:
                     self.advance()
                     if len(self.outgoing) < HIGH_WATER:
-                        state = activity.poll()
+                        state = self.activity.poll()
                         if state is not None:
                             self.send({'type': 'activity', 'activity': state})
+                        for result in self.activity.take_results():
+                            self.send(result)
                 if self.signals:
                     self.signals.expire()
                 readers = [] if eof or len(self.outgoing) >= HIGH_WATER else [master]
@@ -456,7 +379,6 @@ class Relay:
                         for kind, payload in decoder.feed(data):
                             self.handle(kind, payload, master)
                     else:
-                        self.history_dirty = True
                         self.outgoing += encode(b'O', data)
                         self.tail = (self.tail + data)[-512:]
                 for descriptor in writable:
@@ -478,9 +400,7 @@ class Relay:
             child, status = os.waitpid(pid, os.WNOHANG)
             reaped = child == pid
         finally:
-            activity.close()
-            if self.history_worker:
-                self.history_worker.shutdown(wait=False, cancel_futures=True)
+            self.activity.close()
             os.close(master)
             if self.signals:
                 self.signals.close()

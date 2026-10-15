@@ -1,4 +1,4 @@
-import type { ClientMessage, CloseReason, ScrollbackState, ServerMessage } from '../../shared/protocol'
+import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
 import type { ImageMediaType } from '../../shared/model'
 import type { SessionActivity } from '../../shared/activity'
@@ -14,9 +14,7 @@ interface Handlers {
   state(state: SocketState): void
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
-  scrollback(state: ScrollbackState | null): void
   activity(state: SessionActivity | null): void
-  notice(message: string): void
 }
 
 const retries = 8
@@ -30,8 +28,6 @@ export class TerminalSocket {
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
   private ready = false
-  private historyTimer: ReturnType<typeof setTimeout> | undefined
-  private historyOffset: number | undefined
   private pending = new Map<
     string,
     { resolve: (message: Extract<ServerMessage, { type: 'result' }>) => void; reject: (error: Error) => void }
@@ -51,7 +47,7 @@ export class TerminalSocket {
 
   open() {
     if (this.stopped) return
-    this.resetMetadata()
+    this.handlers.activity(null)
     const { cols, rows } = this.size()
     const url = new URL('/api/terminal', window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -99,9 +95,6 @@ export class TerminalSocket {
         this.attempts = 0
         this.handlers.state({ kind: 'connected' })
         this.send({ type: 'resize', ...this.size() })
-        this.send({ type: 'scrollback' })
-      } else if (message.type === 'scrollback') {
-        this.handlers.scrollback(message)
       } else if (message.type === 'activity') {
         this.handlers.activity(message.activity)
       } else if (message.type === 'result') {
@@ -114,7 +107,7 @@ export class TerminalSocket {
       clearTimeout(ackTimer)
       if (this.socket !== socket) return
       this.ready = false
-      this.resetMetadata()
+      this.handlers.activity(null)
       this.failPending('The connection closed before Outpost confirmed it. Check the terminal before retrying.')
       if (this.stopped) return
       const message = closed as Extract<ServerMessage, { type: 'closed' }> | null
@@ -164,7 +157,7 @@ export class TerminalSocket {
   close() {
     this.stopped = true
     clearTimeout(this.timer)
-    this.resetMetadata()
+    this.handlers.activity(null)
     this.failPending('The terminal closed.')
     this.socket?.close()
     this.socket = null
@@ -176,7 +169,6 @@ export class TerminalSocket {
 
   input(data: string | Uint8Array<ArrayBuffer>) {
     if (!this.connected) return false
-    this.flushHistory()
     this.socket!.send(typeof data === 'string' ? new TextEncoder().encode(data) : data)
     return true
   }
@@ -185,40 +177,8 @@ export class TerminalSocket {
     if (this.connected) this.send({ type: 'resize', cols, rows })
   }
 
-  scrollTo(offset: number) {
-    if (!this.connected) return
-    this.historyOffset = Math.max(-1, Math.min(1_000_000, Math.round(offset)))
-    // Jump endpoints immediately. Keep only the latest position during a drag.
-    if (offset <= 0) {
-      this.flushHistory()
-    } else this.historyTimer ??= setTimeout(() => this.flushHistory(), 50)
-  }
-
-  private flushHistory() {
-    clearTimeout(this.historyTimer)
-    this.historyTimer = undefined
-    const offset = this.historyOffset
-    this.historyOffset = undefined
-    if (offset === undefined || !this.connected) return
-    void this.request({ type: 'scrollback', id: crypto.randomUUID(), offset })
-      .then(result => {
-        if (!result.ok) throw new Error(result.message)
-      })
-      .catch(error => this.handlers.notice((error as Error).message))
-  }
-
-  private resetMetadata() {
-    clearTimeout(this.historyTimer)
-    this.historyTimer = undefined
-    this.historyOffset = undefined
-    this.handlers.scrollback(null)
-    this.handlers.activity(null)
-  }
-
   private request(message: ClientMessage & { id: string }) {
     if (!this.connected) return Promise.reject(new Error('The terminal is not connected. Your draft is kept.'))
-    // A debounced drag must reach the relay before any subsequent input.
-    if (message.type !== 'scrollback') this.flushHistory()
     return new Promise<Extract<ServerMessage, { type: 'result' }>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(message.id)
@@ -241,6 +201,12 @@ export class TerminalSocket {
   /** Send a draft and wait until it reached the target. */
   async submit(data: string) {
     const result = await this.request({ type: 'send', id: crypto.randomUUID(), data })
+    if (!result.ok) throw new Error(result.message)
+  }
+
+  /** Mark only the completion the user saw, using this terminal's authorization. */
+  async acknowledge(completionId: string) {
+    const result = await this.request({ type: 'acknowledge', id: crypto.randomUUID(), completionId })
     if (!result.ok) throw new Error(result.message)
   }
 

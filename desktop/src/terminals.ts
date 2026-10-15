@@ -80,6 +80,8 @@ export class TerminalTabs {
         typeof state.hasDraft !== 'boolean'
       )
         return
+      // The renderer owns bell state, including acknowledgement on activation.
+      // Native notification handlers must not race these ordered reports.
       tab.state = {
         title: cleanTitle(state.title),
         connection: state.connection,
@@ -125,8 +127,6 @@ export class TerminalTabs {
     ipcMain.handle('terminal:bell', (event, name: unknown) => {
       const tab = this.sender(event)
       if (typeof name !== 'string' || name.length > 512 || this.host.focused(tab.id)) return false
-      tab.state.attention = true
-      this.host.changed(tab.id)
       if (!Notification.isSupported()) return false
       if (tab.notification) return true
       const notification = new Notification({

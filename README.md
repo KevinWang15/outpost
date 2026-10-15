@@ -94,39 +94,31 @@ top right restores it. This preference also applies to Outpost Desktop. Connecti
 errors, link prompts and bell notices remain visible while the toolbar is hidden.
 
 Right-click the terminal (or press **Shift+F10** / the **Menu** key) for **Copy**,
-**Paste**, **Select all**, image upload, history navigation, and toggles for the
-toolbar, message box and on-screen keys. This menu is shared by the web terminal
-and Outpost Desktop on macOS and Windows. Copy uses the terminal selection;
-Select all selects output currently loaded in the terminal, not the entire
-remote history. History actions follow the same controls as the sidebar.
+**Paste**, **Select all**, image upload, and toggles for the toolbar, message box
+and on-screen keys. This menu is shared by the web terminal and Outpost Desktop
+on macOS and Windows. Copy uses the terminal selection; Select all selects
+output currently loaded in the terminal, not the entire remote conversation.
 Browser clipboard access may ask for permission; if Paste is blocked, use your
 normal paste shortcut. The message box keeps its usual text-editing menu.
 
-The scrollbar on the right navigates the session's saved terminal output,
-including output from before you opened this window (up to 50,000 lines).
-Drag its thumb or click the track to jump through history. Use the arrow at
-the bottom to **Return to live output**. **Shift+Page Up / Page Down** moves
-a screen at a time; when the scrollbar has keyboard focus, **Home / End**
-jumps to the oldest output or back to live output. These controls work in
-both the web terminal and Outpost Desktop, including with the toolbar hidden.
+Text selection is local to the terminal and copies when you release the mouse.
+It does not enter tmux copy mode or pause the remote display. Applications that
+request mouse events receive them normally; to select text locally in such an
+application, hold **Shift** while dragging on Windows/Linux or **Option** on
+macOS. You can also use **Copy** from the context menu or your usual copy shortcut.
 
-While scrolled back, dragging to select text copies it when you release the
-mouse and keeps your scroll position. Double-clicking a word or triple-clicking
-a line also preserves that position. Copying at the live bottom resumes output
-automatically. A pulsing amber **Viewing saved output** notice and animated
-return arrow appear whenever history is open: the display is a snapshot, while
-the coding session continues running. Reduced-motion settings keep the amber
-highlight without animation.
-Press **Esc** with the terminal focused or click **Return to live output** to
-resume viewing and interacting with the session.
+Scrolling and conversation history belong to the running application. Outpost
+has no separate tmux history scrollbar, history shortcuts, or frozen-output mode.
+Its terminal cannot browse tmux's retained output, including output from before
+you connected; use the application's history or transcript commands instead.
+Apps without their own history viewer consequently have limited access to older
+output. Outpost does not infer selection or scrolling capabilities from mouse
+support, and does not force Codex into inline mode: the tool's own configuration
+and explicit launch arguments determine its display mode.
 
-Outpost starts Codex in inline mode so its output enters terminal history.
-An already-running full-screen Codex session keeps its original mode: its
-sidebar has **Oldest**, **Previous page**, **Next page**, and **Latest** buttons
-instead of a draggable thumb. **Shift+Page Up / Page Down** also works there.
-To enable the draggable scrollbar, exit Codex cleanly and reconnect the same
-session. Reloading the page alone does not restart Codex. Other full-screen
-applications use their own scrolling controls.
+An already-running Codex process keeps its launch configuration. To stop using
+Outpost's previous inline override, exit Codex cleanly and reconnect the same
+session. Reloading the terminal alone does not restart the coding tool.
 
 When the coding tool rings the terminal bell, the page and tab title show
 which session rang, and a short chime plays. Click or type in the terminal
@@ -205,9 +197,17 @@ activity shows **Unknown**; hover over the icon for details. Connection errors
 take priority, and an unread terminal bell remains highlighted until you return.
 The green check means connected while the first activity reading is pending.
 
+Activating a tab clears its terminal bell and marks the displayed **Needs you**
+completion as seen. This works with clicks, keyboard tab switching and returning
+to the app window, without typing into the terminal. The icon updates immediately
+while the target saves the acknowledgement shared with the session list. A later
+completion remains unread until you return or interact again. If saving fails,
+the unchecked state returns with an error. Browser terminals use the same logic
+when you return to their page.
+
 Settings remembers text size and bell sound. The toolbar starts hidden in the
 app and can be revealed from the terminal's upper corner. The same xterm.js
-client handles input, image paste, scrollback and reconnects in both clients.
+client handles input, selection, image paste and reconnects in both clients.
 WebGL accelerates rendering when available, with a DOM renderer fallback.
 Outpost Desktop connects to remote Outpost sessions; it does not run local shells.
 

@@ -246,7 +246,7 @@ class ActivityTests(unittest.TestCase):
         path.symlink_to(outside)
         self.assertEqual(observer.describe(True)['state'], 'idle')
 
-    def test_terminal_replies_and_focus_out_dont_ack_but_typing_paste_and_focus_in_do(self):
+    def test_terminal_replies_and_focus_reports_dont_ack_but_typing_and_paste_do(self):
         seen = []
         observer = InputObserver(lambda: seen.append(True))
         for data in (
@@ -254,6 +254,7 @@ class ActivityTests(unittest.TestCase):
             b'\x1b[>0;276;0c',
             b'\x1b[1;2R',
             b'\x1b[?7u',
+            b'\x1b[I',
             b'\x1b[O',
             b'\x1b]11;rgb:0000/0000/0000\x07',
         ):
@@ -261,9 +262,9 @@ class ActivityTests(unittest.TestCase):
         observer.feed(b'\x1b[?')
         observer.feed(b'1;2c')
         self.assertEqual(seen, [])
-        for data in (b'x', b'\r', b'\x1b[A', b'\x1b[I', b'\x1b[200~hello\x1b[201~'):
+        for data in (b'x', b'\r', b'\x1b[A', b'\x1b[200~hello\x1b[201~'):
             observer.feed(data)
-        self.assertGreaterEqual(len(seen), 5)
+        self.assertGreaterEqual(len(seen), 4)
 
 
 if __name__ == '__main__':

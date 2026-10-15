@@ -29,9 +29,6 @@ class CodingSessionAdapter(ABC):
     storage_key = ''
     storage_directory = ''
     selection_options = ()
-    # Optional keys/help for application-owned alternate-screen history.
-    # The terminal transport and views consume capabilities, never tool names.
-    history_navigation = None
 
     def valid_id(self, value):
         return isinstance(value, str) and bool(re.fullmatch(self.id_pattern, value))

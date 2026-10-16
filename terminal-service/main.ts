@@ -158,6 +158,12 @@ async function serve() {
                 socket.destroy()
               }
             })
+          } else if (message.type === 'clear' && attached) {
+            // Clear the authoritative buffer, then apply the same operation in
+            // every viewer's ordered stream. No bytes are sent to the coding tool.
+            term.clear()
+            broadcast(terminalControl({ type: 'clear' }))
+            sendControl(socket, { type: 'result', id: message.id, ok: true })
           } else if (message.type === 'resize' && attached) {
             if (!terminalSize(message.cols, message.rows)) throw new Error('Invalid terminal size')
             const client = clients.get(socket)!

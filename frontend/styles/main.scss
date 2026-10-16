@@ -1097,6 +1097,12 @@ kbd {
     }
   }
 }
+.terminal-menu-shortcut {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .menu-separator {
   height: 1px;
   margin: 4px;

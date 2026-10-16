@@ -10,8 +10,8 @@ from pathlib import Path
 
 from outpost_frames import HEADER, control, header
 
-PROTOCOL = 2
-VERSION = '1.1.2'
+PROTOCOL = 3
+VERSION = '1.2.0'
 MAX_COLS = 400
 MAX_ROWS = 200
 EXECUTABLE = Path.home() / '.outpost' / 'bin' / 'outpost-terminal'

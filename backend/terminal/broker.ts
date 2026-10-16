@@ -143,7 +143,7 @@ class Connection {
   }
 
   private control(message: { type?: string; [key: string]: unknown }) {
-    if (message.type === 'restore' || message.type === 'geometry') {
+    if (message.type === 'restore' || message.type === 'geometry' || message.type === 'clear') {
       const data = JSON.stringify(message)
       this.unacked += Buffer.byteLength(data)
       if (this.socket.readyState === WebSocket.OPEN) this.socket.send(data)
@@ -224,11 +224,16 @@ class Connection {
     const id = (message as { id?: unknown }).id
     if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)))
       return this.socket.close(1008, 'Invalid terminal message')
-    if (['ping', 'send', 'paste-image', 'activate', 'acknowledge'].includes(message.type) && id === undefined)
+    if (['ping', 'send', 'paste-image', 'activate', 'acknowledge', 'clear'].includes(message.type) && id === undefined)
       return this.socket.close(1008, 'A terminal request ID is required')
     switch (message.type) {
       case 'ping':
         return this.send({ type: 'result', id: message.id, ok: true })
+      case 'clear':
+        if (!this.started || !this.child?.stdin.writable)
+          return this.send({ type: 'result', id: message.id, ok: false, message: 'The terminal is not ready.' })
+        this.relay(message)
+        return
       case 'acknowledge':
         if (typeof message.completionId !== 'string' || !/^[a-f0-9]{64}$/.test(message.completionId))
           return this.socket.close(1008, 'Invalid activity acknowledgement')

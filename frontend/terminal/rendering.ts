@@ -3,7 +3,7 @@ import type { ServerMessage } from '../../shared/protocol'
 import { CheckpointReader, remoteTerminalReplies } from '../../shared/terminalCheckpoint'
 import { terminalSize } from '../../shared/terminalService'
 
-type RestoreMessage = Extract<ServerMessage, { type: 'restore' | 'geometry' }>
+type ScreenUpdate = Extract<ServerMessage, { type: 'restore' | 'geometry' | 'clear' }>
 const maxWriteBatch = 128 * 1024
 interface WriteBatch {
   chunks: Uint8Array[]
@@ -16,11 +16,11 @@ interface WriteBatch {
 export interface TerminalRendering {
   begin(): void
   output(bytes: Uint8Array, rendered: () => void): void
-  restore(message: RestoreMessage, rendered: () => void): void
+  restore(message: ScreenUpdate, rendered: () => void): void
   flush(rendered: () => void): void
 }
 
-/** One ordered queue for writes, checkpoints, geometry and the ready barrier.
+/** One ordered queue for writes, checkpoints, geometry, clear and the ready barrier.
  * Connection generations discard stale queued work while preserving ordering
  * behind an in-flight xterm write. Disposal never acknowledges unfinished work. */
 export class TerminalRenderer implements TerminalRendering {
@@ -36,6 +36,7 @@ export class TerminalRenderer implements TerminalRendering {
     private terminal: Terminal,
     private failed: (message: string) => void,
     private local = false,
+    private screenCleared: () => void = () => {},
   ) {
     this.checkpoints = new CheckpointReader(terminal)
     if (!local) remoteTerminalReplies(terminal)
@@ -92,10 +93,15 @@ export class TerminalRenderer implements TerminalRendering {
     )
   }
 
-  restore(message: RestoreMessage, rendered: () => void) {
+  restore(message: ScreenUpdate, rendered: () => void) {
     this.pendingWrite = null
     this.enqueue(() => {
-      if (message.type === 'geometry') {
+      if (message.type === 'clear') {
+        if (this.phase !== 'live') throw new Error('Clear arrived before restoration finished')
+        this.terminal.clearSelection()
+        this.terminal.clear()
+        this.screenCleared()
+      } else if (message.type === 'geometry') {
         if (this.phase !== 'live' || !terminalSize(message.cols, message.rows))
           throw new Error('Invalid terminal geometry')
         this.terminal.resize(message.cols, message.rows)

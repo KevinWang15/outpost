@@ -7,6 +7,7 @@ import type { LocalTerminalBridge } from '../../shared/localTerminal'
 import type { ImageMediaType } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
 import { terminalService } from '../../shared/terminalService'
+import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 import { terminalTheme } from '../../shared/terminalTheme'
 import { readImage } from '../api'
 import { touchInput } from '../browser'
@@ -40,6 +41,7 @@ interface SessionOptions {
   focusRecovery(): boolean
   attachSearch(term: Terminal, container: HTMLElement): () => void
   openSearch(): void
+  screenCleared(): void
   resume(token: string, title: string): void | Promise<void>
 }
 
@@ -58,6 +60,7 @@ export class TerminalSession {
   private modifiers: TerminalModifiers = {}
   private cleanups: (() => void)[] = []
   private disposed = false
+  private clearing = false
 
   constructor(private options: SessionOptions) {
     this.info = { id: '', name: options.title }
@@ -77,7 +80,12 @@ export class TerminalSession {
     }))
     this.own(() => term.dispose())
     try {
-      const rendering = new TerminalRenderer(term, message => this.connection.fail(message), local)
+      const rendering = new TerminalRenderer(
+        term,
+        message => this.connection.fail(message),
+        local,
+        options.screenCleared,
+      )
       this.own(() => rendering.dispose())
       term.loadAddon(new Unicode11Addon())
       term.unicode.activeVersion = '11'
@@ -210,6 +218,17 @@ export class TerminalSession {
     return this.connection.submit(data + '\r')
   }
 
+  clearScreen() {
+    if (this.disposed || !this.connection.connected || this.clearing) return
+    this.clearing = true
+    void this.connection
+      .clear()
+      .catch(error => this.notice((error as Error).message))
+      .finally(() => {
+        this.clearing = false
+      })
+  }
+
   async pasteImage(file: File) {
     if (this.disposed) return
     const problem = imageProblem(file)
@@ -251,7 +270,14 @@ export class TerminalSession {
     )
     this.own(() => data.dispose())
     this.own(() => binary.dispose())
+    const clearShortcut = clearScreenShortcut(/Mac|iPhone|iPad|iPod/.test(navigator.platform))
     term.attachCustomKeyEventHandler(event => {
+      if (clearShortcut.matches(event)) {
+        event.preventDefault()
+        event.stopPropagation()
+        if (event.type === 'keydown' && !event.repeat) this.clearScreen()
+        return false
+      }
       if (!this.clipboard.handleKey(event)) return false
       // Coding tools read Shift+Enter as a newline; xterm would send a plain Enter.
       if (
@@ -307,6 +333,7 @@ export class TerminalSession {
           }
         } else if (command === 'reconnect') this.connection.reconnect()
         else if (command === 'find') this.options.openSearch()
+        else if (command === 'clear') this.clearScreen()
         else if (command === 'select-all') {
           const active = document.activeElement
           if (

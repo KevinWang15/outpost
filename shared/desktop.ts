@@ -17,7 +17,7 @@ export interface TerminalTabState {
   attention: boolean
   hasDraft: boolean
 }
-export type TerminalCommand = 'select-all' | 'focus' | 'reconnect' | 'find'
+export type TerminalCommand = 'select-all' | 'focus' | 'reconnect' | 'find' | 'clear'
 export interface DesktopBridge {
   version: number
   notificationsSupported: boolean

@@ -18,6 +18,7 @@ export interface TerminalConnection {
   resize(cols: number, rows: number): void
   setActive?(active: boolean): void
   submit(data: string): Promise<void>
+  clear(): Promise<void>
   pasteImage(data: string, mediaType: ImageMediaType): Promise<string>
   resume?(): void
   activate?(token: string): Promise<void>

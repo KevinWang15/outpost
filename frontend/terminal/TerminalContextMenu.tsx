@@ -1,6 +1,7 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { Check, ClipboardPaste, Copy, ImagePlus, Search, TextSelect } from 'lucide-react'
+import { Check, ClipboardPaste, Copy, Eraser, ImagePlus, Search, TextSelect } from 'lucide-react'
+import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 
 interface Props {
   children: ReactElement
@@ -12,6 +13,7 @@ interface Props {
     selectAll: () => void
     selectText: () => void
     find: () => void
+    clear: () => void
     pasteImage: () => void
     focus: () => void
   }
@@ -24,6 +26,7 @@ export default function TerminalContextMenu({ children, connected, actions, cont
   const [open, setOpen] = useState(false)
   const [canCopy, setCanCopy] = useState(false)
   const restoreFocus = useRef(true)
+  const clearShortcut = clearScreenShortcut(/Mac|iPhone|iPad|iPod/.test(navigator.platform))
   useEffect(() => {
     if (!open) return
     const dismiss = () => {
@@ -130,6 +133,10 @@ export default function TerminalContextMenu({ children, connected, actions, cont
             }}
           >
             <Search size={15} /> Find in terminal…
+          </ContextMenu.Item>
+          <ContextMenu.Item className="menu-item" disabled={!connected} onSelect={actions.clear}>
+            <Eraser size={15} /> {clearShortcut.label}
+            <span className="terminal-menu-shortcut">{clearShortcut.keys}</span>
           </ContextMenu.Item>
           <ContextMenu.Separator className="menu-separator" />
           {controls.map(control => (

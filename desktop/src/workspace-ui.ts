@@ -10,6 +10,7 @@ import {
 import { paneLayout, type PaneBounds } from './layout'
 import { reconcileElements } from './keyed-elements'
 import { tabActionShortcuts } from './tab-shortcuts'
+import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 
 declare global {
   interface Window {
@@ -511,6 +512,7 @@ run(
     const mac = value.platform === 'darwin',
       modifier = mac ? '⌘' : 'Ctrl+Shift+'
     const tabShortcuts = tabActionShortcuts(value.platform)
+    const clearShortcut = clearScreenShortcut(mac)
     el('new-tab').title = `${tabShortcuts.newTab.label} (${tabShortcuts.newTab.keys}; right-click to choose a shell)`
     el('open-local').textContent = `Open local terminal (${tabShortcuts.newTab.keys})`
     const shortcuts = [
@@ -524,6 +526,7 @@ run(
       ['Split side by side', `${modifier}D`],
       ['Focus other pane', `${mac ? '⌘' : 'Ctrl+'}Alt+→`],
       ['Find in terminal', `${mac ? '⌘' : 'Ctrl+'}F`],
+      [clearShortcut.label, clearShortcut.keys],
       ['Larger terminal text', `${mac ? '⌘' : 'Ctrl+'}= or ${mac ? '⌘' : 'Ctrl+'}+`],
       ['Smaller terminal text', `${mac ? '⌘' : 'Ctrl+'}−`],
       ['Reset terminal text size', `${mac ? '⌘' : 'Ctrl+'}0`],

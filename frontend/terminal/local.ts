@@ -100,6 +100,11 @@ export class LocalTerminalConnection implements TerminalConnection {
     await this.bridge.write(this.generation, data)
   }
 
+  async clear() {
+    if (!this.connected) throw new Error('The shell is not running.')
+    this.rendering.restore({ type: 'clear' }, () => {})
+  }
+
   async pasteImage(data: string, mediaType: ImageMediaType) {
     if (!this.connected) throw new Error('The shell is not running.')
     return this.bridge.pasteImage(this.generation, data, mediaType)

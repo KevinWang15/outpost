@@ -99,7 +99,7 @@ export class TerminalSocket implements TerminalConnection {
       if (message.type === 'hello') {
         this.token = message.resume
         this.handlers.hello(message)
-      } else if (message.type === 'restore' || message.type === 'geometry') {
+      } else if (message.type === 'restore' || message.type === 'geometry' || message.type === 'clear') {
         const length = new TextEncoder().encode(event.data).length
         this.rendering.restore(message, () => rendered(length))
       } else if (message.type === 'ready') {
@@ -258,6 +258,11 @@ export class TerminalSocket implements TerminalConnection {
   /** Send a draft and wait until it reached the target. */
   async submit(data: string) {
     const result = await this.request({ type: 'send', id: crypto.randomUUID(), data })
+    if (!result.ok) throw new Error(result.message)
+  }
+
+  async clear() {
+    const result = await this.request({ type: 'clear', id: crypto.randomUUID() })
     if (!result.ok) throw new Error(result.message)
   }
 

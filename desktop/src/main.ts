@@ -7,6 +7,7 @@ import { DesktopWorkspace } from './workspace'
 import { checkUpdates } from './updates'
 import { tabActionShortcuts } from './tab-shortcuts'
 import { RecentSessions } from './recent-sessions'
+import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 
 app.setName('Outpost')
 app.setAppUserModelId('dev.outpost.desktop')
@@ -67,6 +68,7 @@ function receive(value: string) {
 function menus() {
   const mac = process.platform === 'darwin'
   const tabShortcuts = tabActionShortcuts(process.platform)
+  const clearShortcut = clearScreenShortcut(mac)
   const shortcut = (key: string) => (mac ? 'Cmd+' : 'Ctrl+Shift+') + key
   const increaseFontSize = () => workspace!.forAction().fontSize(1)
   const newLocal = (profile?: string) => {
@@ -110,6 +112,11 @@ function menus() {
         { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.forAction().command('select-all') },
         { type: 'separator' },
         { label: 'Find in terminal…', accelerator: 'CmdOrCtrl+F', click: () => workspace!.forAction().command('find') },
+        {
+          label: clearShortcut.label,
+          accelerator: clearShortcut.accelerator,
+          click: () => workspace!.forAction().command('clear'),
+        },
       ],
     },
     {

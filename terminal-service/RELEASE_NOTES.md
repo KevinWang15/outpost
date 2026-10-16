@@ -1,8 +1,8 @@
-# Outpost Terminal 1.1.2
+# Outpost Terminal 1.2.0
 
 Persistent Linux PTY service for Outpost web and desktop terminals.
 
-This revision restores detection and recovery when the coding tool exits.
+This revision adds a shared clear-screen operation and includes process-exit recovery.
 
 - The service observes the coding process directly, independently of PTY stream closure.
 - Final output gets a bounded drain before shutdown; background descendants cannot
@@ -10,7 +10,11 @@ This revision restores detection and recovery when the coding tool exits.
 - Viewers restoring history receive the queued output and exit message before EOF.
 - The matching server immediately offers Reconnect after receiving the exit message,
   without waiting for relay or SSH cleanup. Reconnect resumes the same conversation.
-- Terminal service protocol 2 and checkpoint schema 2 are unchanged.
+- Clear screen removes the active buffer's screen and scrollback, keeping the
+  current cursor line. All viewers clear at the same point in the output stream;
+  reconnect checkpoints retain the cleared state.
+- Clearing sends no keys or commands to the coding tool and does not resize it.
+- Terminal service protocol is now 3. Checkpoint schema remains 2.
 
 ## Terminal behavior
 
@@ -26,7 +30,6 @@ selects the architecture/libc, verifies SHA-256 and atomically installs the
 executable into `~/.outpost/bin/outpost-terminal`. No public service port is opened.
 
 Updating the executable does not terminate running processes. Existing services
-continue running the old build. After installing, use **Terminate → Connect** on
-an affected session to start the corrected service and resume its conversation.
-The protocol is unchanged; healthy sessions can keep running until you choose
-to restart them.
+continue running the old build. After installing, save ongoing work and use
+**Terminate → Connect** on existing sessions to start protocol 3 and resume
+their conversations. Older service protocols cannot accept the new clear operation.

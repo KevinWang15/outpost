@@ -14,7 +14,7 @@ const decorations = {
 
 /** Search only xterm's current buffer. No transport, PTY input or geometry changes. */
 export function useTerminalSearch(restoreFocus: () => void) {
-  const current = useRef<{ term: Terminal; addon: SearchAddon } | null>(null)
+  const current = useRef<{ term: Terminal; addon: SearchAddon; dispose(): void } | null>(null)
   const criteria = useRef({ query: '', caseSensitive: false, visible: false })
   const input = useRef<HTMLInputElement>(null)
   const [visible, setVisible] = useState(false)
@@ -49,16 +49,38 @@ export function useTerminalSearch(restoreFocus: () => void) {
     restoreFocus()
   }, [restoreFocus])
 
+  const create = useCallback((term: Terminal) => {
+    const addon = new SearchAddon({ highlightLimit: searchHighlightLimit })
+    term.loadAddon(addon)
+    const subscription = addon.onDidChangeResults(next => {
+      setResults(previous =>
+        previous.resultIndex === next.resultIndex && previous.resultCount === next.resultCount ? previous : next,
+      )
+    })
+    return {
+      term,
+      addon,
+      dispose: () => {
+        subscription.dispose()
+        addon.dispose()
+      },
+    }
+  }, [])
+
+  const screenCleared = useCallback(() => {
+    const previous = current.current
+    if (!previous) return
+    // SearchAddon caches line contents until cursor movement or resize. Clear
+    // changes the buffer directly; recreate the addon through its public API.
+    previous.dispose()
+    current.current = create(previous.term)
+    setResults({ resultIndex: -1, resultCount: 0 })
+    if (criteria.current.visible) find(false, true)
+  }, [create, find])
+
   const attach = useCallback(
     (term: Terminal, container: HTMLElement) => {
-      const addon = new SearchAddon({ highlightLimit: searchHighlightLimit })
-      term.loadAddon(addon)
-      current.current = { term, addon }
-      const subscription = addon.onDidChangeResults(next => {
-        setResults(previous =>
-          previous.resultIndex === next.resultIndex && previous.resultCount === next.resultCount ? previous : next,
-        )
-      })
+      current.current = create(term)
       const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
       const key = (event: KeyboardEvent) => {
         if (
@@ -80,12 +102,11 @@ export function useTerminalSearch(restoreFocus: () => void) {
       return () => {
         container.removeEventListener('keydown', key, true)
         container.removeEventListener('keyup', key, true)
-        subscription.dispose()
-        addon.dispose()
+        current.current?.dispose()
         current.current = null
       }
     },
-    [find, open],
+    [create, find, open],
   )
 
   const changeQuery = (value: string) => {
@@ -101,5 +122,18 @@ export function useTerminalSearch(restoreFocus: () => void) {
     find(false, true)
     input.current?.focus({ preventScroll: true })
   }
-  return { visible, query, caseSensitive, results, input, attach, open, close, find, changeQuery, toggleCase }
+  return {
+    visible,
+    query,
+    caseSensitive,
+    results,
+    input,
+    attach,
+    open,
+    close,
+    find,
+    changeQuery,
+    toggleCase,
+    screenCleared,
+  }
 }

@@ -320,15 +320,17 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `ack {bytes}` | Output rendered; flow control |
 | → server | `ping {id}` | Check a resumed browser's socket without sending terminal input |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
+| → server | `clear {id}` | Clear the shared screen and scrollback, keeping the current cursor line |
 | → server | `paste-image {id, mediaType, data}` | Upload an image and paste its path |
 | → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
 | → server | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
 | ← client | `hello {resume, session, target}` | Connection accepted |
 | ← client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
 | ← client | `geometry {cols, rows}` | Shared terminal dimensions, applied before subsequent output |
+| ← client | `clear` | Clear the screen at this point in the ordered output stream |
 | ← client | `ready` | Checkpoint restored; attached to the persistent PTY |
 | ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
-| ← client | `result {id, ok, message?, reference?}` | Outcome of `ping` / `send` / `paste-image` / `activate` / `acknowledge` |
+| ← client | `result {id, ok, message?, reference?}` | Outcome of `ping` / `send` / `clear` / `paste-image` / `activate` / `acknowledge` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `unavailable`, `error` |
 
@@ -395,7 +397,7 @@ session, missing terminal service), its `OUTPOST_RESULT` error becomes the clien
 | --- | --- | --- |
 | `I` | broker → relay | Input bytes for the persistent PTY |
 | `O` | relay → broker | Live PTY output |
-| `C` | both | JSON control: `resize`, `focus`, `send`, `paste-image`, `acknowledge`, `signal-result` / `restore`, `geometry`, `ready`, `activity`, `result`, `signal`, `exit` |
+| `C` | both | JSON control: `resize`, `focus`, `send`, `clear`, `paste-image`, `acknowledge`, `signal-result` / `restore`, `geometry`, `clear`, `ready`, `activity`, `result`, `signal`, `exit` |
 
 Framing separates terminal bytes from control messages. The relay connects to
 `~/.outpost/terminals/<id>.sock` and forwards complete frames, adding activity
@@ -468,7 +470,7 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract uses terminal service 1.1.2 / protocol 2 and client protocol 10.
+This contract uses terminal service 1.2.0 / protocol 3 and client protocol 11.
 Publish the matching helper before deploying the server. A service protocol
 change requires explicitly restarting existing service processes after installing
 the dependency; replacing the executable does not alter a running PTY service.
@@ -638,6 +640,28 @@ The shared controller captures Cmd+F/Ctrl+F before xterm and browser Find. The
 desktop Edit menu sends the typed `find` command through `DesktopBridge` to the
 active terminal, including local shells. Toolbar and context-menu actions use
 the same controller. Search input and match navigation are entirely local.
+
+### Clear screen
+
+**Clear screen** uses Cmd+K on macOS and Ctrl+Shift+K on Windows/Linux. It is
+available in the shared terminal context menu and the desktop Edit menu; the
+Outpost home tab and Settings list the shortcut. Plain Ctrl+K remains application
+input. The operation is available while connected, and sends no keystrokes or
+shell commands. It does not restart the coding process or change terminal size.
+
+Clearing uses xterm's `clear()` semantics: discard the active screen and its
+scrollback, retaining the current cursor line at the top. Fullscreen applications
+repaint according to their own behavior; clearing does not force a redraw.
+For remote sessions the request reaches the authoritative Linux service, which
+clears its buffer and broadcasts `clear` to all attached viewers. Checkpoints
+therefore cannot restore discarded history. Local shells apply the same operation
+directly in their renderer's ordered queue. Clear is a barrier between output
+batches, so output written afterward is retained. The search addon is recreated
+afterward to invalidate cached lines and decorations without private API access.
+
+The clear command requires terminal service protocol 3 and client protocol 11.
+Install the updated helper and explicitly restart existing service processes;
+older protocols are rejected instead of ignoring the operation.
 
 ### Signals
 

@@ -12,6 +12,10 @@ on:
         description: Publish the selected desktop or terminal dependency release
         type: boolean
         default: false
+      terminal_tests:
+        description: Run tests when building the terminal dependency
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -69,3 +73,4 @@ jobs:
     uses: ./.github/workflows/terminal.yml
     with:
       publish: ${{ inputs.publish_preview }}
+      run_tests: ${{ inputs.terminal_tests }}

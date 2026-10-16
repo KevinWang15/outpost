@@ -1,5 +1,6 @@
 import type { TerminalTabState } from '../../shared/desktop'
 import { activityLabels } from '../../shared/activity'
+import type { TabSummary } from './workspace-api'
 
 const connectionLabels = {
   connected: 'Connected',
@@ -50,7 +51,11 @@ export function createTabStatus() {
   return node
 }
 
-export function updateTabStatus(node: HTMLElement, tab: TerminalTabState) {
+export function updateTabStatus(node: HTMLElement, tab: TabSummary) {
+  // Local shells have no managed-session activity badge. Hiding the whole
+  // element also removes its space in both the tab strip and session switcher.
+  node.hidden = tab.kind === 'local'
+  if (node.hidden) return
   node.title = tabStatusLabel(tab)
   const kind = tabStatusIcon(tab)
   // Metadata updates must not restart a bell's animation or a connection spinner.

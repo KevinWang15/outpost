@@ -7,7 +7,7 @@ import { FrameDecoder, relayMagic, terminalControl, terminalFrame } from '../../
 import { signalValidators } from '../../shared/signals'
 import { terminalService, terminalSize } from '../../shared/terminalService'
 import type { Deployment, Owner } from '../deployment'
-import { AppError } from '../errors'
+import { terminalFailure } from './failures'
 import { protocolResult } from '../process'
 import { imageData, type SessionService, type TargetContext } from '../sessions'
 import type { ConnectTokens, Grant } from './tokens'
@@ -88,12 +88,16 @@ class Connection {
     child.on('close', () => {
       if (this.exitReason) return this.close(this.exitReason, closedMessages[this.exitReason])
       if (!this.started) {
-        let message = this.stderr.trim().split('\n').at(-1) || 'Could not attach to the session.'
+        const message = this.stderr.trim().split('\n').at(-1) || 'Could not attach to the session.'
+        let result: ReturnType<typeof protocolResult> = null
         try {
-          const result = protocolResult(this.prelude.toString('utf8'))
-          if (result && !result.ok) message = result.error.message
+          result = protocolResult(this.prelude.toString('utf8'))
         } catch {
           /* Keep the transport's own message. */
+        }
+        if (result && !result.ok) {
+          const failure = terminalFailure(result.error)
+          return this.close(failure.reason, failure.message)
         }
         return this.close('error', message)
       }
@@ -115,7 +119,7 @@ class Connection {
     try {
       frames = this.decoder.feed(chunk)
     } catch {
-      return this.close('error', 'The target sent an invalid terminal stream.')
+      return this.close('unavailable', 'The target sent an invalid terminal stream.')
     }
     for (const { kind, payload } of frames) {
       if (kind === 'O') {
@@ -128,10 +132,10 @@ class Connection {
         try {
           message = JSON.parse(payload.toString('utf8'))
         } catch {
-          return this.close('error', 'The target sent an invalid control message.')
+          return this.close('unavailable', 'The target sent an invalid control message.')
         }
         if (!message || typeof message !== 'object' || Array.isArray(message))
-          return this.close('error', 'The target sent an invalid control message.')
+          return this.close('unavailable', 'The target sent an invalid control message.')
         this.control(message)
       }
     }
@@ -144,7 +148,7 @@ class Connection {
       if (this.socket.readyState === WebSocket.OPEN) this.socket.send(data)
       if (this.unacked > highWater) this.child?.stdout.pause()
     } else if (message.type === 'error') {
-      this.close('error', typeof message.message === 'string' ? message.message : 'Terminal service failed.')
+      this.close('unavailable', typeof message.message === 'string' ? message.message : 'Terminal service failed.')
     } else if (message.type === 'ready') {
       this.started = true
       for (const frame of this.pending) this.child!.stdin.write(frame)
@@ -353,7 +357,7 @@ export class TerminalBroker {
       return reject('expired', closedMessages.expired)
     const { grant } = redeemed
     if ([...this.connections].filter(connection => connection.grant.owner.userId === grant.owner.userId).length >= 16) {
-      return reject('error', 'Too many open terminals. Close one and try again.')
+      return reject('unavailable', 'Too many open terminals. Close one and try again.')
     }
     const cols = Number(query.cols ?? 80),
       rows = Number(query.rows ?? 24)
@@ -381,10 +385,8 @@ export class TerminalBroker {
         command.input,
       )
     } catch (error) {
-      connection.close(
-        error instanceof AppError && error.statusCode === 404 ? 'ended' : 'error',
-        (error as Error).message,
-      )
+      const failure = terminalFailure(error)
+      connection.close(failure.reason, failure.message)
     }
   }
 

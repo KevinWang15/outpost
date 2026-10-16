@@ -191,6 +191,12 @@ no account cookies or passwords are copied into the app.
 Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
 clipboard, composer, links, bells and notifications have one web implementation.
+`terminal/session.ts` owns the emulator, connection, input handlers, host events
+and resource cleanup for one mounted terminal. `TerminalView` owns React state,
+drafts and presentation. Subscriptions are paired with cleanup when acquired and
+released in reverse order, including after partial initialization; late async
+results cannot update a disposed session. A title or callback update does not
+recreate the connection. A failed initialization can be retried explicitly.
 Transient status messages, message-send errors, session link prompts, and bell alerts share an
 absolutely positioned notice stack inside the terminal body. The stack is bounded
 and scrolls independently on small screens. Showing, updating, or dismissing a
@@ -325,11 +331,19 @@ JSON control messages (`shared/protocol.ts`):
 | ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
 | ← client | `result {id, ok, message?, reference?}` | Outcome of `ping` / `send` / `paste-image` / `activate` / `acknowledge` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
-| ← client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `error` |
+| ← client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `unavailable`, `error` |
 
 The server pauses the transport when more than 256 KiB is unacknowledged and
 resumes below 128 KiB. Acknowledgements mean xterm has parsed the bytes; painting
 is independently scheduled by xterm's renderer.
+
+Only `error` permits automatic reconnection. `unavailable` means setup requires
+user action, such as installing a missing helper or restarting an incompatible
+service. The broker preserves runtime HTTP error status through a single failure
+classifier, shared with API lookup failures. A missing session is `ended`;
+authentication errors are `expired`; other permanent request/setup errors are
+`unavailable`. Transport failures, timeouts and throttling remain retryable.
+An explicit Reconnect is available after the user repairs an unavailable target.
 
 **Current contracts.** Both clients send `protocolVersion` from `shared/protocol.ts`.
 A mismatch returns `outdated` before redeeming the launch ticket and asks the
@@ -352,6 +366,12 @@ uses exact, unbuffered reads, leaving subsequent stdin bytes for image data or
 live relay frames. It creates no temporary runtime files or persistent agent.
 Software inspection and installation use the separate POSIX script transport,
 which can run before Python is installed.
+Inspection loads the interactive login environment to discover the same tools as
+session launches. Installation loads login profiles noninteractively, then runs
+the submitted script with `sh -s`. Batch installers have no controlling terminal
+and must not initialize interactive shell job control. Their stdout and stderr
+are streamed unchanged; the terminal helper installer reports its download and
+verification stages explicitly.
 
 The broker starts the relay through the target's transport exactly like any
 other runtime operation (`ssh -T … "$SHELL -lic …"`, or the login shell
@@ -395,7 +415,9 @@ split a control sequence. Unterminated control strings are bounded to 1 MiB.
 
 `shared/terminalState.ts` defines the checkpoint wire types without importing
 xterm internals. `shared/terminalCheckpoint.ts` is the single versioned adapter
-to xterm 6.0's internal state. Reconnect transfers cells (including styles,
+to xterm 6.0's internal state. Its private surface is typed in
+`shared/xtermInternals.ts`; runtime service/method checks guard the engine boundary
+before state is read or restored. Reconnect transfers cells (including styles,
 combined characters,
 soft wrapping and OSC 8 links), both buffers, cursor/save-cursor state, tabs,
 character sets, scrolling margins, palette and application/mouse modes. It does
@@ -419,7 +441,8 @@ buffer is replaced on reconnect instead of appending duplicate history.
 `frontend/terminal/rendering.ts` owns that queue, the restoration lifecycle and
 the readiness barrier. Connection generations discard queued work and callbacks
 from a previous attachment. Restoration is required by `TerminalSocket`, which
-owns transport and acknowledgements; `TerminalView` owns UI events and disposal.
+owns transport and acknowledgements; `TerminalSession` owns its lifetime and UI
+event subscriptions, while `TerminalView` renders its state.
 The renderer rejects live bytes and readiness before a complete checkpoint, and
 configures xterm to leave generated terminal replies to the headless service.
 
@@ -435,7 +458,7 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract requires terminal service 1.1.0 / protocol 2 and client protocol 9.
+This contract requires terminal service 1.1.0 / protocol 2 and client protocol 10.
 Publish the matching helper before deploying the server. Existing service
 processes need to be restarted explicitly after installing the new dependency;
 replacing the executable does not alter a running PTY service.
@@ -713,6 +736,11 @@ two-session split and shared pane geometry. Menus resolve the focused window.
 settings. Its `workspace-preload.ts` bridge accepts only enumerated local UI
 actions; one IPC dispatcher verifies the bundled main frame and routes each call
 to that sender's window. Tab actions check ownership before changing a terminal.
+`workspace-commands.ts` validates argument shapes at that IPC boundary. Command
+names and argument types are derived from `WorkspaceBridge`, used by both the
+preload and dispatcher; there is no separate string-alias registry. The window
+then applies ownership checks and executes the typed command. Invalid commands
+are rejected before cancelling a drag or changing window state.
 `keyed-elements.ts` preserves DOM nodes in the tab strip, server list, session
 switcher and error panels; metadata refreshes update their contents without
 resetting keyboard focus or icon animations. The switcher retains the selected

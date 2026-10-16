@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { Target } from '../shared/model'
 import type { Command } from './process'
 import { AppError } from './errors'
-import { loginScriptShell, quote } from './shell'
+import { loginScriptShell, quote, type LoginMode } from './shell'
 
 /** Hosted accounts connect with their own key and known hosts; local mode uses OpenSSH defaults. */
 export interface SshIdentity {
@@ -16,7 +16,7 @@ export interface SshIdentity {
  * stdin; runtime operations use a short command with their payload on stdin. */
 export interface Transport {
   readonly label: string
-  management(): Command
+  management(mode: LoginMode): Command
   runtime(operation: string): Command
 }
 
@@ -100,10 +100,10 @@ class SshTransport implements Transport {
     private identity: SshIdentity | null,
     private options: TransportOptions,
   ) {}
-  management(): Command {
+  management(mode: LoginMode): Command {
     return {
       executable: 'ssh',
-      args: [...sshArgs(this.target, this.identity, this.options), `sh -c ${quote(loginScriptShell)}`],
+      args: [...sshArgs(this.target, this.identity, this.options), `sh -c ${quote(loginScriptShell(mode))}`],
       label: 'SSH',
     }
   }
@@ -124,8 +124,8 @@ class LocalTransport implements Transport {
     if (process.platform !== 'linux')
       throw new AppError('Local targets require the Outpost server to run on Linux.', 409)
   }
-  management(): Command {
-    return { executable: 'sh', args: ['-c', loginScriptShell], label: this.label }
+  management(mode: LoginMode): Command {
+    return { executable: 'sh', args: ['-c', loginScriptShell(mode)], label: this.label }
   }
   runtime(operation: string): Command {
     return { executable: this.target.environment?.shell ?? 'bash', args: ['-lic', operation], label: this.label }

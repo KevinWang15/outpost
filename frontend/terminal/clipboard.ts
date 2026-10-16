@@ -117,34 +117,42 @@ export function attachClipboard(
   })
   return {
     canCopy() {
-      return term.hasSelection() || pendingCopy !== null
+      return !disposed && (term.hasSelection() || pendingCopy !== null)
     },
     async copy() {
+      if (disposed) return
       const text = term.hasSelection() ? term.getSelection() : pendingCopy
       if (text === null) return options.status('Select text to copy.')
       await writeClipboard(text, false)
     },
     async paste() {
-      if (!options.connected()) return
+      if (disposed || !options.connected()) return
       try {
         if (desktop) {
           term.focus()
           if (!(await desktop.pasteClipboard())) throw new Error('Paste unavailable')
           return
         }
+        let value: string | undefined
         if (navigator.clipboard.read) {
           const items = await navigator.clipboard.read()
+          if (disposed || !options.connected()) return
           const image = items.find(item => item.types.some(type => type.startsWith('image/')))
           if (image) {
             const type =
               image.types.find(type => type === 'image/png') ?? image.types.find(type => type.startsWith('image/'))!
-            return options.pasteImage(new File([await image.getType(type)], 'clipboard-image', { type }))
+            const data = await image.getType(type)
+            if (!disposed && options.connected()) options.pasteImage(new File([data], 'clipboard-image', { type }))
+            return
           }
           const text = items.find(item => item.types.includes('text/plain'))
-          if (text) term.paste(await (await text.getType('text/plain')).text())
-        } else term.paste(await navigator.clipboard.readText())
+          if (text) value = await (await text.getType('text/plain')).text()
+        } else value = await navigator.clipboard.readText()
+        if (disposed || !options.connected()) return
+        if (value !== undefined) term.paste(value)
         term.focus()
       } catch {
+        if (disposed) return
         if (touchInput()) options.pasteFallback?.()
         options.status(
           touchInput()

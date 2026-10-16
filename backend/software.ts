@@ -160,8 +160,11 @@ mkdir -p "$HOME/.outpost/bin"
 # Already running sessions keep their original process and in-memory history.
 work=$(mktemp -d "$HOME/.outpost/bin/.terminal-install.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
+echo "Downloading Outpost Terminal ${terminalService.version} ($arch, $libc)..."
 curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 15 --max-time 300 "$base/$asset" -o "$work/$asset"
+echo 'Downloading checksums...'
 curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 15 --max-time 60 "$base/SHA256SUMS" -o "$work/SHA256SUMS"
+echo 'Verifying download...'
 (cd "$work" && awk -v asset="$asset" '$2 == asset {print}' SHA256SUMS > selected.sha256 && test -s selected.sha256 && sha256sum -c selected.sha256)
 chmod 700 "$work/$asset"
 [ "$("$work/$asset" --version)" = 'outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}' ] || { echo 'Unexpected terminal build version.' >&2; exit 1; }
@@ -206,7 +209,7 @@ export class SoftwareClient implements SoftwareService {
     const marker = `OUTPOST_SOFTWARE_${randomUUID()}`
     const ids = requiredSoftware(target)
     const { code, stdout, stderr } = await runCommand(
-      transport.management(),
+      transport.management('interactive'),
       inspectionScript(ids, marker, target.kind === 'ssh'),
       { env: this.env, signal, timeoutMs: 45_000 },
     )
@@ -238,7 +241,12 @@ export class SoftwareClient implements SoftwareService {
   }
   async install({ transport }: TargetContext, script: string, onOutput: (text: string) => void, signal: AbortSignal) {
     return (
-      await runCommand(transport.management(), script, { env: this.env, signal, onOutput, timeoutMs: 15 * 60_000 })
+      await runCommand(transport.management('noninteractive'), script, {
+        env: this.env,
+        signal,
+        onOutput,
+        timeoutMs: 15 * 60_000,
+      })
     ).code
   }
 }

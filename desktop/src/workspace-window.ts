@@ -8,6 +8,7 @@ import { TrustedServers } from './store'
 import { TerminalTabs, type TerminalTab } from './terminals'
 import { attachTabShortcuts } from './tab-shortcuts'
 import { checkUpdates } from './updates'
+import { keepsTabDrag, workspaceCommand } from './workspace-commands'
 import type { ShellProfile } from './shell-profiles'
 import type { RecentSessionSummary } from './recent-sessions'
 import {
@@ -43,7 +44,6 @@ export interface WorkspaceHost {
 export class WorkspaceWindow {
   private window: BrowserWindow | null = null
   private layout = new TabLayout()
-  private actions = new Map<string, (...values: unknown[]) => unknown>()
   private geometry: TabGeometry | null = null
   private closing = new Set<number>()
   private confirmingWindow = false
@@ -57,91 +57,7 @@ export class WorkspaceWindow {
     private trust: (origin: string) => Promise<boolean>,
     private terminals: TerminalTabs,
     private host: WorkspaceHost,
-  ) {
-    const handle = <Args extends unknown[]>(name: string, action: (...values: Args) => unknown) => {
-      this.actions.set(name, (...values) => Reflect.apply(action, undefined, values))
-    }
-    handle('state', () => this.snapshot())
-    handle('new-local', (profile?: string) => {
-      if (profile !== undefined && typeof profile !== 'string') throw new Error('Choose a local shell.')
-      this.host.newLocal(this, profile)
-    })
-    handle('shell-menu', () => {
-      if (!this.window) return
-      Menu.buildFromTemplate(
-        this.host.shells().map(profile => ({
-          label: profile.name,
-          click: () => {
-            try {
-              this.host.newLocal(this, profile.id)
-            } catch (error) {
-              void this.reportError((error as Error).message)
-            }
-          },
-        })),
-      ).popup({ window: this.window })
-    })
-    handle('activate', (id: number, focusTerminal?: boolean) => this.activate(id, focusTerminal !== false))
-    handle('close', (id: number) => this.close(id))
-    handle('reorder', (id: number, before: number | null) => {
-      this.layout.move(id, before)
-      this.render()
-    })
-    handle('rename', (id: number, label: string) => {
-      const tab = this.tab(id)
-      if (
-        !tab ||
-        typeof label !== 'string' ||
-        label.length > 120 ||
-        [...label].some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
-      )
-        return
-      tab.label = label.trim() || null
-      this.panel(null)
-    })
-    handle('panel', (value: WorkspacePanel) => {
-      if (
-        value === null ||
-        (typeof value === 'string' && ['sessions', 'switcher', 'settings'].includes(value)) ||
-        (value && typeof value === 'object' && this.has(value.rename))
-      )
-        this.panel(value)
-    })
-    handle('pair', (id: number) => {
-      this.layout.pair(id)
-      this.render()
-      this.focusTerminal()
-    })
-    handle('split', (direction: SplitDirection | null) => this.split(direction))
-    handle('ratio', (ratio: number) => {
-      if (this.layout.split && typeof ratio === 'number' && Number.isFinite(ratio)) {
-        this.layout.split.ratio = Math.max(0.2, Math.min(0.8, ratio))
-        this.render()
-      }
-    })
-    handle('context-menu', (id: number) => this.contextMenu(id))
-    handle('reload', (id: number) => this.reload(id))
-    handle('open-server', (value: string) => this.openServer(value))
-    handle('forget-server', (value: string) => this.forgetServer(value))
-    handle('open-recent', (id: unknown) => {
-      if (typeof id !== 'string') throw new Error('Choose a recent session.')
-      return this.host.openRecent(this, id)
-    })
-    handle('remove-recent', (id: unknown) => {
-      if (typeof id !== 'string') throw new Error('Choose a recent session.')
-      return this.host.removeRecent(id)
-    })
-    handle('clear-recent', () => this.host.clearRecent())
-    handle('preferences', (value: TerminalPreferences, shell: string) => {
-      if (!this.host.shells().some(profile => profile.id === shell)) throw new Error('Choose an available local shell.')
-      return this.setPreferences(value, shell)
-    })
-    handle('updates', checkUpdates)
-    handle('report-error', (message: string) => this.reportError(message))
-    handle('tab-geometry', (value: TabGeometry) => this.setGeometry(value))
-    handle('drag-start', (id: number) => this.host.dragStart(this, id))
-    handle('drag-end', (cancel: boolean) => this.host.dragEnd(this, cancel !== false))
-  }
+  ) {}
   invoke(event: IpcMainInvokeEvent, name: unknown, values: unknown[]) {
     const url = pathToFileURL(join(this.directory, 'workspace.html')).href
     if (
@@ -151,11 +67,86 @@ export class WorkspaceWindow {
       event.senderFrame.url !== url
     )
       throw new Error('This action is only available in the Outpost workspace.')
-    const action = typeof name === 'string' ? this.actions.get(name) : undefined
-    if (!action) throw new Error('Unknown workspace action.')
-    if (!['state', 'tab-geometry', 'drag-start', 'drag-end'].includes(name as string)) this.host.dragCancel(this)
-    return action(...values)
+    const command = workspaceCommand(name, values)
+    if (!keepsTabDrag(command.name)) this.host.dragCancel(this)
+    switch (command.name) {
+      case 'state':
+        return this.snapshot()
+      case 'newLocal':
+        return this.host.newLocal(this, command.args[0])
+      case 'shellMenu':
+        return this.shellMenu()
+      case 'activate':
+        return this.activate(command.args[0], command.args[1] !== false)
+      case 'close':
+        return this.close(command.args[0])
+      case 'reorder':
+        this.layout.move(...command.args)
+        return this.render()
+      case 'rename': {
+        const [id, label] = command.args
+        const tab = this.tab(id)
+        if (tab) {
+          tab.label = label.trim() || null
+          this.panel(null)
+        }
+        return
+      }
+      case 'panel': {
+        const value = command.args[0]
+        if (value === null || typeof value === 'string' || this.has(value.rename)) this.panel(value)
+        return
+      }
+      case 'pair':
+        this.layout.pair(command.args[0])
+        this.render()
+        return this.focusTerminal()
+      case 'split':
+        return this.split(command.args[0])
+      case 'ratio':
+        if (this.layout.split) {
+          this.layout.split.ratio = Math.max(0.2, Math.min(0.8, command.args[0]))
+          this.render()
+        }
+        return
+      case 'contextMenu':
+        return this.contextMenu(command.args[0])
+      case 'reload':
+        return this.reload(command.args[0])
+      case 'openServer':
+        return this.openServer(command.args[0])
+      case 'forgetServer':
+        return this.forgetServer(command.args[0])
+      case 'openRecent':
+        return this.host.openRecent(this, command.args[0])
+      case 'removeRecent':
+        return this.host.removeRecent(command.args[0])
+      case 'clearRecent':
+        return this.host.clearRecent()
+      case 'preferences': {
+        const [value, shell] = command.args
+        if (!this.host.shells().some(profile => profile.id === shell))
+          throw new Error('Choose an available local shell.')
+        return this.setPreferences(value, shell)
+      }
+      case 'checkUpdates':
+        return checkUpdates()
+      case 'reportError':
+        return this.reportError(command.args[0])
+      case 'tabGeometry':
+        if (command.args[0].tabs.every(tab => this.has(tab.id))) this.geometry = command.args[0]
+        return
+      case 'dragStart':
+        return this.host.dragStart(this, command.args[0])
+      case 'dragEnd':
+        return this.host.dragEnd(this, command.args[0])
+      default: {
+        const missing: never = command
+        throw new Error(`Unhandled workspace action: ${String(missing)}`)
+      }
+    }
   }
+
   get browserWindow() {
     return this.window
   }
@@ -585,6 +576,22 @@ export class WorkspaceWindow {
       delta === null ? defaultPreferences.fontSize : Math.max(10, Math.min(28, this.preferences.value.fontSize + delta))
     void this.setPreferences({ ...this.preferences.value, fontSize: size }).catch(() => {})
   }
+  private shellMenu() {
+    if (!this.window) return
+    Menu.buildFromTemplate(
+      this.host.shells().map(profile => ({
+        label: profile.name,
+        click: () => {
+          try {
+            this.host.newLocal(this, profile.id)
+          } catch (error) {
+            void this.reportError((error as Error).message)
+          }
+        },
+      })),
+    ).popup({ window: this.window })
+  }
+
   private contextMenu(id: number) {
     const tab = this.tab(id)
     if (!tab || !this.window) return
@@ -641,24 +648,6 @@ export class WorkspaceWindow {
     ]).popup({ window: this.window })
   }
 
-  private setGeometry(value: TabGeometry) {
-    const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 100_000
-    if (
-      !value ||
-      ![value.left, value.right, value.viewportRight].every(finite) ||
-      value.left < 0 ||
-      value.right <= value.left ||
-      value.viewportRight < value.left ||
-      value.viewportRight > value.right ||
-      !Array.isArray(value.tabs) ||
-      value.tabs.length > 32 ||
-      value.tabs.some(
-        tab => !tab || !this.has(tab.id) || !finite(tab.left) || !finite(tab.right) || tab.right < tab.left,
-      )
-    )
-      return
-    this.geometry = value
-  }
   dropAt(point: Point, dragged?: number): number | null | undefined {
     if (!this.window || !this.geometry) return undefined
     const bounds = this.window.getContentBounds()

@@ -1,36 +1,46 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { terminalService, terminalSize } from './terminalService'
 import { terminalTheme } from './terminalTheme'
 import type { Attributes, BufferState, CellLine, Checkpoint, CheckpointState } from './terminalState'
+import type { TerminalLike, XtermAttributes, XtermBuffer, XtermCore, XtermLink } from './xtermInternals'
 
 /** The only xterm-internal adapter in Outpost. Pinned to the 6.0 buffer layout
  * (headless 6.0.0 / our browser 6.0.1 patch). A schema bump is required when
  * upgrading that layout. We transfer cells, not replayed escape sequences:
  * restoring cannot ring bells, run clipboard commands or answer old queries.
  * Snapshot parts are bounded and share output ordering/backpressure. */
-interface TerminalLike {
-  cols: number
-  rows: number
-  reset(): void
-  resize(cols: number, rows: number): void
-  refresh?(start: number, end: number): void
-}
 type CapturedLine = Omit<CellLine, 'cells'> & { cells: Uint32Array }
 
-function core(terminal: TerminalLike): any {
-  const value = (terminal as any)._core
-  if (!value?._bufferService?.buffers || !value?._inputHandler?._curAttrData)
+function core(terminal: TerminalLike): XtermCore {
+  // This is the sole unchecked engine boundary; keep all private reads typed
+  // after verifying the services and methods on which checkpoint restoration relies.
+  const value = (terminal as TerminalLike & { _core?: XtermCore })._core
+  if (
+    !value?._bufferService?.buffers?.normal?.lines ||
+    !value._bufferService.buffers.alt?.lines ||
+    !value._inputHandler?._curAttrData?.extended ||
+    !value._inputHandler._parser ||
+    !value.coreService ||
+    !value.optionsService ||
+    !value.coreMouseService ||
+    typeof value._charsetService?.setgLevel !== 'function' ||
+    !(value._oscLinkService?._dataByLinkId instanceof Map) ||
+    !(value._oscLinkService._entriesWithId instanceof Map) ||
+    typeof value._oscLinkService._removeMarkerFromLink !== 'function' ||
+    typeof value._bufferService.buffers.normal.getBlankLine !== 'function' ||
+    typeof value._bufferService._onScroll?.fire !== 'function' ||
+    (value._themeService && typeof value._handleColorEvent !== 'function')
+  )
     throw new Error('Unsupported xterm checkpoint engine')
   return value
 }
 
-const attributes = (value: any): Attributes => ({
+const attributes = (value: XtermAttributes): Attributes => ({
   fg: value.fg,
   bg: value.bg,
   ext: value.extended._ext,
   url: value.extended.urlId,
 })
-function restoreAttributes(target: any, source: Attributes) {
+function restoreAttributes(target: XtermAttributes, source: Attributes) {
   target.fg = source.fg
   target.bg = source.bg
   target.extended = target.extended.clone()
@@ -46,7 +56,7 @@ function encode(data: Uint32Array): string {
   return btoa(text)
 }
 
-const bufferState = (buffer: any): BufferState => ({
+const bufferState = (buffer: XtermBuffer): BufferState => ({
   x: buffer.x,
   y: buffer.y,
   ybase: buffer.ybase,
@@ -90,7 +100,7 @@ export function checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
       titleStack: input._windowTitleStack,
       iconStack: input._iconNameStack,
       join: input._parser.precedingJoinState,
-      links: [...c._oscLinkService._dataByLinkId].map(([id, entry]: any) => [id, entry.data]),
+      links: [...c._oscLinkService._dataByLinkId].map(([id, entry]) => [id, entry.data]),
       nextLink: c._oscLinkService._nextId,
       colors: c.outpostColors ?? {},
     }),
@@ -121,7 +131,7 @@ export function checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
         combined: { ...line._combined },
         extended: Object.entries(line._extendedAttrs)
           .filter(([col, attr]) => attr && Number(col) < terminal.cols)
-          .map(([col, attr]: any) => [Number(col), attr._ext, attr.urlId]),
+          .map(([col, attr]) => [Number(col), attr._ext, attr.urlId]),
       })
     }
     captured.push({ name, lines })
@@ -243,14 +253,19 @@ export class CheckpointReader {
     links._entriesWithId.clear()
     links._nextId = state.nextLink
     for (const [id, data] of state.links) {
-      const entry: any = { id, data, lines: [], ...(data.id !== undefined ? { key: `${data.id};;${data.uri}` } : {}) }
+      const entry: XtermLink = {
+        id,
+        data,
+        lines: [],
+        ...(data.id !== undefined ? { key: `${data.id};;${data.uri}` } : {}),
+      }
       links._dataByLinkId.set(id, entry)
       if (entry.key) links._entriesWithId.set(entry.key, entry)
     }
-    for (const name of ['normal', 'alt']) {
+    for (const name of ['normal', 'alt'] as const) {
       const buffer = buffers[name]
       for (let row = 0; row < buffer.lines.length; row++) {
-        const ids = new Set(Object.values(buffer.lines.get(row)._extendedAttrs).map((attr: any) => attr?.urlId))
+        const ids = new Set(Object.values(buffer.lines.get(row)._extendedAttrs).map(attr => attr?.urlId))
         for (const id of ids) {
           const entry = links._dataByLinkId.get(id)
           if (!entry) continue
@@ -280,14 +295,18 @@ export function remoteTerminalReplies(terminal: TerminalLike) {
 /** Headless has synchronous handlers only. Processing in the PTY callback
  * bounds the parser queue and makes checkpoints and resizes atomic. */
 export function writeHeadless(terminal: TerminalLike, text: string) {
-  core(terminal).writeSync(text)
+  const engine = core(terminal)
+  if (typeof engine.writeSync !== 'function') throw new Error('Unsupported headless xterm engine')
+  engine.writeSync(text)
 }
 
 /** The public fit addon uses cached cell metrics. Re-measure after visibility,
  * font loading or display changes without resizing/mutating either buffer. Keep
  * this browser-only private API alongside the other pinned xterm internals. */
 export function refreshTerminalMetrics(terminal: TerminalLike) {
-  core(terminal)._charSizeService?.measure()
+  const metrics = core(terminal)._charSizeService
+  if (typeof metrics?.measure !== 'function') throw new Error('Unsupported browser xterm engine')
+  metrics.measure()
 }
 
 /** Headless xterm emits color requests but has no browser theme service. Keep
@@ -323,15 +342,16 @@ export function headlessColors(terminal: TerminalLike, reply: (data: string) => 
   c._inputHandler.onRequestReset(() => {
     c.outpostColors = {}
   })
-  return c._inputHandler.onColor((requests: any[]) => {
+  return c._inputHandler.onColor(requests => {
+    const colors = (c.outpostColors ??= {})
     for (const request of requests) {
-      if (request.type === 1) c.outpostColors[request.index] = request.color
+      if (request.type === 1) colors[request.index] = request.color
       else if (request.type === 2) {
         if (request.index === undefined) {
-          for (let index = 0; index < 256; index++) delete c.outpostColors[index]
-        } else delete c.outpostColors[request.index]
+          for (let index = 0; index < 256; index++) delete colors[index]
+        } else delete colors[request.index]
       } else {
-        const color: number[] = c.outpostColors[request.index] ?? defaults[request.index]
+        const color: number[] = colors[request.index] ?? defaults[request.index]
         const identifier = request.index < 256 ? `4;${request.index}` : String(request.index - 246)
         reply(
           `\x1b]${identifier};rgb:${color.map(channel => channel.toString(16).padStart(2, '0').repeat(2)).join('/')}\x1b\\`,

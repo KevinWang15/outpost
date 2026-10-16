@@ -69,5 +69,10 @@ export interface WorkspaceBridge {
   reportError(message: string): Promise<void>
 }
 
+export type WorkspaceCommands = Omit<WorkspaceBridge, 'onState'>
+export type WorkspaceCommand = {
+  [Name in keyof WorkspaceCommands]: { name: Name; args: Parameters<WorkspaceCommands[Name]> }
+}[keyof WorkspaceCommands]
+
 export const tabBarHeight = 36
 export const splitGap = 8

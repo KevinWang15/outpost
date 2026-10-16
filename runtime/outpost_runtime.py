@@ -786,5 +786,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except terminal.TerminalUnavailable as error:
+        fail(str(error), 409)
     except Exception as error:
         fail(str(error), 500)

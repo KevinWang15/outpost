@@ -10,7 +10,7 @@ import type { Checkpoint } from './terminalState'
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 9
+export const protocolVersion = 10
 export const maxInputMessage = 64 * 1024
 
 export type ClientMessage =
@@ -23,7 +23,8 @@ export type ClientMessage =
   | { type: 'send'; id: string; data: string }
   | { type: 'paste-image'; id: string; mediaType: ImageMediaType; data: string }
 
-export type CloseReason = 'ended' | 'expired' | 'outdated' | 'error'
+// Only `error` is transient. Other reasons require an explicit user action.
+export type CloseReason = 'ended' | 'expired' | 'outdated' | 'unavailable' | 'error'
 export interface SignalMessage {
   type: string
   payload: unknown

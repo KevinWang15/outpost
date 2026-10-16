@@ -17,6 +17,10 @@ MAX_ROWS = 200
 EXECUTABLE = Path.home() / '.outpost' / 'bin' / 'outpost-terminal'
 
 
+class TerminalUnavailable(ValueError):
+    """A dependency or service configuration needs an explicit user action."""
+
+
 def child_command(arguments):
     """Claim the inherited PTY in the child, then replace the bootstrap with the CLI.
 
@@ -38,7 +42,7 @@ os.execvpe(sys.argv[1], sys.argv[1:], os.environ)
 
 def command():
     if not os.access(EXECUTABLE, os.X_OK):
-        raise ValueError('Outpost Terminal is missing. Open Required Software to install it.')
+        raise TerminalUnavailable('Outpost Terminal is missing. Open Required Software to install it.')
     return str(EXECUTABLE)
 
 

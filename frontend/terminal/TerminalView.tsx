@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import {
   Bell,
@@ -30,6 +28,7 @@ import { readImage } from '../api'
 import { attachBell } from './bell'
 import { TerminalActivity } from './activity'
 import { openBrowserTab } from './browser'
+import { attachTerminalLinks } from './links'
 import { attachClipboard, imageProblem, screenText } from './clipboard'
 import Composer from './Composer'
 import KeyBar from './KeyBar'
@@ -47,6 +46,7 @@ import type { TerminalConnection, TerminalState } from './connection'
 import { desktop } from '../desktop'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
 import { TerminalRenderer } from './rendering'
+import { TerminalGeometry } from './geometry'
 import { terminalService } from '../../shared/terminalService'
 import { terminalTheme as theme } from '../../shared/terminalTheme'
 
@@ -195,20 +195,12 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
       rightClickSelectsWord: false,
       logLevel: 'off',
     })
-    const fit = new FitAddon()
     let disposed = false
     const rendering = new TerminalRenderer(term, message => client.fail(message), Boolean(local))
-    term.loadAddon(fit)
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
-    term.loadAddon(
-      new WebLinksAddon((_event, uri) => {
-        void openBrowserTab(uri).then(opened => {
-          if (!opened) setBlockedLink(uri)
-        })
-      }),
-    )
     term.open(surface.current!)
+    const stopLinks = attachTerminalLinks(term, setBlockedLink)
     const stopSearch = attachSearch(term, container.current!)
     // Both clients use GPU rendering where available. Losing the GPU context
     // restores xterm's DOM renderer without losing the session or its buffer.
@@ -238,13 +230,8 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
       message => notify(message, true),
     )
     bell.current = bells
-    const size = () => {
-      const proposed = surface.current?.clientWidth ? fit.proposeDimensions() : undefined
-      return {
-        cols: Math.max(20, Math.min(terminalService.maxCols, proposed?.cols ?? 80)),
-        rows: Math.max(5, Math.min(terminalService.maxRows, proposed?.rows ?? 24)),
-      }
-    }
+    const geometry = new TerminalGeometry(term, surface.current!, (cols, rows) => client.resize(cols, rows))
+    const size = geometry.size
     const focusInput = () => {
       const active = document.activeElement
       // Native activation and reconnects must preserve focus in local controls.
@@ -302,7 +289,11 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
     const activityController = new TerminalActivity(client, setActivity, message => notify(message, true))
     const active = () =>
       desktop ? host.current.focused : document.visibilityState === 'visible' && document.hasFocus()
-    const activityFocus = () => activityController.setActive(active())
+    const activityFocus = () => {
+      const focused = active()
+      activityController.setActive(focused)
+      client.setActive?.(focused)
+    }
     const acknowledgeActivity = () => {
       activityFocus()
       activityController.acknowledge()
@@ -346,18 +337,6 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
       }
       return true
     })
-    let fitFrame = 0
-    const refit = () => {
-      // Coalesce within a frame without waiting for a resize drag/key repeat to stop.
-      if (fitFrame) return
-      fitFrame = requestAnimationFrame(() => {
-        fitFrame = 0
-        const { cols, rows } = size()
-        client.resize(cols, rows)
-      })
-    }
-    const observer = new ResizeObserver(refit)
-    observer.observe(surface.current!)
     const resume = () => {
       if (document.visibilityState === 'visible') client.resume?.()
     }
@@ -368,6 +347,7 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
     term.resize(initial.cols, initial.rows)
     const stopCommands = desktop?.onCommand(command => {
       if (command === 'focus') {
+        geometry.refresh(true)
         focusInput()
         if (active()) {
           bells.acknowledge()
@@ -388,9 +368,10 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
       activityFocus()
       if (term.options.fontSize !== next.fontSize) {
         term.options.fontSize = next.fontSize
-        refit()
+        geometry.refresh(true)
       }
       if (focused) {
+        geometry.refresh(true)
         bells.acknowledge()
         // Native focus commands own activation. A delayed host-state update
         // must not steal focus from the tab strip during a click or drag.
@@ -416,8 +397,7 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
       })
     return () => {
       clearTimeout(start)
-      cancelAnimationFrame(fitFrame)
-      observer.disconnect()
+      geometry.dispose()
       window.removeEventListener('pageshow', resume)
       window.removeEventListener('online', resume)
       document.removeEventListener('visibilitychange', resume)
@@ -438,6 +418,7 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
       stopLaunches?.()
       stopTitle?.dispose()
       stopSearch()
+      stopLinks()
       term.dispose()
       socket.current = null
       terminal.current = null

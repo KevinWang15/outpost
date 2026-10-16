@@ -16,6 +16,7 @@ export interface TerminalConnection {
   fail(message: string): void
   input(data: string | Uint8Array<ArrayBuffer>): boolean
   resize(cols: number, rows: number): void
+  setActive?(active: boolean): void
   submit(data: string): Promise<void>
   pasteImage(data: string, mediaType: ImageMediaType): Promise<string>
   resume?(): void

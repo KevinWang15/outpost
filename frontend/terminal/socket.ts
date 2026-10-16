@@ -24,6 +24,7 @@ export class TerminalSocket implements TerminalConnection {
   private stopped = false
   private ready = false
   private requestedSize: { cols: number; rows: number } | null = null
+  private active = false
   private closedReason: CloseReason | null = null
   private openedAt = 0
   private probing: WebSocket | null = null
@@ -109,6 +110,7 @@ export class TerminalSocket implements TerminalConnection {
           this.handlers.state({ kind: 'connected' })
           const { cols, rows } = this.size()
           this.resize(cols, rows)
+          this.send({ type: 'focus', active: this.active })
         })
       } else if (message.type === 'activity') {
         this.handlers.activity(message.activity)
@@ -220,6 +222,16 @@ export class TerminalSocket implements TerminalConnection {
     // still be in flight when the user resizes back to an earlier dimension.
     this.requestedSize = { cols, rows }
     this.send({ type: 'resize', cols, rows })
+  }
+
+  setActive(active: boolean) {
+    if (this.active === active) return
+    this.active = active
+    if (!this.connected) return
+    // Store this viewer's latest size before claiming control of the PTY.
+    const { cols, rows } = this.size()
+    this.resize(cols, rows)
+    this.send({ type: 'focus', active })
   }
 
   private request(message: ClientMessage & { id: string }, timeout = 60_000) {

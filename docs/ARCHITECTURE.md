@@ -226,10 +226,13 @@ Shared CSS hides only xterm's empty legacy `.xterm-viewport` scrollbar; its acti
 pauses the service or changes the harness's terminal mode.
 
 `viewport.ts` follows the visual viewport's size and offset using coalesced
-animation frames. The terminal's existing ResizeObserver fits xterm after the
-container changes, including keyboard open/close and rotation. Resize requests
-are coalesced per animation frame, including during continuous window dragging
-and font-size key repeat. The socket deduplicates the last requested dimensions,
+animation frames. `terminal/geometry.ts` observes the container and xterm screen,
+including keyboard open/close, rotation, cell-metric changes and renderer fallback.
+Display-scaling changes, font loading and tab activation also remeasure and
+refresh the screen. Hidden views retain their last valid dimensions. Resize
+requests are coalesced per animation frame, including during continuous window
+dragging and font-size key repeat. Only ordered geometry from the connection
+resizes the buffer; measuring never races live output. The socket deduplicates the last requested dimensions,
 not the last rendered dimensions, so an in-flight acknowledgement cannot swallow
 a resize back to the original size. Readiness sends the latest dimensions after
 checkpoint restoration. During pinch
@@ -287,6 +290,18 @@ Terminal parsing and broker flow control do not depend on the renderer. Output
 acknowledgements are batched at 64 KiB or 20 ms, at most every 10 ms, after
 xterm's write callback;
 callbacks from an old connection cannot acknowledge a new socket's output.
+Adjacent output awaiting a write is combined in batches up to 128 KiB, without
+crossing checkpoint, geometry or readiness barriers. This avoids scheduling an
+xterm write for each tiny network frame during a burst. A single larger source
+frame remains intact; xterm's parser still yields according to its own budget.
+
+`terminal/links.ts` owns OSC 8 hyperlinks and detected HTTP(S) URLs for both
+clients. OSC 8 activation confirms the actual destination before invoking the
+shared browser opener; cancellation invokes no opener and creates no retry notice.
+When application mouse reporting is active, a link's press and drag stay local
+instead of also reaching the harness and triggering an independent browser request.
+Local text selection and Shift/Option selection gestures retain xterm's normal
+behavior. Confirmed desktop links use the native bridge, not xterm's default popup.
 
 ### Terminal protocol (client ⇄ broker, WebSocket)
 
@@ -296,6 +311,7 @@ JSON control messages (`shared/protocol.ts`):
 | Direction | Message | Meaning |
 | --- | --- | --- |
 | → server | `resize {cols, rows}` | Client geometry |
+| → server | `focus {active}` | Whether this viewer is active; the latest active viewer controls PTY dimensions |
 | → server | `ack {bytes}` | Output rendered; flow control |
 | → server | `ping {id}` | Check a resumed browser's socket without sending terminal input |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
@@ -311,7 +327,9 @@ JSON control messages (`shared/protocol.ts`):
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `error` |
 
-The server pauses the transport when more than 1 MiB is unacknowledged.
+The server pauses the transport when more than 256 KiB is unacknowledged and
+resumes below 128 KiB. Acknowledgements mean xterm has parsed the bytes; painting
+is independently scheduled by xterm's renderer.
 
 **Current contracts.** Both clients send `protocolVersion` from `shared/protocol.ts`.
 A mismatch returns `outdated` before redeeming the launch ticket and asks the
@@ -347,7 +365,7 @@ session, missing terminal service), its `OUTPOST_RESULT` error becomes the clien
 | --- | --- | --- |
 | `I` | broker → relay | Input bytes for the persistent PTY |
 | `O` | relay → broker | Live PTY output |
-| `C` | both | JSON control: `resize`, `send`, `paste-image`, `acknowledge`, `signal-result` / `restore`, `geometry`, `ready`, `activity`, `result`, `signal`, `exit` |
+| `C` | both | JSON control: `resize`, `focus`, `send`, `paste-image`, `acknowledge`, `signal-result` / `restore`, `geometry`, `ready`, `activity`, `result`, `signal`, `exit` |
 
 Framing separates terminal bytes from control messages. The relay connects to
 `~/.outpost/terminals/<id>.sock` and forwards complete frames, adding activity
@@ -386,8 +404,16 @@ Changes to xterm's internal buffer layout require coordinated headless/renderer
 updates and a checkpoint protocol bump. This coupling is intentional; separate
 terminal parsers would otherwise disagree about screen state.
 
-Snapshot parts are generated synchronously between PTY callbacks, followed by
-live output. The browser applies checkpoints, geometry and bytes through one
+Snapshot capture copies owned cells and metadata synchronously between PTY
+callbacks. Checkpoint schema 2 encodes each row's repeated final cell once,
+preserving its character and style as well as combined characters and links.
+`terminal-service/attachment.ts` encodes and streams this immutable snapshot in
+4 ms slices, honoring socket backpressure. The live PTY keeps running; each
+restoring attachment queues subsequent output and geometry in order. Readiness
+follows the complete snapshot, enabling input (including Ctrl+C) while queued
+output catches up. Catch-up and live socket buffers are each limited
+to 8 MiB; a viewer that stops reading a blocked snapshot for 30 seconds is disconnected.
+The browser applies checkpoints, geometry and bytes through one
 ordered render queue and acknowledges both snapshots and live output. Its
 buffer is replaced on reconnect instead of appending duplicate history.
 `frontend/terminal/rendering.ts` owns that queue, the restoration lifecycle and
@@ -399,9 +425,20 @@ configures xterm to leave generated terminal replies to the headless service.
 
 The service always processes PTY output, including with no clients attached;
 a client with an excessive output backlog is disconnected and can resynchronize.
-It cannot freeze the harness through transport backpressure. Only the newest
-attached client controls dimensions; all viewers receive the same geometry
-before subsequent output. Input from attached clients is ordered into one PTY.
+It cannot freeze the harness through transport backpressure. Each viewer retains
+its requested dimensions. The latest activated viewer controls PTY dimensions;
+loading a second viewer does not steal control. When the controller becomes
+inactive, another active viewer takes over; when it disconnects, the most recent
+active (or remaining) viewer takes over at its own remembered size. With no
+active viewer, the current controller keeps its dimensions. All viewers receive
+the same geometry before subsequent output. Input from attached clients is
+ordered into one PTY. Focus messages express UI activation separately from
+application-generated terminal focus escape sequences.
+
+This contract requires terminal service 1.1.0 / protocol 2 and client protocol 9.
+Publish the matching helper before deploying the server. Existing service
+processes need to be restarted explicitly after installing the new dependency;
+replacing the executable does not alter a running PTY service.
 
 The headless engine alone answers terminal queries, even when disconnected.
 The browser forwards user input, mouse and focus events, suppressing duplicate

@@ -335,6 +335,7 @@ class Connection:
                     for line in part['lines']:
                         data = base64.b64decode(line['cells'])
                         cells = struct.unpack('<' + 'I' * (len(data) // 4), data)
+                        cells += cells[-3:] * line['repeat']
                         text = ''
                         for column in range(len(cells) // 3):
                             value = cells[column * 3]

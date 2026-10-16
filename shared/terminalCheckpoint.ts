@@ -15,6 +15,7 @@ interface TerminalLike {
   resize(cols: number, rows: number): void
   refresh?(start: number, end: number): void
 }
+type CapturedLine = Omit<CellLine, 'cells'> & { cells: Uint32Array }
 
 function core(terminal: TerminalLike): any {
   const value = (terminal as any)._core
@@ -58,19 +59,19 @@ const bufferState = (buffer: any): BufferState => ({
   savedAttributes: attributes(buffer.savedCurAttrData),
 })
 
-/** Consume synchronously after the headless write callback: no live output or
- * resize may interleave with this checkpoint. No unbounded raw journal exists. */
-export function* checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
+/** Capture owned cells and metadata atomically. Encoding and transport can then
+ * yield between parts while the live PTY continues changing its own buffers. */
+export function checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
   const c = core(terminal),
     buffers = c._bufferService.buffers,
     input = c._inputHandler
   if (input._parser.currentState !== 0) throw new Error('Checkpoint requires a complete terminal sequence')
-  yield {
+  const begin: Checkpoint = {
     part: 'begin',
-    version: 1,
+    version: 2,
     cols: terminal.cols,
     rows: terminal.rows,
-    state: {
+    state: structuredClone({
       active: buffers.active === buffers.alt ? 'alt' : 'normal',
       normal: bufferState(buffers.normal),
       alt: bufferState(buffers.alt),
@@ -92,27 +93,55 @@ export function* checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
       links: [...c._oscLinkService._dataByLinkId].map(([id, entry]: any) => [id, entry.data]),
       nextLink: c._oscLinkService._nextId,
       colors: c.outpostColors ?? {},
-    },
+    }),
   }
+  const captured: { name: 'normal' | 'alt'; lines: CapturedLine[] }[] = []
   for (const name of ['normal', 'alt'] as const) {
     const buffer = buffers[name]
-    for (let first = 0; first < buffer.lines.length; first += 8) {
-      const lines: CellLine[] = []
-      for (let index = first; index < Math.min(first + 8, buffer.lines.length); index++) {
-        const line = buffer.lines.get(index)
-        lines.push({
-          cells: encode(line._data.subarray(0, terminal.cols * 3)),
-          wrapped: line.isWrapped,
-          combined: line._combined,
-          extended: Object.entries(line._extendedAttrs)
-            .filter(([, attr]) => attr)
-            .map(([col, attr]: any) => [Number(col), attr._ext, attr.urlId]),
-        })
+    const lines: CapturedLine[] = []
+    for (let index = 0; index < buffer.lines.length; index++) {
+      const line = buffer.lines.get(index)
+      // Most history rows end in many identical blank cells. Preserve the exact
+      // final cell (including its style), storing that run only once.
+      let columns = terminal.cols
+      while (columns > 1) {
+        const end = (columns - 1) * 3
+        if (
+          line._data[end] !== line._data[end - 3] ||
+          line._data[end + 1] !== line._data[end - 2] ||
+          line._data[end + 2] !== line._data[end - 1]
+        )
+          break
+        columns--
       }
-      yield { part: 'lines', buffer: name, first, lines }
+      lines.push({
+        cells: line._data.slice(0, columns * 3),
+        repeat: terminal.cols - columns,
+        wrapped: line.isWrapped,
+        combined: { ...line._combined },
+        extended: Object.entries(line._extendedAttrs)
+          .filter(([col, attr]) => attr && Number(col) < terminal.cols)
+          .map(([col, attr]: any) => [Number(col), attr._ext, attr.urlId]),
+      })
     }
+    captured.push({ name, lines })
   }
-  yield { part: 'end' }
+  return parts()
+
+  function* parts(): Generator<Checkpoint> {
+    yield begin
+    for (const { name, lines } of captured) {
+      for (let first = 0; first < lines.length; first += 8) {
+        yield {
+          part: 'lines',
+          buffer: name,
+          first,
+          lines: lines.slice(first, first + 8).map(line => ({ ...line, cells: encode(line.cells) })),
+        }
+      }
+    }
+    yield { part: 'end' }
+  }
 }
 
 export class CheckpointReader {
@@ -122,7 +151,7 @@ export class CheckpointReader {
   accept(part: Checkpoint) {
     const terminal = this.terminal
     if (part.part === 'begin') {
-      if (part.version !== 1 || !terminalSize(part.cols, part.rows)) throw new Error('Unsupported terminal checkpoint')
+      if (part.version !== 2 || !terminalSize(part.cols, part.rows)) throw new Error('Unsupported terminal checkpoint')
       terminal.reset()
       terminal.resize(part.cols, part.rows)
       const c = core(terminal)
@@ -143,9 +172,24 @@ export class CheckpointReader {
         throw new Error('Invalid checkpoint length')
       for (const data of part.lines) {
         const bytes = Uint8Array.from(atob(data.cells), char => char.charCodeAt(0))
-        if (bytes.length !== terminal.cols * 12) throw new Error('Invalid checkpoint cells')
+        const columns = bytes.length / 12
+        if (
+          !Number.isInteger(columns) ||
+          columns < 1 ||
+          columns > terminal.cols ||
+          !Number.isInteger(data.repeat) ||
+          data.repeat !== terminal.cols - columns
+        )
+          throw new Error('Invalid checkpoint cells')
         const line = buffer.getBlankLine(input._curAttrData, data.wrapped)
-        line._data.set(new Uint32Array(bytes.buffer))
+        const cells = new Uint32Array(bytes.buffer)
+        line._data.set(cells)
+        const last = (columns - 1) * 3
+        for (let column = columns; column < terminal.cols; column++) {
+          line._data[column * 3] = cells[last]
+          line._data[column * 3 + 1] = cells[last + 1]
+          line._data[column * 3 + 2] = cells[last + 2]
+        }
         line._combined = { ...data.combined }
         for (const [column, ext, url] of data.extended) {
           if (!Number.isInteger(column) || column < 0 || column >= terminal.cols)
@@ -237,6 +281,13 @@ export function remoteTerminalReplies(terminal: TerminalLike) {
  * bounds the parser queue and makes checkpoints and resizes atomic. */
 export function writeHeadless(terminal: TerminalLike, text: string) {
   core(terminal).writeSync(text)
+}
+
+/** The public fit addon uses cached cell metrics. Re-measure after visibility,
+ * font loading or display changes without resizing/mutating either buffer. Keep
+ * this browser-only private API alongside the other pinned xterm internals. */
+export function refreshTerminalMetrics(terminal: TerminalLike) {
+  core(terminal)._charSizeService?.measure()
 }
 
 /** Headless xterm emits color requests but has no browser theme service. Keep

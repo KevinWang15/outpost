@@ -10,8 +10,8 @@ from pathlib import Path
 
 from outpost_frames import HEADER, control, header
 
-PROTOCOL = 1
-VERSION = '1.0.1'
+PROTOCOL = 2
+VERSION = '1.1.0'
 MAX_COLS = 400
 MAX_ROWS = 200
 EXECUTABLE = Path.home() / '.outpost' / 'bin' / 'outpost-terminal'
@@ -74,12 +74,12 @@ def request(path, message):
 
 
 def status(path):
+    # Inspection and termination do not consume the screen protocol. Keep them
+    # available when a running service needs an explicit restart after upgrade.
     try:
         result = request(path, {'type': 'status'})
     except OSError as error:
         if error.errno in (errno.ENOENT, errno.ECONNREFUSED):
             return None
         raise
-    if result.get('protocol') != PROTOCOL:
-        raise ValueError('Incompatible terminal service. Stop the session and install the current dependency.')
     return result

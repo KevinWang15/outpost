@@ -1,19 +1,20 @@
-# Outpost Desktop 0.6.0 preview
+# Outpost Desktop 0.6.1 preview
 
-Return to recent Outpost sessions directly from the app.
+Smoother terminal output, more reliable sizing, and consistent link confirmation.
 
 ## What's new
 
-- **Ten recent sessions:** click the Outpost logo to find your most recently connected remote sessions, remembered across app restarts. Local terminals are not included.
-- **Quick reconnect:** click an entry, or select it with the arrow keys and press Enter. If the session is already open, Outpost switches to its existing tab and window.
-- **Manage the list:** remove individual entries or clear the list without closing running sessions. Forgetting a server also removes its recent sessions and saved reconnect credentials.
-- **Existing authentication:** reconnect credentials last 30 days and are refreshed after a successful reconnect. Hosted login expiry and logout still apply. Expired entries show a connection error; use **Connect → Outpost Desktop** in your server for a fresh connection.
+- **Responsive output:** adjacent terminal writes are batched, and output buffering is bounded so a slow viewer does not stop the remote session.
+- **Reliable screen dimensions:** terminal geometry is refreshed after font, display scale, visibility, and focus changes. The active viewer controls the remote screen size when several clients share a session.
+- **Smoother reconnection:** compact history snapshots stream in short batches while the remote process keeps running.
+- **Link confirmation:** cancelling an embedded hyperlink's confirmation prevents it from opening. Link clicks are handled once, without also sending the click to the terminal application.
+- **Local shell tabs:** session activity badges are hidden for local shells.
 
-Recent-session metadata and reconnect credentials are saved as plain JSON in `recent-sessions.json` in the app's user-data directory. Account passwords, login cookies, terminal contents, and drafts are not saved.
+The Outpost home tab still remembers ten recent remote sessions. Reconnect credentials last 30 days and refresh after a successful reconnect; expired entries require a fresh **Connect → Outpost Desktop** from the server.
 
 Up to 32 tabs across 16 windows can stay open. Closing a local terminal ends its shell; local shells and history do not survive quitting the app. Closing or upgrading the app leaves remote sessions running.
 
-**Update both app and server:** this release uses desktop bridge version 6. Install Desktop 0.6.0 and update your Outpost server together. The Linux terminal executable is unchanged, and remote sessions do not need to be restarted. Connect your sessions once after updating to populate the recent list.
+**Update app, server, and terminal helper together:** this release requires Outpost Terminal 1.1.0 (terminal service protocol 2) and the matching Outpost server. On each target, use **Required Software → Outpost Terminal → Install**. Existing remote terminal services keep running with their original protocol; finish or save their work, then explicitly **Terminate** and **Connect** those sessions to use the new helper. Installing the helper or updating the app does not restart them automatically.
 
 ## Install
 

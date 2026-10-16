@@ -12,7 +12,7 @@ import { protocolResult } from '../process'
 import { imageData, type SessionService, type TargetContext } from '../sessions'
 import type { ConnectTokens, Grant } from './tokens'
 
-const highWater = 1024 * 1024
+const highWater = 256 * 1024
 const closedMessages: Record<'ended' | 'expired', string> = {
   ended: 'The coding tool exited. Connect again to start it in the same conversation.',
   expired: 'This connection expired. Click Connect in Outpost to open a new terminal.',
@@ -244,6 +244,9 @@ class Connection {
         if (terminalSize(message.cols, message.rows)) {
           this.relay({ type: 'resize', cols: message.cols, rows: message.rows })
         }
+        return
+      case 'focus':
+        if (typeof message.active === 'boolean') this.relay({ type: 'focus', active: message.active })
         return
       case 'ack':
         if (Number.isSafeInteger(message.bytes) && message.bytes >= 0) {

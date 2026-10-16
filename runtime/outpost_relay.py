@@ -163,7 +163,7 @@ class Relay:
             raise ValueError('Unknown relay frame')
         message = json.loads(payload)
         action = message.get('type')
-        if action in ('resize', 'send'):
+        if action in ('resize', 'focus', 'send'):
             if action == 'send':
                 self.observed(message['data'].encode())
             self.incoming += control(message)

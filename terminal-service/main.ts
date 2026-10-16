@@ -6,6 +6,7 @@ import { checkpoint, headlessColors, writeHeadless } from '../shared/terminalChe
 import { terminalService, terminalSize } from '../shared/terminalService'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { Sequences } from './sequences'
+import { TerminalAttachment } from './attachment'
 
 interface Launch {
   socket: string
@@ -14,6 +15,12 @@ interface Launch {
   env: Record<string, string>
   cols: number
   rows: number
+}
+interface Viewer {
+  attachment: TerminalAttachment
+  cols: number
+  rows: number
+  active: boolean
 }
 
 async function serve() {
@@ -38,7 +45,7 @@ async function serve() {
   term.loadAddon(new Unicode11Addon())
   term.unicode.activeVersion = '11'
   const sequences = new Sequences()
-  const clients = new Set<Socket>()
+  const clients = new Map<Socket, Viewer>()
   const sockets = new Set<Socket>()
   let controller: Socket | undefined
   let ended = false
@@ -46,14 +53,11 @@ async function serve() {
   let listening = false
   const send = (socket: Socket, packet: Buffer) => {
     if (socket.destroyed) return
-    // Snapshot data is bounded by screen geometry + history. A slow client is
-    // disconnected rather than stopping the PTY; it can restore a fresh snapshot.
-    if (socket.writableLength > 96 * 1024 * 1024) return socket.destroy()
     socket.write(packet)
   }
   const sendControl = (socket: Socket, message: object) => send(socket, terminalControl(message))
   const broadcast = (packet: Buffer) => {
-    for (const client of clients) send(client, packet)
+    for (const client of clients.values()) client.attachment.output(packet)
   }
   const pty = new Bun.Terminal({
     cols: launch.cols,
@@ -82,6 +86,12 @@ async function serve() {
     broadcast(terminalControl({ type: 'geometry', cols, rows }))
     pty.resize(cols, rows)
   }
+  const control = (socket: Socket | undefined) => {
+    controller = socket
+    const client = socket && clients.get(socket)
+    if (client && !ended) resize(client.cols, client.rows)
+  }
+  const activeViewer = () => [...clients].reverse().find(([, client]) => client.active)?.[0]
   const server = createServer(socket => {
     sockets.add(socket)
     socket.setTimeout(10_000, () => socket.destroy())
@@ -89,7 +99,7 @@ async function serve() {
     socket.on('close', () => {
       sockets.delete(socket)
       clients.delete(socket)
-      if (controller === socket) controller = [...clients].at(-1)
+      if (controller === socket) control(activeViewer() ?? [...clients.keys()].at(-1))
     })
     const decoder = new FrameDecoder()
     let attached = false
@@ -115,17 +125,40 @@ async function serve() {
           } else if (message.type === 'attach' && !attached) {
             if (message.protocol !== terminalService.protocol)
               throw new Error('Terminal service protocol mismatch; install the current dependency')
-            resize(message.cols, message.rows)
-            // Everything below is synchronous. The next PTY callback is strictly
-            // after this checkpoint, so no output can be omitted or duplicated.
-            for (const part of checkpoint(term)) sendControl(socket, { type: 'restore', checkpoint: part })
+            if (!terminalSize(message.cols, message.rows)) throw new Error('Invalid terminal size')
+            // A newly loading/hidden viewer must not resize an existing viewer.
+            // It takes control only when the UI reports activation after ready.
+            if (!controller) resize(message.cols, message.rows)
+            const parts = checkpoint(term)
+            const attachment = new TerminalAttachment(socket)
+            clients.set(socket, { attachment, cols: message.cols, rows: message.rows, active: false })
             attached = true
-            clients.add(socket)
-            controller = socket
+            controller ??= socket
             socket.setTimeout(0)
-            sendControl(socket, { type: 'ready' })
+            // The capture above is atomic; subsequent bytes/geometry queue in
+            // this attachment while encoding and transport yield to the PTY.
+            void attachment.restore(parts).catch(error => {
+              if (!socket.destroyed) {
+                sendControl(socket, { type: 'error', message: (error as Error).message })
+                socket.destroy()
+              }
+            })
           } else if (message.type === 'resize' && attached) {
+            if (!terminalSize(message.cols, message.rows)) throw new Error('Invalid terminal size')
+            const client = clients.get(socket)!
+            client.cols = message.cols
+            client.rows = message.rows
             if (controller === socket) resize(message.cols, message.rows)
+          } else if (message.type === 'focus' && attached) {
+            if (typeof message.active !== 'boolean') throw new Error('Invalid terminal focus')
+            const client = clients.get(socket)!
+            client.active = message.active
+            // Insertion order records activation recency as well as attachment.
+            if (client.active) {
+              clients.delete(socket)
+              clients.set(socket, client)
+              control(socket)
+            } else if (controller === socket) control(activeViewer() ?? socket)
           } else if ((message.type === 'send' && attached) || message.type === 'paste') {
             if (typeof message.data !== 'string' || Buffer.byteLength(message.data) > 64 * 1024)
               throw new Error('Input exceeds 64 KiB')

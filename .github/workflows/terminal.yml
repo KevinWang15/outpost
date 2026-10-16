@@ -6,12 +6,19 @@ on:
       publish:
         type: boolean
         default: false
+      run_tests:
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       publish:
         description: Publish the immutable terminal dependency release
         type: boolean
         default: false
+      run_tests:
+        description: Run the test suite in addition to building the executables
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -33,7 +40,8 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit -p terminal-service/tsconfig.json
       - run: npm run build:terminal -- x64-glibc
-      - run: npm test
+      - if: inputs.run_tests
+        run: npm test
       - run: npm run build:terminal -- arm64-glibc
       - run: npm run build:terminal -- x64-musl
       - run: npm run build:terminal -- arm64-musl

@@ -545,6 +545,13 @@ class AttachHooks:
 def attach_session(session, cols, rows):
     from outpost_relay import Relay
 
+    service = terminal.status(socket_name(session))
+    if service and service.get('protocol') != terminal.PROTOCOL:
+        fail(
+            'This session is running an incompatible terminal service. Install the current Outpost Terminal '
+            'in Required Software, then Terminate and Connect this session to restart it.',
+            409,
+        )
     return Relay(socket_name(session), cols, rows, AttachHooks(session), 'run/' + session['id'] + '.sock').run()
 
 

@@ -1,11 +1,13 @@
 /** Current cell-checkpoint wire schema, independent of the xterm implementation. */
 export type Checkpoint =
-  | { part: 'begin'; version: 1; cols: number; rows: number; state: CheckpointState }
+  | { part: 'begin'; version: 2; cols: number; rows: number; state: CheckpointState }
   | { part: 'lines'; buffer: 'normal' | 'alt'; first: number; lines: CellLine[] }
   | { part: 'end' }
 
 export interface CellLine {
+  /** Packed cell triples, with the last cell repeated `repeat` more times. */
   cells: string
+  repeat: number
   wrapped: boolean
   combined: Record<number, string>
   extended: [number, number, number][]

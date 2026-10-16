@@ -1,6 +1,8 @@
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { build as buildFrontend } from 'vite'
+import react from '@vitejs/plugin-react-swc'
 
 const absWorkingDir = fileURLToPath(new URL('../', import.meta.url))
 const root = new URL('../desktop/', import.meta.url)
@@ -9,14 +11,19 @@ await rm(dist, { recursive: true, force: true })
 await mkdir(dist, { recursive: true })
 await build({
   absWorkingDir,
-  entryPoints: ['desktop/src/main.ts', 'desktop/src/preload.ts', 'desktop/src/workspace-preload.ts'],
+  entryPoints: [
+    'desktop/src/main.ts',
+    'desktop/src/preload.ts',
+    'desktop/src/local-preload.ts',
+    'desktop/src/workspace-preload.ts',
+  ],
   outdir: 'desktop/dist',
   outExtension: { '.js': '.cjs' },
   bundle: true,
   platform: 'node',
   target: 'node22',
   format: 'cjs',
-  external: ['electron'],
+  external: ['electron', 'node-pty'],
   sourcemap: true,
   logLevel: 'info',
 })
@@ -31,6 +38,15 @@ await build({
   logLevel: 'info',
 })
 for (const file of ['workspace.html', 'workspace.css']) await cp(new URL('src/' + file, root), new URL(file, dist))
+// Package the same terminal screen used by the server, with a local PTY adapter.
+await buildFrontend({
+  configFile: false,
+  root: fileURLToPath(new URL('local-terminal/', root)),
+  base: './',
+  publicDir: false,
+  plugins: [react()],
+  build: { outDir: fileURLToPath(new URL('local-terminal/', dist)), emptyOutDir: true },
+})
 const png = await readFile(new URL('../public/outpost.png', import.meta.url))
 await writeFile(new URL('outpost.png', dist), png)
 await mkdir(new URL('resources/', root), { recursive: true })

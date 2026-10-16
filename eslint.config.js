@@ -30,6 +30,7 @@ export default defineConfig([
       'backend/**/*.ts',
       'terminal-service/**/*.ts',
       'desktop/src/**/*.ts',
+      'desktop/scripts/**/*.mjs',
       'tests/**/*.{js,ts}',
       'scripts/**/*.mjs',
       'promo-v2/scripts/**/*.mjs',

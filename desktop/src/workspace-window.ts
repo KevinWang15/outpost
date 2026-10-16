@@ -1,13 +1,14 @@
 import { app, BrowserWindow, dialog, Menu, shell, type IpcMainInvokeEvent, type Point } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { desktopOrigin, type TerminalPreferences } from '../../shared/desktop'
+import { desktopOrigin, type TerminalCommand, type TerminalPreferences } from '../../shared/desktop'
 import { paneLayout, splitRatio, TabLayout, type TabLayoutState } from './layout'
 import { defaultPreferences, Preferences, validPreferences } from './preferences'
 import { TrustedServers } from './store'
 import { TerminalTabs, type TerminalTab } from './terminals'
 import { attachTabShortcuts } from './tab-shortcuts'
 import { checkUpdates } from './updates'
+import type { ShellProfile } from './shell-profiles'
 import {
   tabBarHeight,
   type SplitDirection,
@@ -18,6 +19,8 @@ import {
 } from './workspace-api'
 
 export interface WorkspaceHost {
+  shells(): ShellProfile[]
+  newLocal(source: WorkspaceWindow, profile?: string): void
   quitting(): boolean
   focused(window: WorkspaceWindow): void
   closed(window: WorkspaceWindow): void
@@ -53,6 +56,25 @@ export class WorkspaceWindow {
       this.actions.set(name, (...values) => Reflect.apply(action, undefined, values))
     }
     handle('state', () => this.snapshot())
+    handle('new-local', (profile?: string) => {
+      if (profile !== undefined && typeof profile !== 'string') throw new Error('Choose a local shell.')
+      this.host.newLocal(this, profile)
+    })
+    handle('shell-menu', () => {
+      if (!this.window) return
+      Menu.buildFromTemplate(
+        this.host.shells().map(profile => ({
+          label: profile.name,
+          click: () => {
+            try {
+              this.host.newLocal(this, profile.id)
+            } catch (error) {
+              void this.reportError((error as Error).message)
+            }
+          },
+        })),
+      ).popup({ window: this.window })
+    })
     handle('activate', (id: number, focusTerminal?: boolean) => this.activate(id, focusTerminal !== false))
     handle('close', (id: number) => this.close(id))
     handle('reorder', (id: number, before: number | null) => {
@@ -95,7 +117,10 @@ export class WorkspaceWindow {
     handle('reload', (id: number) => this.reload(id))
     handle('open-server', (value: string) => this.openServer(value))
     handle('forget-server', (value: string) => this.forgetServer(value))
-    handle('preferences', (value: TerminalPreferences) => this.setPreferences(value))
+    handle('preferences', (value: TerminalPreferences, shell: string) => {
+      if (!this.host.shells().some(profile => profile.id === shell)) throw new Error('Choose an available local shell.')
+      return this.setPreferences(value, shell)
+    })
     handle('updates', checkUpdates)
     handle('report-error', (message: string) => this.reportError(message))
     handle('tab-geometry', (value: TabGeometry) => this.setGeometry(value))
@@ -158,11 +183,23 @@ export class WorkspaceWindow {
       panel: this.layout.panel,
       servers: this.trusted.list(),
       preferences: this.preferences.value,
+      shells: this.host.shells().map(({ id, name }) => ({ id, name })),
+      defaultShell:
+        this.host.shells().find(profile => profile.id === this.preferences.localShell)?.id ?? this.host.shells()[0].id,
       drag: this.host.dragState(this),
       tabs: this.layout.ids.flatMap(id => {
         const tab = this.terminals.tabs.get(id)
         return tab
-          ? [{ ...tab.state, id, origin: tab.origin, label: tab.label || tab.state.title, error: tab.error }]
+          ? [
+              {
+                ...tab.state,
+                id,
+                kind: tab.connection.kind,
+                origin: tab.origin,
+                label: tab.label || tab.state.title,
+                error: tab.error,
+              },
+            ]
           : []
       }),
     }
@@ -396,10 +433,12 @@ export class WorkspaceWindow {
     const id = this.layout.split?.ids.find(id => id !== this.layout.active)
     if (id !== undefined) this.activate(id)
   }
-  command(command: 'select-all' | 'reconnect') {
+  command(command: Exclude<TerminalCommand, 'focus'>) {
     const tab = this.layout.active === null ? undefined : this.terminals.tabs.get(this.layout.active)
-    if (this.layout.panel === null && tab && !tab.error) tab.view.webContents.send('terminal:command', command)
-    else if (command === 'select-all') this.window?.webContents.selectAll()
+    if (this.layout.panel === null && tab && !tab.error) {
+      if (command === 'find') tab.view.webContents.focus()
+      tab.view.webContents.send('terminal:command', command)
+    } else if (command === 'select-all') this.window?.webContents.selectAll()
   }
   edit(action: 'copy' | 'paste') {
     const tab = this.layout.active === null ? undefined : this.terminals.tabs.get(this.layout.active)
@@ -428,7 +467,7 @@ export class WorkspaceWindow {
     const result = await dialog.showMessageBox(this.window, {
       type: 'question',
       message: 'Discard the unsent message?',
-      detail: `${tab.label || tab.state.title} has a draft in its message box. The remote session will keep running.`,
+      detail: `${tab.label || tab.state.title} has a draft in its message box.${tab.connection.kind === 'remote' ? ' The remote session will keep running.' : ''}`,
       buttons: ['Discard draft', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
@@ -440,6 +479,18 @@ export class WorkspaceWindow {
     if (id === null) return
     const tab = this.tab(id)
     if (!tab || (tab.state.hasDraft && !(await this.confirmDraft(tab)))) return
+    if (tab.connection.kind === 'local' && tab.connection.terminal.running && this.window) {
+      const result = await dialog.showMessageBox(this.window, {
+        type: 'question',
+        message: 'Restart this local terminal?',
+        detail: 'Reloading ends the current shell and starts a new one.',
+        buttons: ['Restart shell', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      })
+      if (result.response !== 0) return
+    }
     if (!this.has(id)) return
     tab.error = null
     tab.state = { ...tab.state, hasDraft: false, connection: 'connecting', activity: null }
@@ -447,7 +498,14 @@ export class WorkspaceWindow {
     this.render()
   }
   private needsWindowConfirmation() {
-    return this.hasTabs && (this.layout.ids.length > 1 || this.ids.some(id => this.tab(id)?.state.hasDraft))
+    return (
+      this.hasTabs &&
+      (this.layout.ids.length > 1 ||
+        this.ids.some(id => {
+          const tab = this.tab(id)
+          return tab?.state.hasDraft || (tab?.connection.kind === 'local' && tab.connection.terminal.running)
+        }))
+    )
   }
   private async confirmWindow() {
     if (!this.window) return true
@@ -455,7 +513,7 @@ export class WorkspaceWindow {
     const result = await dialog.showMessageBox(this.window, {
       type: 'question',
       message: `Close ${this.layout.ids.length} terminal tabs?`,
-      detail: `Remote sessions keep running. Connect from Outpost to open them again.${draft ? ' Unsent messages in the message boxes will be discarded.' : ''}`,
+      detail: `Local shells will end. Remote sessions keep running.${draft ? ' Unsent messages in the message boxes will be discarded.' : ''}`,
       buttons: ['Close tabs', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
@@ -491,9 +549,9 @@ export class WorkspaceWindow {
     for (const tab of tabs) this.terminals.dispose(tab.id)
     this.host.changed()
   }
-  async setPreferences(value: TerminalPreferences) {
+  async setPreferences(value: TerminalPreferences, shell = this.preferences.localShell) {
     if (!validPreferences(value)) throw new Error('Use a font size between 10 and 28.')
-    await this.preferences.set(value)
+    await this.preferences.set(value, shell)
     this.host.changed()
   }
   fontSize(delta: number | null) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
-import { TerminalSocket, type SocketState } from '../../frontend/terminal/socket'
+import { TerminalSocket } from '../../frontend/terminal/socket'
+import type { TerminalState } from '../../frontend/terminal/connection'
 import type { ServerMessage } from '../../shared/protocol'
 
 class FakeSocket {
@@ -45,7 +46,7 @@ function setup(t: TestContext) {
   })
   Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeSocket })
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 100_000 })
-  const states: SocketState[] = []
+  const states: TerminalState[] = []
   const client = new TerminalSocket(
     'ticket',
     () => ({ cols: 80, rows: 24 }),

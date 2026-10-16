@@ -73,20 +73,27 @@ npm --prefix desktop run package -- --mac --arm64 --x64
 npm --prefix desktop run package -- --win --x64
 ```
 
-Run the server separately. Open it from app home, then select a session in the
+The app starts with a local shell and works without a server. **+** opens another
+local terminal; right-click it to choose a shell profile. `npm run dev` rebuilds
+the native `node-pty` dependency for Electron before launching. Native compilation
+requires the platform's C++ build tools (Xcode tools on macOS, Visual Studio C++
+tools on Windows). Packaging rebuilds for each target architecture as well.
+
+For managed sessions, run the server separately. Open it from the app logo, then select a session in the
 browser and use Connect → Outpost Desktop. macOS protocol handlers require a
 packaged app installed in Applications. Development Windows runs register the
 current Electron executable; reinstall the packaged app to restore its handler.
 
-The shell bundles native integration and local workspace chrome. Each session
-loads the shared terminal in an isolated `WebContentsView` from its trusted server.
+The shell bundles native integration, local workspace chrome, and the shared
+terminal frontend for local shells. Remote sessions load the same terminal UI
+in an isolated `WebContentsView` from their trusted server.
 `layout.ts` owns tab order and split geometry; `workspace.ts` owns window layout,
 menus' actions and the local chrome bridge; `terminals.ts` owns terminal views
 and validates their native IPC. Keep UI metadata separate from grants and
 terminal contents. Never recreate a view to switch tabs or change a split.
 Desktop dependencies and its lockfile
 are isolated from the server package. `scripts/build-desktop.mjs` builds the
-preloads and shell and wraps approved logo PNGs into ICNS/ICO containers.
+preloads, shell, and local terminal frontend and wraps approved logo PNGs into ICNS/ICO containers.
 `npm run logo:generate` derives these PNGs from the canonical SVG.
 
 **Desktop previews** in GitHub Actions is manual. It builds both Mac architectures
@@ -101,8 +108,10 @@ The existing **CI** workflow can also call this same packaging workflow with
 mode. This entry works while `desktop.yml` exists only on the `v2` branch and
 GitHub has not registered it on the default branch yet.
 
-On each native platform, exercise cold/warm `outpost://` launches, tab switching
-and reordering, title-bar dragging with a full tab strip, native window controls,
+On each native platform, exercise cold/warm `outpost://` launches, local
+login/PowerShell/WSL profiles, offline startup, local shell exit/restart,
+local/remote mixed splits, local resize and font changes, sustained output,
+tab switching and reordering, title-bar dragging with a full tab strip, native window controls,
 fullscreen entry/exit and display scaling, both split directions and divider
 dragging, focus between panes,
 hidden-tab output and bells, draft-close cancellation, multi-tab quit, trust

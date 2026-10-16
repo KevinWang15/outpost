@@ -1,7 +1,7 @@
 import type { SessionActivity } from './activity'
 
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 4
+export const desktopBridgeVersion = 5
 export interface TerminalPreferences {
   fontSize: number
   sound: boolean
@@ -17,7 +17,7 @@ export interface TerminalTabState {
   attention: boolean
   hasDraft: boolean
 }
-export type TerminalCommand = 'select-all' | 'focus' | 'reconnect'
+export type TerminalCommand = 'select-all' | 'focus' | 'reconnect' | 'find'
 export interface DesktopBridge {
   version: number
   notificationsSupported: boolean

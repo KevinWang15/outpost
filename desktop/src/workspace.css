@@ -16,7 +16,8 @@ body {
   overflow: hidden;
 }
 button,
-input {
+input,
+select {
   font: inherit;
 }
 button {
@@ -44,7 +45,8 @@ button.primary {
 button.primary:hover {
   background: #2563eb;
 }
-input {
+input,
+select {
   border: 1px solid #334155;
   background: #0d1729;
   color: #f1f5f9;

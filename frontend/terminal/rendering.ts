@@ -5,7 +5,8 @@ import { terminalSize } from '../../shared/terminalService'
 
 type RestoreMessage = Extract<ServerMessage, { type: 'restore' | 'geometry' }>
 
-/** Every connection must restore checkpoints and acknowledge completed rendering. */
+/** Connections order output and geometry, then acknowledge completed rendering.
+ * Remote attachments additionally restore a checkpoint before live output. */
 export interface TerminalRendering {
   begin(): void
   output(bytes: Uint8Array, rendered: () => void): void
@@ -27,9 +28,10 @@ export class TerminalRenderer implements TerminalRendering {
   constructor(
     private terminal: Terminal,
     private failed: (message: string) => void,
+    private local = false,
   ) {
     this.checkpoints = new CheckpointReader(terminal)
-    remoteTerminalReplies(terminal)
+    if (!local) remoteTerminalReplies(terminal)
   }
 
   get restoring() {
@@ -39,8 +41,13 @@ export class TerminalRenderer implements TerminalRendering {
   begin() {
     this.generation++
     this.stopped = false
-    this.phase = 'waiting'
+    this.phase = this.local ? 'live' : 'waiting'
     this.checkpoints = new CheckpointReader(this.terminal)
+    if (this.local)
+      this.enqueue(
+        () => this.terminal.reset(),
+        () => {},
+      )
   }
 
   output(bytes: Uint8Array, rendered: () => void) {

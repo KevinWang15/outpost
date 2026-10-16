@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { Check, ClipboardPaste, Copy, ImagePlus, TextSelect } from 'lucide-react'
+import { Check, ClipboardPaste, Copy, ImagePlus, Search, TextSelect } from 'lucide-react'
 
 interface Props {
   children: ReactElement
@@ -11,6 +11,7 @@ interface Props {
     paste: () => void
     selectAll: () => void
     selectText: () => void
+    find: () => void
     pasteImage: () => void
     focus: () => void
   }
@@ -120,6 +121,15 @@ export default function TerminalContextMenu({ children, connected, actions, cont
           </ContextMenu.Item>
           <ContextMenu.Item className="menu-item" disabled={!connected} onSelect={actions.pasteImage}>
             <ImagePlus size={15} /> Paste an image…
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            className="menu-item"
+            onSelect={() => {
+              restoreFocus.current = false
+              actions.find()
+            }}
+          >
+            <Search size={15} /> Find in terminal…
           </ContextMenu.Item>
           <ContextMenu.Separator className="menu-separator" />
           {controls.map(control => (

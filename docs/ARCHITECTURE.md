@@ -12,15 +12,16 @@ comments refer back to the principles below by name.
    owns each coding session's PTY, screen and 10,000-line in-memory scrollback.
    Clients and relays are disposable. Reconnect restores a checkpoint and then
    follows live output; disconnect never terminates the session.
-2. **One connection path.** Every terminal — browser or Electron —
+2. **One managed connection path.** Every managed Outpost terminal — browser or Electron —
    uses the same chain:
 
    ```text
    client ⇄ WebSocket ⇄ Outpost broker ⇄ transport (SSH or local shell) ⇄ relay ⇄ terminal service ⇄ PTY
    ```
 
-   There is no second way to connect, no copied shell command, and no desktop
-   launcher on the server. Hosted and local installations run the same code.
+   Hosted and local server installations run the same code. Desktop local shells
+   use a native PTY on the user's computer; they have no broker, authentication,
+   remote dependency, or persistence daemon. Both use the same terminal UI.
 3. **Modes differ only in identity.** A *deployment* answers four questions:
    who owns this request, where is their workspace stored, which SSH identity
    do they use, and may they use this computer as a target. Everything else —
@@ -536,13 +537,29 @@ no observation has arrived on this connection yet, never a failed observation.
 Both `ActivityBadge` and `tab-status.ts`
 use it; the broker and native IPC use its bounded parser. The relay sends state,
 timestamp, opaque completion ID and any diagnostic, never transcript content.
-The desktop bridge is version 4: server and app must be updated together.
+The desktop bridge is version 5: server and app must be updated together.
 The renderer alone owns the terminal bell flag. The native shell displays reported
 state and owns OS notifications, but does not independently rewrite attention on
 activation or notification creation. Both a host focus transition and an explicit
 focus command acknowledge the bell, including reselecting the active tab. The
 preload ignores an initial host-state response if a newer focus event arrived
 while that response was in flight.
+
+### Terminal search
+
+`useTerminalSearch.ts` owns one `@xterm/addon-search` instance for each xterm
+lifetime. `TerminalSearch` is an absolute overlay within `terminal-body`, so
+search never changes terminal dimensions, sends PTY input, or fetches remote
+history. It searches only xterm's active buffer, including retained scrollback.
+The addon refreshes highlights after output and resizes; highlights are capped
+at 1,000 and the UI reports that bound rather than a misleading exact total.
+Closing search clears decorations and restores terminal (or recovery) focus.
+The query stays with its tab until that view is destroyed.
+
+The shared controller captures Cmd+F/Ctrl+F before xterm and browser Find. The
+desktop Edit menu sends the typed `find` command through `DesktopBridge` to the
+active terminal, including local shells. Toolbar and context-menu actions use
+the same controller. Search input and match navigation are entirely local.
 
 ### Signals
 
@@ -559,7 +576,57 @@ fails with a clear message.
 `desktop/` is a separate npm package, so server builds never download Electron.
 `main.ts` owns app lifecycle, menus, server trust and `outpost://` dispatch.
 `launch.ts` validates the envelope; `store.ts` atomically serializes trusted
-origins, and `preferences.ts` serializes font size and bell sound only.
+origins, and `preferences.ts` serializes font size, bell sound, and the optional
+default local shell profile ID.
+
+### Local shells
+
+The logo opens managed servers and sessions; **+**, the new-terminal shortcut,
+and a new window open a local shell. Right-click **+** or the File menu selects
+a profile. `shell-profiles.ts` resolves the login shell on macOS/Linux and
+PowerShell, Command Prompt, and WSL on Windows. Only native profile IDs cross
+the chrome bridge; the renderer cannot supply an executable, environment, or cwd.
+
+`TerminalTab.connection` distinguishes a remote launch from a local PTY owner.
+The same registry, window layout, tab transfer, split, focus, notification, and
+clipboard infrastructure serves both. Moving a local tab preserves its view and
+PTY. Closing it ends its shell; quitting ends all local shells. Window/app close
+confirmation includes running local shells, and reload asks before restarting one.
+Remote session lifetimes are unchanged.
+
+`scripts/build-desktop.mjs` bundles `frontend/terminal/local-entry.tsx` and the
+shared `TerminalView` into the app. Local terminals work offline, without a server
+or account. `TerminalConnection` separates the screen from `TerminalSocket` and
+`LocalTerminalConnection`. The latter uses the separate `LocalTerminalBridge`,
+exposed only by `local-preload.ts` to the exact packaged local terminal page.
+Every native local operation resolves and validates its sender's owning tab and
+main frame; remote pages cannot invoke the PTY capability. Both page types remain
+sandboxed, isolated, and without Node integration. The local page's CSP denies
+network requests and its navigation is locked to its bundled entry.
+
+`local-terminal.ts` owns `node-pty`, using a native PTY on macOS and ConPTY on
+Windows. The local renderer is the terminal emulator: normal scrolling, alternate
+screen, terminal queries, bells, cursor reports, and application mouse input pass
+through xterm. The common `TerminalRenderer` serializes output, reset, and geometry;
+local mode starts with an empty buffer and does not install the remote query-reply
+suppression or restore a checkpoint. Resize events go to both xterm and the PTY.
+Output and geometry share one ordered IPC channel. Render acknowledgements pause
+PTY reads at 262,144 unrendered UTF-16 code units and resume below 65,536. A
+generation ID rejects stale data, input, and acknowledgements after a restart.
+
+Each local tab starts in the user's home directory and retains up to 10,000 lines
+in xterm memory. There is no local session recovery after renderer reload or app
+exit. Local tabs report connection and bell state, without guessing coding-harness
+activity. Image paste saves a bounded file in the tab's private clipboard directory,
+quotes the path for its shell, and uses `wslpath` for the default WSL distribution.
+Closing the tab cleans up those files. Native PTY bindings and spawn helpers are
+kept outside ASAR and rebuilt for Electron by the packaging tools. Windows uses
+node-pty's bundled ConPTY DLL; `desktop/scripts/native-assets.mjs` restores its
+DLL and OpenConsole helper beside rebuilt bindings after packaging and in dev.
+This avoids the older shutdown path's Node fork helper and keeps the Electron
+RunAsNode fuse disabled.
+
+### Shared workspace
 
 `workspace.ts` owns all windows and a single app-wide `TerminalTabs` registry.
 Each terminal ID has one owning `WorkspaceWindow`; duplicate launches and
@@ -703,7 +770,7 @@ the remote harness is not inspected for drafts.
 Packaged apps register the protocol through Electron and installer metadata.
 macOS handles `open-url` before app readiness; Windows uses initial arguments
 and `second-instance`. A single app instance owns all workspaces; subsequent
-launches focus an existing tab or add one to the active window. Closing a tab or window never terminates the target session. The server
+launches focus an existing tab or add one to the active window. Closing a remote tab or window never terminates its target session. The server
 launcher can forget a server and close its tabs. No connection tickets or
 layouts with credentials are persisted; reopening the app starts a fresh
 workspace. The app icon and Windows AppUserModelID belong to Outpost.

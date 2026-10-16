@@ -65,13 +65,25 @@ function menus() {
   const mac = process.platform === 'darwin'
   const shortcut = (key: string) => (mac ? 'Cmd+' : 'Ctrl+Shift+') + key
   const increaseFontSize = () => workspace!.forAction().fontSize(1)
+  const newLocal = (profile?: string) => {
+    try {
+      workspace!.newLocal(profile)
+    } catch (error) {
+      dialog.showErrorBox('Could not open terminal', (error as Error).message)
+    }
+  }
   const template: MenuItemConstructorOptions[] = [
     ...(mac ? [{ role: 'appMenu' as const }] : []),
     {
       label: 'File',
       submenu: [
         { label: 'New window', accelerator: 'CmdOrCtrl+Shift+N', click: () => workspace!.newWindow() },
-        { label: 'New tab…', accelerator: shortcut('T'), click: () => workspace!.forAction().panel('sessions') },
+        { label: 'New local terminal', accelerator: shortcut('T'), click: () => newLocal() },
+        {
+          label: 'New terminal with profile',
+          submenu: workspace!.shells.map(profile => ({ label: profile.name, click: () => newLocal(profile.id) })),
+        },
+        { label: 'Servers and sessions…', click: () => workspace!.forAction().panel('sessions') },
         { label: 'Switch session…', accelerator: shortcut('P'), click: () => workspace!.forAction().panel('switcher') },
         { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => workspace!.forAction().panel('settings') },
         { type: 'separator' },
@@ -92,6 +104,8 @@ function menus() {
         { label: 'Copy', accelerator: shortcut('C'), click: () => workspace!.forAction().edit('copy') },
         { label: 'Paste', accelerator: shortcut('V'), click: () => workspace!.forAction().edit('paste') },
         { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.forAction().command('select-all') },
+        { type: 'separator' },
+        { label: 'Find in terminal…', accelerator: 'CmdOrCtrl+F', click: () => workspace!.forAction().command('find') },
       ],
     },
     {
@@ -202,7 +216,8 @@ else {
       else if (process.platform === 'win32' && process.argv[1])
         app.setAsDefaultProtocolClient('outpost', process.execPath, [resolve(process.argv[1])])
       menus()
-      workspace.show()
+      if (waiting.length) workspace.forAction().show()
+      else workspace.show()
       for (const url of waiting.splice(0)) receive(url)
       app.on('activate', () => workspace!.show())
     })
@@ -219,4 +234,5 @@ else {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin' && pending === 0) app.quit()
   })
+  app.on('will-quit', () => workspace?.dispose())
 }

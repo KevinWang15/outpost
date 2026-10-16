@@ -1,8 +1,10 @@
 import type { TerminalPreferences, TerminalTabState } from '../../shared/desktop'
+import type { ShellProfileSummary } from '../../shared/localTerminal'
 
 export type WorkspacePanel = 'sessions' | 'switcher' | 'settings' | { rename: number } | null
 export type SplitDirection = 'columns' | 'rows'
 export interface TabSummary extends TerminalTabState {
+  kind: 'local' | 'remote'
   id: number
   origin: string
   label: string
@@ -30,11 +32,15 @@ export interface WorkspaceSnapshot {
   panel: WorkspacePanel
   servers: string[]
   preferences: TerminalPreferences
+  shells: ShellProfileSummary[]
+  defaultShell: string
   drag: TabDragState | null
 }
 
 /** Local app chrome only. Terminal pages receive the separate DesktopBridge. */
 export interface WorkspaceBridge {
+  newLocal(profile?: string): Promise<void>
+  shellMenu(): Promise<void>
   tabGeometry(value: TabGeometry): Promise<void>
   dragStart(id: number): Promise<void>
   dragEnd(cancel: boolean): Promise<void>
@@ -53,7 +59,7 @@ export interface WorkspaceBridge {
   reload(id: number): Promise<void>
   openServer(origin: string): Promise<boolean>
   forgetServer(origin: string): Promise<void>
-  preferences(value: TerminalPreferences): Promise<void>
+  preferences(value: TerminalPreferences, shell: string): Promise<void>
   checkUpdates(): Promise<void>
   reportError(message: string): Promise<void>
 }

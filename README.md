@@ -9,7 +9,8 @@ the agent ran on your computer.
 
 - **One Connect button.** Choose the web terminal or Outpost Desktop for macOS and Windows. Both share the terminal UI and connection path.
 - **Feels native.** Paste screenshots with your normal paste shortcut and the agent receives the image. Shift+Enter inserts a newline. Text the agent copies lands on your clipboard. Links it opens open in your browser.
-- **Sessions outlive connections.** Close the tab or lose Wi-Fi; the agent keeps working. Reconnect from any computer or your phone, to the same process.
+- **Managed sessions outlive connections.** Close the tab or lose Wi-Fi; the agent keeps working. Reconnect from any computer or your phone, to the same process.
+- **Local terminals, too.** Outpost Desktop opens your local shell alongside managed sessions, with shared tabs, splits and clipboard controls. Local tabs work offline and end when closed.
 - **Local tool or hosted service.** Run it on your own computer with your SSH config, or host it for a team with accounts and per-user SSH keys.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
 - **Find any conversation.** Search the history on a target, including conversations started outside Outpost, and resume them as sessions.
@@ -145,6 +146,16 @@ output currently loaded in the terminal, not the entire remote conversation.
 Browser clipboard access may ask for permission; if Paste is blocked, use your
 normal paste shortcut. The message box keeps its usual text-editing menu.
 
+Press **Cmd+F** on macOS or **Ctrl+F** on Windows/Linux to find text in the
+current terminal. The search box floats at the top-left without resizing the
+terminal. Matches are highlighted with a result count; **Enter** goes to the
+next match, **Shift+Enter** to the previous one, and **Esc** closes search and
+returns focus to the terminal. **Aa** toggles case sensitivity. Search is also
+available from the terminal toolbar and right-click menu, and **Edit → Find in
+terminal** in the desktop app. Web, remote desktop, and local shell tabs share
+this feature. It searches the screen and scrollback currently held by xterm,
+not files or output that has already left the buffer.
+
 Text selection is local to the terminal and copies when you release the mouse.
 It does not pause the remote display. Applications that
 request mouse events receive them normally; to select text locally in such an
@@ -205,6 +216,22 @@ you trust; release artifacts include checksums.
 The app arranges your sessions in tabbed windows, with its own Outpost
 icon and native notifications. Drag tabs to reorder, double-click to rename,
 or use the session switcher to find an open session by name or server.
+Click the Outpost logo to open the servers and sessions page and connect another session.
+
+**Local terminals:** the app opens a local shell at startup, and **+** opens another.
+Local tabs work offline without an Outpost server or account. macOS uses your login
+shell; Windows uses PowerShell 7 when available, otherwise Windows PowerShell.
+Right-click **+** or use **File → New terminal with profile** to choose another shell,
+including Command Prompt or the default WSL distribution on Windows. WSL must
+already have a distribution installed. Settings lets you choose the default shell.
+Local and remote tabs share splits, dragging between windows, clipboard handling,
+font settings, and bell notifications. Local shells start in your home directory.
+
+Closing a local tab or quitting the app ends its shell. Reloading a local terminal
+asks before restarting a running shell. Local terminal history is held in memory
+for that tab, up to 10,000 lines; it is not restored after quitting. Pasted images
+are saved in a private directory for the tab and removed when the tab closes.
+Managed Outpost sessions retain their existing persistence and reconnect behavior.
 
 Drag a tab outside the tab bar and release to give it a window. Drop it into
 another Outpost window's tab bar to merge it there; an insertion marker shows
@@ -217,7 +244,7 @@ Moving a tab preserves its live connection, terminal buffer and message draft.
 Moving the last tab into another window closes the empty source window.
 
 Tabs share the top row with the native macOS or Windows window controls, with
-no separate title bar. Drag the empty space between the new-tab button and
+no separate title bar. Drag the empty space between **+** and
 the workspace tools to move the window, even when many tabs are open.
 
 Open two sessions, then right-click a tab and choose **Show beside current tab**.
@@ -248,11 +275,13 @@ completion remains unread until you return or interact again. If saving fails,
 the unchecked state returns with an error. Browser terminals use the same logic
 when you return to their page.
 
-Settings remembers text size and bell sound. The toolbar starts hidden in the
+Settings remembers text size, bell sound, and the default local shell. The toolbar starts hidden in the
 app and can be revealed from the terminal's upper corner. The same xterm.js
 client handles input, selection, image paste and reconnects in both clients.
 WebGL accelerates rendering when available, with a DOM renderer fallback.
-Outpost Desktop connects to remote Outpost sessions; it does not run local shells.
+Local tabs use the same terminal screen with a native PTY connection. Their badges
+show shell connection and bell state; coding-harness activity detection is available
+for managed Outpost sessions.
 
 Desktop bells use Outpost's system notification permission. Allow **Outpost**
 in macOS or Windows notification settings and check Focus / Do Not Disturb.
@@ -266,7 +295,7 @@ for manual installation; remote sessions survive closing or upgrading the app.
 | Copy selection | ⌘C | Ctrl+Shift+C |
 | Paste text or an image into the terminal | ⌘V or Ctrl+V | Ctrl+Shift+V |
 | Newline in coding tool | Shift+Enter | Shift+Enter |
-| New tab / choose a session | ⌘T | Ctrl+Shift+T |
+| New local terminal | ⌘T | Ctrl+Shift+T |
 | New window | ⌘Shift+N | Ctrl+Shift+N |
 | Cancel tab drag | Esc | Esc |
 | Switch session | ⌘P | Ctrl+Shift+P |

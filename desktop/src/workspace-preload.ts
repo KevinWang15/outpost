@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { WorkspaceBridge, WorkspaceSnapshot } from './workspace-api'
 
 const bridge: WorkspaceBridge = {
+  newLocal: profile => ipcRenderer.invoke('workspace:action', 'new-local', profile),
+  shellMenu: () => ipcRenderer.invoke('workspace:action', 'shell-menu'),
   tabGeometry: value => ipcRenderer.invoke('workspace:action', 'tab-geometry', value),
   dragStart: id => ipcRenderer.invoke('workspace:action', 'drag-start', id),
   dragEnd: cancel => ipcRenderer.invoke('workspace:action', 'drag-end', cancel),
@@ -25,7 +27,7 @@ const bridge: WorkspaceBridge = {
   reload: id => ipcRenderer.invoke('workspace:action', 'reload', id),
   openServer: origin => ipcRenderer.invoke('workspace:action', 'open-server', origin),
   forgetServer: origin => ipcRenderer.invoke('workspace:action', 'forget-server', origin),
-  preferences: value => ipcRenderer.invoke('workspace:action', 'preferences', value),
+  preferences: (value, shell) => ipcRenderer.invoke('workspace:action', 'preferences', value, shell),
   checkUpdates: () => ipcRenderer.invoke('workspace:action', 'updates'),
   reportError: message => ipcRenderer.invoke('workspace:action', 'report-error', message),
 }

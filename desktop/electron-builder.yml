@@ -2,6 +2,9 @@ appId: dev.outpost.desktop
 productName: Outpost
 copyright: Copyright © 2026 Outpost contributors
 asar: true
+asarUnpack:
+  - node_modules/node-pty/**
+afterPack: scripts/native-assets.mjs
 electronFuses:
   runAsNode: false
   enableNodeOptionsEnvironmentVariable: false

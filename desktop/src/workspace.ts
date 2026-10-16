@@ -6,9 +6,11 @@ import { TerminalTabs } from './terminals'
 import { TabDrag } from './tab-drag'
 import { transferTab } from './tab-transfer'
 import { WorkspaceWindow } from './workspace-window'
+import { shellProfiles } from './shell-profiles'
 
 /** App-wide terminal identity and ownership; moving a tab never recreates its view. */
 export class DesktopWorkspace {
+  readonly shells = shellProfiles()
   private windows = new Map<number, WorkspaceWindow>()
   private owners = new Map<number, WorkspaceWindow>()
   private recent: number[] = []
@@ -94,12 +96,14 @@ export class DesktopWorkspace {
     return this.current
   }
   show() {
-    this.forAction().show()
+    const window = this.forAction()
+    if (!window.hasTabs) this.newLocal(undefined, window)
+    else window.show()
   }
   newWindow() {
     this.drag.cancel()
     try {
-      this.create().show()
+      this.newLocal(undefined, this.create())
     } catch (error) {
       dialog.showErrorBox('Outpost', (error as Error).message)
     }
@@ -122,6 +126,8 @@ export class DesktopWorkspace {
           }
       },
       changed: () => this.render(),
+      shells: () => this.shells,
+      newLocal: (source, profile) => this.newLocal(profile, source),
       destinations: source =>
         [...this.windows]
           .filter(([, window]) => window !== source)
@@ -164,6 +170,22 @@ export class DesktopWorkspace {
       owner.add(tab)
     }
     owner?.activate(tab.id)
+  }
+
+  newLocal(profileId?: string, owner = this.forAction()) {
+    this.drag.cancel()
+    const profile =
+      this.shells.find(item => item.id === (profileId ?? this.preferences.localShell)) ??
+      (profileId === undefined ? this.shells[0] : undefined)
+    if (!profile) throw new Error('Choose an available local shell.')
+    const tab = this.terminals.openLocal(profile)
+    this.owners.set(tab.id, owner)
+    owner.add(tab)
+    owner.activate(tab.id)
+  }
+
+  dispose() {
+    for (const id of [...this.terminals.tabs.keys()]) this.terminals.dispose(id)
   }
 
   private position(window: BrowserWindow, source: BrowserWindow, point?: Point) {
@@ -217,11 +239,12 @@ export class DesktopWorkspace {
     try {
       const tabs = [...this.terminals.tabs.values()]
       const draft = tabs.some(tab => tab.state.hasDraft)
-      if (tabs.length > 1 || draft) {
+      const local = tabs.some(tab => tab.connection.kind === 'local' && tab.connection.terminal.running)
+      if (tabs.length > 1 || draft || local) {
         const result = await dialog.showMessageBox(this.current.ensureWindow(), {
           type: 'question',
           message: `Close ${tabs.length} terminal tabs across ${this.windows.size} windows?`,
-          detail: `Remote sessions keep running.${draft ? ' Unsent messages will be discarded.' : ''}`,
+          detail: `Local shells will end. Remote sessions keep running.${draft ? ' Unsent messages will be discarded.' : ''}`,
           buttons: ['Quit Outpost', 'Cancel'],
           defaultId: 1,
           cancelId: 1,

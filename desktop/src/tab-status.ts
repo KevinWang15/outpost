@@ -11,7 +11,7 @@ const connectionLabels = {
 export function tabStatusLabel(tab: TerminalTabState) {
   const parts = [connectionLabels[tab.connection]]
   if (tab.connection === 'connected') {
-    parts.push(tab.activity === null ? 'Checking activity…' : activityLabels[tab.activity.state])
+    if (tab.activity) parts.push(activityLabels[tab.activity.state])
     if (tab.activity?.detail) parts.push(tab.activity.detail)
   }
   if (tab.attention) parts.push('Bell rang — needs attention')

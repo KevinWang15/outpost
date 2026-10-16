@@ -15,6 +15,7 @@ import {
   PanelTopClose,
   PanelTopOpen,
   RotateCw,
+  Search,
   X,
 } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
@@ -22,6 +23,7 @@ import type { ImageMediaType } from '../../shared/model'
 import type { TerminalHostState } from '../../shared/desktop'
 import type { SessionActivity } from '../../shared/activity'
 import type { CloseReason } from '../../shared/protocol'
+import type { LocalTerminalBridge } from '../../shared/localTerminal'
 import { imageMediaTypes } from '../../shared/model'
 import { browserUrl } from '../../shared/signals'
 import { readImage } from '../api'
@@ -33,11 +35,15 @@ import Composer from './Composer'
 import KeyBar from './KeyBar'
 import TerminalContextMenu from './TerminalContextMenu'
 import TerminalTextDialog from './TerminalTextDialog'
+import TerminalSearch from './TerminalSearch'
+import { useTerminalSearch } from './useTerminalSearch'
 import { attachTouchScroll } from './touch'
 import { touchInput as touch } from '../browser'
 import { useTerminalViewport } from './viewport'
 import { terminalKey, type TerminalModifiers } from './keys'
-import { TerminalSocket, type SocketState } from './socket'
+import { TerminalSocket } from './socket'
+import { LocalTerminalConnection } from './local'
+import type { TerminalConnection, TerminalState } from './connection'
 import { desktop } from '../desktop'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
 import { TerminalRenderer } from './rendering'
@@ -51,13 +57,12 @@ const closedTitles: Record<CloseReason, string> = {
   error: 'Disconnected',
 }
 
-interface Props {
-  token: string
+type Props = {
   title: string
   onClose: () => void
   onResume?: (token: string) => void
   onExpired?: () => void
-}
+} & ({ token: string; local?: never } | { token?: never; local: LocalTerminalBridge })
 
 const toolbarPreference = 'outpost.terminal.toolbar-hidden'
 function savedToolbar() {
@@ -69,17 +74,17 @@ function savedToolbar() {
   }
 }
 
-export default function TerminalView({ token, title, onClose, onResume, onExpired }: Props) {
+export default function TerminalView({ token, local, title, onClose, onResume, onExpired }: Props) {
   const container = useRef<HTMLDivElement>(null)
   useTerminalViewport(container)
   const surface = useRef<HTMLDivElement>(null),
     recovery = useRef<HTMLDivElement>(null),
     chooser = useRef<HTMLInputElement>(null)
   const terminal = useRef<Terminal | null>(null),
-    socket = useRef<TerminalSocket | null>(null)
+    socket = useRef<TerminalConnection | null>(null)
   const clipboard = useRef<ReturnType<typeof attachClipboard> | null>(null)
   const bell = useRef<ReturnType<typeof attachBell> | null>(null)
-  const [state, setState] = useState<SocketState>({ kind: 'connecting' })
+  const [state, setState] = useState<TerminalState>({ kind: 'connecting' })
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   const [name, setName] = useState(title)
   const sessionInfo = useRef({ id: '', name: title })
@@ -117,6 +122,11 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     if (!panel.contains(document.activeElement)) panel.querySelector('button')?.focus({ preventScroll: true })
     return true
   }, [])
+  const restoreTerminalFocus = useCallback(() => {
+    if (!focusRecovery()) terminal.current?.focus()
+  }, [focusRecovery])
+  const search = useTerminalSearch(restoreTerminalFocus)
+  const { attach: attachSearch, open: openSearch } = search
 
   useLayoutEffect(() => {
     if (state.kind !== 'closed' || !document.hasFocus() || (desktop && !host.current.focused)) return
@@ -159,7 +169,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     async (file: File) => {
       const problem = imageProblem(file)
       if (problem) return notify(problem)
-      notify('Uploading image…', true)
+      notify(local ? 'Saving image…' : 'Uploading image…', true)
       try {
         await socket.current!.pasteImage(await readImage(file), file.type as ImageMediaType)
         notify('Image pasted')
@@ -167,7 +177,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         notify((error as Error).message)
       }
     },
-    [notify],
+    [notify, local],
   )
 
   useEffect(() => {
@@ -187,7 +197,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     })
     const fit = new FitAddon()
     let disposed = false
-    const rendering = new TerminalRenderer(term, message => client.fail(message))
+    const rendering = new TerminalRenderer(term, message => client.fail(message), Boolean(local))
     term.loadAddon(fit)
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
@@ -199,6 +209,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       }),
     )
     term.open(surface.current!)
+    const stopSearch = attachSearch(term, container.current!)
     // Both clients use GPU rendering where available. Losing the GPU context
     // restores xterm's DOM renderer without losing the session or its buffer.
     let renderer: WebglAddon | undefined
@@ -234,36 +245,57 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         rows: Math.max(5, Math.min(terminalService.maxRows, proposed?.rows ?? 24)),
       }
     }
-    const client = new TerminalSocket(token, size, rendering, {
-      state: next => {
-        if (disposed) return
-        setState(next)
-        if (next.kind === 'closed' && next.reason === 'expired') lifecycle.current.onExpired?.()
-        if (next.kind === 'connected' && !touch() && (!desktop || (host.current.focused && document.hasFocus())))
-          term.focus()
-      },
-      hello: message => {
-        lifecycle.current.onResume?.(message.resume)
-        sessionInfo.current = {
-          id: `${message.target.id}/${message.session.id}`,
-          name: `${message.session.name} · ${message.target.name}`,
-        }
-        setName(sessionInfo.current.name)
-      },
-      activity: next => activityController.update(next),
-      signal: ({ signal }) => {
-        if (signal.type !== 'browser.open') return
-        let url: string
-        try {
-          url = browserUrl(signal.payload)
-        } catch {
-          return
-        }
-        void openBrowserTab(url).then(opened => {
-          if (!opened) setBlockedLink(url)
+    const focusInput = () => {
+      const active = document.activeElement
+      // Native activation and reconnects must preserve focus in local controls.
+      if (
+        active instanceof HTMLElement &&
+        active !== term.textarea &&
+        (active.closest('[role="menu"]') ||
+          active.matches('button, a[href], input, textarea, select, [contenteditable="true"]'))
+      )
+        return
+      if (!focusRecovery()) term.focus()
+    }
+    const connectionState = (next: TerminalState) => {
+      if (disposed) return
+      setState(next)
+      if (next.kind === 'closed' && next.reason === 'expired') lifecycle.current.onExpired?.()
+      if (next.kind === 'connected' && !touch() && (!desktop || (host.current.focused && document.hasFocus())))
+        focusInput()
+    }
+    const localTitle = (value: string) => {
+      const name = `${value.slice(0, 480)} · Local`
+      sessionInfo.current = { id: 'local', name }
+      setName(name)
+    }
+    const stopTitle = local ? term.onTitleChange(localTitle) : undefined
+    const client: TerminalConnection = local
+      ? new LocalTerminalConnection(local, size, rendering, connectionState, localTitle, notify)
+      : new TerminalSocket(token!, size, rendering, {
+          state: connectionState,
+          hello: message => {
+            lifecycle.current.onResume?.(message.resume)
+            sessionInfo.current = {
+              id: `${message.target.id}/${message.session.id}`,
+              name: `${message.session.name} · ${message.target.name}`,
+            }
+            setName(sessionInfo.current.name)
+          },
+          activity: next => activityController.update(next),
+          signal: ({ signal }) => {
+            if (signal.type !== 'browser.open') return
+            let url: string
+            try {
+              url = browserUrl(signal.payload)
+            } catch {
+              return
+            }
+            void openBrowserTab(url).then(opened => {
+              if (!opened) setBlockedLink(url)
+            })
+          },
         })
-      },
-    })
     socket.current = client
     const activityController = new TerminalActivity(client, setActivity, message => notify(message, true))
     const active = () =>
@@ -325,25 +357,13 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     const observer = new ResizeObserver(refit)
     observer.observe(surface.current!)
     const resume = () => {
-      if (document.visibilityState === 'visible') client.resume()
+      if (document.visibilityState === 'visible') client.resume?.()
     }
     window.addEventListener('pageshow', resume)
     window.addEventListener('online', resume)
     document.addEventListener('visibilitychange', resume)
     const initial = size()
     term.resize(initial.cols, initial.rows)
-    const focusInput = () => {
-      const active = document.activeElement
-      // Native pane activation can arrive after a click has focused a local control.
-      if (
-        active instanceof HTMLElement &&
-        active !== term.textarea &&
-        (active.closest('[role="menu"]') ||
-          active.matches('button, a[href], input, textarea, select, [contenteditable="true"]'))
-      )
-        return
-      if (!focusRecovery()) term.focus()
-    }
     const stopCommands = desktop?.onCommand(command => {
       if (command === 'focus') {
         focusInput()
@@ -352,7 +372,8 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           acknowledgeActivity()
         }
       } else if (command === 'reconnect') client.reconnect()
-      else {
+      else if (command === 'find') openSearch()
+      else if (command === 'select-all') {
         const active = document.activeElement
         if (active !== term.textarea && (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement))
           active.select()
@@ -377,19 +398,21 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
     // render (React StrictMode) never spends the token.
     const start = setTimeout(() => client.open(), 0)
     const launches = new Set<string>()
-    const stopLaunches = desktop?.onLaunch(launch => {
-      if (launches.has(launch)) return
-      launches.add(launch)
-      if (launches.size > 32) launches.delete(launches.values().next().value!)
-      clearTimeout(start)
-      if (!client.connected) lifecycle.current.onResume?.(launch)
-      void client
-        .activate(launch)
-        .catch(error => notify((error as Error).message))
-        .finally(() => {
-          void desktop?.launchHandled(launch).catch(() => {})
-        })
-    })
+    const activate = client.activate?.bind(client)
+    const stopLaunches =
+      activate &&
+      desktop?.onLaunch(launch => {
+        if (launches.has(launch)) return
+        launches.add(launch)
+        if (launches.size > 32) launches.delete(launches.values().next().value!)
+        clearTimeout(start)
+        if (!client.connected) lifecycle.current.onResume?.(launch)
+        void activate(launch)
+          .catch(error => notify((error as Error).message))
+          .finally(() => {
+            void desktop?.launchHandled(launch).catch(() => {})
+          })
+      })
     return () => {
       clearTimeout(start)
       cancelAnimationFrame(fitFrame)
@@ -412,13 +435,15 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
       stopCommands?.()
       stopHost?.()
       stopLaunches?.()
+      stopTitle?.dispose()
+      stopSearch()
       term.dispose()
       socket.current = null
       terminal.current = null
       clipboard.current = null
       bell.current = null
     }
-  }, [token, arm, notify, pasteImage, focusRecovery])
+  }, [token, local, arm, notify, pasteImage, focusRecovery, attachSearch, openSearch])
 
   const press = (key: string, extra?: TerminalModifiers) => {
     const data = terminalKey(key, { ...armed.current, ...extra }, terminal.current?.modes.applicationCursorKeysMode)
@@ -442,7 +467,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           : 'Disconnected'
 
   return (
-    <div ref={container} className="terminal-view" role="dialog" aria-label={`Web terminal · ${name}`}>
+    <div ref={container} className="terminal-view" role="dialog" aria-label={`Terminal · ${name}`}>
       <header className="terminal-bar" hidden={!toolbarShown}>
         <div className="terminal-title">
           <strong>{name}</strong>
@@ -456,6 +481,15 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           </span>
         </div>
         <div className="terminal-actions">
+          <button
+            className="icon-button terminal-find"
+            title="Find in terminal"
+            aria-label="Find in terminal"
+            disabled={state.kind === 'closed'}
+            onClick={openSearch}
+          >
+            <Search size={17} />
+          </button>
           <button
             className="icon-button"
             title="Hide terminal toolbar"
@@ -521,7 +555,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
           </button>
           <button
             className="icon-button"
-            title="Close terminal (the session keeps running)"
+            title={local ? 'Close terminal and end the local shell' : 'Close terminal (the session keeps running)'}
             aria-label="Close terminal"
             onClick={onClose}
           >
@@ -548,6 +582,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
             paste: () => void clipboard.current?.paste(),
             selectAll: () => terminal.current?.selectAll(),
             selectText,
+            find: openSearch,
             pasteImage: () => chooser.current?.click(),
             focus: () => {
               if (!touch()) terminal.current?.focus()
@@ -561,6 +596,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
         >
           <div className="terminal-surface" ref={surface} inert={state.kind === 'closed'} />
         </TerminalContextMenu>
+        {search.visible && state.kind !== 'closed' && <TerminalSearch search={search} />}
         {/* Notices float over the screen; they must never change PTY geometry. */}
         <div className={`terminal-notices${toolbarShown ? '' : ' toolbar-hidden'}`}>
           {(status || (!toolbarShown && (state.kind === 'connecting' || state.kind === 'reconnecting'))) && (
@@ -628,7 +664,7 @@ export default function TerminalView({ token, title, onClose, onResume, onExpire
                 state.reason !== 'expired' && (
                   <button className="button primary" onClick={() => socket.current?.reconnect()}>
                     <RotateCw size={15} />
-                    Reconnect
+                    {local ? 'Start new shell' : 'Reconnect'}
                   </button>
                 )
               )}

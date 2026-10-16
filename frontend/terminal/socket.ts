@@ -3,15 +3,10 @@ import { protocolVersion } from '../../shared/protocol'
 import type { ImageMediaType } from '../../shared/model'
 import type { SessionActivity } from '../../shared/activity'
 import type { TerminalRendering } from './rendering'
-
-export type SocketState =
-  | { kind: 'connecting' }
-  | { kind: 'connected' }
-  | { kind: 'reconnecting'; attempt: number; message: string }
-  | { kind: 'closed'; reason: CloseReason; message: string }
+import type { TerminalConnection, TerminalState } from './connection'
 
 interface Handlers {
-  state(state: SocketState): void
+  state(state: TerminalState): void
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
   activity(state: SessionActivity | null): void
@@ -21,7 +16,7 @@ const retries = 8
 
 /** The web client of the terminal protocol (shared/protocol.ts). Reconnects
  * with the resume token after drops; an ended session requires explicit reconnect. */
-export class TerminalSocket {
+export class TerminalSocket implements TerminalConnection {
   private socket: WebSocket | null = null
   private token: string
   private attempts = 0

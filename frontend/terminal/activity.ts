@@ -1,5 +1,5 @@
 import type { SessionActivity } from '../../shared/activity'
-import type { TerminalSocket } from './socket'
+import type { TerminalConnection } from './connection'
 
 /** Acknowledge the completion visible on activation, never a later turn.
  * Keep local feedback immediate while the target persists the shared check. */
@@ -12,7 +12,7 @@ export class TerminalActivity {
   private checked = new Set<string>()
 
   constructor(
-    private client: Pick<TerminalSocket, 'acknowledge'>,
+    private client: Pick<TerminalConnection, 'acknowledge'>,
     private changed: (state: SessionActivity | null) => void,
     private notice: (message: string) => void,
   ) {}
@@ -37,7 +37,7 @@ export class TerminalActivity {
   }
 
   acknowledge() {
-    if (!this.active) return
+    if (!this.active || !this.client.acknowledge) return
     this.awaitingObservation = this.state === null
     const token = this.state?.state === 'finished' ? this.state.completionId : null
     if (!token || this.checked.has(token) || this.pending.has(token) || this.pending.size >= 32) return

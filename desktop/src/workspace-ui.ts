@@ -302,7 +302,7 @@ function render(next: WorkspaceSnapshot) {
   for (const name of ['sessions', 'switcher', 'settings', 'rename'])
     el(`${name}-panel`).hidden = typeof panel === 'object' ? name !== 'rename' || panel === null : panel !== name
   for (const [id, page] of [
-    ['new-tab', 'sessions'],
+    ['home', 'sessions'],
     ['switch', 'switcher'],
     ['settings', 'settings'],
   ]) {
@@ -325,6 +325,9 @@ function render(next: WorkspaceSnapshot) {
     } else if (panel === 'sessions') {
       if (!next.drag) el('server').focus()
     } else if (panel === 'settings') {
+      const shell = el<HTMLSelectElement>('local-shell')
+      shell.replaceChildren(...next.shells.map(profile => new Option(profile.name, profile.id)))
+      shell.value = next.defaultShell
       el<HTMLInputElement>('font-size').value = String(next.preferences.fontSize)
       el<HTMLInputElement>('sound').checked = next.preferences.sound
       el('saved').textContent = ''
@@ -340,7 +343,12 @@ function render(next: WorkspaceSnapshot) {
   }
 }
 
-el('home').onclick = el('new-tab').onclick = () => run(api.panel('sessions'))
+el('home').onclick = () => run(api.panel('sessions'))
+el('new-tab').onclick = el('open-local').onclick = () => run(api.newLocal())
+el('new-tab').oncontextmenu = event => {
+  event.preventDefault()
+  run(api.shellMenu())
+}
 el('switch').onclick = () => run(api.panel('switcher'))
 el('settings').onclick = () => run(api.panel('settings'))
 el('back').onclick = () => run(api.panel(null))
@@ -385,10 +393,13 @@ el<HTMLFormElement>('preferences-form').onsubmit = event => {
   event.preventDefault()
   run(
     api
-      .preferences({
-        fontSize: Number(el<HTMLInputElement>('font-size').value),
-        sound: el<HTMLInputElement>('sound').checked,
-      })
+      .preferences(
+        {
+          fontSize: Number(el<HTMLInputElement>('font-size').value),
+          sound: el<HTMLInputElement>('sound').checked,
+        },
+        el<HTMLSelectElement>('local-shell').value,
+      )
       .then(() => {
         el('saved').textContent = 'Saved'
       }),
@@ -451,13 +462,14 @@ run(
     const shortcuts = [
       ['New window', mac ? '⌘Shift+N' : 'Ctrl+Shift+N'],
       ['Cancel tab drag', 'Esc'],
-      ['New tab / choose a session', `${modifier}T`],
+      ['New local terminal', `${modifier}T`],
       ['Switch session', `${modifier}P`],
       ['Close tab', `${modifier}W`],
       ['Next / previous tab', 'Ctrl+Tab / Ctrl+Shift+Tab'],
       ['Go to tab 1–8 / last tab', `${mac ? '⌘' : 'Alt+'}1–9`],
       ['Split side by side', `${modifier}D`],
       ['Focus other pane', `${mac ? '⌘' : 'Ctrl+'}Alt+→`],
+      ['Find in terminal', `${mac ? '⌘' : 'Ctrl+'}F`],
       ['Larger terminal text', `${mac ? '⌘' : 'Ctrl+'}= or ${mac ? '⌘' : 'Ctrl+'}+`],
       ['Smaller terminal text', `${mac ? '⌘' : 'Ctrl+'}−`],
       ['Reset terminal text size', `${mac ? '⌘' : 'Ctrl+'}0`],

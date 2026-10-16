@@ -1562,6 +1562,75 @@ kbd {
   flex: 1;
   min-height: 0;
 }
+.terminal-search {
+  --search-control-size: 28px;
+  // Search floats over xterm; opening it must not resize the screen or the PTY.
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: min(480px, calc(100% - 16px));
+  box-sizing: border-box;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  box-shadow: 0 4px 16px #0006;
+  color-scheme: dark;
+  > svg {
+    flex-shrink: 0;
+    color: #94a3b8;
+  }
+  input {
+    flex: 1;
+    min-width: 0;
+    width: 0;
+    height: 28px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    &:focus {
+      outline: 1px solid #60a5fa;
+      box-shadow: none;
+    }
+  }
+  .icon-button {
+    width: var(--search-control-size);
+    height: var(--search-control-size);
+    flex-shrink: 0;
+    color: #cbd5e1;
+    &[aria-pressed='true'] {
+      background: #334155;
+      color: #93c5fd;
+    }
+    &:disabled {
+      opacity: 0.4;
+    }
+  }
+}
+.terminal-search-count {
+  flex-shrink: 0;
+  padding-inline: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  &:empty {
+    display: none;
+  }
+}
+.terminal-search ~ .terminal-notices {
+  top: 60px;
+  max-height: calc(100% - 68px);
+}
 .terminal-bell {
   flex-wrap: nowrap;
   border-color: #854d0e;
@@ -1720,6 +1789,17 @@ kbd {
   }
   .terminal-surface {
     touch-action: var(--terminal-touch-action, pinch-zoom);
+  }
+  .terminal-search {
+    --search-control-size: 44px;
+    input {
+      height: 44px;
+      font-size: 16px;
+    }
+  }
+  .terminal-search ~ .terminal-notices {
+    top: 76px;
+    max-height: calc(100% - 84px);
   }
   .key-bar {
     touch-action: pan-x pinch-zoom;
@@ -2017,5 +2097,56 @@ kbd {
   }
   .terminal-surface {
     left: 4px;
+  }
+  .terminal-search {
+    // Keep the floating toolbar button reachable and the input useful on narrow panes.
+    width: calc(100% - 72px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(3, var(--search-control-size));
+    > svg {
+      display: none;
+    }
+    input {
+      grid-column: 1 / 4;
+      grid-row: 1;
+      width: 100%;
+    }
+    .terminal-search-close {
+      grid-column: 4;
+      grid-row: 1;
+    }
+    .terminal-search-count {
+      grid-column: 1;
+      grid-row: 2;
+      padding: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .terminal-search-case {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .terminal-search-previous {
+      grid-column: 3;
+      grid-row: 2;
+    }
+    .terminal-search-next {
+      grid-column: 4;
+      grid-row: 2;
+    }
+  }
+  .terminal-search ~ .terminal-notices {
+    top: 92px;
+    max-height: calc(100% - 100px);
+  }
+  @media (pointer: coarse) {
+    .terminal-find {
+      // The context menu still offers Find without overflowing the phone toolbar.
+      display: none;
+    }
+    .terminal-search ~ .terminal-notices {
+      top: 124px;
+      max-height: calc(100% - 132px);
+    }
   }
 }

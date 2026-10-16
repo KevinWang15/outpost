@@ -1,7 +1,7 @@
 import type { SessionActivity } from './activity'
 
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 5
+export const desktopBridgeVersion = 6
 export interface TerminalPreferences {
   fontSize: number
   sound: boolean
@@ -21,6 +21,10 @@ export type TerminalCommand = 'select-all' | 'focus' | 'reconnect' | 'find'
 export interface DesktopBridge {
   version: number
   notificationsSupported: boolean
+  /** Credential for this tab only, delivered in memory rather than a page URL. */
+  ticket(): Promise<string | null>
+  /** Called only after the server accepts a connection and issues a resume grant. */
+  saveResume(token: string, title: string): Promise<void>
   openExternal(url: string): Promise<boolean>
   onCommand(listener: (command: TerminalCommand) => void): () => void
   onLaunch(listener: (token: string) => void): () => void

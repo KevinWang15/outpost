@@ -2,7 +2,8 @@ import { app, BrowserWindow, dialog, ipcMain, screen, type Point } from 'electro
 import type { DesktopLaunch } from '../../shared/desktop'
 import { Preferences } from './preferences'
 import { TrustedServers } from './store'
-import { TerminalTabs } from './terminals'
+import { TerminalTabs, type TerminalTab } from './terminals'
+import { RecentSessions } from './recent-sessions'
 import { TabDrag } from './tab-drag'
 import { transferTab } from './tab-transfer'
 import { WorkspaceWindow } from './workspace-window'
@@ -23,6 +24,7 @@ export class DesktopWorkspace {
     private directory: string,
     private trusted: TrustedServers,
     private preferences: Preferences,
+    private recentSessions: RecentSessions,
     private trust: (origin: string) => Promise<boolean>,
   ) {
     this.terminals = new TerminalTabs(directory, {
@@ -52,6 +54,11 @@ export class DesktopWorkspace {
       },
       changed: id => this.owners.get(id)?.render(),
       state: id => ({ ...preferences.value, focused: this.owners.get(id)?.focused(id) ?? false }),
+      remember: async entry => {
+        if (!this.trusted.has(entry.server)) return
+        await this.recentSessions.remember(entry)
+        this.render()
+      },
     })
     this.drag = new TabDrag({
       windows: () => this.recent.flatMap(id => this.windows.get(id) ?? []),
@@ -79,9 +86,6 @@ export class DesktopWorkspace {
     })
   }
 
-  get hasTabs() {
-    return this.terminals.tabs.size > 0
-  }
   get current() {
     const focused = BrowserWindow.getFocusedWindow()
     return (
@@ -128,6 +132,19 @@ export class DesktopWorkspace {
       changed: () => this.render(),
       shells: () => this.shells,
       newLocal: (source, profile) => this.newLocal(profile, source),
+      recentSessions: () => this.recentSessions.list(),
+      openRecent: (source, id) => this.openRecent(source, id),
+      removeRecent: async id => {
+        this.terminals.forgetRecent(id)
+        await this.recentSessions.remove(id)
+        this.render()
+      },
+      clearRecent: async () => {
+        this.terminals.forgetRecent()
+        await this.recentSessions.clear()
+        this.render()
+      },
+      forgetRecents: () => this.recentSessions.retainServers(origin => this.trusted.has(origin)),
       destinations: source =>
         [...this.windows]
           .filter(([, window]) => window !== source)
@@ -162,14 +179,28 @@ export class DesktopWorkspace {
 
   open(launch: DesktopLaunch) {
     this.drag.cancel()
-    const { tab, created } = this.terminals.open(launch)
+    return this.activateOpened(this.terminals.open(launch))
+  }
+
+  private openRecent(source: WorkspaceWindow, id: string) {
+    const entry = this.recentSessions.get(id)
+    if (!entry || !this.trusted.has(entry.server)) throw new Error('This recent session is no longer available.')
+    this.drag.cancel()
+    return this.activateOpened(this.terminals.openRecent(entry), source)
+  }
+
+  private async activateOpened(
+    { tab, created }: { tab: TerminalTab; created: boolean },
+    destination?: WorkspaceWindow,
+  ) {
     let owner = this.owners.get(tab.id)
     if (created) {
-      owner = this.current
+      owner = destination ?? this.current
       this.owners.set(tab.id, owner)
       owner.add(tab)
     }
     owner?.activate(tab.id)
+    if (!created && tab.state.connection === 'connected') await this.terminals.remember(tab)
   }
 
   newLocal(profileId?: string, owner = this.forAction()) {
@@ -251,6 +282,7 @@ export class DesktopWorkspace {
         })
         if (result.response !== 0) return
       }
+      await this.recentSessions.flush()
       this.quitting = true
       app.quit()
     } finally {

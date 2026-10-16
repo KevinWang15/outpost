@@ -28,6 +28,10 @@
         <section id="sessions-panel" hidden>
           <div class="intro"><img src="outpost.png" width="52" height="52" alt="" /><div><p class="eyebrow">YOUR TERMINAL WORKSPACE</p><h1>A place for every session.</h1></div></div>
           <p class="description">Open a local terminal with <strong>+</strong>, or choose a session in your Outpost server, then <strong>Connect → Outpost Desktop</strong>. Local and remote sessions share the same tabs and splits.</p>
+          <div class="section-heading"><h2 id="recent-heading">Recent sessions</h2><button id="clear-recent" type="button" class="subtle">Clear recent sessions</button></div>
+          <ul id="recent-sessions" class="rows" aria-labelledby="recent-heading"></ul>
+          <p id="no-recent" class="hint">Your 10 most recent Outpost sessions will appear here after connecting. Local terminals aren't saved.</p>
+          <p id="recent-hint" class="hint" hidden>Click a session to reconnect, or use ↑ ↓ and Enter. An already open session switches to its tab.</p>
           <button id="open-local" class="primary" type="button">Open local terminal</button>
           <form id="server-form"><label for="server">Outpost server</label><div class="address"><input id="server" type="url" placeholder="https://outpost.example.com" required autocomplete="url" /><button class="primary" type="submit">Open server ↗</button></div></form>
           <h2>Trusted servers</h2><ul id="servers" class="rows"></ul>
@@ -51,7 +55,7 @@
             <button class="primary" type="submit">Save settings</button><span id="saved" role="status"></span>
           </form>
           <h2>Keyboard shortcuts</h2><dl id="shortcuts"></dl>
-          <div class="tip"><strong>Local and remote terminals.</strong><p>Local shells work offline and end when their tab or the app closes. Remote Outpost sessions keep running and can be reconnected through your server. The app saves trusted servers and preferences; it does not save account passwords or connection tickets.</p></div>
+          <div class="tip"><strong>Local and remote terminals.</strong><p>Local shells work offline and end when their tab or the app closes. The Outpost page remembers your 10 most recent remote sessions for quick reconnects. If a saved connection expires, use Connect → Outpost Desktop in your server again. Remove an entry or clear the list to forget saved connections; running sessions stay open.</p></div>
           <footer><span id="version"></span><button id="updates" type="button">Check for updates</button></footer>
         </section>
         <section id="rename-panel" hidden>

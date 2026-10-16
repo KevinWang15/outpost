@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { desktopOrigin } from '../../shared/desktop'
 
-/** Only explicit server trust is persisted. Launch/resume tokens never enter this file. */
+/** Explicit server trust only; reconnect credentials live separately in recent-sessions.json. */
 export class TrustedServers {
   private servers = new Set<string>()
   private writes = Promise.resolve()

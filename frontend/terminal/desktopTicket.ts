@@ -1,5 +1,6 @@
-// A terminal grant is not an account login. Keep it in this window's session
-// storage for reloads; never put a resume token in a link or localStorage.
+// Direct browser launches keep grants in this window's session storage for
+// reloads. Native tabs use the preload and the app's separate recent-session store.
+// Never put a resume token in a link or localStorage.
 const key = 'outpost.desktop.ticket'
 const valid = (value: string | null): value is string =>
   value !== null && value.length <= 8192 && /^[\w-]+\.[\w-]+$/.test(value)

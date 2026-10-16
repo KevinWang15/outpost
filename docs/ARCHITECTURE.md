@@ -146,7 +146,8 @@ authentication or desktop trust confirmation.
    its ticket. Desktop receives `outpost://connect/<base64url payload>` with
    `{v: 2, terminal: 'desktop', server, sessionKey, token, title}`. Electron validates the
    envelope and HTTPS/localhost origin, confirms server trust, and loads
-   `/terminal/desktop#token=…` from that origin.
+   `/terminal/desktop` from that origin. The validated tab receives its credential
+   through the preload's `ticket()` call, without putting it in the page URL.
 3. Both entry pages render `TerminalView` and use `TerminalSocket` to connect
    to `/api/terminal`. The broker returns a 30-day resume token in `hello`.
    Both grants remain bound to the originating login and one session; logout
@@ -168,18 +169,24 @@ authentication or desktop trust confirmation.
 | Choice | Entry | Authorization | Native integration |
 | --- | --- | --- | --- |
 | Web terminal | `TerminalPage`, `/terminal` | Browser login requests a grant | Browser permissions and clipboard APIs |
-| Outpost Desktop | `DesktopTerminalPage`, `/terminal/desktop` | `desktopTicket` consumes the launch fragment | Versioned `DesktopBridge` through a sandboxed preload |
+| Outpost Desktop | `DesktopTerminalPage`, `/terminal/desktop` | The owning native tab supplies its launch or resume credential through `DesktopBridge.ticket()` | Versioned `DesktopBridge` through a sandboxed preload |
 
 `/terminal/desktop` and `/desktop` (downloads) are public page shells. The terminal
 broker authorizes each connection; these pages confer no account API access.
 Desktop needs no copied login cookie or second authentication system.
 
-`desktopTicket` erases the fragment before React renders, replaces the launch ticket
-with the resume grant on `hello`, and clears it on explicit Close or expiry.
-Window-scoped session storage permits reloads. Electron uses nonpersistent
-partitions per server, so no browser login or terminal ticket is written to
-its preferences. If session storage is unavailable, reconnect works in memory
-but reload requires a fresh Connect.
+Native tabs keep their current credential in the main process. On `hello`,
+`DesktopTerminalPage` uses `saveResume()` to replace it with the reusable grant
+and remember the session. Reload requests the current credential again. A fresh
+launch routed to an already connected tab must not replace its resume credential
+with the single-use ticket consumed by `activate`.
+
+The public desktop entry also supports a direct browser launch grant for the
+browser client flow: `desktopTicket` erases the fragment before React renders,
+replaces it with the resume grant in window-scoped session storage on `hello`,
+and clears it on Close or expiry. Native tabs use only the preload credential,
+not browser storage. Electron still uses nonpersistent partitions per server;
+no account cookies or passwords are copied into the app.
 
 Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
@@ -579,6 +586,34 @@ fails with a clear message.
 origins, and `preferences.ts` serializes font size, bell sound, and the optional
 default local shell profile ID.
 
+### Recent remote sessions
+
+`recent-sessions.ts` atomically serializes at most ten remote sessions to
+`recent-sessions.json` in Electron's `userData` directory. The file contains
+plain resume credentials, the normalized server origin, opaque session routing
+key, display title, and last connection time. Launch tickets, local shell
+sessions, terminal contents, and drafts are not saved.
+
+The store and open-tab registry share `remoteSessionId(server, sessionKey)`.
+Records are added or refreshed only after the broker's authenticated `hello`,
+or when explicitly opening an already connected tab. The main process derives
+identity from the sending tab; the renderer cannot choose a different server or
+session entry. Workspace snapshots contain display metadata only, never tokens.
+Selecting a recent entry activates an existing tab across windows, or uses the
+same remote view creation and WebSocket connection path as a new launch. Resume
+credentials never go through the fresh-launch `activate` operation.
+
+Entries survive app restarts. Remove/clear deletes saved credentials and disables
+background re-saving by the affected open tabs; a subsequent explicit Connect
+can remember them again. Forgetting a server closes its tabs and removes its
+entries. Startup also removes entries for origins that are no longer trusted.
+The store serializes concurrent mutations and app quit waits for pending writes.
+
+Expiry is enforced by the existing broker on use: resume grants last 30 days,
+while the original hosted login must remain valid. New grants do not extend
+that login. Expired or logged-out entries stay listed and show the existing
+Connection expired error; there is no background refresh or automatic sign-in.
+
 ### Local shells
 
 The logo opens managed servers and sessions; **+**, the new-terminal shortcut,
@@ -780,9 +815,10 @@ Packaged apps register the protocol through Electron and installer metadata.
 macOS handles `open-url` before app readiness; Windows uses initial arguments
 and `second-instance`. A single app instance owns all workspaces; subsequent
 launches focus an existing tab or add one to the active window. Closing a remote tab or window never terminates its target session. The server
-launcher can forget a server and close its tabs. No connection tickets or
-layouts with credentials are persisted; reopening the app starts a fresh
-workspace. The app icon and Windows AppUserModelID belong to Outpost.
+launcher can forget a server and close its tabs. Reopening the app starts a fresh
+workspace with its recent remote sessions available for explicit reconnect;
+layouts and running local shells are not restored. The app icon and Windows
+AppUserModelID belong to Outpost.
 
 `electron-builder.yml` packages unsigned preview DMG/ZIP files for both Mac
 architectures and an NSIS installer for Windows x64. Apple silicon uses ad-hoc

@@ -46,6 +46,7 @@ let selected = 0
 let matches: TabSummary[] = []
 const tabNodes = new Map<number, HTMLElement>()
 const serverNodes = new Map<string, HTMLElement>()
+const recentNodes = new Map<string, HTMLElement>()
 const sessionNodes = new Map<number, HTMLElement>()
 const placeholderNodes = new Map<number, HTMLElement>()
 const tabs = el('tabs')
@@ -194,6 +195,39 @@ function renderServers() {
   )
   el('no-servers').hidden = state!.servers.length > 0
 }
+function renderRecents() {
+  const active = document.activeElement
+  const hadFocus =
+    active instanceof HTMLElement && (el('recent-sessions').contains(active) || active.id === 'clear-recent')
+  reconcileElements(
+    el('recent-sessions'),
+    recentNodes,
+    state!.recentSessions,
+    session => session.id,
+    session => {
+      const row = document.createElement('li')
+      const open = button('', () => run(api.openRecent(session.id)), 'row-main')
+      open.append(document.createElement('strong'), document.createElement('small'))
+      const remove = button('Remove', () => run(api.removeRecent(session.id)))
+      row.append(open, remove)
+      return row
+    },
+    (row, session) => {
+      const open = row.querySelector<HTMLButtonElement>('.row-main')!
+      open.querySelector('strong')!.textContent = session.title
+      open.querySelector('small')!.textContent = session.server
+      open.title = `${session.title}\n${session.server}\nLast connected ${new Date(session.lastConnectedAt).toLocaleString()}`
+      open.setAttribute('aria-label', `Connect to ${session.title} on ${session.server}`)
+      row.lastElementChild!.setAttribute('aria-label', `Remove ${session.title} from recent sessions`)
+    },
+  )
+  const empty = state!.recentSessions.length === 0
+  el('no-recent').hidden = !empty
+  el('recent-hint').hidden = empty
+  el('clear-recent').hidden = empty
+  if (hadFocus && (!active.isConnected || (empty && active.id === 'clear-recent')))
+    (el('recent-sessions').querySelector<HTMLElement>('.row-main') ?? el('server')).focus()
+}
 function renderMatches(preserveSelection = true) {
   const query = search.value.trim().toLocaleLowerCase()
   const selectedId = preserveSelection ? matches[selected]?.id : undefined
@@ -292,6 +326,7 @@ function render(next: WorkspaceSnapshot) {
   state = next
   renderTabs(panel)
   renderServers()
+  renderRecents()
   renderMatches()
   renderStage()
   if (previousActive !== next.active && next.active !== null)
@@ -324,7 +359,7 @@ function render(next: WorkspaceSnapshot) {
       renderMatches(false)
       if (!next.drag) search.focus()
     } else if (panel === 'sessions') {
-      if (!next.drag) el('server').focus()
+      if (!next.drag) (el('recent-sessions').querySelector<HTMLElement>('.row-main') ?? el('server')).focus()
     } else if (panel === 'settings') {
       const shell = el<HTMLSelectElement>('local-shell')
       shell.replaceChildren(...next.shells.map(profile => new Option(profile.name, profile.id)))
@@ -345,6 +380,21 @@ function render(next: WorkspaceSnapshot) {
 }
 
 el('home').onclick = () => run(api.panel('sessions'))
+el('clear-recent').onclick = () => run(api.clearRecent())
+el('recent-sessions').onkeydown = event => {
+  if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+  const buttons = [...el('recent-sessions').querySelectorAll<HTMLButtonElement>('.row-main')]
+  const index = buttons.findIndex(node => node === document.activeElement)
+  if (index < 0) return
+  event.preventDefault()
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : Math.max(0, Math.min(buttons.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))
+  buttons[next]?.focus()
+}
 el('new-tab').onclick = el('open-local').onclick = () => run(api.newLocal())
 el('new-tab').oncontextmenu = event => {
   event.preventDefault()

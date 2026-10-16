@@ -6,11 +6,13 @@ import { TrustedServers } from './store'
 import { DesktopWorkspace } from './workspace'
 import { checkUpdates } from './updates'
 import { tabActionShortcuts } from './tab-shortcuts'
+import { RecentSessions } from './recent-sessions'
 
 app.setName('Outpost')
 app.setAppUserModelId('dev.outpost.desktop')
 const trusted = new TrustedServers(join(app.getPath('userData'), 'servers.json'))
 const preferences = new Preferences(join(app.getPath('userData'), 'preferences.json'))
+const recentSessions = new RecentSessions(join(app.getPath('userData'), 'recent-sessions.json'))
 let workspace: DesktopWorkspace | undefined
 const waiting: string[] = []
 let operations = Promise.resolve()
@@ -51,7 +53,7 @@ function receive(value: string) {
   operations = operations
     .then(async () => {
       const launch = parseLaunch(value)
-      if (await trust(launch.server)) workspace!.open(launch)
+      if (await trust(launch.server)) await workspace!.open(launch)
       else workspace!.show()
     })
     .catch(async error => {
@@ -208,8 +210,9 @@ else {
   void app
     .whenReady()
     .then(async () => {
-      await Promise.all([trusted.load(), preferences.load()])
-      workspace = new DesktopWorkspace(__dirname, trusted, preferences, trust)
+      await Promise.all([trusted.load(), preferences.load(), recentSessions.load()])
+      await recentSessions.retainServers(origin => trusted.has(origin))
+      workspace = new DesktopWorkspace(__dirname, trusted, preferences, recentSessions, trust)
       app.setAboutPanelOptions({
         applicationName: 'Outpost',
         applicationVersion: app.getVersion(),
@@ -230,7 +233,7 @@ else {
       app.quit()
     })
   app.on('before-quit', event => {
-    if (workspace?.hasTabs && !workspace.quitting) {
+    if (workspace && !workspace.quitting) {
       event.preventDefault()
       void workspace.quit()
     }

@@ -1,12 +1,38 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { pagePaths } from '../../shared/pages'
 import { desktop, desktopProblem } from '../desktop'
 import TerminalView from './TerminalView'
-import { saveDesktopTicket } from './desktopTicket'
 import { openBrowserTab } from './browser'
+import { saveDesktopTicket } from './desktopTicket'
+
+function remember(token: string, title: string) {
+  if (desktop) return desktop.saveResume(token, title)
+  saveDesktopTicket(token)
+}
 
 export default function DesktopTerminalPage({ token: initial }: { token: string | null }) {
-  const [token] = useState(initial)
+  const [token, setToken] = useState(desktop ? null : initial)
+  const [loading, setLoading] = useState(Boolean(desktop))
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!desktop) return
+    let disposed = false
+    void desktop.ticket().then(
+      value => {
+        if (disposed) return
+        setToken(value)
+        setLoading(false)
+      },
+      () => {
+        if (disposed) return
+        setError('Could not open this connection. Close the tab and try again from Outpost.')
+        setLoading(false)
+      },
+    )
+    return () => {
+      disposed = true
+    }
+  }, [])
   if (desktopProblem)
     return (
       <main className="auth-loading" role="alert">
@@ -21,9 +47,12 @@ export default function DesktopTerminalPage({ token: initial }: { token: string 
     return (
       <main className="auth-loading">
         <h1>Outpost Desktop</h1>
-        <p>Choose a session in Outpost, then Connect → Outpost Desktop.</p>
+        <p role={error ? 'alert' : 'status'}>
+          {loading ? 'Opening terminal…' : error || 'Choose a session in Outpost, then Connect → Outpost Desktop.'}
+        </p>
         <button
           className="button primary"
+          disabled={loading}
           onClick={() => {
             void openBrowserTab(window.location.origin)
           }}
@@ -36,8 +65,10 @@ export default function DesktopTerminalPage({ token: initial }: { token: string 
     <TerminalView
       token={token}
       title="Outpost Desktop"
-      onResume={saveDesktopTicket}
-      onExpired={() => saveDesktopTicket(null)}
+      onResume={remember}
+      onExpired={() => {
+        if (!desktop) saveDesktopTicket(null)
+      }}
       onClose={() => {
         if (desktop) void desktop.close()
         else {

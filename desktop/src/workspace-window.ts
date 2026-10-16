@@ -9,6 +9,7 @@ import { TerminalTabs, type TerminalTab } from './terminals'
 import { attachTabShortcuts } from './tab-shortcuts'
 import { checkUpdates } from './updates'
 import type { ShellProfile } from './shell-profiles'
+import type { RecentSessionSummary } from './recent-sessions'
 import {
   tabBarHeight,
   type SplitDirection,
@@ -21,6 +22,11 @@ import {
 export interface WorkspaceHost {
   shells(): ShellProfile[]
   newLocal(source: WorkspaceWindow, profile?: string): void
+  recentSessions(): RecentSessionSummary[]
+  openRecent(source: WorkspaceWindow, id: string): Promise<void>
+  removeRecent(id: string): Promise<void>
+  clearRecent(): Promise<void>
+  forgetRecents(): Promise<void>
   quitting(): boolean
   focused(window: WorkspaceWindow): void
   closed(window: WorkspaceWindow): void
@@ -117,6 +123,15 @@ export class WorkspaceWindow {
     handle('reload', (id: number) => this.reload(id))
     handle('open-server', (value: string) => this.openServer(value))
     handle('forget-server', (value: string) => this.forgetServer(value))
+    handle('open-recent', (id: unknown) => {
+      if (typeof id !== 'string') throw new Error('Choose a recent session.')
+      return this.host.openRecent(this, id)
+    })
+    handle('remove-recent', (id: unknown) => {
+      if (typeof id !== 'string') throw new Error('Choose a recent session.')
+      return this.host.removeRecent(id)
+    })
+    handle('clear-recent', () => this.host.clearRecent())
     handle('preferences', (value: TerminalPreferences, shell: string) => {
       if (!this.host.shells().some(profile => profile.id === shell)) throw new Error('Choose an available local shell.')
       return this.setPreferences(value, shell)
@@ -182,6 +197,7 @@ export class WorkspaceWindow {
       split: this.layout.split,
       panel: this.layout.panel,
       servers: this.trusted.list(),
+      recentSessions: this.host.recentSessions(),
       preferences: this.preferences.value,
       shells: this.host.shells().map(({ id, name }) => ({ id, name })),
       defaultShell:
@@ -556,6 +572,7 @@ export class WorkspaceWindow {
     }
     await this.trusted.set(origin, false)
     for (const tab of tabs) this.terminals.dispose(tab.id)
+    await this.host.forgetRecents()
     this.host.changed()
   }
   async setPreferences(value: TerminalPreferences, shell = this.preferences.localShell) {

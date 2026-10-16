@@ -1,17 +1,19 @@
-# Outpost Desktop 0.5.1 preview
+# Outpost Desktop 0.6.0 preview
 
-Terminal search placement, a shortcut guide, and confirmation before closing tabs.
+Return to recent Outpost sessions directly from the app.
 
 ## What's new
 
-- **Search at the top-right:** **⌘F** / **Ctrl+F** opens terminal search at the top-right, leaving room for the floating toolbar button. The search box still floats over the terminal without resizing it, in web, remote desktop, and local shell tabs.
-- **Shortcut guide on the home page:** click the Outpost logo or choose **Help → Outpost guide and shortcuts**. The guide documents **⌘T / ⌘W** on macOS and **Ctrl+Shift+T / Ctrl+Shift+W** on Windows for creating a local terminal tab and closing the current tab.
-- **Confirm before closing:** closing a tab always asks for confirmation, with **Cancel** selected by default. The prompt explains whether a local shell will end or a remote session will keep running, and includes any unsent message. Closing a window or quitting also asks when terminal tabs remain.
-- **Simpler home page:** removed its Back/Esc control. Click a terminal tab to return; Escape still dismisses transient panels and cancels tab dragging.
+- **Ten recent sessions:** click the Outpost logo to find your most recently connected remote sessions, remembered across app restarts. Local terminals are not included.
+- **Quick reconnect:** click an entry, or select it with the arrow keys and press Enter. If the session is already open, Outpost switches to its existing tab and window.
+- **Manage the list:** remove individual entries or clear the list without closing running sessions. Forgetting a server also removes its recent sessions and saved reconnect credentials.
+- **Existing authentication:** reconnect credentials last 30 days and are refreshed after a successful reconnect. Hosted login expiry and logout still apply. Expired entries show a connection error; use **Connect → Outpost Desktop** in your server for a fresh connection.
 
-Up to 32 tabs across 16 windows can stay open. Closing a local terminal ends its shell; local shells and history do not survive quitting the app. Closing or upgrading the app leaves remote sessions running; reconnect through your Outpost server after reopening.
+Recent-session metadata and reconnect credentials are saved as plain JSON in `recent-sessions.json` in the app's user-data directory. Account passwords, login cookies, terminal contents, and drafts are not saved.
 
-**Self-hosted users:** install Desktop 0.5.1 for the shortcut guide, close confirmations, and local search placement. Update your server and reload remote terminals for the new search placement there. Desktop bridge version 5 and the Linux terminal executable are unchanged from 0.5.0; remote sessions do not need to be restarted.
+Up to 32 tabs across 16 windows can stay open. Closing a local terminal ends its shell; local shells and history do not survive quitting the app. Closing or upgrading the app leaves remote sessions running.
+
+**Update both app and server:** this release uses desktop bridge version 6. Install Desktop 0.6.0 and update your Outpost server together. The Linux terminal executable is unchanged, and remote sessions do not need to be restarted. Connect your sessions once after updating to populate the recent list.
 
 ## Install
 

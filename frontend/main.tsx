@@ -7,7 +7,7 @@ import { takeDesktopTicket } from './terminal/desktopTicket'
 import { pagePaths } from '../shared/pages'
 
 const desktopTerminal = window.location.pathname === pagePaths.desktopTerminal
-// Strip launch credentials before rendering anything or making API requests.
+// Consume direct browser grants before rendering; native tabs use their preload.
 const ticket = desktopTerminal ? takeDesktopTicket() : null
 
 createRoot(document.getElementById('root')!).render(

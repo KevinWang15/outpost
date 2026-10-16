@@ -315,10 +315,20 @@ for manual installation; remote sessions survive closing or upgrading the app.
 | Close window | ⌘Shift+W | Alt+F4 |
 
 The app remembers trusted servers and opens their workspaces in your browser.
+The **Outpost logo → Recent sessions** list keeps your 10 most recent remote
+sessions across app restarts. Click an entry, or choose with ↑/↓ and press Enter,
+to reconnect. If it is already open, its existing tab and window are activated.
+Local shells are not included. **Remove** and **Clear recent sessions** forget
+saved connections without closing tabs or ending remote sessions.
 Removing a server asks for confirmation before closing its tabs across all windows.
+It also removes that server's recent sessions and saved reconnect credentials.
 Closing a tab includes any unsent message in its confirmation; hiding the message box preserves its draft.
-Launch/resume tickets stay in memory; the app stores neither your account
-password nor login cookies. After quitting, connect through your server again.
+Reconnect credentials are stored as plain JSON in `recent-sessions.json` in the
+app's user-data directory. Account passwords, browser login cookies, and
+single-use launch tickets are not saved. Reconnect credentials last 30 days and
+are renewed on reconnect; hosted login expiry and logout still apply. An expired
+entry shows **Connection expired** when opened. Use **Connect → Outpost Desktop**
+in your server to obtain a fresh connection.
 Use HTTPS, or HTTP on localhost for a local Outpost server / SSH port forward.
 The app needs a network connection and an open terminal tab for bells.
 

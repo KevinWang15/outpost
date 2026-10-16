@@ -21,6 +21,7 @@ import { parseSessionActivity } from '../../shared/activity'
 import { pagePaths } from '../../shared/pages'
 import { browserUrl } from '../../shared/signals'
 import { attachTabShortcuts } from './tab-shortcuts'
+import { remoteSessionId, validResumeToken, type RecentSession } from './recent-sessions'
 
 export interface TerminalTab {
   id: number
@@ -32,7 +33,15 @@ export interface TerminalTab {
   notification: Notification | null
   externalAt: number
   connection:
-    | { kind: 'remote'; launchKey: string; sessionKey: string; pendingLaunches: Set<string>; url: string }
+    | {
+        kind: 'remote'
+        launchKey: string
+        sessionKey: string
+        token: string
+        remember: boolean
+        pendingLaunches: Set<string>
+        url: string
+      }
     | { kind: 'local'; terminal: LocalTerminal }
   interfaceReady: boolean
   interfaceTimer?: ReturnType<typeof setTimeout>
@@ -48,6 +57,7 @@ interface Host {
   removed(id: number): void
   changed(id: number): void
   state(id: number): TerminalHostState
+  remember(session: RecentSession): Promise<void>
 }
 const cleanTitle = (value: string) =>
   [...value]
@@ -66,6 +76,18 @@ export class TerminalTabs {
     private host: Host,
   ) {
     ipcMain.handle('terminal:host-state', event => this.host.state(this.sender(event).id))
+    ipcMain.handle('terminal:ticket', event => {
+      const connection = this.sender(event).connection
+      return connection.kind === 'remote' ? connection.token : null
+    })
+    ipcMain.handle('terminal:save-resume', (event, token: unknown, title: unknown) => {
+      const tab = this.sender(event)
+      const connection = tab.connection
+      if (connection.kind !== 'remote' || !validResumeToken(token) || typeof title !== 'string' || title.length > 512)
+        throw new Error('Invalid session reconnect credential.')
+      connection.token = token
+      return this.remember(tab, cleanTitle(title))
+    })
     ipcMain.handle('terminal:pending-launches', event => {
       const connection = this.sender(event).connection
       return connection.kind === 'remote' ? [...connection.pendingLaunches] : []
@@ -208,6 +230,18 @@ export class TerminalTabs {
       notification.close()
     }
   }
+  async remember(tab: TerminalTab, title = tab.state.title) {
+    const connection = tab.connection
+    if (connection.kind !== 'remote' || !connection.remember) return
+    await this.host.remember({
+      id: remoteSessionId(tab.origin, connection.sessionKey),
+      server: tab.origin,
+      sessionKey: connection.sessionKey,
+      token: connection.token,
+      title,
+      lastConnectedAt: Date.now(),
+    })
+  }
   hostState(ids: Iterable<number>) {
     for (const id of ids) {
       const tab = this.tabs.get(id)
@@ -230,7 +264,8 @@ export class TerminalTabs {
     this.dismiss(tab)
     clearTimeout(tab.interfaceTimer)
     this.tabs.delete(id)
-    if (tab.connection.kind === 'remote') this.sessionTabs.delete(tab.connection.sessionKey)
+    if (tab.connection.kind === 'remote')
+      this.sessionTabs.delete(remoteSessionId(tab.origin, tab.connection.sessionKey))
     else tab.connection.terminal.dispose()
     const window = this.host.window(tab.id)
     if (window && !window.isDestroyed()) window.contentView.removeChildView(tab.view)
@@ -240,26 +275,27 @@ export class TerminalTabs {
   }
   open(launch: DesktopLaunch) {
     const launchKey = createHash('sha256').update(launch.token).digest('hex')
-    const sessionKey = JSON.stringify([launch.server, launch.sessionKey])
+    const sessionKey = remoteSessionId(launch.server, launch.sessionKey)
     const existing = this.sessionTabs.get(sessionKey)
     if (existing !== undefined) {
       const tab = this.tabs.get(existing)!
       const connection = tab.connection
       if (connection.kind !== 'remote') throw new Error('Invalid remote tab.')
+      connection.remember = true
       if (connection.launchKey !== launchKey) {
         if (connection.pendingLaunches.size >= 16)
           throw new Error('This terminal is still opening. Try Connect again shortly.')
         connection.launchKey = launchKey
-        connection.url = `${launch.server}${pagePaths.desktopTerminal}#token=${launch.token}`
+        // A healthy tab consumes this launch via activate; keep its reusable
+        // resume credential for reloads instead of the single-use launch ticket.
         if (tab.error) {
           // Recover a failed page in the same tab. A healthy renderer handles
           // launches through its existing socket and retains its composer draft.
           connection.pendingLaunches.clear()
+          connection.token = launch.token
           tab.error = null
           tab.state = { ...tab.state, connection: 'connecting', activity: null, hasDraft: false }
-          void tab.view.webContents
-            .loadURL(`${launch.server}${pagePaths.desktopTerminal}#token=${launch.token}`)
-            .catch(() => {})
+          void tab.view.webContents.loadURL(connection.url).catch(() => {})
         } else {
           connection.pendingLaunches.add(launch.token)
           tab.view.webContents.send('terminal:launch', launch.token)
@@ -267,15 +303,44 @@ export class TerminalTabs {
       }
       return { tab, created: false }
     }
-    const tab = this.create(launch.server, launch.title, {
+    return this.createRemote(launch, launchKey)
+  }
+
+  openRecent(entry: RecentSession) {
+    const existing = this.sessionTabs.get(entry.id)
+    // A saved resume credential must never enter the fresh-launch activation path.
+    if (existing !== undefined) {
+      const tab = this.tabs.get(existing)!
+      if (tab.connection.kind === 'remote') tab.connection.remember = true
+      return { tab, created: false }
+    }
+    return this.createRemote(entry, '')
+  }
+
+  private createRemote(entry: Pick<DesktopLaunch, 'server' | 'sessionKey' | 'token' | 'title'>, launchKey: string) {
+    const sessionKey = remoteSessionId(entry.server, entry.sessionKey)
+    const tab = this.create(entry.server, entry.title, {
       kind: 'remote',
       launchKey,
-      sessionKey,
+      sessionKey: entry.sessionKey,
+      token: entry.token,
+      remember: true,
       pendingLaunches: new Set(),
-      url: `${launch.server}${pagePaths.desktopTerminal}#token=${launch.token}`,
+      url: `${entry.server}${pagePaths.desktopTerminal}`,
     })
     this.sessionTabs.set(sessionKey, tab.id)
     return { tab, created: true }
+  }
+
+  forgetRecent(id?: string) {
+    for (const tab of this.tabs.values()) {
+      const connection = tab.connection
+      if (
+        connection.kind === 'remote' &&
+        (id === undefined || remoteSessionId(tab.origin, connection.sessionKey) === id)
+      )
+        connection.remember = false
+    }
   }
 
   openLocal(profile: ShellProfile) {
@@ -408,7 +473,7 @@ export class TerminalTabs {
       this.host.changed(tab.id)
     })
     contents.on('destroyed', () => this.dispose(tab.id))
-    // The shared entry erases the fragment before rendering. No credentials reach the local chrome.
+    // The isolated terminal requests its own credential through the preload.
     void contents.loadURL(connection.kind === 'local' ? this.localPage : connection.url).catch(() => {})
     return tab
   }

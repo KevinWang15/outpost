@@ -1,5 +1,6 @@
 import type { TerminalPreferences, TerminalTabState } from '../../shared/desktop'
 import type { ShellProfileSummary } from '../../shared/localTerminal'
+import type { RecentSessionSummary } from './recent-sessions'
 
 export type WorkspacePanel = 'sessions' | 'switcher' | 'settings' | { rename: number } | null
 export type SplitDirection = 'columns' | 'rows'
@@ -31,6 +32,7 @@ export interface WorkspaceSnapshot {
   split: { ids: [number, number]; direction: SplitDirection; ratio: number } | null
   panel: WorkspacePanel
   servers: string[]
+  recentSessions: RecentSessionSummary[]
   preferences: TerminalPreferences
   shells: ShellProfileSummary[]
   defaultShell: string
@@ -59,6 +61,9 @@ export interface WorkspaceBridge {
   reload(id: number): Promise<void>
   openServer(origin: string): Promise<boolean>
   forgetServer(origin: string): Promise<void>
+  openRecent(id: string): Promise<void>
+  removeRecent(id: string): Promise<void>
+  clearRecent(): Promise<void>
   preferences(value: TerminalPreferences, shell: string): Promise<void>
   checkUpdates(): Promise<void>
   reportError(message: string): Promise<void>

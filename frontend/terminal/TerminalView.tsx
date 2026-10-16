@@ -60,7 +60,7 @@ const closedTitles: Record<CloseReason, string> = {
 type Props = {
   title: string
   onClose: () => void
-  onResume?: (token: string) => void
+  onResume?: (token: string, title: string) => void | Promise<void>
   onExpired?: () => void
 } & ({ token: string; local?: never } | { token?: never; local: LocalTerminalBridge })
 
@@ -275,12 +275,14 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
       : new TerminalSocket(token!, size, rendering, {
           state: connectionState,
           hello: message => {
-            lifecycle.current.onResume?.(message.resume)
             sessionInfo.current = {
               id: `${message.target.id}/${message.session.id}`,
               name: `${message.session.name} · ${message.target.name}`,
             }
             setName(sessionInfo.current.name)
+            void Promise.resolve(lifecycle.current.onResume?.(message.resume, sessionInfo.current.name)).catch(() => {
+              notify('Could not save this session in Recent sessions.', true)
+            })
           },
           activity: next => activityController.update(next),
           signal: ({ signal }) => {
@@ -406,7 +408,6 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
         launches.add(launch)
         if (launches.size > 32) launches.delete(launches.values().next().value!)
         clearTimeout(start)
-        if (!client.connected) lifecycle.current.onResume?.(launch)
         void activate(launch)
           .catch(error => notify((error as Error).message))
           .finally(() => {

@@ -43,7 +43,6 @@ class Connection {
   private started = false
   private pending: Buffer[] = []
   private unacked = 0
-  private exitReason: 'ended' | null = null
   private finished = false
   private signals = { count: 0, until: 0 }
   private window = { messages: 0, bytes: 0, until: 0 }
@@ -86,7 +85,7 @@ class Connection {
     child.stdout.on('data', (chunk: Buffer) => this.output(chunk))
     child.on('error', error => this.close('error', `Could not reach the target: ${error.message}`))
     child.on('close', () => {
-      if (this.exitReason) return this.close(this.exitReason, closedMessages[this.exitReason])
+      if (this.finished) return
       if (!this.started) {
         const message = this.stderr.trim().split('\n').at(-1) || 'Could not attach to the session.'
         let result: ReturnType<typeof protocolResult> = null
@@ -107,6 +106,7 @@ class Connection {
   }
 
   private output(chunk: Buffer) {
+    if (this.finished) return
     if (!this.started && !this.prelude.includes(relayMagic)) {
       // Login shells may print before the relay starts; keep a bounded tail for errors.
       this.prelude = Buffer.concat([this.prelude, chunk]).subarray(-64 * 1024)
@@ -122,6 +122,7 @@ class Connection {
       return this.close('unavailable', 'The target sent an invalid terminal stream.')
     }
     for (const { kind, payload } of frames) {
+      if (this.finished) return
       if (kind === 'O') {
         if (this.socket.readyState !== WebSocket.OPEN) continue
         this.unacked += payload.length
@@ -187,7 +188,9 @@ class Connection {
       this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
       reply(true)
     } else if (message.type === 'exit' && message.reason === 'ended') {
-      this.exitReason = message.reason
+      // The terminal service owns the coding process. A relay/SSH process may
+      // linger during cleanup; it must not delay the client's recovery action.
+      this.close('ended', closedMessages.ended)
     }
   }
 
@@ -298,6 +301,7 @@ class Connection {
   }
 
   close(reason: CloseReason, message: string) {
+    if (this.finished) return
     this.send({ type: 'closed', reason, message })
     if (this.socket.readyState === WebSocket.OPEN) this.socket.close(1000, reason)
     this.finish()

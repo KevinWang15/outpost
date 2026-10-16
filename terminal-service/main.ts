@@ -23,6 +23,10 @@ interface Viewer {
   active: boolean
 }
 
+const outputQuietMs = 50
+const outputDrainMs = 1000
+const viewerDrainMs = 30_000
+
 async function serve() {
   process.umask(0o077)
   // Configuration travels through a pipe, never argv or an on-disk secret file.
@@ -49,10 +53,13 @@ async function serve() {
   const sockets = new Set<Socket>()
   let controller: Socket | undefined
   let ended = false
+  let childExited = false
   let ptyEnded = false
   let listening = false
+  let lastOutputAt = 0
+  let drainTimer: ReturnType<typeof setTimeout> | undefined
   const send = (socket: Socket, packet: Buffer) => {
-    if (socket.destroyed) return
+    if (socket.destroyed || socket.writableEnded) return
     socket.write(packet)
   }
   const sendControl = (socket: Socket, message: object) => send(socket, terminalControl(message))
@@ -63,6 +70,8 @@ async function serve() {
     cols: launch.cols,
     rows: launch.rows,
     data(_terminal, data) {
+      if (ended) return
+      lastOutputAt = performance.now()
       const complete = sequences.feed(Buffer.from(data))
       if (!complete) return
       writeHeadless(term, complete)
@@ -75,11 +84,15 @@ async function serve() {
   })
   // The target is the sole authority for terminal queries, including when no
   // renderer exists. Renderers forward only actual input and focus/mouse events.
-  term.onData(data => pty.write(data))
-  headlessColors(term, data => pty.write(data))
+  const reply = (data: string) => {
+    if (!childExited && !pty.closed) pty.write(data)
+  }
+  term.onData(reply)
+  headlessColors(term, reply)
   const child = Bun.spawn(launch.command, { cwd: launch.cwd, env: launch.env, terminal: pty })
   const resize = (cols: number, rows: number) => {
     if (!terminalSize(cols, rows)) throw new Error('Invalid terminal size')
+    if (childExited) return
     if (cols === term.cols && rows === term.rows) return
     term.resize(cols, rows)
     // Every viewer applies the same geometry before receiving subsequent bytes.
@@ -106,10 +119,12 @@ async function serve() {
     socket.on('data', bytes => {
       try {
         for (const packet of decoder.feed(Buffer.from(bytes))) {
-          if (ended) return socket.end()
+          // Shutdown owns socket closure: a restoring viewer must flush its
+          // ordered snapshot/output/exit queue before sending EOF.
+          if (ended) return
           if (packet.kind === 'I') {
             if (!attached || packet.payload.length > 64 * 1024) throw new Error('Invalid terminal input')
-            pty.write(packet.payload)
+            if (!childExited) pty.write(packet.payload)
             continue
           }
           if (packet.kind !== 'C') throw new Error('Invalid terminal frame')
@@ -164,8 +179,12 @@ async function serve() {
               throw new Error('Input exceeds 64 KiB')
             let data = message.data
             if (message.type === 'paste' && term.modes.bracketedPasteMode) data = `\x1b[200~${data}\x1b[201~`
-            pty.write(data)
-            sendControl(socket, { type: 'result', id: message.id, ok: true, reference: message.reference })
+            if (childExited) {
+              sendControl(socket, { type: 'result', id: message.id, ok: false, message: 'The coding tool exited.' })
+            } else {
+              pty.write(data)
+              sendControl(socket, { type: 'result', id: message.id, ok: true, reference: message.reference })
+            }
             if (!attached) socket.end()
           } else throw new Error('Unknown terminal operation')
         }
@@ -185,8 +204,11 @@ async function serve() {
   const close = () => {
     if (ended) return
     ended = true
-    broadcast(terminalControl({ type: 'exit', reason: 'ended' }))
-    for (const socket of sockets) socket.end()
+    clearTimeout(drainTimer)
+    for (const client of clients.values()) client.attachment.end()
+    for (const socket of sockets) {
+      if (!clients.has(socket)) socket.end()
+    }
     server.close()
     try {
       unlinkSync(launch.socket)
@@ -195,7 +217,9 @@ async function serve() {
     }
     pty.close()
     term.dispose()
-    setTimeout(() => process.exit(0), 2000).unref()
+    // Slow readers cannot retain a dead service indefinitely. Healthy viewers
+    // finish naturally after their queued output and exit frame have flushed.
+    setTimeout(() => process.exit(0), viewerDrainMs).unref()
   }
   process.on('SIGHUP', () => {}) // SSH/client lifetime never owns this process.
   process.on('SIGTERM', () => {
@@ -206,10 +230,25 @@ async function serve() {
     child.kill()
     close()
   })
-  // PTY EOF follows its last output callback. Process exit can precede unread
-  // output, so it must not close the PTY early and lose the final response.
   listening = true
   if (ptyEnded) close()
+  // A reusable Bun.Terminal retains its slave descriptor; its exit callback
+  // reports stream closure, not child exit. The coding process owns session
+  // lifetime. Drain pending output briefly, but never wait for PTY EOF or an
+  // inherited descriptor held by a background descendant.
+  void child.exited.then(() => {
+    childExited = true
+    if (ended) return
+    lastOutputAt = performance.now()
+    const deadline = lastOutputAt + outputDrainMs
+    const drained = () => {
+      const now = performance.now()
+      const remaining = Math.min(lastOutputAt + outputQuietMs, deadline) - now
+      if (remaining > 0) drainTimer = setTimeout(drained, remaining)
+      else close()
+    }
+    drainTimer = setTimeout(drained, outputQuietMs)
+  })
 }
 
 if (process.argv.includes('--version'))

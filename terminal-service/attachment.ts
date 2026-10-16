@@ -10,6 +10,7 @@ const sliceMs = 4
  * persistent PTY: bounded catch-up/socket queues disconnect them if necessary. */
 export class TerminalAttachment {
   private restoring = true
+  private ending = false
   private pending: (Buffer | undefined)[] = []
   private pendingBytes = 0
 
@@ -21,7 +22,7 @@ export class TerminalAttachment {
   }
 
   output(packet: Buffer) {
-    if (this.socket.destroyed) return
+    if (this.ending || this.socket.destroyed) return
     if (this.restoring) {
       if (this.pendingBytes + packet.length > maxPending) return this.socket.destroy()
       this.pending.push(packet)
@@ -30,6 +31,15 @@ export class TerminalAttachment {
       if (this.socket.writableLength + packet.length > maxPending) return this.socket.destroy()
       this.socket.write(packet)
     }
+  }
+
+  /** Exit belongs after the snapshot and all accepted output, including when
+   * the child finishes while this viewer is still restoring its history. */
+  end() {
+    if (this.ending) return
+    this.output(terminalControl({ type: 'exit', reason: 'ended' }))
+    this.ending = true
+    if (!this.restoring && !this.socket.destroyed) this.socket.end()
   }
 
   async restore(parts: Generator<Checkpoint>) {
@@ -62,6 +72,7 @@ export class TerminalAttachment {
       }
       this.pending = []
       this.restoring = false
+      if (this.ending && !this.socket.destroyed) this.socket.end()
     } finally {
       parts.return(undefined)
     }

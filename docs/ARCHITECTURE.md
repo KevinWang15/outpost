@@ -344,6 +344,17 @@ authentication errors are `expired`; other permanent request/setup errors are
 `unavailable`. Transport failures, timeouts and throttling remain retryable.
 An explicit Reconnect is available after the user repairs an unavailable target.
 
+The coding process owns session lifetime. The Linux helper observes
+`Subprocess.exited`; the reusable Bun PTY's `exit` callback only reports stream
+closure and does not report each child exit. On child exit, pending output drains
+until 50 ms of quiet, with a one-second ceiling so background descendants cannot
+hold the session open. Each viewer flushes its snapshot and pending output before
+the `exit` frame and EOF, with a 30-second shutdown deadline for slow viewers.
+The service removes its socket, so management reports the session as stopped.
+The broker handles `exit` immediately, independent of SSH process cleanup.
+Reconnect starts the coding tool with the same native conversation ID; it never
+automatically restarts a tool that deliberately exited.
+
 **Current contracts.** Both clients send `protocolVersion` from `shared/protocol.ts`.
 A mismatch returns `outdated` before redeeming the launch ticket and asks the
 user to reload. Desktop loads the same frontend from its server. Changes to the
@@ -457,7 +468,7 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract uses terminal service 1.1.1 / protocol 2 and client protocol 10.
+This contract uses terminal service 1.1.2 / protocol 2 and client protocol 10.
 Publish the matching helper before deploying the server. A service protocol
 change requires explicitly restarting existing service processes after installing
 the dependency; replacing the executable does not alter a running PTY service.

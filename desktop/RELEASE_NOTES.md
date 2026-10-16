@@ -1,20 +1,21 @@
-# Outpost Desktop 0.6.1 preview
+# Outpost Desktop 0.6.2 preview
 
-Smoother terminal output, more reliable sizing, and consistent link confirmation.
+Cleaner connection handling and more dependable terminal cleanup.
 
 ## What's new
 
-- **Responsive output:** adjacent terminal writes are batched, and output buffering is bounded so a slow viewer does not stop the remote session.
-- **Reliable screen dimensions:** terminal geometry is refreshed after font, display scale, visibility, and focus changes. The active viewer controls the remote screen size when several clients share a session.
-- **Smoother reconnection:** compact history snapshots stream in short batches while the remote process keeps running.
-- **Link confirmation:** cancelling an embedded hyperlink's confirmation prevents it from opening. Link clicks are handled once, without also sending the click to the terminal application.
-- **Local shell tabs:** session activity badges are hidden for local shells.
+- **Terminal lifecycle:** setup and cleanup have one owner, including failed initialization and asynchronous clipboard work after a tab closes.
+- **Clear connection failures:** missing dependencies and other permanent setup problems show their error immediately instead of repeatedly reconnecting.
+- **One desktop login path:** the app supplies terminal credentials through its preload bridge. The obsolete browser URL-token and session-storage path is removed.
+- **Stricter desktop commands:** native workspace actions share a typed contract and validate arguments before changing window state.
+- **Dependency installation:** batch installers no longer start interactive shell job control, and the terminal installer shows download and verification progress.
+- **Current settings format:** saved desktop preferences require font size, sound, and a nullable local shell selection. An unsupported file shows its path and settings-reset instructions.
 
 The Outpost home tab still remembers ten recent remote sessions. Reconnect credentials last 30 days and refresh after a successful reconnect; expired entries require a fresh **Connect → Outpost Desktop** from the server.
 
 Up to 32 tabs across 16 windows can stay open. Closing a local terminal ends its shell; local shells and history do not survive quitting the app. Closing or upgrading the app leaves remote sessions running.
 
-**Update app, server, and terminal helper together:** this release requires Outpost Terminal 1.1.0 (terminal service protocol 2) and the matching Outpost server. On each target, use **Required Software → Outpost Terminal → Install**. Existing remote terminal services keep running with their original protocol; finish or save their work, then explicitly **Terminate** and **Connect** those sessions to use the new helper. Installing the helper or updating the app does not restart them automatically.
+Use the matching Outpost server and reload open web terminals after deployment (client protocol 10). The current dependency is **Outpost Terminal 1.1.1**, installed through **Required Software → Outpost Terminal → Install**. Its service protocol remains 2; updating the executable does not restart running remote sessions. Newly started terminal services use the installed build.
 
 ## Install
 

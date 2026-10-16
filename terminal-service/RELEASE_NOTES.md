@@ -1,18 +1,14 @@
-# Outpost Terminal 1.1.0
+# Outpost Terminal 1.1.1
 
 Persistent Linux PTY service for Outpost web and desktop terminals.
 
-This revision improves responsiveness during reconnection and fixes screen-size
-ownership when several clients view the same session.
+This revision makes the checkpoint adapter's engine contract explicit.
 
-- The active viewer controls screen size; other viewers retain their preferred
-  dimensions, which are restored when they take control.
-- Reconnection captures an immutable checkpoint, then encodes and streams it in
-  short batches while the PTY continues running.
-- Repeated cells at the end of history rows are compacted without losing styles.
-- Snapshot catch-up and live socket buffers are bounded; a stalled viewer is
-  disconnected without stopping the session.
-- Requires terminal service protocol 2 and the matching Outpost server/client.
+- Typed xterm internals replace unchecked access in the shared checkpoint adapter.
+- Runtime checks reject an unsupported engine layout before reading or restoring state.
+- Terminal service protocol 2 and checkpoint schema 2 are unchanged.
+- The matching Outpost server reports permanent setup failures directly and runs
+  dependency installation without interactive shell job-control warnings.
 
 ## Terminal behavior
 
@@ -27,6 +23,6 @@ Install through **Required Software → Outpost Terminal → Install**. Outpost
 selects the architecture/libc, verifies SHA-256 and atomically installs the
 executable into `~/.outpost/bin/outpost-terminal`. No public service port is opened.
 
-Existing terminal services continue using their original protocol until restarted.
-After saving or finishing their work, explicitly **Terminate** and **Connect**
-those sessions. Updating the executable does not terminate running processes.
+Updating the executable does not terminate running processes. Existing services
+continue running, and newly started services use the installed build. No protocol
+restart is required for this patch.

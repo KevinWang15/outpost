@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { desktopTerminal } from './terminal-fixture'
 
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)])
 
@@ -92,9 +93,10 @@ test('Outpost Desktop uses the launch flow and retries with a fresh ticket', asy
   expect(next.token).not.toBe(firstTicket.token)
   const payload = JSON.parse(Buffer.from(next.url.slice('outpost://connect/'.length), 'base64url').toString())
   expect(payload.terminal).toBe('desktop')
-  // The OS launcher opens this URL; exercise the real browser client and broker.
+  // The OS launcher supplies the ticket through the preload; use the real broker.
   const app = await context.newPage()
-  await app.goto(`/terminal/desktop#token=${payload.token}`)
+  await desktopTerminal(app, payload.token)
+  await app.goto('/terminal/desktop')
   await expect(app.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
   await expect(connect.getByText('Connected in Outpost Desktop')).toBeVisible()
   await app.close()

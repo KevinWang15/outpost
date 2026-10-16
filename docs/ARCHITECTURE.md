@@ -181,12 +181,11 @@ and remember the session. Reload requests the current credential again. A fresh
 launch routed to an already connected tab must not replace its resume credential
 with the single-use ticket consumed by `activate`.
 
-The public desktop entry also supports a direct browser launch grant for the
-browser client flow: `desktopTicket` erases the fragment before React renders,
-replaces it with the resume grant in window-scoped session storage on `hello`,
-and clears it on Close or expiry. Native tabs use only the preload credential,
-not browser storage. Electron still uses nonpersistent partitions per server;
-no account cookies or passwords are copied into the app.
+The desktop entry requires the current preload bridge. Opening it in an ordinary
+browser shows launch instructions; URL fragments and browser storage are never
+credential sources. Browser sessions use the authenticated `/terminal` entry.
+Electron uses nonpersistent partitions per server; no account cookies or passwords
+are copied into the app.
 
 Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
@@ -458,10 +457,10 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract requires terminal service 1.1.0 / protocol 2 and client protocol 10.
-Publish the matching helper before deploying the server. Existing service
-processes need to be restarted explicitly after installing the new dependency;
-replacing the executable does not alter a running PTY service.
+This contract uses terminal service 1.1.1 / protocol 2 and client protocol 10.
+Publish the matching helper before deploying the server. A service protocol
+change requires explicitly restarting existing service processes after installing
+the dependency; replacing the executable does not alter a running PTY service.
 
 The headless engine alone answers terminal queries, even when disconnected.
 The browser forwards user input, mouse and focus events, suppressing duplicate
@@ -604,7 +603,8 @@ no observation has arrived on this connection yet, never a failed observation.
 Both `ActivityBadge` and `tab-status.ts`
 use it; the broker and native IPC use its bounded parser. The relay sends state,
 timestamp, opaque completion ID and any diagnostic, never transcript content.
-The desktop bridge is version 5: server and app must be updated together.
+The desktop bridge contract is defined by `desktopBridgeVersion` in
+`shared/desktop.ts`; server and app must be updated together.
 The renderer alone owns the terminal bell flag. The native shell displays reported
 state and owns OS notifications, but does not independently rewrite attention on
 activation or notification creation. Both a host focus transition and an explicit
@@ -643,8 +643,10 @@ fails with a clear message.
 `desktop/` is a separate npm package, so server builds never download Electron.
 `main.ts` owns app lifecycle, menus, server trust and `outpost://` dispatch.
 `launch.ts` validates the envelope; `store.ts` atomically serializes trusted
-origins, and `preferences.ts` serializes font size, bell sound, and the optional
-default local shell profile ID.
+origins, and `preferences.ts` serializes font size, bell sound, and the default
+local shell profile ID (`null` selects the platform default). All three keys are
+required in a saved preferences file. A missing file uses defaults; an unsupported
+saved shape is rejected with reset instructions, without rewriting it.
 
 ### Recent remote sessions
 

@@ -46,7 +46,6 @@ type Props = {
   title: string
   onClose: () => void
   onResume?: (token: string, title: string) => void | Promise<void>
-  onExpired?: () => void
 } & ({ token: string; local?: never } | { token?: never; local: LocalTerminalBridge })
 
 const toolbarPreference = 'outpost.terminal.toolbar-hidden'
@@ -59,7 +58,7 @@ function savedToolbar() {
   }
 }
 
-export default function TerminalView({ token, local, title, onClose, onResume, onExpired }: Props) {
+export default function TerminalView({ token, local, title, onClose, onResume }: Props) {
   const container = useRef<HTMLDivElement>(null)
   useTerminalViewport(container)
   const surface = useRef<HTMLDivElement>(null),
@@ -82,10 +81,10 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
   const statusTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const connected = state.kind === 'connected'
   const [toolbarShown, setToolbarShown] = useState(savedToolbar)
-  const lifecycle = useRef({ onResume, onExpired, title })
+  const lifecycle = useRef({ onResume, title })
   useEffect(() => {
-    lifecycle.current = { onResume, onExpired, title }
-  }, [onResume, onExpired, title])
+    lifecycle.current = { onResume, title }
+  }, [onResume, title])
   const showToolbar = (shown: boolean) => {
     setToolbarShown(shown)
     try {
@@ -166,7 +165,6 @@ export default function TerminalView({ token, local, title, onClose, onResume, o
         attachSearch,
         openSearch,
         resume: (token, title) => lifecycle.current.onResume?.(token, title),
-        expired: () => lifecycle.current.onExpired?.(),
       })
     } catch (error) {
       // A discarded StrictMode mount must not publish a stale initialization failure.

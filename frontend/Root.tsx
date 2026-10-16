@@ -9,7 +9,7 @@ const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
 
 /** Desktop entry pages bypass account UI. The broker
  * authorizes every connection; workspace routes require the normal AuthGate. */
-export default function Root({ desktopTerminal, ticket }: { desktopTerminal: boolean; ticket: string | null }) {
+export default function Root() {
   return (
     <Suspense
       fallback={
@@ -20,8 +20,8 @@ export default function Root({ desktopTerminal, ticket }: { desktopTerminal: boo
     >
       {window.location.pathname === pagePaths.desktop ? (
         <DesktopDownloadPage />
-      ) : desktopTerminal ? (
-        <DesktopTerminalPage token={ticket} />
+      ) : window.location.pathname === pagePaths.desktopTerminal ? (
+        <DesktopTerminalPage />
       ) : (
         <AuthGate>{window.location.pathname === pagePaths.terminal ? <TerminalPage /> : <App />}</AuthGate>
       )}

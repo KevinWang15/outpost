@@ -41,7 +41,6 @@ interface SessionOptions {
   attachSearch(term: Terminal, container: HTMLElement): () => void
   openSearch(): void
   resume(token: string, title: string): void | Promise<void>
-  expired(): void
 }
 
 /** Owns one terminal's imperative lifetime. React owns presentation and drafts;
@@ -94,7 +93,6 @@ export class TerminalSession {
       const state = (next: TerminalState) => {
         if (this.disposed) return
         options.state(next)
-        if (next.kind === 'closed' && next.reason === 'expired') options.expired()
         if (next.kind === 'connected' && !touchInput() && (!desktop || (this.focused && document.hasFocus())))
           this.focus()
       }

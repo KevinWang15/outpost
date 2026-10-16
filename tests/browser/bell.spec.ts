@@ -77,7 +77,7 @@ async function mockNotifications(page: Page, permission: NotificationPermission 
   }, permission)
 }
 
-async function openTerminal(page: Page, mode: 'web' | 'desktop' = 'web') {
+async function openTerminal(page: Page) {
   await page.route('**/api/targets/bell-target/sessions/bell-session/connect', route =>
     route.fulfill({ json: { token: 'bell-test' } }),
   )
@@ -99,9 +99,7 @@ async function openTerminal(page: Page, mode: 'web' | 'desktop' = 'web') {
     )
     restoreEmptyTerminal(ws)
   })
-  await page.goto(
-    mode === 'web' ? '/terminal?target=bell-target&session=bell-session' : '/terminal/desktop#token=bell.launch',
-  )
+  await page.goto('/terminal?target=bell-target&session=bell-session')
   await expect(page.getByText('Connected', { exact: true })).toBeVisible()
   await expect(page).toHaveTitle('Coding session · Dev box · Outpost')
   return socket
@@ -202,91 +200,89 @@ test('OSC terminators do not ring, and visual bells work without audio', async (
   expect(errors).toEqual([])
 })
 
-for (const mode of ['web', 'desktop'] as const) {
-  test(`desktop bells (${mode}) request permission on click, group alerts, and return to the correct session`, async ({
-    page,
-  }) => {
-    await mockNotifications(page)
-    await page.clock.install()
-    const socket = await openTerminal(page, mode)
-    const alerts = () => page.evaluate(() => window.bellNotifications.instances.length)
-    const notice = page.getByRole('status').filter({ hasText: 'rang a bell' })
-    const input = page.getByRole('textbox', { name: 'Terminal input' })
-    await attention(page, false)
-    socket.send(Buffer.from('\x07'))
-    await expect(notice).toBeVisible()
-    expect(await alerts()).toBe(0)
-    expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(0)
+test('browser notifications request permission on click, group alerts, and return to the correct session', async ({
+  page,
+}) => {
+  await mockNotifications(page)
+  await page.clock.install()
+  const socket = await openTerminal(page)
+  const alerts = () => page.evaluate(() => window.bellNotifications.instances.length)
+  const notice = page.getByRole('status').filter({ hasText: 'rang a bell' })
+  const input = page.getByRole('textbox', { name: 'Terminal input' })
+  await attention(page, false)
+  socket.send(Buffer.from('\x07'))
+  await expect(notice).toBeVisible()
+  expect(await alerts()).toBe(0)
+  expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(0)
 
-    await attention(page, true)
-    await page.getByRole('button', { name: 'Enable notifications', exact: true }).click()
-    expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(1)
-    expect(await page.evaluate(() => window.bellNotifications.gestures)).toEqual([true])
-    await expect(page.getByRole('button', { name: 'Notifications allowed', exact: true })).toBeVisible()
-    socket.send(Buffer.from('\x07'))
-    await expect(notice).toBeVisible()
-    expect(await alerts()).toBe(0)
+  await attention(page, true)
+  await page.getByRole('button', { name: 'Enable notifications', exact: true }).click()
+  expect(await page.evaluate(() => window.bellNotifications.requests)).toBe(1)
+  expect(await page.evaluate(() => window.bellNotifications.gestures)).toEqual([true])
+  await expect(page.getByRole('button', { name: 'Notifications allowed', exact: true })).toBeVisible()
+  socket.send(Buffer.from('\x07'))
+  await expect(notice).toBeVisible()
+  expect(await alerts()).toBe(0)
 
-    // A visible terminal still needs a desktop alert when another app has focus.
-    await attention(page, false, true)
-    socket.send(Buffer.from('\x07\x07\x07'))
-    await expect.poll(alerts).toBe(1)
-    expect(
-      await page.evaluate(() => {
-        const { title, options } = window.bellNotifications.instances[0]
-        return { title, options }
-      }),
-    ).toEqual({
-      title: 'Outpost · Terminal bell',
-      options: {
-        body: 'Coding session · Dev box rang a bell',
-        icon: '/outpost.png',
-        tag: 'outpost-bell:bell-target/bell-session',
-      },
-    })
-    await page.clock.fastForward(10_000)
-    socket.send(Buffer.from('\x07'))
-    await expect(notice).toBeVisible()
-    expect(await alerts()).toBe(1)
-
-    await page.evaluate(() => window.bellNotifications.instances[0].onclick?.(new Event('click')))
-    await expect(notice).toBeHidden()
-    await expect(input).toBeFocused()
-    expect(await page.evaluate(() => window.bellNotifications.focused)).toBe(1)
-    expect(await page.evaluate(() => window.bellNotifications.instances[0].closed)).toBe(true)
-
-    // Use the latest session name, including a hello received after a reconnect.
-    socket.send(
-      JSON.stringify({
-        type: 'hello',
-        resume: 'bell-resume',
-        session: { id: 'bell-session', name: 'Renamed session' },
-        target: { id: 'bell-target', name: 'Dev box' },
-      }),
-    )
-    await expect(page).toHaveTitle('Renamed session · Dev box · Outpost')
-    await attention(page, false)
-    socket.send(Buffer.from('\x07'))
-    await expect.poll(alerts).toBe(2)
-    expect(await page.evaluate(() => window.bellNotifications.instances[1].options.body)).toBe(
-      'Renamed session · Dev box rang a bell',
-    )
-    // Dismissing an OS banner does not make subsequent output flood the desktop.
-    await page.evaluate(() => window.bellNotifications.instances[1].close())
-    socket.send(Buffer.from('\x07'))
-    await expect(notice).toBeVisible()
-    expect(await alerts()).toBe(2)
-    await attention(page, true)
-    await expect(notice).toBeHidden()
-
-    await attention(page, false)
-    socket.send(Buffer.from('\x07'))
-    await expect.poll(alerts).toBe(3)
-    await attention(page, true)
-    await expect(notice).toBeHidden()
-    expect(await page.evaluate(() => window.bellNotifications.instances[2].closed)).toBe(true)
+  // A visible terminal still needs a desktop alert when another app has focus.
+  await attention(page, false, true)
+  socket.send(Buffer.from('\x07\x07\x07'))
+  await expect.poll(alerts).toBe(1)
+  expect(
+    await page.evaluate(() => {
+      const { title, options } = window.bellNotifications.instances[0]
+      return { title, options }
+    }),
+  ).toEqual({
+    title: 'Outpost · Terminal bell',
+    options: {
+      body: 'Coding session · Dev box rang a bell',
+      icon: '/outpost.png',
+      tag: 'outpost-bell:bell-target/bell-session',
+    },
   })
-}
+  await page.clock.fastForward(10_000)
+  socket.send(Buffer.from('\x07'))
+  await expect(notice).toBeVisible()
+  expect(await alerts()).toBe(1)
+
+  await page.evaluate(() => window.bellNotifications.instances[0].onclick?.(new Event('click')))
+  await expect(notice).toBeHidden()
+  await expect(input).toBeFocused()
+  expect(await page.evaluate(() => window.bellNotifications.focused)).toBe(1)
+  expect(await page.evaluate(() => window.bellNotifications.instances[0].closed)).toBe(true)
+
+  // Use the latest session name, including a hello received after a reconnect.
+  socket.send(
+    JSON.stringify({
+      type: 'hello',
+      resume: 'bell-resume',
+      session: { id: 'bell-session', name: 'Renamed session' },
+      target: { id: 'bell-target', name: 'Dev box' },
+    }),
+  )
+  await expect(page).toHaveTitle('Renamed session · Dev box · Outpost')
+  await attention(page, false)
+  socket.send(Buffer.from('\x07'))
+  await expect.poll(alerts).toBe(2)
+  expect(await page.evaluate(() => window.bellNotifications.instances[1].options.body)).toBe(
+    'Renamed session · Dev box rang a bell',
+  )
+  // Dismissing an OS banner does not make subsequent output flood the desktop.
+  await page.evaluate(() => window.bellNotifications.instances[1].close())
+  socket.send(Buffer.from('\x07'))
+  await expect(notice).toBeVisible()
+  expect(await alerts()).toBe(2)
+  await attention(page, true)
+  await expect(notice).toBeHidden()
+
+  await attention(page, false)
+  socket.send(Buffer.from('\x07'))
+  await expect.poll(alerts).toBe(3)
+  await attention(page, true)
+  await expect(notice).toBeHidden()
+  expect(await page.evaluate(() => window.bellNotifications.instances[2].closed)).toBe(true)
+})
 
 test('saved notification permission is used and revoking it stops desktop bells', async ({ page }) => {
   await mockNotifications(page, 'granted')

@@ -9,6 +9,17 @@ export function validPreferences(value: unknown): value is TerminalPreferences {
   return Number.isFinite(item.fontSize) && item.fontSize >= 10 && item.fontSize <= 28 && typeof item.sound === 'boolean'
 }
 
+interface StoredPreferences extends TerminalPreferences {
+  localShell: string | null
+}
+const validShell = (value: unknown): value is string | null =>
+  value === null || (typeof value === 'string' && /^[a-z-]{1,32}$/.test(value))
+function validStoredPreferences(value: unknown): value is StoredPreferences {
+  return (
+    validPreferences(value) && Object.keys(value).length === 3 && 'localShell' in value && validShell(value.localShell)
+  )
+}
+
 /** Presentation only. Credentials, terminal content and drafts are never persisted. */
 export class Preferences {
   value = { ...defaultPreferences }
@@ -18,16 +29,16 @@ export class Preferences {
   async load() {
     try {
       const value: unknown = JSON.parse(await readFile(this.path, 'utf8'))
-      if (!validPreferences(value)) throw new Error('Invalid terminal preferences.')
+      if (!validStoredPreferences(value))
+        throw new Error(`Invalid terminal preferences. Remove ${this.path} to reset settings, then restart Outpost.`)
       this.value = { fontSize: value.fontSize, sound: value.sound }
-      const shell = (value as TerminalPreferences & { localShell?: unknown }).localShell
-      if (typeof shell === 'string' && /^[a-z-]{1,32}$/.test(shell)) this.localShell = shell
+      this.localShell = value.localShell
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
   }
   set(value: TerminalPreferences, localShell = this.localShell) {
-    if (!validPreferences(value)) throw new Error('Invalid terminal preferences.')
+    if (!validPreferences(value) || !validShell(localShell)) throw new Error('Invalid terminal preferences.')
     const next = { fontSize: value.fontSize, sound: value.sound }
     const write = this.writes.then(async () => {
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })

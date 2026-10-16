@@ -10,7 +10,7 @@
   "speed": 1
  },
  "text": "Meet Outpost, the AI session manager that brings it all together. Your agents run on your servers, and they stay there. From your laptop, or your desktop, you see every session, on every server, in one place.",
- "fingerprint": "f355422510a43075c26d44b0693a71ca2c7eaaed15fac484f5ef1880bc14d6f6",
+ "fingerprint": "a1feb9b30c167d036e20964f1c45539deb180b6f7e16cedb0290e46d3f80a34c",
  "alignment": {
   "characters": [
    "M",
@@ -643,5 +643,5 @@
    12.26
   ]
  },
- "audioSha256": "712d251c3d46439c06953553e1a739143212aa2034076f252868193d86124e12"
+ "audioSha256": "970ac2b950cae809fcfc39e7ecb223e433c4b9a4b12ca035e8529ecdbfa6333a"
 }

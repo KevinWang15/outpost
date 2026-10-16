@@ -2,11 +2,11 @@
 import {
   createElement, Server, Laptop, Monitor, Check, CircleCheck, Search, Bell, Puzzle, SquareTerminal, WifiOff, Unplug,
   ImageOff, ImagePlus, Image, TriangleAlert, ChevronDown, Plus, ArrowRight, Link, X, CornerDownRight, PanelsTopLeft,
-  CircleHelp, LoaderCircle, Clock, ShieldCheck, Sparkles, Zap,
+  CircleHelp, LoaderCircle, Clock, ShieldCheck, Sparkles, Zap, AppWindow, Globe, ClipboardPaste, Cpu,
 } from 'lucide'
 import { clamp, easeOut, easeOutBack, prog, style, track } from './util.js'
 
-const ICONS = { Server, Laptop, Monitor, Check, CircleCheck, Search, Bell, Puzzle, SquareTerminal, WifiOff, Unplug, ImageOff, ImagePlus, Image, TriangleAlert, ChevronDown, Plus, ArrowRight, Link, X, CornerDownRight, PanelsTopLeft, CircleHelp, LoaderCircle, Clock, ShieldCheck, Sparkles, Zap }
+const ICONS = { Server, Laptop, Monitor, Check, CircleCheck, Search, Bell, Puzzle, SquareTerminal, WifiOff, Unplug, ImageOff, ImagePlus, Image, TriangleAlert, ChevronDown, Plus, ArrowRight, Link, X, CornerDownRight, PanelsTopLeft, CircleHelp, LoaderCircle, Clock, ShieldCheck, Sparkles, Zap, AppWindow, Globe, ClipboardPaste, Cpu }
 export function icon(name, size = 24, stroke = 2) {
   const el = createElement(ICONS[name])
   el.setAttribute('width', size)
@@ -125,16 +125,48 @@ export const terminal = ({ r = 'term', title = 'Build the dashboard', host = 'AT
     </div>
   </div>`
 
-export const attachModal = () => `
-  <div class="a-card a-attach" data-r="attach">
-    <div class="a-eyebrow">OUTPOST / AI SESSION MANAGER</div>
-    <div class="a-title">Attach an image to Build the dashboard</div>
-    <div class="a-sub">Paste, drop, or browse for an image to share with your coding session.</div>
-    <div class="a-drop" data-r="drop">
-      <div class="a-drop-empty" data-r="dropEmpty">${icon('ImagePlus', 44, 1.6)}<span>Paste or drop an image</span></div>
-      <img data-r="dropImg" src="${ASSET}dashboard-concept.png">
+export const connectDialog = () => `
+  <div class="a-card a-connect" data-r="connectDlg">
+    <div class="a-title">Connect to Build the dashboard</div>
+    <div class="a-sub">Atlas development · /workspaces/demo-dashboard</div>
+    <div class="a-choice" data-r="choiceWeb"><span class="a-choice-icon">${icon('AppWindow', 26)}</span><div><b>Web terminal</b><small>Opens in your browser. No installation needed. Works on phones too.</small></div>${icon('ArrowRight', 22)}</div>
+    <div class="a-choice" data-r="choiceDesk"><span class="a-choice-icon">${icon('Monitor', 26)}</span><div><b>Outpost Desktop</b><small>Your own terminal window, app icon, and desktop notifications.</small></div>${icon('ArrowRight', 22)}</div>
+    <div class="a-remember"><i class="box"></i>Remember my choice</div>
+  </div>`
+
+// Tab status icons drawn like the desktop app's own (desktop/src/tab-status.ts).
+const TAB_ICONS = {
+  working: '<path d="M12 2a10 10 0 1 0 10 10"/>',
+  idle: '<path d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z"/><path d="M12 6v6l4 2"/>',
+  finished: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/><path d="M2 8c0-2 1-4 3-5m17 5c0-2-1-4-3-5"/>',
+  connected: '<path d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z"/><path d="m8 12 3 3 5-6"/>',
+}
+export const tabIcon = state => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TAB_ICONS[state]}</svg>`
+
+// tabs: [{ r, label, state }]; the scene toggles .selected / .shown and data-state.
+export const desktopApp = ({ r = 'desk', tabs }) => `
+  <div class="d-app" data-r="${r}">
+    <div class="d-chrome">
+      <span class="d-lights"><i></i><i></i><i></i></span>
+      <img class="d-logo" src="${ASSET}logo.svg">
+      <div class="d-tabs">
+        ${tabs.map(tab => `<div class="d-tab" data-r="${tab.r}"><span class="d-status" data-state="${tab.state}" data-r="${tab.r}Status">${tabIcon(tab.state)}</span><span class="d-label">${tab.label}</span><span class="d-x">×</span></div>`).join('')}
+        <div class="d-plus" data-r="${r}Plus">${icon('Plus', 20)}</div>
+      </div>
     </div>
-    <div class="a-actions split"><div class="a-btn">Browse images</div><span></span><div class="a-btn">Cancel</div><div class="a-btn primary" data-r="sendBtn">${icon('ImagePlus', 20)} Send to session</div></div>
+    <div class="d-body">
+      <div class="term-body" data-r="${r}Remote">
+        <div class="term-banner"><b>›_ OpenAI Codex</b><div><span>project:</span> <i>demo-dashboard</i></div><div><span>directory:</span> /workspaces/demo-dashboard</div></div>
+        <div class="term-lines" data-r="${r}Lines"></div>
+        <div class="term-prompt" data-r="${r}Prompt">
+          <div class="term-attach" data-r="${r}Attach"><b>[Image #1]</b></div>
+          <div class="term-input">› <span data-r="${r}Input"></span><i class="caret block" data-r="${r}Caret"></i></div>
+        </div>
+      </div>
+      <div class="term-body d-local" data-r="${r}Local">
+        <div class="term-lines" data-r="${r}LocalLines"></div>
+      </div>
+    </div>
   </div>`
 
 export const finderCard = () => `

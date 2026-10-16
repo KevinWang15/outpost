@@ -10,7 +10,7 @@
   "speed": 1
  },
  "text": "Whichever computer you sit down at, your agents and conversations are right where you left them. Outpost, the AI session manager. Keep the session. Keep your flow.",
- "fingerprint": "cb2b6c673eb9975211bb7c50529662eb90091a0bbb2160ac65a9825e09558d94",
+ "fingerprint": "7c7baae055537232c8063b46bb07feb6ac24dd43b535b971a597d30d9595bc56",
  "alignment": {
   "characters": [
    "W",
@@ -508,5 +508,5 @@
    10.774
   ]
  },
- "audioSha256": "fb0989c3aff2c3d13ce2aeb08c15e77cba61ad044fae4869657947ee0b505923"
+ "audioSha256": "28e8a3a2c99b9baf2742165ffcdcfdf4797319602aad2398f0e059b5f7bc48d6"
 }

@@ -87,213 +87,221 @@ you see every session,
 on every server, in one place.
 
 23
-00:00:49,983 --> 00:00:52,247
+00:00:49,983 --> 00:00:52,189
 Starting a session takes just a moment.
 
 24
-00:00:52,247 --> 00:00:54,720
+00:00:52,189 --> 00:00:54,604
 Pick a server, give the session a name,
 
 25
-00:00:54,720 --> 00:00:56,531
+00:00:54,604 --> 00:00:56,415
 and choose your agent.
 
 26
-00:00:56,531 --> 00:00:58,307
+00:00:56,415 --> 00:00:58,203
 Then point it at a project folder,
 
 27
-00:00:58,307 --> 00:01:00,653
+00:00:58,203 --> 00:01:00,571
 with suggestions as you type.
 
 28
-00:01:00,653 --> 00:01:03,183
+00:01:00,571 --> 00:01:03,067
 If the agent isn't installed on that server yet,
 
 29
-00:01:03,183 --> 00:01:06,008
-the manager can install it for you.
+00:01:03,067 --> 00:01:05,636
+Outpost can install it for you.
 
 30
-00:01:07,483 --> 00:01:08,540
+00:01:07,117 --> 00:01:07,941
 Click Connect,
 
 31
-00:01:08,540 --> 00:01:10,687
-and a terminal opens on your computer,
+00:01:07,941 --> 00:01:10,054
+and open the session in your browser,
 
 32
-00:01:10,687 --> 00:01:12,510
-already attached to the session.
+00:01:10,054 --> 00:01:13,897
+or in Outpost Desktop, already attached and live.
 
 33
-00:01:12,510 --> 00:01:14,809
-You see exactly what the agent is doing,
+00:01:13,897 --> 00:01:16,985
+In the desktop app, each session gets its own tab,
 
 34
-00:01:14,809 --> 00:01:17,549
-and you can pick up the conversation right away.
+00:01:16,985 --> 00:01:19,621
+with your local shells right alongside.
 
 35
-00:01:17,549 --> 00:01:19,813
-It's like remote desktop, built for coding,
+00:01:19,621 --> 00:01:21,955
+You see exactly what the agent is doing,
 
 36
-00:01:19,813 --> 00:01:23,183
-with no graphical desktop needed on the server.
+00:01:21,955 --> 00:01:25,372
+and you can pick up the conversation right away.
 
 37
-00:01:24,450 --> 00:01:26,609
+00:01:26,650 --> 00:01:28,519
 Because the session lives on the server,
 
 38
-00:01:26,609 --> 00:01:29,187
+00:01:28,519 --> 00:01:30,737
 your connection is just a window into it.
 
 39
-00:01:29,187 --> 00:01:32,182
+00:01:30,737 --> 00:01:33,604
 Close your laptop, or lose your Wi-Fi,
 
 40
-00:01:32,182 --> 00:01:34,051
+00:01:33,604 --> 00:01:35,709
 and the agent keeps working.
 
 41
-00:01:34,051 --> 00:01:36,756
+00:01:35,961 --> 00:01:38,667
 Later, reconnect from the same computer,
 
 42
-00:01:36,756 --> 00:01:37,836
+00:01:38,667 --> 00:01:39,770
 or a different one,
 
 43
-00:01:37,836 --> 00:01:41,032
+00:01:39,770 --> 00:01:42,908
 and you're right back where you left off.
 
 44
-00:01:42,483 --> 00:01:45,687
+00:01:44,383 --> 00:01:47,169
 Need to show the agent a screenshot or a design?
 
 45
-00:01:45,687 --> 00:01:47,452
-Paste the image into the manager,
+00:01:47,169 --> 00:01:49,770
+Just paste it, the way you always do.
 
 46
-00:01:47,452 --> 00:01:49,344
-and send it to the session.
+00:01:49,770 --> 00:01:51,790
+Image paste works seamlessly,
 
 47
-00:01:49,344 --> 00:01:51,643
-It lands right in the agent's prompt,
+00:01:51,790 --> 00:01:54,704
+in your browser and in the desktop app.
 
 48
-00:01:51,643 --> 00:01:53,934
-ready for your next instruction.
-
-49
-00:01:54,186 --> 00:01:57,208
+00:01:54,704 --> 00:01:58,086
 No more fighting a remote clipboard.
 
-50
-00:01:58,483 --> 00:02:00,968
+49
+00:01:59,350 --> 00:02:01,695
 Looking for an earlier conversation?
 
-51
-00:02:00,968 --> 00:02:03,359
+50
+00:02:01,695 --> 00:02:04,017
 Search a server by topic, phrase,
 
-52
-00:02:03,359 --> 00:02:06,970
+51
+00:02:04,017 --> 00:02:07,593
 or error message, and reopen the session you need.
 
-53
-00:02:06,970 --> 00:02:09,687
+52
+00:02:07,593 --> 00:02:10,043
 The search runs on the server itself.
 
-54
-00:02:09,687 --> 00:02:11,115
+53
+00:02:10,043 --> 00:02:11,540
 Your history stays there,
 
-55
-00:02:11,115 --> 00:02:14,044
+54
+00:02:11,540 --> 00:02:14,585
 and only the matching snippets come back.
 
-56
-00:02:15,317 --> 00:02:16,966
+55
+00:02:15,850 --> 00:02:17,638
 With several agents running at once,
 
+56
+00:02:17,638 --> 00:02:19,345
+Outpost shows you where you are needed,
+
 57
-00:02:16,966 --> 00:02:19,601
-the manager shows you where you are needed.
+00:02:19,345 --> 00:02:20,575
+on every tab.
 
 58
-00:02:19,601 --> 00:02:21,656
+00:02:20,575 --> 00:02:22,456
 You can see which agents are working,
 
 59
-00:02:21,656 --> 00:02:22,678
+00:02:22,456 --> 00:02:23,385
 which are idle,
 
 60
-00:02:22,678 --> 00:02:23,653
+00:02:23,385 --> 00:02:24,349
 and which have finished a
 
 61
-00:02:23,653 --> 00:02:25,986
+00:02:24,349 --> 00:02:26,439
 turn and are waiting for you.
 
 62
-00:02:25,986 --> 00:02:27,658
+00:02:26,439 --> 00:02:27,936
 Check in, and the notice clears,
 
 63
-00:02:27,658 --> 00:02:30,227
+00:02:27,936 --> 00:02:30,297
 so you can move on to the next one.
 
 64
-00:02:31,483 --> 00:02:33,236
+00:02:31,550 --> 00:02:33,408
 And your servers stay simple.
 
 65
-00:02:33,236 --> 00:02:35,581
-They're agentless, with no extra manager
+00:02:33,408 --> 00:02:34,673
+One self-contained terminal
 
 66
-00:02:35,581 --> 00:02:37,520
-service to keep running on them.
+00:02:34,673 --> 00:02:37,250
+program keeps each session alive.
 
 67
-00:02:37,520 --> 00:02:39,494
-The design also leaves room to grow,
+00:02:37,250 --> 00:02:39,236
+There's no manager service to run,
 
 68
-00:02:39,494 --> 00:02:41,410
-including support for custom AI
+00:02:39,236 --> 00:02:41,360
+and no extra ports to open.
 
 69
-00:02:41,410 --> 00:02:44,675
-harnesses as your workflow evolves.
+00:02:41,360 --> 00:02:43,520
+The design also leaves room to grow,
 
 70
-00:02:45,950 --> 00:02:47,599
-Whichever computer you sit down at,
+00:02:43,520 --> 00:02:45,203
+including support for custom AI
 
 71
-00:02:47,599 --> 00:02:48,922
-your agents and conversations
+00:02:45,203 --> 00:02:48,179
+harnesses as your workflow evolves.
 
 72
-00:02:48,922 --> 00:02:50,942
-are right where you left them.
+00:02:49,450 --> 00:02:51,099
+Whichever computer you sit down at,
 
 73
-00:02:50,942 --> 00:02:54,367
-Outpost, the AI session manager.
+00:02:51,099 --> 00:02:52,422
+your agents and conversations
 
 74
-00:02:54,367 --> 00:02:55,679
-Keep the session.
+00:02:52,422 --> 00:02:54,442
+are right where you left them.
 
 75
-00:02:55,679 --> 00:02:57,424
+00:02:54,442 --> 00:02:57,867
+Outpost, the AI session manager.
+
+76
+00:02:57,867 --> 00:02:59,179
+Keep the session.
+
+77
+00:02:59,179 --> 00:03:00,924
 Keep your flow.

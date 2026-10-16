@@ -5,7 +5,7 @@ import * as THREE from 'three'
 import { C } from './textures.js'
 import { clamp, easeIn, easeInOut, easeOut, easeOutBack, lerp, prog, springy, style, track, typed, win } from './util.js'
 import {
-  ASSET, attachModal, chip, createDialog, cursorMarkup, driveCursor, finderCard, heading, icon, pin, pop, reveal, softwareCard, targetsCard, terminal,
+  ASSET, chip, connectDialog, createDialog, cursorMarkup, desktopApp, driveCursor, finderCard, heading, icon, pin, pop, reveal, softwareCard, tabIcon, targetsCard, terminal,
 } from './ui.js'
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z)
@@ -355,51 +355,76 @@ function create(cue) {
   }
 }
 
-/* 5 · CONNECT — Click Connect → terminal on your computer, attached to the server session. */
+/* 5 · CONNECT — one Connect button: the browser or Outpost Desktop, with tabs and local shells. */
+const DESK_TABS = [
+  { r: 'tabDash', label: 'Build the dashboard', state: 'working' },
+  { r: 'tabApi', label: 'Review the API', state: 'finished' },
+  { r: 'tabLocal', label: 'Local · zsh', state: 'connected' },
+]
 function connect(cue) {
   return {
     chapter: 'Connect',
     markup: `
       <div class="shot" data-r="dash" style="left:0;top:0;width:1264px;height:505px"><img src="${ASSET}screenshots/dashboard-focus.png" width="1264" height="505"></div>
-      ${terminal({ r: 'term' })}
-      ${heading({ x: 110, y: 110, eyebrow: 'Connect', title: 'One click.\n<em>You\'re in.</em>', sub: 'A terminal opens on your computer, already attached to the session on the server.', width: 620 })}
-      <div class="badges" data-r="rd" style="left:110px;top:780px;flex-direction:column;align-items:flex-start">
-        <div class="badge" data-r="b0">${icon('Monitor', 24)}Like remote desktop</div>
-        <div class="badge" data-r="b1">${icon('SquareTerminal', 24)}Built for coding</div>
-        <div class="badge strike" data-r="b2">${icon('X', 24)}<span>No server desktop needed</span></div>
+      ${connectDialog()}
+      ${desktopApp({ tabs: DESK_TABS })}
+      ${heading({ x: 110, y: 110, eyebrow: 'Connect', title: 'One click.\n<em>You\'re in.</em>', sub: 'Open any session in your browser or in Outpost Desktop, live and already attached.', width: 620 })}
+      <div class="badges" data-r="rd" style="left:110px;top:640px;flex-direction:column;align-items:flex-start">
+        <div class="badge" data-r="b0">${icon('Globe', 24)}Web terminal</div>
+        <div class="badge" data-r="b1">${icon('Monitor', 24)}Outpost Desktop · macOS &amp; Windows</div>
+        <div class="badge" data-r="b2">${icon('PanelsTopLeft', 24)}A tab for every session</div>
+        <div class="badge" data-r="b3">${icon('SquareTerminal', 24)}Local shells alongside</div>
       </div>
       ${cursorMarkup()}`,
     update(t, w, r) {
-      // 3D backdrop: camera pushes in toward Atlas, a beam links it to the viewer.
-      w.setCamera(track([[0, 2, 6, 20], [cue.terminal + 0.5, -2, 5, 12], [17, -3.5, 5, 11]], t), track([[0, 0, 3.5, 0], [cue.terminal + 0.5, -4, 4, 0], [17, -5, 4, 0]], t), 36)
+      w.setCamera(track([[0, 2, 6, 20], [cue.desktop + 1, -2, 5, 12], [20, -3.5, 5, 11]], t), track([[0, 0, 3.5, 0], [cue.desktop + 1, -4, 4, 0], [20, -5, 4, 0]], t), 36)
       showServers(w, t, { from: -2 })
       placePanels(w, t, () => -2, { opacity: 0.9 })
       w.renderer.toneMappingExposure = 0.7
-      // Dashboard screenshot zooms toward the Connect button, then the terminal launches out of it.
+      // Session list → Connect → the two-choice dialog.
       const btn = { x: 0.8913 * 1264, y: 0.3518 * 505 }
-      const zoom = easeInOut(prog(t, 0, cue.click + 0.2))
-      const launch = easeInOut(prog(t, cue.terminal - 0.25, 0.9))
-      const ds = lerp(1.15, 1.6, zoom) * (1 + launch * 0.4)
-      const dx = lerp(560, 960 - btn.x * 1.6, zoom)
-      const dy = lerp(300, 540 - btn.y * 1.6, zoom)
-      style(r.dash, { o: 1 - launch, x: dx - (ds - 1) * 632 + (ds - 1) * 632, y: dy, s: ds, origin: '0 0', blur: launch * 10 })
-      const term = easeOutBack(prog(t, cue.terminal - 0.1, 0.9), 1.1)
-      style(r.term, { o: clamp(term * 1.5), x: lerp(dx + btn.x * ds - 500, 790, term), y: lerp(dy + btn.y * ds - 330, 210, term), s: lerp(0.1, 1, term), ry: -8 * term, rx: 4 * (1 - term) })
-      const lines = [
-        ['› Build the dashboard interface.', 'u'], ['• Preparing summary cards and a progress chart.', ''], ['• Checking responsive layout and mobile spacing.', ''], ['The coding session is still running.', 'c'],
-      ]
-      r.termLines.innerHTML = lines.map(([text, cls], i) => `<div class="${cls}">${typed(text, t, cue.terminal + 0.6 + i * 0.75, 48)}</div>`).join('') +
+      const zoom = easeInOut(prog(t, 0, cue.click + 0.3))
+      const dlgIn = easeOutBack(prog(t, cue.click + 0.6, 0.6), 1.1)
+      const chosen = cue.desktop + 0.5
+      const launch = easeInOut(prog(t, chosen + 0.2, 0.9))
+      const ds = lerp(1.15, 1.45, zoom)
+      style(r.dash, { o: (1 - 0.6 * dlgIn) * (1 - launch), x: lerp(560, 960 - btn.x * 1.45, zoom), y: lerp(300, 540 - btn.y * 1.45, zoom), s: ds, origin: '0 0', blur: dlgIn * 4 + launch * 6 })
+      style(r.connectDlg, { o: clamp(dlgIn * 1.4) * (1 - launch), x: 900, y: 230 + (1 - dlgIn) * 50, s: (0.94 + 0.06 * dlgIn) * (1 - 0.12 * launch), blur: launch * 8 })
+      r.choiceWeb.classList.toggle('hot', t > cue.browser - 0.1 && t < cue.desktop - 0.1)
+      r.choiceDesk.classList.toggle('hot', t > cue.desktop - 0.1)
+      r.choiceDesk.classList.toggle('press', t > chosen && t < chosen + 0.18)
+      // Outpost Desktop opens with the session in its own tab; more tabs arrive at "its own tab".
+      const app = easeOutBack(prog(t, chosen + 0.3, 0.9), 1.1)
+      style(r.desk, { o: clamp(app * 1.5), x: lerp(1150, 740, app), y: lerp(420, 190, app), s: lerp(0.35, 1, app), ry: -7 * app })
+      const tabAt = [chosen + 0.3, cue.tab + 0.1, cue.local + 0.5]
+      DESK_TABS.forEach((tab, i) => {
+        const p = easeOutBack(prog(t, tabAt[i], 0.45), 1.4)
+        style(r[tab.r], { o: clamp(p * 1.4), y: (1 - p) * 30, s: 0.9 + 0.1 * p })
+      })
+      const local = t > cue.local + 0.7 && t < cue.see - 0.1
+      r.tabDash.classList.toggle('selected', !local)
+      r.tabLocal.classList.toggle('selected', local)
+      r.deskPlus.classList.toggle('press', t > cue.local + 0.3 && t < cue.local + 0.5)
+      r.deskRemote.style.display = local ? 'none' : 'block'
+      r.deskLocal.style.display = local ? 'block' : 'none'
+      const lines = [['› Build the dashboard interface.', 'u'], ['• Preparing summary cards and a progress chart.', ''], ['• Checking responsive layout and mobile spacing.', ''], ['The coding session is still running.', 'c']]
+      r.deskLines.innerHTML = lines.map(([text, cls], i) => `<div class="${cls}">${typed(text, t, chosen + 1 + i * 0.7, 48)}</div>`).join('') +
         (t > cue.see ? `<div class="s">${icon('LoaderCircle', 18)} Working · refining the interface</div>` : '')
-      r.termAttach.style.display = 'none'
-      r.termInput.textContent = typed('Also add a dark mode toggle', t, cue.pickup + 0.3, 16)
-      r.termCaret.style.opacity = Math.floor(t * 2.2) % 2 === 0 ? 1 : 0
-      reveal(r.head, t, cue.terminal + 0.6, { dur: 0.8 })
-      reveal(r.b0, t, cue.remote - 0.1, { x: -24, y: 0 })
-      reveal(r.b1, t, cue.built - 0.1, { x: -24, y: 0 })
-      reveal(r.b2, t, cue.nodesk - 0.1, { x: -24, y: 0 })
+      r.deskLocalLines.innerHTML = `<div><span class="p">demo@laptop</span> <span class="d">~/workspaces</span> % ${typed('git status', t, cue.local + 0.9, 14)}</div>` +
+        (t > cue.local + 1.8 ? '<div class="d">On branch main</div><div class="d">nothing to commit, working tree clean</div>' : '')
+      r.deskAttach.style.display = 'none'
+      r.deskInput.textContent = typed('Also add a dark mode toggle', t, cue.pickup + 0.3, 16)
+      r.deskCaret.style.opacity = Math.floor(t * 2.2) % 2 === 0 ? 1 : 0
+      reveal(r.head, t, chosen + 0.6, { dur: 0.8 })
+      ;[cue.browser, cue.desktop, cue.tab, cue.local].forEach((at, i) => reveal(r[`b${i}`], t, Math.max(at, chosen + 0.8) - 0.1, { x: -24, y: 0 }))
       r.rd.style.opacity = 1
       r.rd.style.visibility = 'visible'
-      driveCursor(r, t, [[0, 1500, 820, 0], [cue.click - 0.5, 1160, 640, 1], [cue.click + 0.05, 960, 540, 1], [cue.terminal, 960, 540, 1], [cue.terminal + 0.3, 1000, 600, 0]], [cue.click + 0.05])
+      const choice = { x: 900 + 680, y: 230 + 268 }
+      driveCursor(r, t, [
+        [0, 1500, 820, 0], [cue.click - 0.5, 1160, 640, 1], [cue.click + 0.05, 960, 540, 1], [cue.click + 0.6, 1100, 560, 1],
+        [cue.browser, choice.x - 40, choice.y - 120, 1], [chosen - 0.3, choice.x, choice.y, 1], [chosen + 0.3, choice.x + 20, choice.y + 30, 0],
+        [cue.local - 0.2, 1660, 230, 0], [cue.local + 0.1, 1640, 222, 1], [cue.local + 0.9, 1660, 300, 1], [cue.local + 1.3, 1680, 330, 0],
+      ], [cue.click + 0.05, chosen, cue.local + 0.35])
     },
   }
 }
@@ -465,73 +490,105 @@ function persist(cue) {
     },
   }
 }
-
-/* 7 · IMAGES — paste in the manager, send to the session, lands in the prompt. */
+/* 7 · IMAGES — just paste, as usual; it works in the desktop app and in the browser. */
+const browserWindow = () => `
+  <div class="b-win" data-r="web">
+    <div class="b-bar"><span class="d-lights"><i></i><i></i><i></i></span><div class="b-url">${icon('ShieldCheck', 16)} outpost.example.com/terminal</div></div>
+    ${terminal({ r: 'webTerm', title: 'Review the API', host: 'ATLAS DEVELOPMENT' }).replace('Codex · Review the API', 'Claude Code · Review the API')}
+  </div>`
 function images(cue) {
+  // One paste per window: the clipboard image lifts, flies along an arc, and lands in the prompt.
+  const pastes = [
+    { win: 'desk', at: cue.paste + 0.35 },
+    { win: 'web', at: cue.browser + 0.9 },
+  ]
   return {
     chapter: 'Share images',
     markup: `
-      ${heading({ x: 110, y: 110, eyebrow: 'Images', title: 'Paste here.\n<em>Use it there.</em>', sub: 'Send a screenshot or design straight into the remote agent\'s prompt.', width: 640 })}
-      ${attachModal()}
-      ${terminal({ r: 'term' })}
+      ${heading({ x: 110, y: 110, eyebrow: 'Images', title: 'Just paste.\n<em>It works.</em>', sub: 'Share a screenshot or a design the way you always do.', width: 640 })}
+      ${desktopApp({ tabs: DESK_TABS.slice(0, 2) })}
+      ${browserWindow()}
       <canvas class="trail" data-r="trail" width="1920" height="1080"></canvas>
+      <div class="clip" data-r="clip">${icon('ClipboardPaste', 22)}<span>Clipboard</span><img src="${ASSET}dashboard-concept.png"></div>
       <img class="flyimg" data-r="fly" src="${ASSET}dashboard-concept.png">
-      <div class="keycap" data-r="keys" style="left:0;top:0"><span>Ctrl</span><span>V</span></div>
-      ${chip('sent', 'Sent to Build the dashboard', 'CircleCheck', 'mint')}
-      ${cursorMarkup()}`,
+      <div class="keycap" data-r="keys" style="left:0;top:0"><span>⌘</span><span>V</span></div>
+      <div class="badges" data-r="where" style="left:0;right:0;top:872px;justify-content:center">
+        <div class="badge" data-r="w0">${icon('Monitor', 24)}Outpost Desktop</div><div class="badge" data-r="w1">${icon('Globe', 24)}Web terminal</div>
+      </div>`,
     update(t, w, r) {
       w.setCamera(track([[0, 8, 6, 22], [16, 4, 6, 20]], t), [0, 3, 0], 34)
       showServers(w, t, { from: -2 })
       placePanels(w, t, () => -2, { opacity: 0.8 })
       w.renderer.toneMappingExposure = 0.65
-      reveal(r.head, t, 0.15)
-      // Modal on the left half; terminal on the right, slightly receded.
-      const mIn = easeOutBack(prog(t, 0.4, 0.8), 1.1)
-      style(r.attach, { o: clamp(mIn * 1.4) * (1 - prog(t, cue.lands + 1.2, 0.5)), x: 110, y: 420 + (1 - mIn) * 60, s: 0.84, origin: '0 0', ry: 8 })
-      r.attach.style.top = '0px'
-      const pasted = t > cue.paste + 0.35
-      r.dropImg.style.opacity = pasted ? 1 : 0
-      r.dropImg.style.transform = `scale(${pasted ? 0.85 + 0.15 * easeOutBack(prog(t, cue.paste + 0.35, 0.5), 2) : 0.8})`
-      r.dropEmpty.style.opacity = pasted ? 0 : 1
-      pin(r.keys, { x: 430, y: 780 }, { o: win(t, cue.paste - 0.4, cue.paste + 1.2, 0.25, 0.3), s: 0.9 + 0.1 * pop(t, cue.paste - 0.4) })
-      r.sendBtn.classList.toggle('press', t > cue.send + 0.3 && t < cue.send + 0.5)
-      const tIn = easeOut(prog(t, 0.6, 1))
-      const focus = easeInOut(prog(t, cue.lands + 1.1, 0.9))
-      style(r.term, { o: tIn, x: lerp(900, 820, focus), y: 300 - 120 * focus, s: lerp(0.86, 1.02, focus), origin: '0 0', ry: lerp(-10, -4, focus) })
-      r.termLines.innerHTML = '<div class="u">› Build the dashboard interface.</div><div>• Waiting for the design reference.</div>'
-      const landed = t > cue.lands + 0.35
-      r.termAttach.style.display = landed ? 'block' : 'none'
-      r.termPrompt.style.boxShadow = landed ? `0 0 0 ${3 * (1 - prog(t, cue.lands + 0.35, 1.2))}px rgba(124,196,255,0.9), 0 0 ${50 * (1 - prog(t, cue.lands + 0.35, 1.5))}px rgba(124,196,255,0.8)` : 'none'
-      r.termInput.textContent = ''
-      r.termCaret.style.opacity = Math.floor(t * 2.2) % 2 === 0 ? 1 : 0
-      // The image flies from the modal into the terminal prompt along an arc with a light trail.
-      const fp = prog(t, cue.send + 0.45, cue.lands + 0.35 - cue.send - 0.45)
+      reveal(r.head, t, 0.15, { until: cue.browser - 0.1 })
+      // Act 1: the desktop app alone. Act 2: it steps aside for a browser window.
+      const split = easeInOut(prog(t, cue.browser - 0.4, 0.9))
+      const dIn = easeOut(prog(t, 0.4, 0.9))
+      const desk = { x: lerp(780, 1010, split), y: lerp(220, 250, split), s: lerp(0.92, 0.72, split) }
+      style(r.desk, { o: dIn, x: desk.x, y: desk.y + (1 - dIn) * 40, s: desk.s, origin: '0 0', ry: lerp(-6, -3, split) })
+      r.tabDash.classList.add('selected')
+      ;[r.tabDash, r.tabApi].forEach(tab => style(tab, { o: 1 }))
+      r.deskLocal.style.display = 'none'
+      r.deskLines.innerHTML = '<div class="u">› Build the dashboard interface.</div><div>• Waiting for the design reference.</div>'
+      r.deskInput.textContent = typed(' Match this layout', t, pastes[0].at + 0.9, 18)
+      r.deskCaret.style.opacity = Math.floor(t * 2.2) % 2 === 0 ? 1 : 0
+      const webIn = easeOutBack(prog(t, cue.browser - 0.2, 0.8), 1.1)
+      const web = { x: lerp(-200, 120, webIn), y: 270, s: 0.72 }
+      style(r.web, { o: clamp(webIn * 1.4), x: web.x, y: web.y, s: web.s, origin: '0 0', ry: 3 })
+      r.webTermLines.innerHTML = '<div class="u">› Review the API changes.</div><div>• Retry policy looks good.</div>'
+      r.webTermInput.textContent = typed(' Is this error expected?', t, pastes[1].at + 0.9, 18)
+      r.webTermCaret.style.opacity = Math.floor(t * 2.2 + 1) % 2 === 0 ? 1 : 0
+      // Prompt targets in stage pixels (each window's prompt sits near its bottom-left).
+      const target = {
+        desk: { x: desk.x + 90 * desk.s, y: desk.y + 520 * desk.s },
+        web: { x: web.x + 90 * web.s, y: web.y + 580 * web.s },
+      }
       const ctx = r.trail.getContext('2d')
       ctx.clearRect(0, 0, 1920, 1080)
-      const from = { x: 330, y: 520 }
-      const to = { x: lerp(900, 820, focus) + 120, y: 300 + 560 * 0.86 }
-      const at = u => ({ x: lerp(from.x, to.x, u), y: lerp(from.y, to.y, u) - Math.sin(u * Math.PI) * 300 })
-      if (fp > 0 && fp < 1) {
+      let flying = false
+      const clipAt = pastes.find(p => t < p.at + 0.9) ?? pastes.at(-1)
+      // Act 1: below the heading. Act 2: in the gap above both windows.
+      const clipPos = clipAt.win === 'desk' ? { x: 160, y: 560 } : { x: 860, y: 8 }
+      for (const [i, paste] of pastes.entries()) {
+        const landed = t > paste.at + 0.75
+        const attach = r[i === 0 ? 'deskAttach' : 'webTermAttach']
+        const prompt = r[i === 0 ? 'deskPrompt' : 'webTermPrompt']
+        attach.style.display = landed ? 'block' : 'none'
+        attach.innerHTML = `<b>[Image #1]</b><i class="thumb" style="background-image:url(${ASSET}dashboard-concept.png)"></i>`
+        prompt.style.boxShadow = landed ? `0 0 0 ${3 * (1 - prog(t, paste.at + 0.75, 1.2))}px rgba(124,196,255,0.9), 0 0 ${50 * (1 - prog(t, paste.at + 0.75, 1.5))}px rgba(124,196,255,0.8)` : 'none'
+        if (landed) w.sparks.add({ origin: V(0, 3, 4), age: t - paste.at - 0.75, seed: 21 + i, count: 70, speed: 2.5, hex: '#7cc4ff' })
+        const fp = prog(t, paste.at, 0.75)
+        if (fp <= 0 || fp >= 1) continue
+        flying = true
+        const from = { x: clipPos.x + 40, y: clipPos.y + 60 }
+        const to = target[paste.win]
+        const at = u => ({ x: lerp(from.x, to.x, u), y: lerp(from.y, to.y, u) - Math.sin(u * Math.PI) * 220 })
         const e = easeInOut(fp)
         const p = at(e)
-        style(r.fly, { o: 1, x: p.x - 180 * (1 - e * 0.7), y: p.y - 110 * (1 - e * 0.7), s: lerp(0.9, 0.18, e), r: Math.sin(e * Math.PI) * -8, origin: '0 0' })
+        style(r.fly, { o: 1, x: p.x - 120 * (1 - e), y: p.y - 70 * (1 - e), s: lerp(0.7, 0.16, e), r: Math.sin(e * Math.PI) * -8, origin: '0 0' })
         ctx.lineCap = 'round'
-        for (let k = 0; k < 30; k++) {
-          const u0 = Math.max(0, e - 0.02 * (k + 1))
-          const u1 = Math.max(0, e - 0.02 * k)
-          const p0 = at(u0)
-          const p1 = at(u1)
-          ctx.strokeStyle = `rgba(124,196,255,${0.5 * (1 - k / 30)})`
-          ctx.lineWidth = 10 * (1 - k / 30)
+        for (let k = 0; k < 24; k++) {
+          const p0 = at(Math.max(0, e - 0.025 * (k + 1)))
+          const p1 = at(Math.max(0, e - 0.025 * k))
+          ctx.strokeStyle = `rgba(124,196,255,${0.5 * (1 - k / 24)})`
+          ctx.lineWidth = 9 * (1 - k / 24)
           ctx.beginPath()
           ctx.moveTo(p0.x, p0.y)
           ctx.lineTo(p1.x, p1.y)
           ctx.stroke()
         }
-      } else r.fly.style.opacity = 0
-      pin(r.sent, { x: to.x + 560, y: to.y - 190 }, { o: pop(t, cue.lands + 0.4) * (1 - prog(t, cue.nomore + 1.6, 0.4)), s: 0.7 + 0.3 * pop(t, cue.lands + 0.4) })
-      driveCursor(r, t, [[0, 900, 900, 0], [cue.send - 0.6, 700, 800, 1], [cue.send + 0.3, 662, 868, 1], [cue.send + 0.8, 700, 900, 1], [cue.send + 1.2, 760, 960, 0]], [cue.send + 0.3])
-      if (landed) w.sparks.add({ origin: V(0, 3, 4), age: t - cue.lands - 0.35, seed: 21, count: 80, speed: 2.5, hex: '#7cc4ff' })
+      }
+      if (!flying) r.fly.style.opacity = 0
+      // The clipboard card and the ordinary paste shortcut, shown before each paste.
+      const clipO = win(t, cue.paste - 0.7, pastes[0].at + 0.5, 0.35, 0.3) + win(t, cue.browser + 0.2, pastes[1].at + 0.5, 0.35, 0.3)
+      style(r.clip, { o: clipO, x: clipPos.x, y: clipPos.y, s: 0.95 + 0.05 * clipO })
+      const keyO = win(t, pastes[0].at - 0.45, pastes[0].at + 0.5, 0.2, 0.3) + win(t, pastes[1].at - 0.45, pastes[1].at + 0.5, 0.2, 0.3)
+      const keyPos = clipAt.win === 'desk' ? { x: clipPos.x + 140, y: clipPos.y + 250 } : { x: clipPos.x + 410, y: clipPos.y + 110 }
+      pin(r.keys, keyPos, { o: keyO, s: 0.9 + 0.1 * clamp(keyO) })
+      reveal(r.w0, t, cue.desktop - 0.1, { y: 20 })
+      reveal(r.w1, t, cue.browser - 0.1, { y: 20 })
+      r.where.style.opacity = 1
+      r.where.style.visibility = 'visible'
     },
   }
 }
@@ -613,18 +670,20 @@ function search(cue) {
   }
 }
 
-/* 9 · ACTIVITY — working / idle / waiting; check in and the notice clears. */
+/* 9 · ACTIVITY — working / idle / waiting on every tab; check in and the notice clears. */
+const ACTIVITY_TABS = [
+  { r: 'tabDash', label: 'Build the dashboard', state: 'working' },
+  { r: 'tabApi', label: 'Review the API', state: 'finished' },
+  { r: 'tabIdea', label: 'Explore the next idea', state: 'idle' },
+]
 function activity(cue) {
   return {
     chapter: 'Know where you\'re needed',
     markup: `
       ${heading({ x: 260, y: 96, eyebrow: 'Activity', title: 'See where you\'re <em>needed.</em>', width: 1400, align: 'center' })}
       ${chip('cw', 'Working', 'LoaderCircle', 'blue')}${chip('ci', 'Idle', null, 'dim')}${chip('ca', 'Waiting for you', 'Bell', 'amber')}
-      <div class="shot" data-r="shot" style="left:0;top:0;width:1264px;height:505px">
-        <img data-r="before" src="${ASSET}screenshots/activity-before-focus.png" width="1264" height="505">
-        <img class="over" data-r="after" src="${ASSET}screenshots/activity-checked-focus.png" width="1264" height="505">
-        <div class="ring" data-r="ring" style="position:absolute;left:570px;top:256px;width:110px;height:40px"></div>
-      </div>
+      ${desktopApp({ tabs: ACTIVITY_TABS })}
+      ${chip('note', 'Finished a turn · needs you', 'Bell', 'amber')}
       ${cursorMarkup()}`,
     update(t, w, r) {
       // Every server panel shows a live status; the "waiting" one pulses amber.
@@ -647,16 +706,34 @@ function activity(cue) {
       pin(r.cw, anchor(0, 0), { o: pop(t, cue.working) * (1 - toUi), s: 0.7 + 0.3 * pop(t, cue.working) })
       pin(r.ci, anchor(2, 1), { o: pop(t, cue.idle) * (1 - toUi), s: 0.7 + 0.3 * pop(t, cue.idle) })
       pin(r.ca, anchor(1, 1), { o: pop(t, cue.waiting) * (1 - toUi), s: (0.7 + 0.3 * pop(t, cue.waiting)) * (1 + 0.05 * Math.sin(t * 6)) })
-      // Then the real session list: the "Awaiting you" badge, a click, the notice clears.
-      style(r.shot, { o: toUi, x: 328, y: 330 + (1 - toUi) * 80, s: 0.92 + 0.08 * toUi, rx: (1 - toUi) * 12 })
-      r.after.style.opacity = checked ? 1 : 0
-      // Badge bounds measured from the screenshots: "Awaiting you" 576–673 × 262–289, then "• Idle" 572–607 × 266–284.
-      const shrink = easeInOut(prog(t, cue.check + 0.5, 0.35))
-      Object.assign(r.ring.style, { left: `${lerp(570, 562, shrink)}px`, top: `${lerp(256, 260, shrink)}px`, width: `${lerp(110, 54, shrink)}px`, height: `${lerp(40, 30, shrink)}px` })
-      r.ring.style.opacity = checked ? 1 - prog(t, cue.clears + 1.4, 0.6) : 0.6 + 0.4 * Math.sin(t * 6)
-      r.ring.classList.toggle('mint', checked)
-      const connectBtn = { x: 328 + 1126, y: 330 + 289 }
-      driveCursor(r, t, [[0, 1400, 900, 0], [cue.check - 0.4, 1500, 820, 1], [cue.check + 0.3, connectBtn.x, connectBtn.y, 1], [cue.clears + 1, connectBtn.x + 60, connectBtn.y + 80, 1], [cue.clears + 1.6, connectBtn.x + 90, connectBtn.y + 110, 0]], [cue.check + 0.35])
+      // Then Outpost Desktop's tab bar: the ringing "Review the API" tab is clicked and its bell clears.
+      const app = { x: 400, y: 300 }
+      style(r.desk, { o: toUi, x: app.x, y: app.y + (1 - toUi) * 80, s: 0.92 + 0.08 * toUi, rx: (1 - toUi) * 12 })
+      ACTIVITY_TABS.forEach(tab => style(r[tab.r], { o: 1 }))
+      const setState = (tab, state) => {
+        const status = r[`${tab}Status`]
+        if (status.dataset.state !== state) { status.dataset.state = state; status.innerHTML = tabIcon(state) }
+      }
+      setState('tabApi', checked ? 'idle' : 'finished')
+      const ring = !checked && t > cue.waiting - 0.2
+      r.tabApiStatus.style.transform = ring ? `rotate(${Math.sin(t * 14) * 16 * (0.5 + 0.5 * Math.sin(t * 2.4))}deg)` : 'none'
+      r.tabApi.classList.toggle('ping', ring && toUi > 0.5)
+      r.tabApi.classList.toggle('selected', checked)
+      r.tabDash.classList.toggle('selected', !checked)
+      r.tabDashStatus.style.transform = `rotate(${t * 360}deg)`
+      r.deskLocal.style.display = 'none'
+      r.deskLines.innerHTML = checked
+        ? '<div class="u">› Review the API changes.</div><div>• Read 12 changed files.</div><div class="m">✓ Retry policy looks good. Two small fixes suggested.</div>'
+        : '<div class="u">› Build the dashboard interface.</div><div>• Adding a progress chart.</div>'
+      r.deskBanner ??= r.desk.querySelector('.term-banner b')
+      r.deskBanner.textContent = checked ? '✻ Claude Code' : '›_ OpenAI Codex'
+      r.deskAttach.style.display = 'none'
+      r.deskInput.textContent = ''
+      r.deskCaret.style.opacity = Math.floor(t * 2.2) % 2 === 0 ? 1 : 0
+      // Tab x in stage pixels: chrome padding + lights + logo, then 274 px per tab.
+      const tabApi = { x: app.x + 140 + 274 + 135, y: app.y + 36 }
+      pin(r.note, { x: tabApi.x, y: tabApi.y - 70 }, { o: (ring ? pop(t, cue.waiting) : 0) * toUi, s: 0.8 + 0.2 * pop(t, cue.waiting) })
+      driveCursor(r, t, [[0, 1400, 900, 0], [cue.check - 0.4, 1400, 760, 1], [cue.check + 0.3, tabApi.x, tabApi.y, 1], [cue.clears + 1, tabApi.x + 60, tabApi.y + 160, 1], [cue.clears + 1.6, tabApi.x + 90, tabApi.y + 220, 0]], [cue.check + 0.35])
     },
   }
 }
@@ -667,11 +744,13 @@ function architecture(cue) {
   return {
     chapter: 'Simple by design',
     markup: `
-      ${heading({ x: 110, y: 110, eyebrow: 'Under the hood', title: 'Agentless servers.\n<em>Room to grow.</em>', width: 820 })}
+      ${heading({ x: 110, y: 110, eyebrow: 'Under the hood', title: 'Simple servers.\n<em>Room to grow.</em>', width: 820 })}
       <div class="badges" data-r="pts" style="left:0;right:0;top:800px;justify-content:center">
-        <div class="badge strike" data-r="p0">${icon('X', 24)}<span>No extra service on your servers</span></div>
+        <div class="badge" data-r="p2">${icon('Cpu', 24)}One self-contained terminal program</div>
+        <div class="badge strike" data-r="p0">${icon('X', 24)}<span>No manager service, no open ports</span></div>
         <div class="badge" data-r="p1">${icon('Puzzle', 24)}Custom AI harnesses plug in</div>
       </div>
+      ${chip('bin', 'Outpost Terminal · keeps sessions alive', 'SquareTerminal', 'cyan')}
       ${chip('svc', 'No manager service', 'X', 'red')}`,
     update(t, w, r) {
       const server = w.servers[1]
@@ -681,8 +760,9 @@ function architecture(cue) {
       const toRail = easeInOut(prog(t, cue.grow - 0.6, 1.2))
       w.setCamera(track([[0, MID - 0.9, 3.8, 12], [cue.grow - 0.6, MID, 3.8, 11], [cue.grow + 0.6, MID, 3.4, 14], [14.5, MID, 3.6, 14.5]], t), track([[0, MID - 0.9, 3.2, 0], [cue.grow - 0.6, MID, 3.0, 0], [cue.grow + 0.6, MID, 2.4, 0], [14.5, MID, 2.4, 0]], t), 36)
       w.renderer.toneMappingExposure = 1.05
-      // A ghost "manager service" box tries to dock onto the server, then dissolves.
-      const gIn = easeOut(prog(t, cue.agentless - 0.4, 0.5))
+      // The terminal program is named on the server; then a ghost "manager service" box tries to dock and dissolves.
+      pin(r.bin, { x: 960, y: 730 }, { o: pop(t, cue.binary) * (1 - prog(t, cue.grow - 0.8, 0.4)), s: 0.7 + 0.3 * pop(t, cue.binary) })
+      const gIn = easeOut(prog(t, cue.service - 0.6, 0.5))
       const gOut = prog(t, cue.service + 0.5, 0.8)
       w.ghost.visible = gIn > 0 && gOut < 1
       w.ghost.position.set(MID, 4.1 + (1 - gIn) * 1.2 + Math.sin(t * 2) * 0.05, 0.2)
@@ -690,7 +770,7 @@ function architecture(cue) {
       w.ghost.material.opacity = gIn * (1 - gOut)
       w.ghost.scale.setScalar(1 + gOut * 0.6)
       if (gOut > 0) w.sparks.add({ origin: V(MID, 4.1, 0.2), age: t - cue.service - 0.5, seed: 17, count: 140, speed: 3, hex: C.red, gravity: -1 })
-      pin(r.svc, w.project(V(MID, 5.4, 0.2)), { o: pop(t, cue.service) * (1 - gOut), s: 0.7 + 0.3 * pop(t, cue.service) })
+      pin(r.svc, w.project(V(MID, 5.4, 0.2)), { dx: 130, o: pop(t, cue.service) * (1 - gOut), s: 0.7 + 0.3 * pop(t, cue.service) })
       server.panels.forEach(p => p.reset())
       const panel = server.panels[0]
       panel.group.position.set(MID, 5.0 + Math.sin(t * 1.3) * 0.08 - toRail * 5, -0.6)
@@ -714,7 +794,8 @@ function architecture(cue) {
         if (i === 3 && p >= 1) w.sparks.add({ origin: V(x, 2.6, 3.3), age: t - at - 0.9, seed: 31, count: 120, speed: 3, hex: C.amber })
       })
       reveal(r.head, t, 0.2)
-      reveal(r.p0, t, cue.service - 0.1, { y: 20 })
+      reveal(r.p2, t, cue.binary - 0.1, { y: 20, until: cue.grow - 0.2 })
+      reveal(r.p0, t, cue.service - 0.1, { y: 20, until: cue.grow - 0.2 })
       reveal(r.p1, t, cue.custom - 0.1, { y: 20 })
       r.pts.style.opacity = 1
       r.pts.style.visibility = 'visible'

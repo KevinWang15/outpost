@@ -1,8 +1,8 @@
 {
  "provider": "ElevenLabs Music",
  "model": "music_v1",
- "songId": "KKRmbcXe6GB30MjQAUz5",
- "fingerprint": "991c55c97c6bd5fa656a9fa88b9bca73adbf3001d2daac98e54fd09bd2c02ebf",
+ "songId": "W3FhrzyjW2fwes2vk5iB",
+ "fingerprint": "398f7fb06dfa9d44e5296f6912b2618930d5ce5bc05df7d95f45b7b9b9b055a3",
  "plan": {
   "positive_global_styles": [
    "modern minimal electronic",
@@ -92,7 +92,7 @@
      "no harsh distortion",
      "no aggressive drops"
     ],
-    "duration_ms": 68500,
+    "duration_ms": 69367,
     "lines": []
    },
    {
@@ -110,7 +110,7 @@
      "no harsh distortion",
      "no aggressive drops"
     ],
-    "duration_ms": 33000,
+    "duration_ms": 32200,
     "lines": []
    },
    {
@@ -128,7 +128,7 @@
      "no harsh distortion",
      "no aggressive drops"
     ],
-    "duration_ms": 30000,
+    "duration_ms": 33433,
     "lines": []
    }
   ]

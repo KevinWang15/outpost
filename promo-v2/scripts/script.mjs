@@ -24,14 +24,14 @@ export const scenes = [
   },
   {
     id: 'create',
-    text: "Starting a session takes just a moment. Pick a server, give the session a name, and choose your agent. Then point it at a project folder, with suggestions as you type. If the agent isn't installed on that server yet, the manager can install it for you.",
+    text: "Starting a session takes just a moment. Pick a server, give the session a name, and choose your agent. Then point it at a project folder, with suggestions as you type. If the agent isn't installed on that server yet, Outpost can install it for you.",
     cues: { server: 'Pick a server', name: 'give the session a name', agent: 'choose your agent', folder: 'point it at a project folder', missing: "If the agent isn't installed", install: 'install it for you' },
     hold: 1.6,
   },
   {
     id: 'connect',
-    text: "Click Connect, and a terminal opens on your computer, already attached to the session. You see exactly what the agent is doing, and you can pick up the conversation right away. It's like remote desktop, built for coding, with no graphical desktop needed on the server.",
-    cues: { click: 'Click Connect', terminal: 'a terminal opens', see: 'You see exactly', pickup: 'pick up the conversation', remote: "It's like remote desktop", built: 'built for coding', nodesk: 'no graphical desktop' },
+    text: 'Click Connect, and open the session in your browser, or in Outpost Desktop, already attached and live. In the desktop app, each session gets its own tab, with your local shells right alongside. You see exactly what the agent is doing, and you can pick up the conversation right away.',
+    cues: { click: 'Click Connect', browser: 'in your browser', desktop: 'Outpost Desktop', live: 'attached and live', tab: 'its own tab', local: 'your local shells', see: 'You see exactly', pickup: 'pick up the conversation' },
     hold: 1.4,
   },
   {
@@ -42,8 +42,8 @@ export const scenes = [
   },
   {
     id: 'images',
-    text: "Need to show the agent a screenshot or a design? Paste the image into the manager, and send it to the session. It lands right in the agent's prompt, ready for your next instruction. No more fighting a remote clipboard.",
-    cues: { paste: 'Paste the image', send: 'send it to the session', lands: 'It lands', ready: 'ready for your next', nomore: 'No more' },
+    text: 'Need to show the agent a screenshot or a design? Just paste it, the way you always do. Image paste works seamlessly, in your browser and in the desktop app. No more fighting a remote clipboard.',
+    cues: { paste: 'Just paste it', seamless: 'works seamlessly', browser: 'in your browser', desktop: 'the desktop app', nomore: 'No more' },
     hold: 1.4,
   },
   {
@@ -54,14 +54,14 @@ export const scenes = [
   },
   {
     id: 'activity',
-    text: 'With several agents running at once, the manager shows you where you are needed. You can see which agents are working, which are idle, and which have finished a turn and are waiting for you. Check in, and the notice clears, so you can move on to the next one.',
+    text: 'With several agents running at once, Outpost shows you where you are needed, on every tab. You can see which agents are working, which are idle, and which have finished a turn and are waiting for you. Check in, and the notice clears, so you can move on to the next one.',
     cues: { working: 'which agents are working', idle: 'which are idle', waiting: 'waiting for you', check: 'Check in', clears: 'the notice clears' },
     hold: 1.4,
   },
   {
     id: 'architecture',
-    text: "And your servers stay simple. They're agentless, with no extra manager service to keep running on them. The design also leaves room to grow, including support for custom AI harnesses as your workflow evolves.",
-    cues: { simple: 'servers stay simple', agentless: 'agentless', service: 'no extra manager service', grow: 'room to grow', custom: 'custom AI harnesses' },
+    text: "And your servers stay simple. One self-contained terminal program keeps each session alive. There's no manager service to run, and no extra ports to open. The design also leaves room to grow, including support for custom AI harnesses as your workflow evolves.",
+    cues: { simple: 'servers stay simple', binary: 'One self-contained', alive: 'keeps each session alive', service: 'no manager service', ports: 'no extra ports', grow: 'room to grow', custom: 'custom AI harnesses' },
     hold: 1.4,
   },
   {

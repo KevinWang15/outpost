@@ -12,12 +12,12 @@ The project includes editable scenes, screenshots, narration copy, and a measure
 | 2 | The rough edges | An SSH beam snaps and the agent stops; a pasted screenshot bounces off a remote terminal; sessions on every server turn into question marks. |
 | 3 | One place | The Outpost logo blooms; laptop and desktop rise, with beams to every session on every server. |
 | 4 | Start a session | Pick a server, name it, choose the agent and folder (with suggestions), and auto-install a missing agent. |
-| 5 | Connect | The dashboard zooms into Connect, and a terminal launches out of the button, attached to the live session. |
+| 5 | Connect | Connect offers the web terminal or Outpost Desktop; Desktop opens with the session in a tab, more session tabs, and a local shell. |
 | 6 | Keeps running | The laptop lid closes and its beam fades, but the agent keeps working; later, the desktop reconnects to the finished work. |
-| 7 | Share images | Ctrl+V into the manager, Send to session; the image arcs into the agent's prompt. |
+| 7 | Share images | An ordinary paste shortcut drops a clipboard image into the agent's prompt, first in Outpost Desktop, then in a browser tab. |
 | 8 | Find past conversations | Search, then the camera dives into the server: a scan ring sweeps the orbiting history, and only the matches lift out. |
-| 9 | Know where you're needed | Every session shows working / idle / waiting; checking the waiting one clears its notice. |
-| 10 | Simple by design | A ghost "manager service" dissolves before it docks; adapter modules slot onto a rail, with a custom harness snapping in last. |
+| 9 | Know where you're needed | Every session shows working / idle / waiting; in the Desktop tab bar, a ringing tab is checked and its bell clears. |
+| 10 | Simple by design | The server's one terminal program is named; a ghost "manager service" dissolves before it docks; adapter modules slot onto a rail, with a custom harness last. |
 | 11 | Outro | An orbit over the whole system converges into the Outpost logo, "AI Session Manager", and the tagline. |
 
 ## Audio
@@ -75,6 +75,6 @@ Cue phrases must occur in the narration text. Changing cues or `hold` does not r
 
 ## Content notes
 
-All environment details are synthetic: `example.com` hosts, `/workspaces/demo-*` paths, and invented session titles. The four screenshots in `assets/screenshots` are captures of the app using the fixtures in `scripts/demo.mjs`; the capture script checks visible content before saving pixels. Terminal output, installation progress, and animated scenes are staged illustrations of the product's real behaviour: sessions persist on dev servers, Connect opens a local terminal attached to them, images are inserted into the agent prompt, search runs on the server and returns only matching excerpts, and servers run no resident manager service.
+All environment details are synthetic: `example.com` hosts, `/workspaces/demo-*` paths, and invented session titles. The four screenshots in `assets/screenshots` are captures of the app using the fixtures in `scripts/demo.mjs`; the capture script checks visible content before saving pixels. Terminal output, installation progress, and animated scenes are staged illustrations of the product's real behaviour: sessions persist on dev servers, Connect opens them in the web terminal or Outpost Desktop, pasted images reach the agent prompt, search runs on the server and returns only matching excerpts, and servers run no manager service.
 
 Fonts: Inter and JetBrains Mono (SIL OFL; licenses in `assets/fonts`). Icons: Lucide (ISC).

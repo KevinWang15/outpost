@@ -590,8 +590,11 @@ the chrome bridge; the renderer cannot supply an executable, environment, or cwd
 `TerminalTab.connection` distinguishes a remote launch from a local PTY owner.
 The same registry, window layout, tab transfer, split, focus, notification, and
 clipboard infrastructure serves both. Moving a local tab preserves its view and
-PTY. Closing it ends its shell; quitting ends all local shells. Window/app close
-confirmation includes running local shells, and reload asks before restarting one.
+PTY. Closing it ends its shell; quitting ends all local shells. Tab, window and
+app close always ask for confirmation when tabs remain, and reload asks before
+restarting a running local shell. Single-tab confirmation names the tab and
+explains whether its shell ends or its remote session keeps running, including
+any unsent message in the same prompt. Cancel is the default action.
 Remote session lifetimes are unchanged.
 
 `scripts/build-desktop.mjs` bundles `frontend/terminal/local-entry.tsx` and the
@@ -661,7 +664,13 @@ Activation applies view visibility before restoring or focusing the native windo
 Native focus events may select another visible split pane, but cannot override an
 activation in progress or reactivate a view already hidden by the current layout.
 
-`tab-shortcuts.ts` reserves Ctrl+Tab and Ctrl+Shift+Tab in Electron's
+`tab-shortcuts.ts` shares new-tab and close-tab accelerators between the native
+menu and the workspace guide: Cmd+T/W on macOS, Ctrl+Shift+T/W on Windows.
+Both the Outpost home page and Settings render the same shortcut list. The home
+page stays open until a tab or another page is selected; it has no Back/Escape
+control. Transient panels retain Escape dismissal.
+
+`tab-shortcuts.ts` also reserves Ctrl+Tab and Ctrl+Shift+Tab in Electron's
 `before-input-event` for both the workspace and terminal web contents. It prevents
 renderer delivery and the duplicate menu accelerator, then uses the existing
 `TabLayout.cycle` order and activation path. Terminal callbacks resolve the

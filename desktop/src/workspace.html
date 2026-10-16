@@ -10,7 +10,7 @@
   </head>
   <body>
     <header class="chrome">
-      <button id="home" class="icon brand" aria-label="Servers and sessions" aria-controls="sessions-panel" title="Servers and sessions"><img src="outpost.png" alt="" width="20" height="20" /></button>
+      <button id="home" class="icon brand" aria-label="Servers, sessions and help" aria-controls="sessions-panel" title="Servers, sessions and help"><img src="outpost.png" alt="" width="20" height="20" /></button>
       <nav id="tabs" role="tablist" aria-label="Terminal sessions"></nav>
       <button id="new-tab" class="icon" aria-label="New local terminal" title="New local terminal (right-click to choose a shell)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg></button>
       <div class="window-drag" aria-hidden="true"></div>
@@ -32,7 +32,8 @@
           <form id="server-form"><label for="server">Outpost server</label><div class="address"><input id="server" type="url" placeholder="https://outpost.example.com" required autocomplete="url" /><button class="primary" type="submit">Open server ↗</button></div></form>
           <h2>Trusted servers</h2><ul id="servers" class="rows"></ul>
           <p id="no-servers" class="hint">Add your server address above to get started.</p>
-          <div class="tip"><strong>Sessions that move with you.</strong><p>Drag tabs to reorder, out of the tab bar to make a window, or into another window's tab bar to merge. Press Esc to cancel a drag. Right-click a tab for move and split actions. Moving tabs keeps their connections and drafts. Closing a local tab ends its shell; remote sessions keep running.</p></div>
+          <div class="tip"><strong>Sessions that move with you.</strong><p>Drag tabs to reorder, out of the tab bar to make a window, or into another window's tab bar to merge. Press Esc to cancel a drag. Right-click a tab for move and split actions. Moving tabs keeps their connections and drafts. Click a tab to return to its terminal.</p><p>Closing a tab always asks for confirmation. Closing a local tab ends its shell and running processes; remote sessions keep running. Unsent messages are discarded, and local terminal history is not saved.</p></div>
+          <h2>Keyboard shortcuts</h2><dl id="home-shortcuts"></dl>
           <p id="open-result" role="status" aria-live="polite"></p>
         </section>
         <section id="switcher-panel" hidden>

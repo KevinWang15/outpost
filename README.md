@@ -147,7 +147,7 @@ Browser clipboard access may ask for permission; if Paste is blocked, use your
 normal paste shortcut. The message box keeps its usual text-editing menu.
 
 Press **Cmd+F** on macOS or **Ctrl+F** on Windows/Linux to find text in the
-current terminal. The search box floats at the top-left without resizing the
+current terminal. The search box floats at the top-right without resizing the
 terminal. Matches are highlighted with a result count; **Enter** goes to the
 next match, **Shift+Enter** to the previous one, and **Esc** closes search and
 returns focus to the terminal. **Aa** toggles case sensitivity. Search is also
@@ -216,7 +216,9 @@ you trust; release artifacts include checksums.
 The app arranges your sessions in tabbed windows, with its own Outpost
 icon and native notifications. Drag tabs to reorder, double-click to rename,
 or use the session switcher to find an open session by name or server.
-Click the Outpost logo to open the servers and sessions page and connect another session.
+Click the Outpost logo to open the servers, sessions, and help page. It includes
+the keyboard shortcut guide, also available from **Help → Outpost guide and shortcuts**.
+Click a terminal tab to return; Escape does not dismiss this home page.
 
 **Local terminals:** the app opens a local shell at startup, and **+** opens another.
 Local tabs work offline without an Outpost server or account. macOS uses your login
@@ -227,6 +229,9 @@ already have a distribution installed. Settings lets you choose the default shel
 Local and remote tabs share splits, dragging between windows, clipboard handling,
 font settings, and bell notifications. Local shells start in your home directory.
 
+Closing a tab always asks for confirmation, whether you use its close button,
+the menu, or **⌘W** on macOS / **Ctrl+Shift+W** on Windows. Closing a window or
+quitting also asks when any terminal tabs remain. **Cancel** is the default.
 Closing a local tab or quitting the app ends its shell. Reloading a local terminal
 asks before restarting a running shell. Local terminal history is held in memory
 for that tab, up to 10,000 lines; it is not restored after quitting. Pasted images
@@ -310,8 +315,8 @@ for manual installation; remote sessions survive closing or upgrading the app.
 | Close window | ⌘Shift+W | Alt+F4 |
 
 The app remembers trusted servers and opens their workspaces in your browser.
-Removing a server closes its tabs across all windows. Closing multiple tabs or discarding a message
-draft asks for confirmation. Hiding the message box preserves its draft.
+Removing a server asks for confirmation before closing its tabs across all windows.
+Closing a tab includes any unsent message in its confirmation; hiding the message box preserves its draft.
 Launch/resume tickets stay in memory; the app stores neither your account
 password nor login cookies. After quitting, connect through your server again.
 Use HTTPS, or HTTP on localhost for a local Outpost server / SSH port forward.

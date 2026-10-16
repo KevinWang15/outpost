@@ -9,6 +9,7 @@ import {
 } from './workspace-api'
 import { paneLayout, type PaneBounds } from './layout'
 import { reconcileElements } from './keyed-elements'
+import { tabActionShortcuts } from './tab-shortcuts'
 
 declare global {
   interface Window {
@@ -310,7 +311,7 @@ function render(next: WorkspaceSnapshot) {
     if (panel === page) control.setAttribute('aria-current', 'page')
     else control.removeAttribute('aria-current')
   }
-  el('back').hidden = next.active === null
+  el('back').hidden = next.active === null || panel === 'sessions'
   el('split').setAttribute('aria-label', next.split ? 'Return to single pane' : 'Split side by side')
   el('split').title = next.split ? 'Return to single pane' : 'Split side by side'
   el('split').setAttribute('aria-pressed', String(Boolean(next.split)))
@@ -369,7 +370,7 @@ search.onkeydown = event => {
   }
 }
 window.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && state?.active !== null && state?.panel !== null) {
+  if (event.key === 'Escape' && state && state.active !== null && state.panel !== null && state.panel !== 'sessions') {
     event.preventDefault()
     run(api.panel(null))
   }
@@ -459,12 +460,15 @@ run(
     render(value)
     const mac = value.platform === 'darwin',
       modifier = mac ? '⌘' : 'Ctrl+Shift+'
+    const tabShortcuts = tabActionShortcuts(value.platform)
+    el('new-tab').title = `${tabShortcuts.newTab.label} (${tabShortcuts.newTab.keys}; right-click to choose a shell)`
+    el('open-local').textContent = `Open local terminal (${tabShortcuts.newTab.keys})`
     const shortcuts = [
       ['New window', mac ? '⌘Shift+N' : 'Ctrl+Shift+N'],
       ['Cancel tab drag', 'Esc'],
-      ['New local terminal', `${modifier}T`],
+      [tabShortcuts.newTab.label, tabShortcuts.newTab.keys],
       ['Switch session', `${modifier}P`],
-      ['Close tab', `${modifier}W`],
+      [tabShortcuts.closeTab.label, tabShortcuts.closeTab.keys],
       ['Next / previous tab', 'Ctrl+Tab / Ctrl+Shift+Tab'],
       ['Go to tab 1–8 / last tab', `${mac ? '⌘' : 'Alt+'}1–9`],
       ['Split side by side', `${modifier}D`],
@@ -477,12 +481,16 @@ run(
       ['Paste into terminal', mac ? '⌘V or Ctrl+V' : `${modifier}V`],
       ['Reload terminal', `${modifier}R`],
     ]
-    for (const [label, keys] of shortcuts) {
-      const dt = document.createElement('dt')
-      dt.textContent = label
-      const dd = document.createElement('dd')
-      dd.textContent = keys
-      el('shortcuts').append(dt, dd)
+    for (const id of ['home-shortcuts', 'shortcuts']) {
+      const list = el(id)
+      list.replaceChildren()
+      for (const [label, keys] of shortcuts) {
+        const dt = document.createElement('dt')
+        dt.textContent = label
+        const dd = document.createElement('dd')
+        dd.textContent = keys
+        list.append(dt, dd)
+      }
     }
   }),
 )

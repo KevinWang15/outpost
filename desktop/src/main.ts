@@ -5,6 +5,7 @@ import { Preferences } from './preferences'
 import { TrustedServers } from './store'
 import { DesktopWorkspace } from './workspace'
 import { checkUpdates } from './updates'
+import { tabActionShortcuts } from './tab-shortcuts'
 
 app.setName('Outpost')
 app.setAppUserModelId('dev.outpost.desktop')
@@ -63,6 +64,7 @@ function receive(value: string) {
 }
 function menus() {
   const mac = process.platform === 'darwin'
+  const tabShortcuts = tabActionShortcuts(process.platform)
   const shortcut = (key: string) => (mac ? 'Cmd+' : 'Ctrl+Shift+') + key
   const increaseFontSize = () => workspace!.forAction().fontSize(1)
   const newLocal = (profile?: string) => {
@@ -78,7 +80,7 @@ function menus() {
       label: 'File',
       submenu: [
         { label: 'New window', accelerator: 'CmdOrCtrl+Shift+N', click: () => workspace!.newWindow() },
-        { label: 'New local terminal', accelerator: shortcut('T'), click: () => newLocal() },
+        { label: tabShortcuts.newTab.label, accelerator: tabShortcuts.newTab.accelerator, click: () => newLocal() },
         {
           label: 'New terminal with profile',
           submenu: workspace!.shells.map(profile => ({ label: profile.name, click: () => newLocal(profile.id) })),
@@ -88,8 +90,8 @@ function menus() {
         { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => workspace!.forAction().panel('settings') },
         { type: 'separator' },
         {
-          label: 'Close tab',
-          accelerator: shortcut('W'),
+          label: tabShortcuts.closeTab.label,
+          accelerator: tabShortcuts.closeTab.accelerator,
           click: () => {
             void workspace!.forAction().close()
           },
@@ -177,6 +179,8 @@ function menus() {
     {
       role: 'help',
       submenu: [
+        { label: 'Outpost guide and shortcuts', click: () => workspace!.forAction().panel('sessions') },
+        { type: 'separator' },
         {
           label: 'Check for updates…',
           click: () => {

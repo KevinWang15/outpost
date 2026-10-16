@@ -239,8 +239,7 @@ export class DesktopWorkspace {
     try {
       const tabs = [...this.terminals.tabs.values()]
       const draft = tabs.some(tab => tab.state.hasDraft)
-      const local = tabs.some(tab => tab.connection.kind === 'local' && tab.connection.terminal.running)
-      if (tabs.length > 1 || draft || local) {
+      if (tabs.length > 0) {
         const result = await dialog.showMessageBox(this.current.ensureWindow(), {
           type: 'question',
           message: `Close ${tabs.length} terminal tabs across ${this.windows.size} windows?`,

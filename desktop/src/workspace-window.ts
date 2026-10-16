@@ -260,7 +260,7 @@ export class WorkspaceWindow {
     })
     window.on('close', event => {
       this.host.dragCancel(this)
-      if (this.allowWindowClose || this.host.quitting() || !this.needsWindowConfirmation()) return
+      if (this.allowWindowClose || this.host.quitting() || !this.hasTabs) return
       event.preventDefault()
       if (this.confirmingWindow) return
       this.confirmingWindow = true
@@ -454,13 +454,32 @@ export class WorkspaceWindow {
     if (!tab) return
     this.closing.add(id)
     try {
-      if (tab.state.hasDraft && !(await this.confirmDraft(tab))) return
+      if (!(await this.confirmClose(tab))) return
       if (!this.has(id)) return
       this.terminals.dispose(id)
       this.focusTerminal()
     } finally {
       this.closing.delete(id)
     }
+  }
+  private async confirmClose(tab: TerminalTab) {
+    if (!this.window) return false
+    const detail =
+      tab.connection.kind === 'remote'
+        ? 'The remote session will keep running. You can reconnect through your Outpost server.'
+        : tab.connection.terminal.running
+          ? 'The local shell and its running processes will end. This terminal’s history will be discarded.'
+          : 'This local shell has ended. Its terminal history will be discarded.'
+    const result = await dialog.showMessageBox(this.window, {
+      type: 'question',
+      message: `Close “${tab.label || tab.state.title}”?`,
+      detail: `${detail}${tab.state.hasDraft ? ' The unsent message will also be discarded.' : ''}`,
+      buttons: ['Close tab', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    return result.response === 0
   }
   private async confirmDraft(tab: TerminalTab) {
     if (!this.window) return false
@@ -496,16 +515,6 @@ export class WorkspaceWindow {
     tab.state = { ...tab.state, hasDraft: false, connection: 'connecting', activity: null }
     tab.view.webContents.reload()
     this.render()
-  }
-  private needsWindowConfirmation() {
-    return (
-      this.hasTabs &&
-      (this.layout.ids.length > 1 ||
-        this.ids.some(id => {
-          const tab = this.tab(id)
-          return tab?.state.hasDraft || (tab?.connection.kind === 'local' && tab.connection.terminal.running)
-        }))
-    )
   }
   private async confirmWindow() {
     if (!this.window) return true

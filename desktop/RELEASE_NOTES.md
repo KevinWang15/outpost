@@ -1,18 +1,17 @@
-# Outpost Desktop 0.5.0 preview
+# Outpost Desktop 0.5.1 preview
 
-Local shells and terminal search, alongside your persistent remote sessions.
+Terminal search placement, a shortcut guide, and confirmation before closing tabs.
 
 ## What's new
 
-- **Local terminal tabs:** click **+**, or press **⌘T** on macOS / **Ctrl+Shift+T** on Windows, to open a shell on your computer. Local terminals work offline, without an Outpost server.
-- **Shell profiles:** macOS uses your login shell. Windows offers installed PowerShell profiles, Command Prompt, and WSL's default distribution. Right-click **+** or use **File → New terminal with profile** to choose a shell; Settings remembers your default.
-- **One terminal workspace:** local and remote tabs share splits, drag-to-window, resizing, clipboard support, image paste, and notifications. The Outpost logo opens your servers and sessions.
-- **Find in terminal:** **⌘F** / **Ctrl+F** opens a search box at the top-left. Search highlights matches in the loaded screen and scrollback, with a count and case toggle. **Enter** / **Shift+Enter** navigate; **Esc** closes. Search also appears in the Edit menu and terminal context menu, and works in the web terminal.
-- **Stable viewport:** search floats over the terminal without changing its dimensions, and reconnects preserve focus in local controls.
+- **Search at the top-right:** **⌘F** / **Ctrl+F** opens terminal search at the top-right, leaving room for the floating toolbar button. The search box still floats over the terminal without resizing it, in web, remote desktop, and local shell tabs.
+- **Shortcut guide on the home page:** click the Outpost logo or choose **Help → Outpost guide and shortcuts**. The guide documents **⌘T / ⌘W** on macOS and **Ctrl+Shift+T / Ctrl+Shift+W** on Windows for creating a local terminal tab and closing the current tab.
+- **Confirm before closing:** closing a tab always asks for confirmation, with **Cancel** selected by default. The prompt explains whether a local shell will end or a remote session will keep running, and includes any unsent message. Closing a window or quitting also asks when terminal tabs remain.
+- **Simpler home page:** removed its Back/Esc control. Click a terminal tab to return; Escape still dismisses transient panels and cancels tab dragging.
 
 Up to 32 tabs across 16 windows can stay open. Closing a local terminal ends its shell; local shells and history do not survive quitting the app. Closing or upgrading the app leaves remote sessions running; reconnect through your Outpost server after reopening.
 
-**Self-hosted users:** update the server and Desktop together. This release uses desktop bridge version 5; older app/server combinations show an update message. The Linux terminal executable is unchanged and remote sessions do not need to be restarted.
+**Self-hosted users:** install Desktop 0.5.1 for the shortcut guide, close confirmations, and local search placement. Update your server and reload remote terminals for the new search placement there. Desktop bridge version 5 and the Linux terminal executable are unchanged from 0.5.0; remote sessions do not need to be restarted.
 
 ## Install
 

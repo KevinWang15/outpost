@@ -1568,7 +1568,7 @@ kbd {
   position: absolute;
   z-index: 2;
   top: 8px;
-  left: 8px;
+  right: 8px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1615,6 +1615,11 @@ kbd {
       opacity: 0.4;
     }
   }
+}
+.terminal-show-toolbar + .terminal-body .terminal-search {
+  // Leave the floating toolbar button reachable, including its mobile touch target.
+  right: 64px;
+  max-width: calc(100% - 72px);
 }
 .terminal-search-count {
   flex-shrink: 0;
@@ -2099,8 +2104,7 @@ kbd {
     left: 4px;
   }
   .terminal-search {
-    // Keep the floating toolbar button reachable and the input useful on narrow panes.
-    width: calc(100% - 72px);
+    // Keep the input useful on narrow panes.
     display: grid;
     grid-template-columns: minmax(0, 1fr) repeat(3, var(--search-control-size));
     > svg {

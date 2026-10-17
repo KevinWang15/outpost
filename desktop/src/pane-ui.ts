@@ -1,4 +1,4 @@
-import { paneLayout, type DividerGeometry, type PaneBounds } from './layout'
+import { paneLayout, splitGap, type DividerGeometry, type PaneBounds } from './layout'
 import { reconcileElements } from './keyed-elements'
 import { createTabStatus, updateTabStatus } from './tab-status'
 import type { WorkspaceBridge, WorkspaceSnapshot } from './workspace-api'
@@ -122,6 +122,9 @@ export function paneControls(stage: HTMLElement, api: WorkspaceBridge, run: (wor
         const node = document.createElement('div')
         node.className = 'pane-header'
         node.dataset.pane = String(pane.id)
+        // Paint through half the resize gap on either side, keeping controls
+        // aligned with their terminal. The divider stays above this decoration.
+        node.style.paddingInline = `${splitGap / 2}px`
         const select = button('Drag to move pane', '', () => run(api.activatePane(pane.id)), 'pane-select')
         const label = document.createElement('span')
         label.className = 'pane-label'
@@ -141,7 +144,8 @@ export function paneControls(stage: HTMLElement, api: WorkspaceBridge, run: (wor
         return node
       },
       (node, { pane, geometry }) => {
-        place(node, geometry.header!)
+        const header = geometry.header!
+        place(node, { ...header, x: header.x - splitGap / 2, width: header.width + splitGap })
         node.classList.toggle('active', pane.id === state.activePaneId)
         node.classList.toggle(
           'dragging',

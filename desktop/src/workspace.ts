@@ -1,14 +1,18 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, type Point } from 'electron'
-import type { DesktopLaunch } from '../../shared/desktop'
+import { desktopSessionId, type DesktopLaunch } from '../../shared/desktopAuth'
 import { Preferences } from './preferences'
-import { TrustedServers } from './store'
 import { TerminalPanes, type TerminalPane } from './terminals'
 import { RecentSessions } from './recent-sessions'
+import { SessionFinder } from './session-finder'
+import { ServerAccounts } from './server-accounts'
 import { WorkspaceDrag } from './workspace-drag'
 import { transferPanes } from './pane-transfer'
-import type { WorkspaceItem, PanePlacement, SplitDirection } from './workspace-model'
+import type { WorkspaceItem, PanePlacement, SessionTarget } from './workspace-model'
 import { WorkspaceWindow } from './workspace-window'
 import { shellProfiles } from './shell-profiles'
+
+type OpenDestination =
+  { kind: 'activate'; window?: WorkspaceWindow } | { kind: 'place'; window: WorkspaceWindow; placement: PanePlacement }
 
 /** App-wide pane identity and window ownership; transfers preserve terminal views. */
 export class DesktopWorkspace {
@@ -18,16 +22,22 @@ export class DesktopWorkspace {
   private recent: number[] = []
   private terminals: TerminalPanes
   private drag: WorkspaceDrag
-  private confirmingQuit = false
-  quitting = false
+  private finder: SessionFinder
+  private lifecycle: 'running' | 'confirming' | 'closing' | 'closed' = 'running'
+  get stopping() {
+    return this.lifecycle === 'closing' || this.lifecycle === 'closed'
+  }
+  get quitting() {
+    return this.lifecycle === 'closed'
+  }
 
   constructor(
     private directory: string,
-    private trusted: TrustedServers,
     private preferences: Preferences,
     private recentSessions: RecentSessions,
-    private trust: (origin: string) => Promise<boolean>,
+    private accounts: ServerAccounts,
   ) {
+    this.finder = new SessionFinder(directory)
     this.terminals = new TerminalPanes(directory, {
       window: id => this.owners.get(id)?.browserWindow ?? null,
       focused: id => this.owners.get(id)?.focused(id) ?? false,
@@ -62,7 +72,7 @@ export class DesktopWorkspace {
       changed: id => this.owners.get(id)?.render(),
       state: id => ({ ...preferences.value, focused: this.owners.get(id)?.focused(id) ?? false }),
       remember: async entry => {
-        if (!this.trusted.has(entry.server)) return
+        if (!this.accounts.hasAccount(entry.server, entry.accountId)) return
         await this.recentSessions.remember(entry)
         this.render()
       },
@@ -84,6 +94,7 @@ export class DesktopWorkspace {
         ),
     })
     ipcMain.handle('workspace:action', (event, name: unknown, ...values: unknown[]) => {
+      if (this.stopping) return
       const window = [...this.windows.values()].find(item => item.browserWindow?.webContents === event.sender)
       if (!window) throw new Error('This action is only available in an Outpost window.')
       return window.invoke(event, name, values)
@@ -99,23 +110,38 @@ export class DesktopWorkspace {
     )
   }
   resume() {
+    if (this.stopping) return
     this.terminals.resume()
+    void this.accounts.refresh()
+  }
+  accountsChanged() {
+    this.render()
+  }
+  edit(action: 'copy' | 'paste' | 'select-all') {
+    if (this.finder.edit(action)) return
+    const owner = this.forAction()
+    if (action === 'select-all') owner?.command(action)
+    else owner?.edit(action)
   }
   forAction() {
+    if (this.stopping) return null
     // Menu/OS actions finish any provisional drag before resolving ownership.
     this.drag.cancel()
     return this.current
   }
   show() {
+    if (this.stopping) return
     const window = this.forAction() ?? this.create()
     if (!window.hasTabs) this.newLocal(undefined, window)
     else window.show()
   }
   present() {
+    if (this.stopping) return
     const window = this.forAction() ?? this.create()
     window.show()
   }
   newWindow() {
+    if (this.stopping) return
     this.drag.cancel()
     let window: WorkspaceWindow | undefined
     try {
@@ -129,8 +155,8 @@ export class DesktopWorkspace {
 
   private create() {
     if (this.windows.size >= 16) throw new Error('Close a window before opening another (16 windows maximum).')
-    const workspace = new WorkspaceWindow(this.directory, this.trusted, this.preferences, this.trust, this.terminals, {
-      quitting: () => this.quitting,
+    const workspace = new WorkspaceWindow(this.directory, this.preferences, this.terminals, {
+      quitting: () => this.stopping,
       focused: window => {
         const id = window.browserWindow!.id
         this.recent = [id, ...this.recent.filter(value => value !== id)]
@@ -145,9 +171,25 @@ export class DesktopWorkspace {
       },
       changed: () => this.render(),
       shells: () => this.shells,
-      newLocal: (source, profile, split) => this.newLocal(profile, source, split),
-      recentSessions: () => this.recentSessions.list(),
+      newLocal: (source, profile, placement) => this.newLocal(profile, source, placement),
+      recentSessions: () =>
+        this.recentSessions.list().filter(item => {
+          const entry = this.recentSessions.get(item.id)!
+          return this.accounts.hasAccount(entry.server, entry.accountId)
+        }),
       openRecent: (source, id) => this.openRecent(source, id),
+      findSession: (source, target, anchor) => this.findSession(source, target, anchor),
+      serverAccounts: () => this.accounts.snapshot(),
+      loginServer: origin => this.accounts.login(origin),
+      cancelServerLogin: origin => this.accounts.cancel(origin),
+      logoutServer: async origin => {
+        if (!(await this.accounts.logout(origin))) return
+        for (const entry of this.recentSessions.list())
+          if (entry.server === origin) this.terminals.forgetRecent(entry.id)
+        await this.recentSessions.retain(entry => entry.server !== origin)
+        this.render()
+      },
+      refreshServers: () => this.accounts.refresh(),
       removeRecent: async id => {
         this.terminals.forgetRecent(id)
         await this.recentSessions.remove(id)
@@ -158,7 +200,6 @@ export class DesktopWorkspace {
         await this.recentSessions.clear()
         this.render()
       },
-      forgetRecents: () => this.recentSessions.retainServers(origin => this.trusted.has(origin)),
       destinations: source =>
         [...this.windows]
           .filter(([, window]) => window !== source)
@@ -178,7 +219,7 @@ export class DesktopWorkspace {
       },
       dragStart: (source, item) => {
         const ids = source.selection(item)
-        if (this.quitting || !ids.length || !source.browserWindow?.isFocused()) return
+        if (this.stopping || !ids.length || !source.browserWindow?.isFocused()) return
         const pane = this.terminals.panes.get(ids[0])!
         this.drag.start(source, item, pane.state.title)
       },
@@ -193,46 +234,96 @@ export class DesktopWorkspace {
   }
 
   open(launch: DesktopLaunch) {
+    if (this.stopping) return
     this.drag.cancel()
     return this.activateOpened(this.terminals.open(launch))
   }
 
-  private openRecent(source: WorkspaceWindow, id: string) {
-    const entry = this.recentSessions.get(id)
-    if (!entry || !this.trusted.has(entry.server)) throw new Error('This recent session is no longer available.')
+  private async openRecent(source: WorkspaceWindow, id: string) {
+    const entry = this.recentEntry(id)
     this.drag.cancel()
-    return this.activateOpened(this.terminals.openRecent(entry), source)
+    const launch = await this.accounts.launch(entry)
+    if (this.stopping || !source.browserWindow || source.browserWindow.isDestroyed()) return
+    return this.activateOpened(this.terminals.open(launch), { kind: 'activate', window: source })
+  }
+
+  private recentEntry(id: string) {
+    const entry = this.recentSessions.get(id)
+    if (!entry || !this.accounts.hasAccount(entry.server, entry.accountId))
+      throw new Error('This recent session is no longer available.')
+    return entry
+  }
+
+  private async findSession(source: WorkspaceWindow, target: SessionTarget, anchor: Point) {
+    this.drag.cancel()
+    const window = source.browserWindow
+    if (!window || window.isDestroyed()) return
+    const anchorPane = target.kind === 'split' ? this.terminals.panes.get(target.paneId) : undefined
+    const excluded = anchorPane?.connection.kind === 'remote' ? desktopSessionId(anchorPane.connection.reference) : null
+    try {
+      const selected = await this.finder.pick(
+        window,
+        target.kind === 'split' ? 'Split with Outpost terminal' : 'Open Outpost terminal',
+        anchor,
+        (signal, publish) =>
+          this.accounts.sessions(signal, ({ sessions, errors }) =>
+            publish({
+              sessions: sessions.filter(session => desktopSessionId(session) !== excluded),
+              errors,
+            }),
+          ),
+      )
+      if (selected === null || this.stopping || window.isDestroyed()) return
+      const launch = await this.accounts.launch(selected)
+      if (this.stopping || window.isDestroyed() || this.windows.get(window.id) !== source) return
+      this.drag.cancel()
+      if (target.kind === 'split' && source.groupForPane(target.paneId) !== target.tabId)
+        throw new Error('The pane chosen for this split has moved or closed. Open the finder again from its tab.')
+      const placement: PanePlacement =
+        target.kind === 'split' ? { kind: 'pane', pane: target.paneId, edge: 'right' } : { kind: 'tab', before: null }
+      await this.activateOpened(this.terminals.open(launch), { kind: 'place', window: source, placement })
+    } finally {
+      source.restoreFocus()
+    }
   }
 
   private async activateOpened(
     { pane, created }: { pane: TerminalPane; created: boolean },
-    destination?: WorkspaceWindow,
+    destination: OpenDestination = { kind: 'activate' },
   ) {
     let owner = this.owners.get(pane.id)
     if (created) {
-      owner = this.attachNewPane(pane, destination)
+      owner = this.attachNewPane(
+        pane,
+        destination.window,
+        destination.kind === 'place' ? destination.placement : undefined,
+      )
     }
-    owner?.activatePane(pane.id)
+    if (!owner) throw new Error('This terminal is no longer available.')
+    if (!created && destination.kind === 'place')
+      this.move(owner, { kind: 'pane', id: pane.id }, destination.window, destination.placement)
+    else owner.activatePane(pane.id)
     if (!created && pane.state.connection === 'connected') await this.terminals.remember(pane)
   }
 
-  newLocal(profileId?: string, destination?: WorkspaceWindow, split?: SplitDirection) {
+  newLocal(profileId?: string, destination?: WorkspaceWindow, placement?: PanePlacement) {
+    if (this.stopping) return
     this.drag.cancel()
     const profile =
       this.shells.find(item => item.id === (profileId ?? this.preferences.localShell)) ??
       (profileId === undefined ? this.shells[0] : undefined)
     if (!profile) throw new Error('Choose an available local shell.')
     const pane = this.terminals.openLocal(profile)
-    const owner = this.attachNewPane(pane, destination, split)
+    const owner = this.attachNewPane(pane, destination, placement)
     owner.activatePane(pane.id)
   }
 
-  private attachNewPane(pane: TerminalPane, destination?: WorkspaceWindow, split?: SplitDirection) {
+  private attachNewPane(pane: TerminalPane, destination?: WorkspaceWindow, placement?: PanePlacement) {
     let owner = destination ?? this.current
     try {
       owner ??= this.create()
       this.owners.set(pane.id, owner)
-      owner.addPane(pane, split)
+      owner.addPane(pane, placement)
       return owner
     } catch (error) {
       this.terminals.dispose(pane.id)
@@ -242,6 +333,8 @@ export class DesktopWorkspace {
   }
 
   dispose() {
+    this.finder.cancel()
+    this.accounts.dispose()
     for (const id of [...this.terminals.panes.keys()]) this.terminals.dispose(id)
   }
 
@@ -268,7 +361,7 @@ export class DesktopWorkspace {
     point?: Point,
   ) {
     const ids = source.selection(item)
-    if (!ids.length || !source.browserWindow || this.quitting) return
+    if (!ids.length || !source.browserWindow || this.stopping) return
     // Moving the entire contents of a lone window preserves its native identity.
     if (!destination && source.paneIds.length === ids.length && !source.browserWindow.isFullScreen()) {
       this.position(source.browserWindow, source.browserWindow, point)
@@ -292,8 +385,8 @@ export class DesktopWorkspace {
   }
 
   async quit() {
-    if (this.confirmingQuit) return
-    this.confirmingQuit = true
+    if (this.lifecycle !== 'running') return
+    this.lifecycle = 'confirming'
     this.drag.cancel()
     try {
       const panes = [...this.terminals.panes.values()]
@@ -311,16 +404,20 @@ export class DesktopWorkspace {
         if (result.response !== 0) return
       }
       await this.recentSessions.flush()
+      await this.accounts.flush()
       // A new launch while confirmation or persistence was pending is not part
       // of the approved shutdown. Leave it open and let the user request quit again.
       if ([...this.terminals.panes.values()].some(pane => !panes.includes(pane))) return
+      // Closing is irreversible: reject new work while saving committed logins
+      // and draining PTY cleanup. Only then allow Electron's final quit event.
+      this.lifecycle = 'closing'
       this.dispose()
+      await this.accounts.flush()
       await this.terminals.flushCleanup()
-      if (this.terminals.panes.size) return
-      this.quitting = true
+      this.lifecycle = 'closed'
       app.quit()
     } finally {
-      this.confirmingQuit = false
+      if (this.lifecycle === 'confirming') this.lifecycle = 'running'
     }
   }
 }

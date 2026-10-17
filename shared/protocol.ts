@@ -1,9 +1,7 @@
 // Terminal protocol between clients (web terminal and desktop app) and the
 // broker. Binary WebSocket frames carry raw terminal bytes; text frames carry
 // these JSON messages. See docs/ARCHITECTURE.md → "Terminal protocol".
-import type { Static } from 'typebox'
 import type { SessionActivity } from './activity'
-import type { connectInput } from './schemas'
 import type { Checkpoint } from './terminalState'
 
 // Clients send ?protocol=<version>. The server accepts only its own version and
@@ -53,13 +51,8 @@ export type ServerMessage =
   | { type: 'signal'; signal: SignalMessage }
   | { type: 'closed'; reason: CloseReason; message: string }
 
-export type ConnectRequest = Static<typeof connectInput>
-export interface ConnectResponse {
+export interface TerminalTicket {
   id: string
   token: string
   expiresAt: string
-  url: string | null
-}
-export interface ConnectionStatus {
-  status: 'pending' | 'connected'
 }

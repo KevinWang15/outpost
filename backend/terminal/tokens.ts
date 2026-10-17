@@ -20,13 +20,11 @@ const launchLifetime = 5 * 60_000
 const resumeLifetime = 30 * 24 * 60 * 60_000
 const text = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 128
 
-/** Launch tokens start one connection (short-lived, single use, safe to put in
- * an outpost:// URL). Resume tokens are returned over the WebSocket and used
+/** Launch tokens start one connection (short-lived and single use). Resume tokens are returned over the WebSocket and used
  * for reconnection and image uploads, never in launcher links. Both are bound to
  * one owner, target and session. */
 export class ConnectTokens {
   private used = new Map<string, number>()
-  private connected = new Map<string, { userId: string; until: number }>()
   constructor(private secret: string) {}
   private sign(data: string) {
     return createHmac('sha256', this.secret).update(`outpost-terminal:${data}`).digest('base64url')
@@ -38,14 +36,6 @@ export class ConnectTokens {
   private prune() {
     const now = Date.now()
     for (const [id, until] of this.used) if (until <= now) this.used.delete(id)
-    for (const [id, entry] of this.connected) if (entry.until <= now) this.connected.delete(id)
-  }
-  /** Opaque routing identity, scoped to this login. It is never authorization. */
-  desktopSessionKey(grant: Grant) {
-    return createHmac('sha256', this.secret)
-      .update('outpost-desktop-session:')
-      .update(JSON.stringify([grant.owner.userId, grant.owner.loginId, grant.targetId, grant.sessionId]))
-      .digest('base64url')
   }
   issue(grant: Grant) {
     const id = randomUUID(),
@@ -135,13 +125,5 @@ export class ConnectTokens {
       this.used.set(id, expires)
     }
     return { id, kind, grant }
-  }
-  markConnected(id: string, owner: Owner) {
-    this.connected.set(id, { userId: owner.userId, until: Date.now() + launchLifetime })
-  }
-  /** Whether the client for a launch token has attached, for "Connected in Outpost Desktop". */
-  status(owner: Owner, id: string): 'pending' | 'connected' {
-    this.prune()
-    return this.connected.get(id)?.userId === owner.userId ? 'connected' : 'pending'
   }
 }

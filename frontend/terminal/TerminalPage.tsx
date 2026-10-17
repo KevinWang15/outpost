@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
-import type { ConnectResponse } from '../../shared/protocol'
+import type { TerminalTicket } from '../../shared/protocol'
 import { api } from '../api'
 import { standaloneBrowser } from '../browser'
 import TerminalView from './TerminalView'
@@ -27,10 +27,10 @@ export default function TerminalPage() {
     const controller = new AbortController()
     // Wait until committed so StrictMode's discarded effect cannot issue a launch.
     const start = setTimeout(() => {
-      void api<ConnectResponse>(
+      void api<TerminalTicket>(
         `/targets/${encodeURIComponent(target)}/sessions/${encodeURIComponent(session)}/connect`,
         'POST',
-        { terminal: 'web' },
+        {},
         controller.signal,
       ).then(
         connection => {

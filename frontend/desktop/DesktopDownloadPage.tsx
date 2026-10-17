@@ -29,8 +29,8 @@ export default function DesktopDownloadPage() {
         first launch attempt. Windows may show a SmartScreen warning. Check the downloaded release before continuing.
       </p>
       <p>
-        The app uses your existing sign-in through a temporary connection ticket. Chrome, Python, and WSL are not
-        required on your computer.
+        Sign in through your browser and approve app access for 30 days. Connect several servers in the app and search
+        all their sessions. The app never handles your password.
       </p>
       <p>
         Enable Outpost in system notification settings to receive alerts. Use Help → Check for updates in the app to

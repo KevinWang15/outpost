@@ -3,12 +3,39 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test, expect, _electron as electron } from '@playwright/test'
+import { desktopEntryUrl } from '../../shared/desktopAuth'
 import type { DesktopBridge } from '../../shared/desktop'
 
 test('native wake and unlock reach all remote tabs without reloading pages or touching local shells', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-wake-'))
   const userData = join(directory, 'profile')
-  const server = createServer((_request, response) => {
+  let origin = ''
+  const credential = {
+    token: 'op_app_' + 'a'.repeat(43),
+    account: { id: 'fixture', name: 'Fixture', email: null },
+    expiresAt: Date.now() + 86_400_000,
+  }
+  const server = createServer((request, response) => {
+    if (request.url?.startsWith('/api/desktop/')) {
+      const key = request.url.includes('/sessions/a/') ? 'a' : 'b'
+      response.setHeader('Content-Type', 'application/json')
+      response.end(
+        JSON.stringify(
+          request.url.endsWith('/account')
+            ? credential
+            : {
+                server: origin,
+                accountId: 'fixture',
+                targetId: 'target',
+                sessionId: key,
+                loginId: 'desktop:' + '0'.repeat(36),
+                token: `${key}.signature`,
+                title: key,
+              },
+        ),
+      )
+      return
+    }
     response.setHeader('Content-Type', 'text/html')
     response.end(`<body><div id="events"></div><script>
       window.outpostDesktop.onCommand(command => {
@@ -18,22 +45,12 @@ test('native wake and unlock reach all remote tabs without reloading pages or to
     </script></body>`)
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   await mkdir(userData)
-  await writeFile(join(userData, 'servers.json'), JSON.stringify([origin]))
-  const launches = ['a', 'b'].map(
-    key =>
-      'outpost://connect/' +
-      Buffer.from(
-        JSON.stringify({
-          v: 2,
-          terminal: 'desktop',
-          server: origin,
-          sessionKey: key.repeat(43),
-          token: `${key}.signature`,
-          title: key,
-        }),
-      ).toString('base64url'),
+  await writeFile(join(userData, 'server-trust.json'), JSON.stringify([origin]))
+  await writeFile(join(userData, 'server-logins.json'), JSON.stringify([{ origin, ...credential }]))
+  const launches = ['a', 'b'].map(key =>
+    desktopEntryUrl({ server: origin, accountId: 'fixture', session: { targetId: 'target', sessionId: key } }),
   )
   const app = await electron.launch({
     executablePath: resolve('desktop/node_modules/electron/dist/electron'),

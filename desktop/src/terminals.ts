@@ -16,13 +16,15 @@ import {
   type IpcMainEvent,
   type WebContents,
 } from 'electron'
-import type { DesktopLaunch, TerminalHostState, TerminalPaneState } from '../../shared/desktop'
+import type { TerminalHostState, TerminalPaneState } from '../../shared/desktop'
+import { desktopSessionId, type DesktopLaunch, type DesktopSessionReference } from '../../shared/desktopAuth'
 import { parseSessionActivity } from '../../shared/activity'
 import { pagePaths } from '../../shared/pages'
 import { browserUrl } from '../../shared/signals'
 import { attachWorkspaceShortcuts, type PaneAction } from './workspace-shortcuts'
 import { PaneAppearance } from './pane-appearance'
-import { remoteSessionId, validResumeToken, type RecentSession } from './recent-sessions'
+import { validTerminalToken } from './launch'
+import type { RecentSession } from './recent-sessions'
 
 export interface TerminalPane {
   id: number
@@ -37,7 +39,8 @@ export interface TerminalPane {
     | {
         kind: 'remote'
         launchKey: string
-        sessionKey: string
+        reference: DesktopSessionReference
+        loginId: string
         token: string
         remember: boolean
         pendingLaunches: Set<string>
@@ -90,7 +93,7 @@ export class TerminalPanes {
     ipcMain.handle('terminal:save-resume', (event, token: unknown, title: unknown) => {
       const pane = this.sender(event)
       const connection = pane.connection
-      if (connection.kind !== 'remote' || !validResumeToken(token) || typeof title !== 'string' || title.length > 512)
+      if (connection.kind !== 'remote' || !validTerminalToken(token) || typeof title !== 'string' || title.length > 512)
         throw new Error('Invalid session reconnect credential.')
       connection.token = token
       return this.remember(pane, cleanTitle(title))
@@ -241,10 +244,8 @@ export class TerminalPanes {
     const connection = pane.connection
     if (connection.kind !== 'remote' || !connection.remember) return
     await this.host.remember({
-      id: remoteSessionId(pane.origin, connection.sessionKey),
-      server: pane.origin,
-      sessionKey: connection.sessionKey,
-      token: connection.token,
+      id: desktopSessionId(connection.reference),
+      ...connection.reference,
       title,
       lastConnectedAt: Date.now(),
     })
@@ -279,8 +280,7 @@ export class TerminalPanes {
     this.dismiss(pane)
     clearTimeout(pane.interfaceTimer)
     this.live.delete(id)
-    if (pane.connection.kind === 'remote')
-      this.sessionPanes.delete(remoteSessionId(pane.origin, pane.connection.sessionKey))
+    if (pane.connection.kind === 'remote') this.sessionPanes.delete(desktopSessionId(pane.connection.reference))
     else {
       const cleanup = pane.connection.terminal.dispose()
       this.cleanup.add(cleanup)
@@ -305,8 +305,8 @@ export class TerminalPanes {
   }
   open(launch: DesktopLaunch) {
     const launchKey = createHash('sha256').update(launch.token).digest('hex')
-    const sessionKey = remoteSessionId(launch.server, launch.sessionKey)
-    const existing = this.sessionPanes.get(sessionKey)
+    const identity = desktopSessionId(launch)
+    const existing = this.sessionPanes.get(identity)
     if (existing !== undefined) {
       const pane = this.live.get(existing)!
       const connection = pane.connection
@@ -318,7 +318,8 @@ export class TerminalPanes {
         connection.launchKey = launchKey
         // A healthy pane consumes this launch via activate; keep its reusable
         // resume credential for reloads instead of the single-use launch ticket.
-        if (pane.error) {
+        if (pane.error || connection.loginId !== launch.loginId) {
+          connection.loginId = launch.loginId
           // Recover a failed page in the same pane. A healthy renderer handles
           // launches through its existing socket and retains its composer draft.
           connection.pendingLaunches.clear()
@@ -336,39 +337,31 @@ export class TerminalPanes {
     return this.createRemote(launch, launchKey)
   }
 
-  openRecent(entry: RecentSession) {
-    const existing = this.sessionPanes.get(entry.id)
-    // A saved resume credential must never enter the fresh-launch activation path.
-    if (existing !== undefined) {
-      const pane = this.live.get(existing)!
-      if (pane.connection.kind === 'remote') pane.connection.remember = true
-      return { pane, created: false }
-    }
-    return this.createRemote(entry, '')
-  }
-
-  private createRemote(entry: Pick<DesktopLaunch, 'server' | 'sessionKey' | 'token' | 'title'>, launchKey: string) {
-    const sessionKey = remoteSessionId(entry.server, entry.sessionKey)
+  private createRemote(entry: DesktopLaunch, launchKey: string) {
+    const identity = desktopSessionId(entry)
     const pane = this.create(entry.server, entry.title, {
       kind: 'remote',
       launchKey,
-      sessionKey: entry.sessionKey,
+      loginId: entry.loginId,
+      reference: {
+        server: entry.server,
+        accountId: entry.accountId,
+        targetId: entry.targetId,
+        sessionId: entry.sessionId,
+      },
       token: entry.token,
       remember: true,
       pendingLaunches: new Set(),
       url: `${entry.server}${pagePaths.desktopTerminal}`,
     })
-    this.sessionPanes.set(sessionKey, pane.id)
+    this.sessionPanes.set(identity, pane.id)
     return { pane, created: true }
   }
 
   forgetRecent(id?: string) {
     for (const pane of this.live.values()) {
       const connection = pane.connection
-      if (
-        connection.kind === 'remote' &&
-        (id === undefined || remoteSessionId(pane.origin, connection.sessionKey) === id)
-      )
+      if (connection.kind === 'remote' && (id === undefined || desktopSessionId(connection.reference) === id))
         connection.remember = false
     }
   }

@@ -281,6 +281,22 @@ beside the focused pane using your default shell profile. The split toolbar butt
 splits side by side; right-click it for top and bottom. To split with an existing
 remote session, drag its tab to a terminal edge, or use **◫** in the session switcher.
 
+Sign in to one or more servers from the **Outpost logo → Logged-in Outpost
+servers** page. Enter a server URL, approve first-use trust, and finish sign-in
+and app approval in your system browser. The app never receives your password
+or browser cookies. An existing browser login provides SSO. App logins last
+30 days; expired logins show **Connect** so you can sign in again.
+
+Right-click a tab and choose **Split with Outpost terminal…**, or right-click
+**+** and choose **Outpost terminal…** for a new tab. The shared finder loads
+all sessions on your logged-in servers, including sessions you have never
+opened in the app. Type to filter by session, target, tool, directory or server;
+use **↑ / ↓** and **Enter**, or click a result; **Esc** cancels. Servers and
+unreachable targets report errors independently, so available results remain
+usable. An already-open session moves its existing pane into the chosen split
+or tab, preserving its connection and draft. A split uses the selected pane of
+the tab whose menu you opened.
+
 Drag a pane's header to reorganize it:
 
 - Drop on the left, right, top or bottom of another terminal to split there. A
@@ -361,21 +377,33 @@ for manual installation; remote sessions survive closing or upgrading the app.
 | Reset terminal text size | ⌘0 | Ctrl+0 |
 | Close window | ⌘Shift+W | Alt+F4 |
 
-The app remembers trusted servers and opens their workspaces in your browser.
+Server badges distinguish **Connected**, **Offline**, and **Sign-in expired**.
+Pending browser sign-ins show temporary progress beneath the URL field. Click an offline badge to retry, **Cancel sign-in** to
+stop waiting, or **Sign out** to revoke that app login. Sign-out requires the
+server to be reachable. It does not end the coding processes on your targets.
+Trust is remembered independently of login and is not cleared by sign-out.
 The **Outpost logo → Recent sessions** list keeps your 10 most recent remote
 sessions across app restarts. Click an entry, or choose with ↑/↓ and press Enter,
 to reconnect. If it is already open, its existing tab and window are activated.
 Local shells are not included. **Remove** and **Clear recent sessions** forget
 saved connections without closing tabs or ending remote sessions.
-Removing a server asks for confirmation before closing its tabs across all windows.
-It also removes that server's recent sessions and saved reconnect credentials.
+Signing out also removes that server's recent-session shortcuts. Existing
+terminals authorized by that app login disconnect; their remote processes keep running.
 Closing a tab includes any unsent message in its confirmation; hiding the message box preserves its draft.
-Reconnect credentials are stored as plain JSON in `recent-sessions.json` in the
-app's user-data directory. Account passwords, browser login cookies, and
-single-use launch tickets are not saved. Reconnect credentials last 30 days and
-are renewed on reconnect; hosted login expiry and logout still apply. An expired
-entry shows **Connection expired** when opened. Use **Connect → Outpost Desktop**
-in your server to obtain a fresh connection.
+Recent-session references are stored in `recent-sessions.json` in the app's
+user-data directory, without credentials. Reopening a recent session requests
+fresh access using its server login. If that login expires, sign in again.
+App credentials are stored as plain JSON in `server-logins.json` and expire
+30 days after approval. Browser sign-out does not sign the app out;
+changing/resetting the account password invalidates app access. Account
+passwords, browser cookies and terminal reconnect credentials are never saved
+by the app. There is no silent renewal.
+
+You can start from the app's URL field or the website's **Connect Outpost app**
+button. **Connect → Outpost Desktop** also signs in if needed, then opens the
+selected session. Approval happens in your browser. First use asks whether to
+trust that server; accepting is remembered, declining cancels only this attempt.
+There is no trusted-server list or management screen.
 Use HTTPS, or HTTP on localhost for a local Outpost server / SSH port forward.
 The app needs a network connection and an open terminal tab for bells.
 

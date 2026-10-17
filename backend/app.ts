@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import staticFiles from '@fastify/static'
 import cookies from '@fastify/cookie'
 import websocket from '@fastify/websocket'
-import type { Deployment } from './deployment'
+import type { Deployment, Owner } from './deployment'
 import { Installations } from './installations'
 import { SessionClient, type SessionService } from './sessions'
 import { SoftwareClient, type SoftwareService } from './software'
@@ -16,6 +16,8 @@ import { terminalRoutes } from './routes/terminal'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
 import { pageHtml } from '../shared/pageHtml'
+import { DesktopAccess } from './desktop-access'
+import { desktopRoutes } from './routes/desktop'
 
 export interface AppOptions {
   deployment: Deployment
@@ -47,13 +49,16 @@ export async function createApp(options: AppOptions) {
   const software = options.software ?? new SoftwareClient(options.env)
   const resolve = targetResolver(deployment, options.multiplex ?? true)
   const tokens = new ConnectTokens(deployment.secret)
-  const broker = new TerminalBroker({ tokens, deployment, sessions, resolve, env: options.env })
+  const desktop = await DesktopAccess.open(deployment)
+  const active = (owner: Owner) => desktop.active(owner)
+  const broker = new TerminalBroker({ tokens, active, sessions, resolve, env: options.env })
   const services: Services = {
     deployment,
     sessions,
     software,
     tokens,
     broker,
+    active,
     resolve,
     installations: new Installations(software),
     context: (request, targetId) => resolve(deployment.owner(request), targetId),
@@ -62,7 +67,10 @@ export async function createApp(options: AppOptions) {
     broker.close()
     await services.installations.close()
   })
-  app.addHook('onClose', async () => deployment.close())
+  app.addHook('onClose', async () => {
+    desktop.close()
+    deployment.close()
+  })
 
   app.addHook('onRequest', async (request, reply) => {
     const rejection = deployment.admits(request)
@@ -96,6 +104,7 @@ export async function createApp(options: AppOptions) {
 
   app.get('/health', async () => ({ status: 'ok' }))
   deployment.register(app)
+  desktopRoutes(app, services, desktop)
   workspaceRoutes(app, services)
   sessionRoutes(app, services)
   terminalRoutes(app, services)

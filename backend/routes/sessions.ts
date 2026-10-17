@@ -1,14 +1,11 @@
 import type { FastifyInstance } from 'fastify'
-import { desktopOrigin, type DesktopLaunch } from '../../shared/desktop'
 import type { ConversationSearch, SessionForkInput, SessionInput } from '../../shared/model'
-import type { ConnectRequest, ConnectResponse, ConnectionStatus } from '../../shared/protocol'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
 import { launchOptions } from '../sessions'
 import {
   acknowledgeInput,
-  connectInput,
   conversationSearch,
   directoryQuery,
   sessionInput,
@@ -17,7 +14,7 @@ import {
 
 type Params = { targetId: string; sessionId: string }
 export function sessionRoutes(app: FastifyInstance, services: Services) {
-  const { sessions, broker, tokens, deployment } = services
+  const { sessions, broker, tokens } = services
   const base = '/api/targets/:targetId/sessions'
   app.get<{ Params: Params }>(base, async (request, reply) =>
     withRequestSignal(reply, async signal =>
@@ -71,51 +68,18 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
         request.body.completionId,
       ),
   )
-  app.post<{ Params: Params; Body: ConnectRequest }>(
+  app.post<{ Params: Params }>(
     `${base}/:sessionId/connect`,
     {
-      schema: { body: connectInput },
+      schema: { body: { type: 'object', additionalProperties: false } },
     },
     async (request, reply) =>
       withRequestSignal(reply, async signal => {
         const context = await services.context(request, request.params.targetId)
         const session = await sessions.get(context, request.params.sessionId, signal)
-        const { terminal } = request.body
-        let origin: string | undefined
-        if (terminal === 'desktop') {
-          try {
-            origin = desktopOrigin(deployment.origin(request))
-          } catch {
-            throw new AppError('Outpost Desktop requires HTTPS, or HTTP on localhost.')
-          }
-        }
-        const grant = {
-          owner: context.owner,
-          targetId: context.target.id,
-          sessionId: session.id,
-        }
-        const issued = tokens.issue(grant)
-        const link: DesktopLaunch | null =
-          terminal === 'desktop'
-            ? {
-                v: 2,
-                server: origin!,
-                sessionKey: tokens.desktopSessionKey(grant),
-                token: issued.token,
-                terminal: 'desktop',
-                title: `${session.name} · ${context.target.name}`,
-              }
-            : null
-        return {
-          ...issued,
-          url: !link ? null : `outpost://connect/${Buffer.from(JSON.stringify(link)).toString('base64url')}`,
-        } satisfies ConnectResponse
+        if (!services.active(context.owner)) throw new AppError('Sign in again to connect.', 401)
+        return tokens.issue({ owner: context.owner, targetId: context.target.id, sessionId: session.id })
       }),
-  )
-  app.get<{ Params: { id: string } }>(
-    '/api/connections/:id',
-    async request =>
-      ({ status: tokens.status(deployment.owner(request), request.params.id) }) satisfies ConnectionStatus,
   )
   app.post<{ Params: Params; Body: ConversationSearch }>(
     '/api/targets/:targetId/conversations/search',

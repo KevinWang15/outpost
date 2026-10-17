@@ -1,0 +1,133 @@
+:root {
+  font:
+    13px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: #dbe5f4;
+  background: #101a2b;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  overflow: hidden;
+}
+main {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  border: 1px solid #344258;
+  border-radius: 8px;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+button {
+  background: transparent;
+  border: 1px solid #344258;
+  border-radius: 4px;
+  color: #93a4bd;
+  cursor: pointer;
+}
+button:hover {
+  background: #22324b;
+  color: #fff;
+}
+input {
+  flex-shrink: 0;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #405575;
+  border-radius: 6px;
+  background: #0b1220;
+  padding: 9px 11px;
+}
+:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+input::placeholder {
+  color: #93a4bd;
+}
+ul {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  padding: 2px;
+  margin: 10px -2px;
+}
+li {
+  cursor: pointer;
+  padding: 8px 10px;
+  margin-bottom: 3px;
+  border-radius: 5px;
+}
+li[aria-selected='true'] {
+  background: #223b5d;
+  outline: 1px solid #568bca;
+}
+li:hover {
+  background: #263a55;
+}
+li strong,
+li span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+li strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+li span,
+footer,
+#empty {
+  color: #93a4bd;
+  font-size: 12px;
+}
+#loading {
+  margin: 8px 0 0;
+  color: #93a4bd;
+  font-size: 12px;
+}
+#errors {
+  flex-shrink: 0;
+  max-height: 64px;
+  overflow-y: auto;
+  white-space: pre-line;
+  margin: 0 0 8px;
+  color: #fbbf24;
+  font-size: 12px;
+}
+#empty {
+  flex: 1;
+  margin: 16px 0;
+}
+footer {
+  flex-shrink: 0;
+  padding-top: 8px;
+  border-top: 1px solid #28364d;
+}
+[hidden] {
+  display: none !important;
+}

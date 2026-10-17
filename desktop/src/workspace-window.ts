@@ -1,18 +1,18 @@
-import { app, BrowserWindow, dialog, Menu, shell, type IpcMainInvokeEvent, type Point } from 'electron'
+import { app, BrowserWindow, dialog, Menu, screen, type IpcMainInvokeEvent, type Point } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { desktopOrigin, type TerminalCommand, type TerminalPreferences } from '../../shared/desktop'
+import type { TerminalCommand, TerminalPreferences } from '../../shared/desktop'
 import { paneLayout, paneIds, tabBarHeight, WindowLayout } from './layout'
 import { WorkspaceClose } from './workspace-close'
 import { summarizeTabs } from './workspace-summary'
 import { defaultPreferences, Preferences, validPreferences } from './preferences'
-import { TrustedServers } from './store'
 import { TerminalPanes, type TerminalPane } from './terminals'
 import { attachWorkspaceShortcuts, type PaneAction } from './workspace-shortcuts'
 import { checkUpdates } from './updates'
 import { keepsWorkspaceDrag, workspaceCommand } from './workspace-commands'
 import type { ShellProfile } from './shell-profiles'
 import type { RecentSessionSummary } from './recent-sessions'
+import type { ServerAccountsSnapshot } from './server-accounts-api'
 import type { WorkspaceSnapshot, TabGeometry, WorkspaceDragState, PaneSummary } from './workspace-api'
 import type {
   CloseScope,
@@ -22,16 +22,22 @@ import type {
   WorkspacePanel,
   WorkspaceItem,
   PanePlacement,
+  SessionTarget,
 } from './workspace-model'
 
 export interface WorkspaceHost {
   shells(): ShellProfile[]
-  newLocal(source: WorkspaceWindow, profile?: string, split?: SplitDirection): void
+  newLocal(source: WorkspaceWindow, profile?: string, placement?: PanePlacement): void
   recentSessions(): RecentSessionSummary[]
   openRecent(source: WorkspaceWindow, id: string): Promise<void>
+  findSession(source: WorkspaceWindow, target: SessionTarget, anchor: Point): Promise<void>
+  serverAccounts(): ServerAccountsSnapshot
+  loginServer(origin: string): Promise<void>
+  cancelServerLogin(origin: string): void
+  logoutServer(origin: string): Promise<void>
+  refreshServers(): Promise<void>
   removeRecent(id: string): Promise<void>
   clearRecent(): Promise<void>
-  forgetRecents(): Promise<void>
   quitting(): boolean
   focused(window: WorkspaceWindow): void
   closed(window: WorkspaceWindow): void
@@ -54,9 +60,7 @@ export class WorkspaceWindow {
   private presenting = false
   constructor(
     private directory: string,
-    private trusted: TrustedServers,
     private preferences: Preferences,
-    private trust: (origin: string) => Promise<boolean>,
     private terminals: TerminalPanes,
     private host: WorkspaceHost,
   ) {
@@ -129,10 +133,14 @@ export class WorkspaceWindow {
         return this.tabMenu(command.args[0])
       case 'reloadPane':
         return this.reloadPane(command.args[0])
-      case 'openServer':
-        return this.openServer(command.args[0])
-      case 'forgetServer':
-        return this.forgetServer(command.args[0])
+      case 'loginServer':
+        return this.host.loginServer(command.args[0])
+      case 'cancelServerLogin':
+        return this.host.cancelServerLogin(command.args[0])
+      case 'logoutServer':
+        return this.host.logoutServer(command.args[0])
+      case 'refreshServers':
+        return this.host.refreshServers()
       case 'openRecent':
         return this.host.openRecent(this, command.args[0])
       case 'removeRecent':
@@ -220,7 +228,7 @@ export class WorkspaceWindow {
       tree: this.layout.activeTab?.root ?? null,
       zoomed: this.layout.activeTab?.zoomed ?? false,
       panel: this.layout.panel,
-      servers: this.trusted.list(),
+      servers: this.host.serverAccounts(),
       recentSessions: this.host.recentSessions(),
       preferences: this.preferences.value,
       shells: this.host.shells().map(({ id, name }) => ({ id, name })),
@@ -323,15 +331,9 @@ export class WorkspaceWindow {
       this.presenting = false
     }
   }
-  addPane(pane: TerminalPane, split?: SplitDirection) {
-    const previous = this.layout.activePaneId
+  addPane(pane: TerminalPane, placement: PanePlacement = { kind: 'tab', before: null }) {
     if (!this.attach(pane.id)) throw new Error('This terminal has closed.')
-    this.layout.addPane(
-      pane.id,
-      split && previous !== null
-        ? { kind: 'pane', pane: previous, edge: split === 'columns' ? 'right' : 'bottom' }
-        : { kind: 'tab', before: null },
-    )
+    this.layout.addPane(pane.id, placement)
   }
   attach(id: number) {
     const pane = this.terminals.panes.get(id)
@@ -479,7 +481,11 @@ export class WorkspaceWindow {
     if (!this.hasPane(id)) return
     this.layout.activatePane(id)
     try {
-      this.host.newLocal(this, undefined, direction)
+      this.host.newLocal(this, undefined, {
+        kind: 'pane',
+        pane: id,
+        edge: direction === 'columns' ? 'right' : 'bottom',
+      })
     } catch (error) {
       void this.reportError((error as Error).message)
     }
@@ -614,35 +620,6 @@ export class WorkspaceWindow {
     if (this.pane(id) !== pane) return
     this.terminals.reloadPane(id)
   }
-  private async openServer(value: unknown) {
-    if (typeof value !== 'string') throw new Error('Enter an Outpost server URL.')
-    const origin = desktopOrigin(value)
-    if (!(await this.trust(origin))) return false
-    this.host.changed()
-    await shell.openExternal(origin)
-    return true
-  }
-  private async forgetServer(value: unknown) {
-    if (typeof value !== 'string' || !this.window) return
-    const origin = desktopOrigin(value)
-    const panes = [...this.terminals.panes.values()].filter(pane => pane.origin === origin)
-    if (panes.length) {
-      const answer = await dialog.showMessageBox(this.window, {
-        type: 'question',
-        message: `Forget this server and close ${panes.length} panes across all windows?`,
-        detail: `Remote sessions keep running. Unsent messages in these panes will be discarded.\n${origin}`,
-        buttons: ['Forget server', 'Cancel'],
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true,
-      })
-      if (answer.response !== 0) return
-    }
-    await this.trusted.set(origin, false)
-    for (const pane of panes) this.terminals.dispose(pane.id)
-    await this.host.forgetRecents()
-    this.host.changed()
-  }
   async setPreferences(value: TerminalPreferences, shell = this.preferences.localShell) {
     if (!validPreferences(value)) throw new Error('Use a font size between 10 and 28.')
     await this.preferences.set(value, shell)
@@ -655,8 +632,9 @@ export class WorkspaceWindow {
   }
   private shellMenu() {
     if (!this.window) return
-    Menu.buildFromTemplate(
-      this.host.shells().map(profile => ({
+    const anchor = screen.getCursorScreenPoint()
+    Menu.buildFromTemplate([
+      ...this.host.shells().map(profile => ({
         label: profile.name,
         click: () => {
           try {
@@ -666,13 +644,20 @@ export class WorkspaceWindow {
           }
         },
       })),
-    ).popup({ window: this.window })
+      { type: 'separator' },
+      { label: 'Outpost terminal…', click: () => this.findSession({ kind: 'tab' }, anchor) },
+    ]).popup({ window: this.window })
+  }
+
+  private findSession(target: SessionTarget, anchor: Point) {
+    void this.host.findSession(this, target, anchor).catch(error => this.reportError(String(error)))
   }
 
   private tabMenu(id: number) {
     const group = this.layout.tab(id)
     if (!group || !this.window) return
     const item: WorkspaceItem = { kind: 'tab', id }
+    const anchor = screen.getCursorScreenPoint()
     Menu.buildFromTemplate([
       { label: 'Rename tab…', click: () => this.panel({ renameTab: id }) },
       { label: 'Move tab to new window', click: () => this.host.move(this, item, null) },
@@ -688,6 +673,10 @@ export class WorkspaceWindow {
         click: () => {
           this.splitPane(group.activePaneId, 'columns')
         },
+      },
+      {
+        label: 'Split with Outpost terminal…',
+        click: () => this.findSession({ kind: 'split', tabId: id, paneId: group.activePaneId }, anchor),
       },
       {
         label: 'Move beside current tab',

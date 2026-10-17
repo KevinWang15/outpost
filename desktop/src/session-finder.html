@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'" />
+    <title>Outpost terminals</title>
+    <link rel="stylesheet" href="session-finder.css" />
+    <script src="session-finder-ui.js" defer></script>
+  </head>
+  <body>
+    <main aria-labelledby="title">
+      <header><h1 id="title">Outpost terminals</h1><button id="cancel" type="button" aria-label="Cancel" title="Cancel (Esc)">Esc</button></header>
+      <input id="query" type="text" role="combobox" aria-label="Find an Outpost session" aria-autocomplete="list" aria-expanded="true" aria-controls="results" autocomplete="off" spellcheck="false" placeholder="Search sessions, targets or servers…" disabled />
+      <p id="loading" role="status"></p>
+      <ul id="results" role="listbox" aria-label="Outpost sessions"></ul>
+      <p id="empty" role="status" hidden></p>
+      <p id="errors" role="alert" hidden></p>
+      <footer>↑ ↓ to choose · Enter to connect · Esc to cancel</footer>
+    </main>
+  </body>
+</html>

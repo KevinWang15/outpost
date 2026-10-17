@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { desktopOrigin } from '../../shared/desktop'
+import { validDesktopId, desktopSessionId, desktopOrigin, type DesktopSessionReference } from '../../shared/desktopAuth'
 
 export interface RecentSessionSummary {
   id: string
@@ -8,17 +8,9 @@ export interface RecentSessionSummary {
   title: string
   lastConnectedAt: number
 }
-export interface RecentSession extends RecentSessionSummary {
-  sessionKey: string
-  token: string
-}
+export interface RecentSession extends RecentSessionSummary, DesktopSessionReference {}
 
-/** Shared with the open-tab registry; this routing identity is not authorization. */
-export const remoteSessionId = (server: string, sessionKey: string) => JSON.stringify([server, sessionKey])
-export const validResumeToken = (value: unknown): value is string =>
-  typeof value === 'string' && value.length <= 8192 && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)
-
-/** Ten remote sessions, with plain reconnect credentials in the app's userData directory. */
+/** Ten remote sessions, with session references in the app's userData directory. */
 export class RecentSessions {
   private entries: RecentSession[] = []
   private writes = Promise.resolve()
@@ -31,12 +23,12 @@ export class RecentSessions {
       const entries = new Map<string, RecentSession>()
       for (const item of data) {
         if (!item || typeof item !== 'object') continue
-        const { server, sessionKey, token, title, lastConnectedAt } = item
+        const { server, accountId, targetId, sessionId, title, lastConnectedAt } = item
         if (
           typeof server !== 'string' ||
-          typeof sessionKey !== 'string' ||
-          !/^[A-Za-z0-9_-]{43}$/.test(sessionKey) ||
-          !validResumeToken(token) ||
+          !validDesktopId(accountId) ||
+          !validDesktopId(targetId) ||
+          !validDesktopId(sessionId) ||
           typeof title !== 'string' ||
           title.length > 512 ||
           typeof lastConnectedAt !== 'number' ||
@@ -46,9 +38,9 @@ export class RecentSessions {
           continue
         try {
           const origin = desktopOrigin(server)
-          const id = remoteSessionId(origin, sessionKey)
+          const id = desktopSessionId({ server: origin, accountId, targetId, sessionId })
           if ((entries.get(id)?.lastConnectedAt ?? -1) <= lastConnectedAt)
-            entries.set(id, { id, server: origin, sessionKey, token, title, lastConnectedAt })
+            entries.set(id, { id, server: origin, accountId, targetId, sessionId, title, lastConnectedAt })
         } catch {
           // Ignore invalid origins without granting trust from this file.
         }
@@ -60,7 +52,7 @@ export class RecentSessions {
     }
   }
 
-  /** Credentials never enter a workspace snapshot. */
+  /** The home view needs labels only; connection references stay in the main process. */
   list(): RecentSessionSummary[] {
     return this.entries.map(({ id, server, title, lastConnectedAt }) => ({ id, server, title, lastConnectedAt }))
   }
@@ -76,8 +68,8 @@ export class RecentSessions {
   clear() {
     return this.change(() => [])
   }
-  retainServers(allowed: (server: string) => boolean) {
-    return this.change(entries => entries.filter(entry => allowed(entry.server)))
+  retain(allowed: (session: RecentSession) => boolean) {
+    return this.change(entries => entries.filter(allowed))
   }
   flush() {
     return this.writes

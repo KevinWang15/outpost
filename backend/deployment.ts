@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { TargetInput } from '../shared/model'
+import type { DesktopAccount } from '../shared/desktopAuth'
 import { isLoopbackAddress } from '../shared/loopback'
 import { AppError } from './errors'
 import type { SshIdentity } from './transport'
@@ -13,6 +14,11 @@ import { Workspace } from './workspace'
 export interface Owner {
   userId: string
   loginId: string
+}
+export interface AccountIdentity {
+  account: DesktopAccount
+  /** Changes when credentials are replaced; never sent to a client. */
+  revision: string
 }
 
 /** The only place where local and hosted installations differ (principle 3). */
@@ -25,6 +31,7 @@ export interface Deployment {
   admits(request: FastifyRequest): string | null
   owner(request: FastifyRequest): Owner
   active(owner: Owner): boolean
+  account(userId: string): AccountIdentity | null
   workspace(owner: Owner): Workspace
   identity(owner: Owner): Promise<SshIdentity | null>
   /** Public origin used in links that leave the browser, e.g. outpost:// URLs. */
@@ -92,6 +99,11 @@ export class LocalDeployment implements Deployment {
   }
   active() {
     return true
+  }
+  account(userId: string): AccountIdentity | null {
+    return userId === 'local'
+      ? { account: { id: 'local', name: 'Local workspace', email: null }, revision: 'local' }
+      : null
   }
   workspace() {
     return this.store

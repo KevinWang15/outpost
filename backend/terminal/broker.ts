@@ -8,7 +8,7 @@ import { BoundedWriter } from '../../shared/node/boundedWriter'
 import { FrameDecoder, relayMagic, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
 import { signalValidators } from '../../shared/signals'
 import { terminalService, terminalSize } from '../../shared/terminalService'
-import type { Deployment, Owner } from '../deployment'
+import type { Owner } from '../deployment'
 import { terminalFailure } from './failures'
 import { protocolResult } from '../process'
 import type { SessionService, TargetContext } from '../sessions'
@@ -30,7 +30,7 @@ export interface TerminalQuery {
 
 interface Dependencies {
   tokens: ConnectTokens
-  deployment: Deployment
+  active(owner: Owner): boolean
   sessions: SessionService
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
   env?: NodeJS.ProcessEnv
@@ -396,7 +396,7 @@ export class TerminalBroker {
   constructor(private dependencies: Dependencies) {
     this.sweep = setInterval(() => {
       for (const connection of this.connections) {
-        if (!dependencies.deployment.active(connection.grant.owner))
+        if (!dependencies.active(connection.grant.owner))
           connection.close('expired', 'Sign-in ended. Sign in and connect again.')
       }
     }, 5000).unref()
@@ -407,10 +407,9 @@ export class TerminalBroker {
 
   /** A fresh Connect can focus an existing tab without attaching another PTY. */
   activate(grant: Grant, token: string) {
-    if (this.stopped || !this.dependencies.deployment.active(grant.owner)) return false
+    if (this.stopped || !this.dependencies.active(grant.owner)) return false
     const redeemed = this.dependencies.tokens.redeem(token, grant)
     if (!redeemed) return false
-    this.dependencies.tokens.markConnected(redeemed.id, grant.owner)
     return true
   }
 
@@ -424,8 +423,7 @@ export class TerminalBroker {
       return reject('outdated', 'Outpost was updated. Reload this terminal to reconnect.')
     }
     const redeemed = this.stopped ? null : this.dependencies.tokens.redeem(query.token ?? '')
-    if (!redeemed || !this.dependencies.deployment.active(redeemed.grant.owner))
-      return reject('expired', closedMessages.expired)
+    if (!redeemed || !this.dependencies.active(redeemed.grant.owner)) return reject('expired', closedMessages.expired)
     const { grant } = redeemed
     if ([...this.connections].filter(connection => connection.grant.owner.userId === grant.owner.userId).length >= 16) {
       // After a network change, old viewers may occupy slots until their
@@ -444,7 +442,6 @@ export class TerminalBroker {
       if (connection.abort.signal.aborted) return
       const session = await this.dependencies.sessions.get(context, grant.sessionId, connection.abort.signal)
       if (socket.readyState !== WebSocket.OPEN) return
-      if (redeemed.kind === 'launch') this.dependencies.tokens.markConnected(redeemed.id, grant.owner)
       connection.send({
         type: 'hello',
         resume: this.dependencies.tokens.resume(redeemed.id, grant),

@@ -2134,3 +2134,27 @@ kbd {
     }
   }
 }
+
+.desktop-authorization {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  .auth-card {
+    width: min(100%, 560px);
+  }
+  p {
+    margin-block: 18px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  svg {
+    vertical-align: middle;
+  }
+}
+.authorization-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}

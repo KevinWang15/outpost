@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import test from 'node:test'
 import type { Session, SoftwareReport, Target } from '../../shared/model'
-import type { ConnectResponse } from '../../shared/protocol'
+import type { TerminalTicket } from '../../shared/protocol'
 import { createApp } from '../../backend/app'
 import { LocalDeployment, type Deployment } from '../../backend/deployment'
 import { HostedDeployment } from '../../backend/hosted/deployment'
@@ -84,9 +84,7 @@ async function lifecycle(
     tool: 'claude',
     createDirectory: true,
   })
-  const { token } = await call<ConnectResponse>('POST', `/targets/${added.id}/sessions/${session.id}/connect`, {
-    terminal: 'web',
-  })
+  const { token } = await call<TerminalTicket>('POST', `/targets/${added.id}/sessions/${session.id}/connect`, {})
   const fork = await call<Session>('POST', `/targets/${added.id}/sessions/${session.id}/fork`, {
     branch: `feature/fork-${session.id}`,
     rootDir: `~/work-${session.id}`,

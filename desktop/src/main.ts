@@ -1,35 +1,41 @@
-import { app, dialog, Menu, powerMonitor, type MenuItemConstructorOptions } from 'electron'
+import { app, dialog, Menu, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
 import { join, resolve } from 'node:path'
-import { parseLaunch } from './launch'
+import { parseDesktopEntry } from '../../shared/desktopAuth'
 import { Preferences } from './preferences'
-import { TrustedServers } from './store'
+import { ServerTrust } from './server-trust'
 import { DesktopWorkspace } from './workspace'
 import { checkUpdates } from './updates'
 import { paneActionShortcuts, tabActionShortcuts, type PaneAction } from './workspace-shortcuts'
 import { RecentSessions } from './recent-sessions'
+import { ServerAccounts } from './server-accounts'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 
 app.setName('Outpost')
 app.setAppUserModelId('dev.outpost.desktop')
-const trusted = new TrustedServers(join(app.getPath('userData'), 'servers.json'))
+const serverTrust = new ServerTrust(join(app.getPath('userData'), 'server-trust.json'), confirmTrust)
 const preferences = new Preferences(join(app.getPath('userData'), 'preferences.json'))
 const recentSessions = new RecentSessions(join(app.getPath('userData'), 'recent-sessions.json'))
 let workspace: DesktopWorkspace | undefined
+const accounts = new ServerAccounts(join(app.getPath('userData'), 'server-logins.json'), serverTrust, {
+  openBrowser: url => shell.openExternal(url),
+  changed: () => workspace?.accountsChanged(),
+  failed: error => {
+    void report(error.message)
+  },
+})
 const resumeTerminals = () => workspace?.resume()
 const waiting: string[] = []
-let operations = Promise.resolve()
 let pending = 0
 const report = (message: string) =>
   dialog.showMessageBox({
     type: 'error',
     title: 'Outpost',
     message,
-    detail: 'Check the server address and use Connect → Outpost Desktop again.',
+    detail: 'Check the server address and try again from the Outpost tab or your server workspace.',
     buttons: ['OK'],
   })
 
-async function trust(origin: string) {
-  if (trusted.has(origin)) return true
+async function confirmTrust(origin: string) {
   const result = await dialog.showMessageBox({
     type: 'question',
     title: 'Trust Outpost server?',
@@ -41,24 +47,44 @@ async function trust(origin: string) {
     cancelId: 1,
     noLink: true,
   })
-  if (result.response !== 0) return false
-  await trusted.set(origin, true)
-  return true
+  return result.response === 0
 }
 function receive(value: string) {
+  if (workspace?.stopping) return
   if (!workspace) {
     if (waiting.length < 16) waiting.push(value)
     return
   }
   if (pending >= 16) return
   pending++
-  operations = operations
+  void Promise.resolve()
     .then(async () => {
-      const launch = parseLaunch(value)
-      if (await trust(launch.server)) await workspace!.open(launch)
-      else workspace!.show()
+      if (workspace!.stopping) return
+      if (value.startsWith('outpost://login/')) {
+        const sessions = await accounts.complete(value)
+        if (workspace!.stopping) return
+        workspace!.present()
+        if (sessions?.length) {
+          for (const session of sessions) {
+            if (workspace!.stopping) return
+            try {
+              await workspace!.open(await accounts.launch(session))
+            } catch (error) {
+              if (workspace!.stopping) return
+              await report(error instanceof Error ? error.message : 'Could not open the session.')
+            }
+          }
+        } else workspace!.forAction()?.panel('sessions')
+        return
+      }
+      const launch = await accounts.connect(parseDesktopEntry(value))
+      if (workspace!.stopping) return
+      workspace!.present()
+      if (launch) await workspace!.open(launch)
+      else workspace!.forAction()?.panel('sessions')
     })
     .catch(async error => {
+      if (workspace!.stopping) return
       workspace!.show()
       await report(error instanceof Error ? error.message : 'Could not open the session.')
     })
@@ -117,9 +143,9 @@ function menus() {
     {
       label: 'Edit',
       submenu: [
-        { label: 'Copy', accelerator: shortcut('C'), click: () => workspace!.forAction()?.edit('copy') },
-        { label: 'Paste', accelerator: shortcut('V'), click: () => workspace!.forAction()?.edit('paste') },
-        { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.forAction()?.command('select-all') },
+        { label: 'Copy', accelerator: shortcut('C'), click: () => workspace!.edit('copy') },
+        { label: 'Paste', accelerator: shortcut('V'), click: () => workspace!.edit('paste') },
+        { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.edit('select-all') },
         { type: 'separator' },
         {
           label: 'Find in terminal…',
@@ -226,9 +252,10 @@ else {
   void app
     .whenReady()
     .then(async () => {
-      await Promise.all([trusted.load(), preferences.load(), recentSessions.load()])
-      await recentSessions.retainServers(origin => trusted.has(origin))
-      workspace = new DesktopWorkspace(__dirname, trusted, preferences, recentSessions, trust)
+      await Promise.all([serverTrust.load(), preferences.load(), recentSessions.load()])
+      await accounts.load()
+      await recentSessions.retain(entry => accounts.hasAccount(entry.server, entry.accountId))
+      workspace = new DesktopWorkspace(__dirname, preferences, recentSessions, accounts)
       powerMonitor.on('resume', resumeTerminals)
       powerMonitor.on('unlock-screen', resumeTerminals)
       app.setAboutPanelOptions({
@@ -244,6 +271,7 @@ else {
       if (waiting.length) workspace.present()
       else workspace.show()
       for (const url of waiting.splice(0)) receive(url)
+      void accounts.refresh()
       app.on('activate', () => workspace!.show())
     })
     .catch(async error => {

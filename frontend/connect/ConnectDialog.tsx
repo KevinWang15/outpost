@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AppWindow, ArrowRight, Check, LoaderCircle, Monitor } from 'lucide-react'
+import { AppWindow, ArrowRight, Monitor } from 'lucide-react'
 import { pagePaths } from '../../shared/pages'
 import type { TerminalChoice } from '../../shared/terminals'
 import type { Target } from '../../shared/model'
@@ -23,57 +23,49 @@ export default function ConnectDialog({
 }) {
   const [remember, setRemember] = useState(() => preferredTerminal() !== null)
 
-  if (phase.kind === 'opening' || phase.kind === 'connected')
+  if (phase === 'opening')
     return (
       <Dialog
         title={`Connect to ${session.name}`}
         description={target.name}
         onClose={onClose}
         footer={
-          phase.kind === 'opening' && (
-            <>
-              <button className="button" onClick={onBack}>
-                Choose another terminal
-              </button>
-              <button
-                className="button primary"
-                onClick={() => {
-                  onChoose('desktop', remember)
-                }}
-              >
-                Open Outpost Desktop again
-              </button>
-            </>
-          )
+          <>
+            <button className="button" onClick={onBack}>
+              Choose another terminal
+            </button>
+            <button
+              className="button primary"
+              onClick={() => {
+                onChoose('desktop', remember)
+              }}
+            >
+              Open Outpost Desktop again
+            </button>
+          </>
         }
       >
-        <div className={`connect-progress ${phase.kind === 'connected' ? 'done' : ''}`} role="status">
-          {phase.kind === 'connected' ? <Check size={20} /> : <LoaderCircle className="spin" size={20} />}
+        <div className="connect-progress" role="status">
+          <Monitor size={20} />
           <div>
-            <strong>{phase.kind === 'connected' ? 'Connected in Outpost Desktop' : 'Opening Outpost Desktop…'}</strong>
+            <strong>Continue in Outpost Desktop</strong>
             <p>
-              {phase.kind === 'connected'
-                ? 'You can close this window.'
-                : 'Allow your browser to open Outpost. Confirm this server in the app on your first connection.'}
+              Allow your browser to open Outpost. If this server is not connected in the app, finish sign-in and approve
+              access in your browser.
             </p>
           </div>
         </div>
-        {phase.kind === 'opening' && phase.slow && (
-          <div className="connect-setup">
-            <h3>Nothing opened?</h3>
-            <p>Install Outpost Desktop for macOS or Windows and open it once, then try again.</p>
-            <a className="button primary" href={pagePaths.desktop} target="_blank" rel="noopener noreferrer">
-              Download Outpost Desktop
-            </a>
-            <p className="hint">
-              Each retry creates a fresh connection ticket. Chrome, Python, and WSL are not required.
-            </p>
-          </div>
-        )}
+        <div className="connect-setup">
+          <h3>Nothing opened?</h3>
+          <p>Install Outpost Desktop for macOS or Windows and open it once, then try again.</p>
+          <a className="button primary" href={pagePaths.desktop} target="_blank" rel="noopener noreferrer">
+            Download Outpost Desktop
+          </a>
+          <p className="hint">Already installed? Open the app once to register its browser link, then try again.</p>
+        </div>
       </Dialog>
     )
 
-  const busy = phase.kind === 'requesting' ? phase.terminal : null
   return (
     <Dialog title={`Connect to ${session.name}`} description={`${target.name} · ${session.rootDir}`} onClose={onClose}>
       {error && (
@@ -101,7 +93,6 @@ export default function ConnectDialog({
           <button
             key={choice.id}
             className="choice"
-            disabled={Boolean(busy)}
             onClick={() => {
               onChoose(choice.id, remember)
             }}
@@ -111,11 +102,7 @@ export default function ConnectDialog({
               <span className="choice-title">{choice.name}</span>
               <span className="choice-detail">{choice.detail}</span>
             </span>
-            {busy === choice.id ? (
-              <LoaderCircle className="spin" size={18} />
-            ) : (
-              <ArrowRight size={18} className="choice-arrow" />
-            )}
+            <ArrowRight size={18} className="choice-arrow" />
           </button>
         ))}
       </div>
@@ -123,7 +110,6 @@ export default function ConnectDialog({
         <input
           type="checkbox"
           checked={remember}
-          disabled={Boolean(busy)}
           onChange={event => setRemember(event.target.checked)}
           aria-describedby="connect-remember-hint"
         />

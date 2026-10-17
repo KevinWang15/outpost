@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AccountUser } from '../../shared/auth'
 import type { TargetInput } from '../../shared/model'
@@ -10,6 +10,7 @@ import { AccountStore, type AccountSession } from './store'
 import { AccountSshKeys } from './keys'
 import { accountEmail, engageLabMailer, type AccountMailer } from './email'
 import { hashPassword, validatePassword, verifyPassword } from './passwords'
+import { RateLimit } from '../rate-limit'
 
 const COOKIE = 'outpost_session'
 const normalizeEmail = (value: string) => value.trim().toLowerCase()
@@ -30,27 +31,6 @@ const body = (properties: Record<string, unknown>) => ({
 })
 const loopbackName = (hostname: string) =>
   hostname === 'localhost' || isLoopbackAddress(hostname.replace(/^\[|\]$/g, ''))
-
-class RateLimit {
-  private buckets = new Map<string, { count: number; until: number }>()
-  consume(key: string, limit: number) {
-    const now = Date.now()
-    if (this.buckets.size >= 10000) {
-      for (const [name, entry] of this.buckets) if (entry.until <= now) this.buckets.delete(name)
-      if (this.buckets.size >= 10000 && !this.buckets.has(key))
-        throw new AppError('Too many requests. Please try again later.', 429)
-    }
-    const previous = this.buckets.get(key)
-    const bucket = previous && previous.until > now ? previous : { count: 0, until: now + 15 * 60_000 }
-    if (bucket.count >= limit) throw new AppError('Too many attempts. Please try again in 15 minutes.', 429)
-    bucket.count++
-    this.buckets.set(key, bucket)
-  }
-  check(request: FastifyRequest, action: string, email?: string) {
-    this.consume(`${action}:ip:${request.ip}`, action === 'login' ? 50 : 20)
-    if (email) this.consume(`${action}:email:${email}`, action === 'login' ? 10 : 5)
-  }
-}
 
 export interface HostedOptions {
   directory: string
@@ -153,6 +133,14 @@ export class HostedDeployment implements Deployment {
   active(owner: Owner) {
     return this.store.ticketSession(owner.userId, owner.loginId)
   }
+  account(userId: string) {
+    const user = this.store.byId(userId)
+    if (!user?.emailVerifiedAt) return null
+    return {
+      account: { id: user.id, name: user.name, email: user.email },
+      revision: createHash('sha256').update(user.passwordHash).digest('hex'),
+    }
+  }
   workspace(owner: Owner) {
     let workspace = this.workspaces.get(owner.userId)
     if (!workspace) {
@@ -208,7 +196,9 @@ export class HostedDeployment implements Deployment {
   register(app: FastifyInstance) {
     const limited = (action: string) => async (request: FastifyRequest) => {
       const input = request.body as { email?: string } | undefined
-      this.rateLimit.check(request, action, typeof input?.email === 'string' ? normalizeEmail(input.email) : undefined)
+      this.rateLimit.consume(`${action}:ip:${request.ip}`, action === 'login' ? 50 : 20)
+      if (typeof input?.email === 'string')
+        this.rateLimit.consume(`${action}:email:${normalizeEmail(input.email)}`, action === 'login' ? 10 : 5)
     }
     app.get('/api/auth/session', async request => ({
       mode: 'hosted',

@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { terminalConnectionPolicy } from '../../shared/protocol'
-import { desktopTerminal } from './terminal-fixture'
+import { desktopTerminal, appConnection } from './terminal-fixture'
 
 for (const mode of ['web', 'desktop'] as const) {
   test(`${mode}: a blackholed connection recovers the same process, offline output, size and draft`, async ({
@@ -38,12 +38,7 @@ for (const mode of ['web', 'desktop'] as const) {
       })
     })
     if (mode === 'desktop') {
-      const connection = await (
-        await page.request.post(`/api/targets/${target.id}/sessions/${session.id}/connect`, {
-          headers,
-          data: { terminal: 'desktop' },
-        })
-      ).json()
+      const connection = await appConnection(page.request, target.id, session.id)
       await desktopTerminal(page, connection.token)
       await page.goto('/terminal/desktop')
       await page.getByRole('button', { name: 'Show terminal toolbar' }).click()

@@ -3,7 +3,6 @@
 // drift. Strings exclude control characters unless they carry free text.
 import Type from 'typebox'
 import { harnesses, harnessIds } from './harnesses'
-import { terminalChoices } from './terminals'
 
 const strict = { additionalProperties: false } as const
 const text = (maxLength: number) => Type.String({ minLength: 1, maxLength, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
@@ -91,7 +90,6 @@ export const directoryQuery = Type.Object(
   { path: Type.String({ maxLength: 4096, pattern: '^(|~|(?:~/|/)[^\\u0000-\\u001f\\u007f]*)$' }) },
   strict,
 )
-export const connectInput = Type.Object({ terminal: Type.Enum(terminalChoices) }, strict)
 
 // Software ----------------------------------------------------------------------
 export const softwareIds = ['bash', 'python3', 'outpost-terminal', ...harnessIds] as const

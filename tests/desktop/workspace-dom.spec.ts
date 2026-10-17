@@ -53,6 +53,20 @@ test('dividers paint a one-pixel line, keep a usable hit target and resize only 
   expect(h!.height).toBe(6)
   expect(await vertical.evaluate(node => getComputedStyle(node, '::after').width)).toBe('1px')
   expect(await horizontal.evaluate(node => getComputedStyle(node, '::after').height)).toBe('1px')
+  const leftHeader = page.locator('[data-pane="101"]'),
+    rightHeader = page.locator('[data-pane="102"]')
+  const left = (await leftHeader.boundingBox())!,
+    right = (await rightHeader.boundingBox())!
+  // The backgrounds meet under the separator, while controls keep their
+  // original inset and the entire native gap remains available for resizing.
+  expect(left.x + left.width).toBe(v!.x + v!.width / 2)
+  expect(right.x).toBe(left.x + left.width)
+  expect(await vertical.evaluate(node => getComputedStyle(node).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+  expect(await leftHeader.evaluate(node => getComputedStyle(node).paddingInlineStart)).toBe('3px')
+  for (const x of [v!.x + 1, v!.x + v!.width - 1])
+    expect(
+      await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.getAttribute('role'), { x, y: left.y + 10 }),
+    ).toBe('separator')
   const before = await page.evaluate(() => window.workspaceFixture.snapshot().tree)
   await page.mouse.move(h!.x + h!.width / 2, h!.y + h!.height / 2)
   await page.mouse.down()

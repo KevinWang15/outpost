@@ -12,7 +12,7 @@
     <header class="chrome">
       <button id="home" class="icon brand" aria-label="Servers, sessions and help" aria-controls="sessions-panel" title="Servers, sessions and help"><img src="outpost.png" alt="" width="20" height="20" /></button>
       <nav id="tabs" role="tablist" aria-label="Terminal sessions"></nav>
-      <button id="new-tab" class="icon" aria-label="New local terminal" title="New local terminal (right-click to choose a shell)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg></button>
+      <button id="new-tab" class="icon" aria-label="New local terminal" title="New local terminal (right-click for shells or Outpost sessions)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg></button>
       <div class="window-drag" aria-hidden="true"></div>
       <div class="tools">
         <button id="switch" class="icon" aria-label="Switch session" aria-controls="switcher-panel" title="Switch session"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg></button>
@@ -28,16 +28,19 @@
         <button id="back" class="back" hidden>← Back to terminal <kbd>Esc</kbd></button>
         <section id="sessions-panel" hidden>
           <div class="intro"><img src="outpost.png" width="52" height="52" alt="" /><div><p class="eyebrow">YOUR TERMINAL WORKSPACE</p><h1>A place for every session.</h1></div></div>
-          <p class="description">Open a local terminal with <strong>+</strong>, or choose a session in your Outpost server, then <strong>Connect → Outpost Desktop</strong>. Local and remote sessions share the same tabs and splits.</p>
+          <p class="description">Open a local terminal with <strong>+</strong>, or right-click <strong>+</strong> to find a session on your logged-in Outpost servers. Local and remote sessions share the same tabs and splits.</p>
           <div class="section-heading"><h2 id="recent-heading">Recent sessions</h2><button id="clear-recent" type="button" class="subtle">Clear recent sessions</button></div>
           <ul id="recent-sessions" class="rows" aria-labelledby="recent-heading"></ul>
           <p id="no-recent" class="hint">Your 10 most recent Outpost sessions will appear here after connecting. Local terminals aren't saved.</p>
           <p id="recent-hint" class="hint" hidden>Click a session to reconnect, or use ↑ ↓ and Enter. An already open session switches to its tab.</p>
           <button id="open-local" class="primary" type="button">Open local terminal</button>
-          <form id="server-form"><label for="server">Outpost server</label><div class="address"><input id="server" type="url" placeholder="https://outpost.example.com" required autocomplete="url" /><button class="primary" type="submit">Open server ↗</button></div></form>
-          <h2>Trusted servers</h2><ul id="servers" class="rows"></ul>
-          <p id="no-servers" class="hint">Add your server address above to get started.</p>
-          <div class="tip"><strong>Sessions that move with you.</strong><p>Drag tabs to reorder or move them between windows. Drag a pane’s header to a terminal edge to split there, to the tab bar for its own tab, or outside all windows for a new window. The highlighted half shows where it will land. Press Esc to cancel. Moving panes keeps their connections, history and drafts; empty windows close automatically.</p><p>The split button opens a new local shell beside the focused pane; right-click it to split top and bottom. To arrange existing remote sessions, drag their tabs or use ◫ in the session switcher. Drag dividers to resize; double-click a pane header to zoom or restore it.</p><p>Closing a pane or tab always asks for confirmation. Closing a local tab ends its shell and running processes; remote sessions keep running. Unsent messages are discarded, and local terminal history is not saved.</p></div>
+          <div class="section-heading"><h2>Logged-in Outpost servers</h2><button id="refresh-servers" type="button" class="subtle">Refresh</button></div>
+          <ul id="servers" class="rows" aria-label="Logged-in Outpost servers"></ul>
+          <p id="no-servers" class="hint">No servers signed in yet.</p>
+          <form id="server-form"><label for="server">Connect a server</label><div class="address"><input id="server" type="url" placeholder="https://outpost.example.com" required autocomplete="url" /><button class="primary" type="submit">Sign in with browser ↗</button></div></form>
+          <div id="server-signins" role="status" aria-live="polite"></div>
+          <p class="hint">Sign-in happens in your browser. The app never asks for your password. Server logins last 30 days.</p>
+          <div class="tip"><strong>Sessions that move with you.</strong><p>Drag tabs to reorder or move them between windows. Drag a pane’s header to a terminal edge to split there, to the tab bar for its own tab, or outside all windows for a new window. The highlighted half shows where it will land. Press Esc to cancel. Moving panes keeps their connections, history and drafts; empty windows close automatically.</p><p>The split button opens a new local shell beside the focused pane; right-click it to split top and bottom. Right-click a tab and choose Split with Outpost terminal to search all sessions on your logged-in servers. To arrange already-open sessions, drag their tabs or use ◫ in the session switcher. Drag dividers to resize; double-click a pane header to zoom or restore it.</p><p>Closing a pane or tab always asks for confirmation. Closing a local tab ends its shell and running processes; remote sessions keep running. Unsent messages are discarded, and local terminal history is not saved.</p></div>
           <h2>Keyboard shortcuts</h2><dl id="home-shortcuts"></dl>
           <p id="open-result" role="status" aria-live="polite"></p>
         </section>
@@ -56,7 +59,7 @@
             <button class="primary" type="submit">Save settings</button><span id="saved" role="status"></span>
           </form>
           <h2>Keyboard shortcuts</h2><dl id="shortcuts"></dl>
-          <div class="tip"><strong>Local and remote terminals.</strong><p>Local shells work offline and end when their tab or the app closes. The Outpost page remembers your 10 most recent remote sessions for quick reconnects. If a saved connection expires, use Connect → Outpost Desktop in your server again. Remove an entry or clear the list to forget saved connections; running sessions stay open.</p></div>
+          <div class="tip"><strong>Local and remote terminals.</strong><p>Local shells work offline and end when their tab or the app closes. The Outpost page remembers your 10 most recent remote sessions for quick reconnects. If a server login expires, sign in again from the Outpost tab. Remove an entry or clear the list to forget saved connections; running sessions stay open.</p></div>
           <footer><span id="version"></span><button id="updates" type="button">Check for updates</button></footer>
         </section>
         <section id="rename-panel" hidden>

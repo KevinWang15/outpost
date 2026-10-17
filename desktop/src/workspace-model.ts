@@ -28,3 +28,6 @@ export interface WindowLayoutState {
   panel: WorkspacePanel
 }
 export type CloseScope = WorkspaceItem | { kind: 'window' }
+
+/** Captured before an asynchronous session choice; selection may change while it is pending. */
+export type SessionTarget = { kind: 'tab' } | { kind: 'split'; tabId: number; paneId: number }

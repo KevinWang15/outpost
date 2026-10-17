@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
-import { desktopTerminal } from './terminal-fixture'
+import { desktopTerminal, appConnection } from './terminal-fixture'
 
 const ticketKey = 'outpost.desktop.ticket'
 
@@ -26,12 +26,7 @@ async function session(page: Page) {
   ).json()
   expect(target.id).toBeTruthy()
   expect(created.id).toBeTruthy()
-  return (
-    await page.request.post(`/api/targets/${target.id}/sessions/${created.id}/connect`, {
-      headers,
-      data: { terminal: 'desktop' },
-    })
-  ).json() as Promise<{ token: string; id: string; url: string }>
+  return appConnection(page.request, target.id, created.id)
 }
 
 test('app tickets attach without a browser login; reload and toolbar changes reuse the shared client', async ({
@@ -61,7 +56,6 @@ test('app tickets attach without a browser login; reload and toolbar changes reu
   expect(resume).toBeTruthy()
   expect(await page.evaluate(key => sessionStorage.getItem(key), ticketKey)).toBeNull()
   expect(await page.evaluate(key => localStorage.getItem(key), ticketKey)).toBeNull()
-  expect((await (await page.request.get(`/api/connections/${connection.id}`)).json()).status).toBe('connected')
 
   await page.getByRole('button', { name: 'Show terminal toolbar' }).click()
   const before = await page.locator('.terminal-surface').evaluate(element => element.clientHeight)

@@ -70,7 +70,7 @@ comments refer back to the principles below by name.
 | `backend/` | Outpost server | HTTP API, deployments, transports, terminal broker |
 | `terminal-service/` | Linux target | Self-contained persistent PTY executable, headless xterm engine |
 | `runtime/` | Targets | Session registry, service control, relay, harness adapters |
-| `desktop/` | Your computer | Electron shell, native capabilities, trusted servers and installers |
+| `desktop/` | Your computer | Electron shell, native capabilities, server accounts, trust and installers |
 | `shared/` | Browser + desktop + server | Schemas, harness registry, terminal protocol, desktop bridge contract |
 
 **One definition per contract.** Request and stored-record shapes are TypeBox
@@ -125,11 +125,10 @@ twice. An installed standalone web app navigates to the terminal in its current
 window, retaining its Home Screen context. Closing, retrying, or changing targets aborts pending requests, and late
 poll results cannot replace a newer attempt.
 
-Remembered launches keep their request and desktop handoff state in the hook
-without mounting a dialog. Successful handoffs clear silently. Launch errors
-reopen the chooser; a separate six-second timer reveals progress and recovery
-actions for a stalled request or handoff, even when a status poll is blocked on
-the network. Explicit choices keep the usual progress and success dialog.
+Remembered launches skip the dialog. A successful OS handoff ends the browser
+attempt; errors reopen the chooser. Explicit desktop choices show a browser
+handoff with retry/download guidance. No browser polling or terminal credential
+is needed to ask the app to connect.
 
 `preference.ts` stores only an explicitly chosen terminal in browser local
 storage for the current origin. Connect reads it on each click, including changes
@@ -139,30 +138,33 @@ show the chooser, storage write failures are reported without blocking connectio
 and launch errors return to the chooser. This never stores credentials or skips
 authentication or desktop trust confirmation.
 
-1. The UI chooses `web` or `desktop` (`shared/terminals.ts`). The authenticated
-   `POST /api/targets/:t/sessions/:s/connect` route checks ownership and issues a
-   signed, single-use launch ticket valid for five minutes.
-2. Web opens `/terminal?target=…&session=…`, whose authenticated page requests
-   its ticket. Desktop receives `outpost://connect/<base64url payload>` with
-   `{v: 2, terminal: 'desktop', server, sessionKey, token, title}`. Electron validates the
-   envelope and HTTPS/localhost origin, confirms server trust, and loads
-   `/terminal/desktop` from that origin. The validated tab receives its credential
-   through the preload's `ticket()` call, without putting it in the page URL.
-3. Both entry pages render `TerminalView` and use `TerminalSocket` to connect
+1. The UI chooses `web` or `desktop` (`shared/terminals.ts`). Web opens
+   `/terminal?target=…&session=…`; that authenticated page requests a signed,
+   single-use launch ticket valid for five minutes.
+2. Desktop receives `outpost://server?origin=…&account=…&target=…&session=…`.
+   `useDesktopEntry` builds this link synchronously in the browser click handler.
+   It is only an intent and contains no credential; ownership is checked when
+   the app requests a terminal grant. The website's **Connect Outpost app**
+   button uses the same link without a session. Electron validates the URL and
+   confirms first-use server trust before contacting it.
+3. `ServerAccounts` uses an existing app login for the requested account, or
+   starts browser approval (see below). Website entry binds the expected account;
+   browser consent refuses a different one. Pending session intents complete
+   after login. Every app entry point requests a fresh scoped launch through
+   `/api/desktop/targets/:t/sessions/:s/connect`.
+4. Both entry pages render `TerminalView` and use `TerminalSocket` to connect
    to `/api/terminal`. The broker returns a 30-day resume token in `hello`.
-   Both grants remain bound to the originating login and one session; logout
-   revokes them and closes live connections. Resume tokens never appear in
+   Grants remain bound to their issuing login and one session; revoking that
+   login closes its live connections. Resume tokens stay in memory, never in
    OS links or page URLs. Proxies must not log WebSocket query strings.
-4. The connection hook polls `/api/connections/:id` until desktop is attached,
-   including when the dialog is skipped for a remembered choice.
-   Retrying issues a fresh ticket. Electron identifies tabs by normalized server
-   origin and an opaque `sessionKey`, derived from the login, target and session.
-   Every Connect activates that tab; a connected tab acknowledges the new ticket
-   with `activate` over its existing WebSocket. The broker verifies that the signed
-   ticket matches the connection's full grant before consuming it and marking the
-   handoff connected. The routing key itself never authorizes access. Disconnected
-   tabs use the fresh ticket to reconnect without replacing their renderer or draft.
-   There are at most 16 pending OS launches and 32 terminal panes.
+5. `desktopSessionId` defines routing identity as server, account, target and
+   session, independently of login lifetime. Reopening activates the existing
+   pane across windows. A connected pane consumes a fresh launch with `activate`
+   on its existing socket; a renewed app login reloads the same pane with its
+   new grant. The broker always checks the full grant, including login identity.
+   OS links are bounded to 16 concurrent dispatches and processed independently,
+   so one unavailable server cannot delay another server's login callback.
+   There are at most 16 pending sign-ins and 32 terminal panes.
 
 ### Client choices and shared responsibilities
 
@@ -173,7 +175,7 @@ authentication or desktop trust confirmation.
 
 `/terminal/desktop` and `/desktop` (downloads) are public page shells. The terminal
 broker authorizes each connection; these pages confer no account API access.
-Desktop needs no copied login cookie or second authentication system.
+Desktop uses its independent app login; browser cookies are never copied into Electron.
 
 Native tabs keep their current credential in the main process. On `hello`,
 `DesktopTerminalPage` uses `saveResume()` to replace it with the reusable grant
@@ -752,39 +754,87 @@ fails with a clear message.
 
 `desktop/` is a separate npm package, so server builds never download Electron.
 `main.ts` owns app lifecycle, menus, server trust and `outpost://` dispatch.
-`launch.ts` validates the envelope; `store.ts` atomically serializes trusted
+`shared/desktopAuth.ts` validates OS intents and login callbacks; `launch.ts`
+validates terminal grants; `server-trust.ts` atomically serializes trusted
 origins, and `preferences.ts` serializes font size, bell sound, and the default
 local shell profile ID (`null` selects the platform default). All three keys are
 required in a saved preferences file. A missing file uses defaults; an unsupported
 saved shape is rejected with reset instructions, without rewriting it.
 
+### Browser-based app login
+
+Trust, account login and terminal attachment are separate capabilities:
+
+- `server-trust.ts` privately remembers first-use origin trust in `server-trust.json`. Declining stops before any login
+  request; signing out never erases trust. There is no trusted-server management UI.
+- `server-accounts.ts` owns saved account identity, liveness and authenticated
+  requests. Its snapshot has separate `accounts` and `signIns` fields: account
+  rows require a saved login; attempts can only produce transient form progress.
+- `server-sign-in.ts` owns browser approval attempts, PKCE, cancellation and queued
+  session intents. It opens the system browser; no password or browser cookie
+  enters Electron. Saving starts a non-cancellable commit; sign-out waits for
+  it, then revokes the saved grant. Failed or cancelled attempts add no account
+  row, and never alter a previously saved login.
+- `server-login-store.ts` publishes credentials after an atomic disk commit.
+  `server-catalogue.ts` discovers sessions using scoped account request handles;
+  it knows nothing about trust, credential persistence or browser approval.
+  The renderer gets only presentation metadata through `server-accounts-api.ts`.
+- `backend/desktop-access.ts` owns browser approvals and durable app grants.
+  `backend/routes/desktop.ts` exposes the narrowly scoped catalogue/connect API.
+  Browser workspace/account routes continue to require the browser login.
+
+The app generates random state and a PKCE S256 verifier, then starts a ten-minute
+request at `POST /api/desktop/authorizations`. The system browser opens
+`/desktop/authorize?request=…`; `AuthGate` preserves this destination through
+normal account sign-in and email verification. A visible consent page identifies
+the server/account and requires approval. The server returns a fixed
+`outpost://login/<state>/<code>` callback. The one-minute, single-use code is bound
+to the PKCE challenge and account credential revision. The main process matches
+state to its own pending origin and exchanges the code with the private verifier.
+It accepts neither unsolicited callbacks nor caller-supplied redirect destinations.
+This follows the external-browser and PKCE design described in
+[RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html) and
+[RFC 7636](https://www.rfc-editor.org/rfc/rfc7636.html); it is a first-party app
+protocol, not a general OAuth provider.
+
+App grants last 30 days. `desktop-logins.sqlite` stores token hashes, account ID,
+credential revision and expiry; `server-logins.json` in Electron userData stores
+the app bearer with filesystem mode 0600. An app login is independent of its
+approving browser login. Password changes/resets or loss of account verification
+invalidate it through the revision check. App sign-out revokes that grant;
+`Services.active` is the single liveness authority used by terminal connections
+and uploads for both browser and app owners. Pending approvals are memory-only
+and expire on server restart. App startup/wake and manual refresh check accounts;
+network failure is distinguished from authentication expiry. Expiry stays invalid
+until the user completes a new sign-in; a late success or network error cannot
+overwrite authentication expiry. Credentials expire without automatic renewal.
+
+Only catalogue endpoints and new terminal launches accept the app bearer. The
+app lists targets, then their sessions with at most four concurrent requests.
+Results stream into the finder; a slow or failed target does not block other
+servers. `server-api.ts` bounds response size, enforces timeouts/cancellation,
+and refuses redirects so credentials cannot move to another origin. Signing out
+requires successful revocation (an already-invalid grant also counts); network
+failure leaves the login visible for retry. Local deployments use the same
+approval and grant path, with their single local-workspace identity.
+
 ### Recent remote sessions
 
-`recent-sessions.ts` atomically serializes at most ten remote sessions to
-`recent-sessions.json` in Electron's `userData` directory. The file contains
-plain resume credentials, the normalized server origin, opaque session routing
-key, display title, and last connection time. Launch tickets, local shell
-sessions, terminal contents, and drafts are not saved.
+`recent-sessions.ts` atomically serializes at most ten remote session references
+to `recent-sessions.json` in Electron's `userData` directory: server, account,
+target, session, title and last connection time. It contains no credentials.
+`desktopSessionId` is shared by this store, the finder and the open-pane registry.
 
-The store and open-tab registry share `remoteSessionId(server, sessionKey)`.
-Records are added or refreshed only after the broker's authenticated `hello`,
-or when explicitly opening an already connected tab. The main process derives
-identity from the sending tab; the renderer cannot choose a different server or
-session entry. Workspace snapshots contain display metadata only, never tokens.
-Selecting a recent entry activates an existing tab across windows, or uses the
-same remote view creation and WebSocket connection path as a new launch. Resume
-credentials never go through the fresh-launch `activate` operation.
+Records are refreshed after the authenticated `hello` or explicit activation.
+The main process derives identity from the pane, not renderer-supplied metadata.
+Workspace snapshots contain display metadata only. Opening a recent session uses
+`ServerAccounts.launch`, the same fresh app authorization path as the finder and
+website entry. An expired login reports an error and requires explicit sign-in.
 
-Entries survive app restarts. Remove/clear deletes saved credentials and disables
-background re-saving by the affected open tabs; a subsequent explicit Connect
-can remember them again. Forgetting a server closes its tabs and removes its
-entries. Startup also removes entries for origins that are no longer trusted.
-The store serializes concurrent mutations and app quit waits for pending writes.
-
-Expiry is enforced by the existing broker on use: resume grants last 30 days,
-while the original hosted login must remain valid. New grants do not extend
-that login. Expired or logged-out entries stay listed and show the existing
-Connection expired error; there is no background refresh or automatic sign-in.
+Remove/clear disables background re-saving by affected panes; explicit Connect
+can remember them again. Sign-out removes that server's references, and startup
+retains only references belonging to saved server accounts. Concurrent writes
+are serialized; app quit waits for pending writes.
 
 ### Local shells
 
@@ -889,6 +939,25 @@ member IDs and aggregate status from the model and pane states. A tab summary
 does not inherit a representative pane's identity, origin, error or connection
 capability. This projection is shared with DOM fixtures, keeping presentation
 tests on the production aggregation rules.
+
+The tab menu's **Split with Outpost terminal** and the **+** menu's **Outpost
+terminal** action share `session-finder.ts`. Its sandboxed native child window
+floats above terminal views without resizing or hiding them. A separate preload
+exposes only catalogue display metadata, selection and cancellation; its IPC
+checks the exact bundled main frame and accepts only an offered session ID.
+Revisioned snapshots prevent the initial load from overwriting newer results.
+The UI retains selected identity as results arrive, uses keyed rows, and renders
+at most 200 matches while searching the full catalogue. Escape, blur, parent
+closure and replacement cancel the choice and outstanding HTTP work.
+
+The split action captures a tab and pane identity and revalidates ownership after
+both selection and the asynchronous terminal-launch request. `DesktopWorkspace`
+has one opening path: activate an existing pane in its current location, or place
+it explicitly. Explicit placement attaches a new native view or transfers the
+existing live pane using the same transaction as dragging. The recent-session
+home action continues to activate a session in its current location. Fresh app
+launches use the app-authorized `/api/desktop/targets/:t/sessions/:s/connect` endpoint;
+terminal views never receive the broader app-account bearer.
 
 `tab-status.ts` renders the same status icons and text in tabs and the session
 switcher. Connecting/reconnecting and disconnected states take priority. Connected
@@ -1004,13 +1073,17 @@ output and acknowledgements. Nested splits place existing views using the shared
 tree geometry. Moving/reordering panes never redeems another grant. There is a
 32-pane limit across at most 16 workspace windows. Closing a tab explicitly destroys
 its web contents; closing a window destroys only the views it still owns. Quit
-confirmation covers tabs and drafts across all windows. Renderer failures are
+confirmation covers tabs and drafts across all windows. Shutdown has explicit
+confirmation, closing and closed states: once closing begins, new actions and
+browser callbacks cannot create panes. Pending credential commits and PTY cleanup
+finish before Electron exits. Renderer failures are
 shown per tab and do not reset the workspace or other sessions.
 
 Fresh launches for an existing tab wait in a bounded, in-memory queue until its
 renderer handles them. The preload subscribes before reading pending launches;
 only an explicit acknowledgement removes one, so loading and StrictMode cleanup
-do not lose a handoff. Exact repeats of the most recent OS link are ignored.
+do not lose a handoff. Repeated OS intents use the same session identity and
+activate the existing pane.
 
 Remote views use sandboxing, context isolation, no Node integration, no
 webviews and no popups/downloads. Top-level navigation is restricted to the
@@ -1046,8 +1119,9 @@ the remote harness is not inspected for drafts.
 Packaged apps register the protocol through Electron and installer metadata.
 macOS handles `open-url` before app readiness; Windows uses initial arguments
 and `second-instance`. A single app instance owns all workspaces; subsequent
-launches focus an existing tab or add one to the active window. Closing a remote tab or window never terminates its target session. The server
-launcher can forget a server and close its tabs. Reopening the app starts a fresh
+launches focus an existing tab or add one to the active window. Closing a remote
+tab or window never terminates its target session. Signing out revokes app access
+without terminating remote processes. Reopening the app starts a fresh
 workspace with its recent remote sessions available for explicit reconnect;
 layouts and running local shells are not restored. The app icon and Windows
 AppUserModelID belong to Outpost.
@@ -1092,8 +1166,9 @@ an empty store; there is no automatic import of earlier layouts.
   checked; tokens are HMAC-signed with the installation secret.
 - Hosted SSH uses only the account's key and known-hosts file (`-F none`, no
   agent). Connection multiplexing sockets are scoped per owner and identity.
-- Desktop confirms unknown server origins before loading their UI. Trust is
-  explicit and revocable from app home; only HTTPS and localhost HTTP qualify.
+- Desktop confirms unknown server origins before contacting them. Accepted trust
+  persists independently of login and has no management UI; declining cancels
+  only the current attempt. Only HTTPS and localhost HTTP qualify.
 - Images are limited to 16 MB, signals to 32 KiB and 120 per minute per
   connection, clipboard text to 1 MiB.
 

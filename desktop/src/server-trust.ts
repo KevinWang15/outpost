@@ -1,12 +1,16 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { desktopOrigin } from '../../shared/desktop'
+import { desktopOrigin } from '../../shared/desktopAuth'
 
-/** Explicit server trust only; reconnect credentials live separately in recent-sessions.json. */
-export class TrustedServers {
+/** Persistent first-use trust, separate from app logins and terminal grants. */
+export class ServerTrust {
   private servers = new Set<string>()
   private writes = Promise.resolve()
-  constructor(private path: string) {}
+  private prompts = new Map<string, Promise<boolean>>()
+  constructor(
+    private path: string,
+    private prompt: (origin: string) => Promise<boolean>,
+  ) {}
   async load() {
     try {
       const data: unknown = JSON.parse(await readFile(this.path, 'utf8'))
@@ -24,17 +28,27 @@ export class TrustedServers {
         throw new Error('Could not read trusted server preferences.', { cause: error })
     }
   }
-  list() {
-    return [...this.servers]
-  }
   has(origin: string) {
     return this.servers.has(origin)
   }
-  set(origin: string, trusted: boolean) {
+  ensure(value: string) {
+    const origin = desktopOrigin(value)
+    if (this.has(origin)) return Promise.resolve(true)
+    const pending = this.prompts.get(origin)
+    if (pending) return pending
+    const work = this.prompt(origin)
+      .then(async accepted => {
+        if (accepted) await this.remember(origin)
+        return accepted
+      })
+      .finally(() => this.prompts.delete(origin))
+    this.prompts.set(origin, work)
+    return work
+  }
+  private remember(origin: string) {
     const write = this.writes.then(async () => {
       const next = new Set(this.servers)
-      if (trusted) next.add(origin)
-      else next.delete(origin)
+      next.add(desktopOrigin(origin))
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
       await writeFile(this.path + '.tmp', JSON.stringify([...next]), { mode: 0o600 })
       await rename(this.path + '.tmp', this.path)

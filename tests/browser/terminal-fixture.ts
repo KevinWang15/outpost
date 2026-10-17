@@ -1,3 +1,7 @@
+import { randomBytes, createHash } from 'node:crypto'
+import type { APIRequestContext } from '@playwright/test'
+import { parseDesktopLoginCallback } from '../../shared/desktopAuth'
+import type { DesktopLaunch } from '../../shared/desktopAuth'
 import type { Page, WebSocketRoute } from '@playwright/test'
 import headless from '@xterm/headless'
 import { checkpoint } from '../../shared/terminalCheckpoint'
@@ -66,4 +70,34 @@ export function restoreEmptyTerminal(socket: WebSocketRoute) {
   } finally {
     terminal.dispose()
   }
+}
+
+/** Obtain app-owned terminal grants through the same approval/exchange API as Electron. */
+export async function appConnection(
+  request: APIRequestContext,
+  targetId: string,
+  sessionId: string,
+): Promise<DesktopLaunch> {
+  const headers = { 'x-outpost-request': '1' },
+    verifier = randomBytes(32).toString('base64url')
+  const start = await request.post('/api/desktop/authorizations', {
+    headers,
+    data: {
+      state: randomBytes(32).toString('base64url'),
+      challenge: createHash('sha256').update(verifier).digest('base64url'),
+    },
+  })
+  const { requestId } = await start.json()
+  const approval = await request.post(`/api/desktop/authorizations/${requestId}`, {
+    headers,
+    data: { allow: true, accountId: 'local' },
+  })
+  const { code } = parseDesktopLoginCallback((await approval.json()).callback)
+  const login = await request.post('/api/desktop/token', { headers, data: { code, verifier } })
+  const { token } = await login.json()
+  return (
+    await request.post(`/api/desktop/targets/${targetId}/sessions/${sessionId}/connect`, {
+      headers: { ...headers, authorization: `Bearer ${token}` },
+    })
+  ).json()
 }

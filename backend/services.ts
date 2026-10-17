@@ -17,6 +17,7 @@ export interface Services {
   installations: Installations
   tokens: ConnectTokens
   broker: TerminalBroker
+  active(owner: Owner): boolean
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
   context(request: FastifyRequest, targetId: string): Promise<TargetContext>
 }

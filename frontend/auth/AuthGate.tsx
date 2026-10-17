@@ -5,6 +5,7 @@ import type { AuthState } from '../../shared/auth'
 import { api } from '../api'
 import { AuthContext } from './useAuth'
 import AuthPage from './AuthPage'
+import { desktopReturnPath } from './returnPath'
 
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState | null>(null)
@@ -12,7 +13,20 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [path, setPath] = useState(window.location.pathname)
   const generation = useRef(0)
   const channel = useRef<BroadcastChannel | null>(null)
+  const returnTo = useRef(
+    desktopReturnPath(window.location.pathname + window.location.search) ??
+      desktopReturnPath(new URLSearchParams(window.location.search).get('returnTo')),
+  )
   const navigate = useCallback((destination: string) => {
+    if (returnTo.current) {
+      if (destination === pagePaths.workspace) {
+        window.location.assign(returnTo.current)
+        return
+      }
+      const url = new URL(destination, window.location.origin)
+      url.searchParams.set('returnTo', returnTo.current)
+      destination = url.pathname + url.search
+    }
     window.history.pushState(null, '', destination)
     setPath(new URL(destination, window.location.href).pathname)
   }, [])

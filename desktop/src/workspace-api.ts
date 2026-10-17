@@ -1,6 +1,7 @@
 import type { TerminalPreferences, TerminalPaneState } from '../../shared/desktop'
 import type { ShellProfileSummary } from '../../shared/localTerminal'
 import type { RecentSessionSummary } from './recent-sessions'
+import type { ServerAccountsSnapshot } from './server-accounts-api'
 import type { WorkspacePanel, PaneNode, SplitDirection, WorkspaceItem } from './workspace-model'
 
 export interface PaneSummary extends TerminalPaneState {
@@ -44,7 +45,7 @@ export interface WorkspaceSnapshot {
   tree: PaneNode | null
   zoomed: boolean
   panel: WorkspacePanel
-  servers: string[]
+  servers: ServerAccountsSnapshot
   recentSessions: RecentSessionSummary[]
   preferences: TerminalPreferences
   shells: ShellProfileSummary[]
@@ -75,8 +76,10 @@ export interface WorkspaceBridge {
   resizeSplit(id: number, value: number): Promise<void>
   tabMenu(id: number): Promise<void>
   reloadPane(id: number): Promise<void>
-  openServer(origin: string): Promise<boolean>
-  forgetServer(origin: string): Promise<void>
+  loginServer(origin: string): Promise<void>
+  cancelServerLogin(origin: string): Promise<void>
+  logoutServer(origin: string): Promise<void>
+  refreshServers(): Promise<void>
   openRecent(id: string): Promise<void>
   removeRecent(id: string): Promise<void>
   clearRecent(): Promise<void>

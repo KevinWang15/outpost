@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import test from 'node:test'
 import type { Session, SoftwareReport, Target } from '../../shared/model'
-import type { ConnectResponse } from '../../shared/protocol'
+import type { TerminalTicket } from '../../shared/protocol'
 import { createApp } from '../../backend/app'
 import { LocalDeployment } from '../../backend/deployment'
 import { api, fixtureHome, removeHome, TerminalClient } from './helpers'
@@ -61,12 +61,11 @@ test(
     await writeFile(join(project, 'capture-input'), '')
 
     const connect = async () => {
-      const { token, url } = await request<ConnectResponse>(
+      const { token } = await request<TerminalTicket>(
         'POST',
         `/targets/${target.id}/sessions/${session.id}/connect`,
-        { terminal: 'web' },
+        {},
       )
-      assert.equal(url, null)
       return token
     }
     const token = await connect()
@@ -261,9 +260,7 @@ test(
       { name: 'First', rootDir: '~/first', tool: 'codex', createDirectory: true },
       201,
     )
-    const { token } = await request<ConnectResponse>('POST', `/targets/${target.id}/sessions/${session.id}/connect`, {
-      terminal: 'web',
-    })
+    const { token } = await request<TerminalTicket>('POST', `/targets/${target.id}/sessions/${session.id}/connect`, {})
     const client = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`)
     clients.push(client)
     await client.message('ready')

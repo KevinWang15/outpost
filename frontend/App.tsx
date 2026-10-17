@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useState } from 'react'
 import { LoaderCircle, LogOut, Monitor, Plus, Server, Settings2, UserRound } from 'lucide-react'
+import { useDesktopEntry } from './desktop/useDesktopEntry'
 import type { Target, TargetInput } from '../shared/model'
 import { api } from './api'
 import AccountDialog from './auth/AccountDialog'
@@ -52,6 +53,7 @@ function reducer(state: Workspace, action: Action): Workspace {
 
 export default function App() {
   const { mode, user, signOut } = useAuth()
+  const openDesktop = useDesktopEntry()
   const [{ targets, selected, visit }, dispatch] = useReducer(reducer, { targets: null, selected: '', visit: 0 })
   const [error, setError] = useState('')
   const [adding, setAdding] = useState(false),
@@ -117,6 +119,19 @@ export default function App() {
           })}
         </nav>
         <div className="sidebar-footer">
+          <button
+            className="connection-preferences"
+            onClick={() => {
+              try {
+                openDesktop()
+              } catch (error) {
+                setError(error instanceof Error ? error.message : 'Could not open Outpost Desktop.')
+              }
+            }}
+          >
+            <Monitor size={16} />
+            Connect Outpost app
+          </button>
           <button className="connection-preferences" onClick={() => setConnectionPreferences(true)}>
             <Settings2 size={16} />
             Connection preferences

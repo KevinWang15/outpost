@@ -1,5 +1,6 @@
+import type { Target, Session } from '../../shared/model'
 import { expect, test, type Page } from '@playwright/test'
-import { desktopTerminal } from './terminal-fixture'
+import { desktopTerminal, appConnection } from './terminal-fixture'
 
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)])
 
@@ -72,7 +73,7 @@ test('add a target, create a session, and work in the web terminal', async ({ pa
   await expect(row).toContainText('Stopped')
 })
 
-test('Outpost Desktop uses the launch flow and retries with a fresh ticket', async ({ page, context }) => {
+test('Outpost Desktop hands off a session reference and uses app-owned access', async ({ page, context }) => {
   await addTarget(page, 'Desktop app box')
   await createSession(page, 'Desktop app session', '~/desktop-app-project')
   await page
@@ -81,24 +82,25 @@ test('Outpost Desktop uses the launch flow and retries with a fresh ticket', asy
     .getByRole('button', { name: 'Connect' })
     .click()
   const connect = page.getByRole('dialog', { name: 'Connect to Desktop app session' })
-  const response = () =>
-    page.waitForResponse(response => response.url().endsWith('/connect') && response.request().method() === 'POST')
-  const first = response()
+  const requests: string[] = []
+  page.on('request', request => {
+    if (request.url().endsWith('/connect')) requests.push(request.url())
+  })
   await connect.getByRole('button', { name: /Outpost Desktop/ }).click()
-  const firstTicket = await (await first).json()
-  await expect(connect.getByText('Opening Outpost Desktop…')).toBeVisible()
-  const retry = response()
+  await expect(connect.getByText('Continue in Outpost Desktop')).toBeVisible()
   await connect.getByRole('button', { name: 'Open Outpost Desktop again' }).click()
-  const next = await (await retry).json()
-  expect(next.token).not.toBe(firstTicket.token)
-  const payload = JSON.parse(Buffer.from(next.url.slice('outpost://connect/'.length), 'base64url').toString())
-  expect(payload.terminal).toBe('desktop')
-  // The OS launcher supplies the ticket through the preload; use the real broker.
+  expect(requests).toEqual([])
+  const targets = (await (await page.request.get('/api/targets')).json()) as Target[]
+  const target = targets.find(item => item.name === 'Desktop app box')!
+  const { sessions } = (await (await page.request.get(`/api/targets/${target.id}/sessions`)).json()) as {
+    sessions: Session[]
+  }
+  const session = sessions.find(item => item.name === 'Desktop app session')!
   const app = await context.newPage()
-  await desktopTerminal(app, payload.token)
+  const launch = await appConnection(app.request, target.id, session.id)
+  await desktopTerminal(app, launch.token)
   await app.goto('/terminal/desktop')
   await expect(app.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
-  await expect(connect.getByText('Connected in Outpost Desktop')).toBeVisible()
   await app.close()
 })
 

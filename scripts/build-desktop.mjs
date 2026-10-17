@@ -16,6 +16,7 @@ await build({
     'desktop/src/preload.ts',
     'desktop/src/local-preload.ts',
     'desktop/src/workspace-preload.ts',
+    'desktop/src/session-finder-preload.ts',
   ],
   outdir: 'desktop/dist',
   outExtension: { '.js': '.cjs' },
@@ -29,15 +30,16 @@ await build({
 })
 await build({
   absWorkingDir,
-  entryPoints: ['desktop/src/workspace-ui.ts'],
-  outfile: 'desktop/dist/workspace-ui.js',
+  entryPoints: ['desktop/src/workspace-ui.ts', 'desktop/src/session-finder-ui.ts'],
+  outdir: 'desktop/dist',
   bundle: true,
   platform: 'browser',
   target: 'chrome140',
   format: 'iife',
   logLevel: 'info',
 })
-for (const file of ['workspace.html', 'workspace.css']) await cp(new URL('src/' + file, root), new URL(file, dist))
+for (const file of ['workspace.html', 'workspace.css', 'session-finder.html', 'session-finder.css'])
+  await cp(new URL('src/' + file, root), new URL(file, dist))
 // Package the same terminal screen used by the server, with a local PTY adapter.
 await buildFrontend({
   configFile: false,

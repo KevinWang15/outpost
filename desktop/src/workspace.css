@@ -516,7 +516,8 @@ dd {
 }
 .pane-divider {
   position: absolute;
-  background: #0f172a;
+  /* Let pane headers fill the grab area beneath the one-pixel separator. */
+  background: transparent;
   z-index: 1;
   cursor: col-resize;
   touch-action: none;
@@ -667,4 +668,71 @@ dd {
   background: #26364e;
   line-height: 16px;
   text-align: center;
+}
+
+.server-account .row-main {
+  min-width: 0;
+  flex: 1;
+  padding: 8px;
+}
+.server-account .row-main small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.server-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  border: 1px solid #344258;
+  border-radius: 5px;
+  padding: 5px 8px;
+}
+.server-status svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.server-account[data-status='connected'] .server-status {
+  color: #34d399;
+}
+.server-account[data-status='connecting'] .server-status {
+  color: #60a5fa;
+}
+.server-account[data-status='connecting'] .server-status svg {
+  animation: server-connecting 1s linear infinite;
+}
+.server-account[data-status='expired'] .server-status {
+  color: #fbbf24;
+}
+@keyframes server-connecting {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .server-status svg {
+    animation: none !important;
+  }
+}
+
+.server-sign-in {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+.server-sign-in span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.server-sign-in button {
+  flex: none;
 }

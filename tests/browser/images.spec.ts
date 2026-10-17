@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import type { Session, Target } from '../../shared/model'
 import type { UploadedImage } from '../../shared/images'
-import { desktopTerminal } from './terminal-fixture'
+import { desktopTerminal, appConnection } from './terminal-fixture'
 
 const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 32, 10])
 
@@ -25,11 +25,8 @@ async function openSession(page: Page, mode: 'web' | 'desktop') {
   const session: Session = await response.json()
   await writeFile(join(session.rootDir, 'capture-input'), '')
   if (mode === 'desktop') {
-    const connection = await page.request.post(`/api/targets/${target.id}/sessions/${session.id}/connect`, {
-      headers,
-      data: { terminal: 'desktop' },
-    })
-    await desktopTerminal(page, (await connection.json()).token)
+    const connection = await appConnection(page.request, target.id, session.id)
+    await desktopTerminal(page, connection.token)
     await page.goto('/terminal/desktop')
     await page.getByRole('button', { name: 'Show terminal toolbar' }).click()
   } else await page.goto(`/terminal?target=${target.id}&session=${session.id}`)

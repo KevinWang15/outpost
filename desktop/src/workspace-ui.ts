@@ -7,6 +7,7 @@ import { paneControls } from './pane-ui'
 import { reconcileElements } from './keyed-elements'
 import { paneActionShortcuts, tabActionShortcuts } from './workspace-shortcuts'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
+import { serverAccountsControls } from './server-accounts-ui'
 
 declare global {
   interface Window {
@@ -42,13 +43,13 @@ let panelKey = ''
 let selected = 0
 let matches: PaneSummary[] = []
 const tabNodes = new Map<number, HTMLElement>()
-const serverNodes = new Map<string, HTMLElement>()
 const recentNodes = new Map<string, HTMLElement>()
 const sessionNodes = new Map<number, HTMLElement>()
 const tabs = el('tabs')
 const search = el<HTMLInputElement>('session-search')
 workspaceDragging(document.body, api, run)
 const renderPanes = paneControls(el('stage'), api, run)
+const renderServerAccounts = serverAccountsControls(api, run)
 let geometryFrame = 0
 let scrollFrame = 0
 const dragSpace = document.querySelector<HTMLElement>('.window-drag')!
@@ -181,31 +182,6 @@ function renderTabs(panel: WorkspacePanel) {
   if (drag?.scroll) scrollFrame = requestAnimationFrame(scroll)
   reportGeometry()
 }
-function renderServers() {
-  const list = el('servers')
-  reconcileElements(
-    list,
-    serverNodes,
-    state!.servers,
-    origin => origin,
-    origin => {
-      const row = document.createElement('li')
-      const open = button(
-        origin + ' ↗',
-        () => {
-          el<HTMLInputElement>('server').value = origin
-          el<HTMLFormElement>('server-form').requestSubmit()
-        },
-        'row-main',
-      )
-      const forget = button('Forget', () => run(api.forgetServer(origin)))
-      forget.setAttribute('aria-label', `Forget ${origin} and close its panes`)
-      row.append(open, forget)
-      return row
-    },
-  )
-  el('no-servers').hidden = state!.servers.length > 0
-}
 function renderRecents() {
   const active = document.activeElement
   const hadFocus =
@@ -289,7 +265,7 @@ function render(next: WorkspaceSnapshot) {
   const panel: WorkspacePanel = next.panel ?? (next.activePaneId === null ? 'sessions' : null)
   state = next
   renderTabs(panel)
-  renderServers()
+  renderServerAccounts(state!.servers)
   renderRecents()
   renderMatches()
   renderStage()
@@ -399,21 +375,6 @@ window.addEventListener('keydown', event => {
     run(api.panel(null))
   }
 })
-el<HTMLFormElement>('server-form').onsubmit = async event => {
-  event.preventDefault()
-  const submit = el('server-form').querySelector<HTMLButtonElement>('button[type=submit]')!
-  submit.disabled = true
-  try {
-    if (await api.openServer(el<HTMLInputElement>('server').value.trim()))
-      el('open-result').textContent =
-        'Choose a session in your browser, then Connect → Outpost Desktop. It will appear here as a new tab.'
-  } catch {
-    el('open-result').textContent =
-      'Could not open this server. Use HTTPS, or HTTP on localhost, and check the address.'
-  } finally {
-    submit.disabled = false
-  }
-}
 el<HTMLFormElement>('preferences-form').onsubmit = event => {
   event.preventDefault()
   run(
@@ -444,7 +405,8 @@ run(
       modifier = mac ? '⌘' : 'Ctrl+Shift+'
     const tabShortcuts = tabActionShortcuts(value.platform)
     const clearShortcut = clearScreenShortcut(mac)
-    el('new-tab').title = `${tabShortcuts.newTab.label} (${tabShortcuts.newTab.keys}; right-click to choose a shell)`
+    el('new-tab').title =
+      `${tabShortcuts.newTab.label} (${tabShortcuts.newTab.keys}; right-click for shells or Outpost sessions)`
     el('open-local').textContent = `Open local terminal (${tabShortcuts.newTab.keys})`
     const shortcuts = [
       ['New window', mac ? '⌘Shift+N' : 'Ctrl+Shift+N'],

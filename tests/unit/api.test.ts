@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import type { Session, Target } from '../../shared/model'
-import type { ConnectResponse } from '../../shared/protocol'
+import type { TerminalTicket } from '../../shared/protocol'
 import { createApp } from '../../backend/app'
 import { ConnectTokens } from '../../backend/terminal/tokens'
 import { imageMediaTypes, maxImageBytes } from '../../shared/images'
@@ -124,8 +124,8 @@ test('targets and sessions are validated strictly', async t => {
   assert.equal((await call('GET', '/targets/missing/sessions')).status, 404)
 })
 
-test('connect returns a web token or an outpost:// link for the chosen terminal', async t => {
-  const { port, call } = await setup(t)
+test('web connections issue scoped tickets and reject terminal-choice payloads', async t => {
+  const { call } = await setup(t)
   const { body: target } = (await call('POST', '/targets', {
     kind: 'ssh',
     name: 'dev',
@@ -139,23 +139,8 @@ test('connect returns a web token or an outpost:// link for the chosen terminal'
   })) as { body: Session }
   const path = `/targets/${target.id}/sessions/${session.id}/connect`
   assert.equal((await call('POST', path, { terminal: 'kitty' })).status, 400)
-  const web = (await call('POST', path, { terminal: 'web' })).body as ConnectResponse
-  assert.equal(web.url, null)
-  for (const terminal of ['desktop']) {
-    const connection = (await call('POST', path, { terminal })).body as ConnectResponse
-    const { sessionKey, ...link } = JSON.parse(
-      Buffer.from(connection.url!.slice('outpost://connect/'.length), 'base64url').toString(),
-    )
-    assert.match(sessionKey, /^[A-Za-z0-9_-]{43}$/)
-    assert.deepEqual(link, {
-      v: 2,
-      server: `http://127.0.0.1:${port}`,
-      token: connection.token,
-      terminal,
-      title: 'Build · dev',
-    })
-    assert.deepEqual((await call('GET', `/connections/${connection.id}`)).body, { status: 'pending' })
-  }
+  const web = (await call('POST', path, {})).body as TerminalTicket
+  assert.ok(web.token)
 })
 
 test('fork validates input, resolves the source on its target, and inherits launch settings', async t => {
@@ -204,9 +189,9 @@ test('the broker relays a terminal and reports attach failures', async t => {
     rootDir: '~/p',
     tool: 'claude',
   })) as { body: Session }
-  const connect = async (terminal = 'desktop') =>
-    (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal })).body as ConnectResponse
-  const { token, id } = await connect()
+  const connect = async () =>
+    (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, {})).body as TerminalTicket
+  const { token } = await connect()
   const client = new TerminalClient(
     `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}&cols=120&rows=40`,
   )
@@ -217,7 +202,6 @@ test('the broker relays a terminal and reports attach failures', async t => {
   await client.text('started 120x40')
   assert.ok(!client.output.includes('Welcome to the target'), 'login noise before the relay is not shown')
   assert.deepEqual(sessions.attached.at(-1), { targetId: target.id, id: session.id, cols: 120, rows: 40 })
-  assert.deepEqual((await call('GET', `/connections/${id}`)).body, { status: 'connected' })
   client.input('hello')
   await client.text('echo:hello')
   client.send({ type: 'resize', cols: 100, rows: 30 })
@@ -263,9 +247,8 @@ test('the broker relays a terminal and reports attach failures', async t => {
     rootDir: '~/p',
     tool: 'claude',
   })) as { body: Session }
-  const failed = (
-    await failing.call('POST', `/targets/${other.id}/sessions/${otherSession.id}/connect`, { terminal: 'web' })
-  ).body as ConnectResponse
+  const failed = (await failing.call('POST', `/targets/${other.id}/sessions/${otherSession.id}/connect`, {}))
+    .body as TerminalTicket
   const broken = new TerminalClient(
     `ws://127.0.0.1:${failing.port}/api/terminal?token=${encodeURIComponent(failed.token)}`,
   )
@@ -286,9 +269,8 @@ test('clients speaking another protocol version are told to update, without spen
     rootDir: '~/p',
     tool: 'claude',
   })) as { body: Session }
-  const { token } = (
-    await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, { terminal: 'desktop' })
-  ).body as ConnectResponse
+  const { token } = (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, {}))
+    .body as TerminalTicket
   const base = `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`
   const page = new TerminalClient(`${base}&protocol=`)
   t.after(() => page.socket.terminate())

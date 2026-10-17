@@ -30,15 +30,6 @@ test('tampered, foreign and expired tokens are refused', t => {
   assert.equal(tokens.redeem(token), null)
 })
 
-test('connection status is visible only to its owner', () => {
-  const tokens = new ConnectTokens('a'.repeat(64))
-  const { id } = tokens.issue(grant)
-  assert.equal(tokens.status(owner, id), 'pending')
-  tokens.markConnected(id, owner)
-  assert.equal(tokens.status(owner, id), 'connected')
-  assert.equal(tokens.status({ userId: 'someone', loginId: 'x' }, id), 'pending')
-})
-
 test('upload authorization only accepts current resume grants and never consumes launch tickets', t => {
   const tokens = new ConnectTokens('a'.repeat(64))
   const launch = tokens.issue(grant)

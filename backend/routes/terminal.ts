@@ -27,7 +27,7 @@ export function terminalRoutes(app: FastifyInstance, services: Services) {
         onRequest: async request => {
           const authorization = request.headers.authorization
           const grant = authorization?.startsWith('Bearer ') ? services.tokens.authorize(authorization.slice(7)) : null
-          if (!grant || !services.deployment.active(grant.owner))
+          if (!grant || !services.active(grant.owner))
             throw new AppError('This terminal authorization expired. Connect again from Outpost.', 401)
           grants.set(request, grant)
         },
@@ -38,7 +38,7 @@ export function terminalRoutes(app: FastifyInstance, services: Services) {
           const mediaType = request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase()
           if (!Buffer.isBuffer(request.body) || !(imageMediaTypes as readonly string[]).includes(mediaType ?? ''))
             throw new AppError('Use a PNG, JPEG, GIF, or WebP image.', 415)
-          if (!services.deployment.active(grant.owner)) throw new AppError('This terminal authorization expired.', 401)
+          if (!services.active(grant.owner)) throw new AppError('This terminal authorization expired.', 401)
           const context = await services.resolve(grant.owner, grant.targetId)
           return services.sessions.uploadImage(
             context,

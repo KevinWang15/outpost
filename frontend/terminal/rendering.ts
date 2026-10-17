@@ -1,6 +1,6 @@
 import type { Terminal } from '@xterm/xterm'
 import type { ServerMessage } from '../../shared/protocol'
-import { CheckpointReader, remoteTerminalReplies } from '../../shared/terminalCheckpoint'
+import { CheckpointReader, clearTerminal, remoteTerminalReplies } from '../../shared/terminalCheckpoint'
 import { terminalSize } from '../../shared/terminalService'
 
 type ScreenUpdate = Extract<ServerMessage, { type: 'restore' | 'geometry' | 'clear' }>
@@ -99,7 +99,7 @@ export class TerminalRenderer implements TerminalRendering {
       if (message.type === 'clear') {
         if (this.phase !== 'live') throw new Error('Clear arrived before restoration finished')
         this.terminal.clearSelection()
-        this.terminal.clear()
+        clearTerminal(this.terminal)
         this.screenCleared()
       } else if (message.type === 'geometry') {
         if (this.phase !== 'live' || !terminalSize(message.cols, message.rows))

@@ -72,16 +72,4 @@ export async function streamInstallation(
   }
 }
 
-export function readImage(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const url = reader.result as string
-      resolve(url.slice(url.indexOf(',') + 1))
-    }
-    reader.onerror = () => reject(new Error('Could not read the image file'))
-    reader.readAsDataURL(file)
-  })
-}
-
 export const copyText = (text: string) => navigator.clipboard.writeText(text)

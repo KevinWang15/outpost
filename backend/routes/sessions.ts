@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { desktopOrigin, type DesktopLaunch } from '../../shared/desktop'
-import type { ConversationSearch, SessionForkInput, SessionImageInput, SessionInput } from '../../shared/model'
+import type { ConversationSearch, SessionForkInput, SessionInput } from '../../shared/model'
 import type { ConnectRequest, ConnectResponse, ConnectionStatus } from '../../shared/protocol'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
@@ -11,7 +11,6 @@ import {
   connectInput,
   conversationSearch,
   directoryQuery,
-  imageInput,
   sessionInput,
   sessionForkInput,
 } from '../../shared/schemas'
@@ -70,16 +69,6 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
         await services.context(request, request.params.targetId),
         request.params.sessionId,
         request.body.completionId,
-      ),
-  )
-  app.post<{ Params: Params; Body: SessionImageInput }>(
-    `${base}/:sessionId/image`,
-    { bodyLimit: 24 * 1024 * 1024, schema: { body: imageInput } },
-    async request =>
-      sessions.pasteImage(
-        await services.context(request, request.params.targetId),
-        request.params.sessionId,
-        request.body,
       ),
   )
   app.post<{ Params: Params; Body: ConnectRequest }>(

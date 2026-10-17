@@ -22,7 +22,7 @@ const text = (value: unknown) => typeof value === 'string' && value.length > 0 &
 
 /** Launch tokens start one connection (short-lived, single use, safe to put in
  * an outpost:// URL). Resume tokens are returned over the WebSocket and used
- * only to reconnect that socket, never in launcher links. Both are bound to
+ * for reconnection and image uploads, never in launcher links. Both are bound to
  * one owner, target and session. */
 export class ConnectTokens {
   private used = new Map<string, number>()
@@ -77,8 +77,8 @@ export class ConnectTokens {
       e: Date.now() + resumeLifetime,
     })
   }
-  /** Verify a token; a launch token is consumed. Returns null when invalid, expired or reused. */
-  redeem(token: string, expectedGrant?: Grant): { id: string; kind: Payload['k']; grant: Grant } | null {
+  private verify(token: string) {
+    if (token.length > 8192) return null
     const [data, signature, extra] = token.split('.')
     if (!data || !signature || extra !== undefined) return null
     const expected = Buffer.from(this.sign(data)),
@@ -98,31 +98,43 @@ export class ConnectTokens {
       payload.e <= Date.now()
     )
       return null
-    // Reusing an attached tab must not consume a ticket for another session or
-    // login. The desktop launch envelope is only a routing hint.
-    if (
-      expectedGrant &&
-      (payload.k !== 'launch' ||
-        payload.u !== expectedGrant.owner.userId ||
-        payload.l !== expectedGrant.owner.loginId ||
-        payload.t !== expectedGrant.targetId ||
-        payload.s !== expectedGrant.sessionId)
-    )
-      return null
-    this.prune()
-    if (payload.k === 'launch') {
-      if (this.used.has(payload.i)) return null
-      this.used.set(payload.i, payload.e)
-    }
     return {
       id: payload.i,
       kind: payload.k,
+      expires: payload.e,
       grant: {
         owner: { userId: payload.u, loginId: payload.l },
         targetId: payload.t,
         sessionId: payload.s,
       },
     }
+  }
+  /** Authorize ancillary requests without accepting or consuming launch tickets. */
+  authorize(token: string): Grant | null {
+    const verified = this.verify(token)
+    return verified?.kind === 'resume' ? verified.grant : null
+  }
+  /** Verify a token; a launch token is consumed. */
+  redeem(token: string, expectedGrant?: Grant) {
+    const verified = this.verify(token)
+    if (!verified) return null
+    const { id, kind, grant, expires } = verified
+    // A launch routed to an existing tab must belong to that exact session/login.
+    if (
+      expectedGrant &&
+      (kind !== 'launch' ||
+        grant.owner.userId !== expectedGrant.owner.userId ||
+        grant.owner.loginId !== expectedGrant.owner.loginId ||
+        grant.targetId !== expectedGrant.targetId ||
+        grant.sessionId !== expectedGrant.sessionId)
+    )
+      return null
+    this.prune()
+    if (kind === 'launch') {
+      if (this.used.has(id)) return null
+      this.used.set(id, expires)
+    }
+    return { id, kind, grant }
   }
   markConnected(id: string, owner: Owner) {
     this.connected.set(id, { userId: owner.userId, until: Date.now() + launchLifetime })

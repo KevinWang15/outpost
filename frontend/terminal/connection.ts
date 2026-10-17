@@ -1,4 +1,3 @@
-import type { ImageMediaType } from '../../shared/model'
 import type { CloseReason } from '../../shared/protocol'
 
 export type TerminalState =
@@ -19,7 +18,7 @@ export interface TerminalConnection {
   setActive?(active: boolean): void
   submit(data: string): Promise<void>
   clear(): Promise<void>
-  pasteImage(data: string, mediaType: ImageMediaType): Promise<string>
+  pasteImage(file: File): Promise<string>
   resume?(): void
   activate?(token: string): Promise<void>
   acknowledge?(completionId: string): Promise<void>

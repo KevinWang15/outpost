@@ -10,7 +10,6 @@ import { Menu } from '../ui/Menu'
 import { useToast } from '../ui/toast-context'
 import FinderDialog from './FinderDialog'
 import ForkDialog from './ForkDialog'
-import ImageDialog from './ImageDialog'
 import SessionDialog from './SessionDialog'
 import SessionTable from './SessionTable'
 import SoftwarePanel from './SoftwarePanel'
@@ -22,7 +21,6 @@ import { address } from './labels'
 type Panel =
   | { kind: 'session'; conversation: ConversationMatch | null }
   | { kind: 'finder' }
-  | { kind: 'image'; session: Session }
   | { kind: 'fork'; session: Session }
   | { kind: 'edit' }
   | { kind: 'remove' }
@@ -127,7 +125,6 @@ export default function TargetView({
         onRefresh={() => void refresh()}
         onCreate={() => setPanel({ kind: 'session', conversation: null })}
         onConnect={connect}
-        onImage={session => setPanel({ kind: 'image', session })}
         onFork={session => setPanel({ kind: 'fork', session })}
         onCheck={session => void check(session)}
         onTerminate={session => setPanel({ kind: 'terminate', session })}
@@ -179,7 +176,6 @@ export default function TargetView({
           onClose={connectFlow.close}
         />
       )}
-      {panel?.kind === 'image' && <ImageDialog targetId={target.id} session={panel.session} onClose={close} />}
       {panel?.kind === 'edit' && (
         <TargetDialog
           target={target}

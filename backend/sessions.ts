@@ -4,14 +4,12 @@ import type {
   DirectorySuggestions,
   Session,
   SessionForkInput,
-  SessionImage,
-  SessionImageInput,
   SessionInput,
   SessionList,
   SessionLaunchOptions,
   Target,
 } from '../shared/model'
-import { imageExtensions, maxImageBytes } from '../shared/model'
+import { imageExtensions, imageProblem, type ImageMediaType, type UploadedImage } from '../shared/images'
 import type { Owner } from './deployment'
 import { AppError } from './errors'
 import { runProtocol, type Command } from './process'
@@ -36,23 +34,13 @@ type Request =
   | ({ action: 'fork'; id: string } & SessionForkInput)
   | { action: 'get' | 'terminate' | 'delete'; id: string }
   | { action: 'acknowledge'; id: string; completionId: string }
-  | { action: 'paste-image'; id: string; extension: string }
+  | { action: 'upload-image'; id: string; extension: string; size: number }
 
 export function launchOptions(input: SessionInput): SessionLaunchOptions {
   const options = { env: input.env ?? {}, args: input.args ?? '' }
   if (Buffer.byteLength(JSON.stringify(options)) > 16 * 1024)
     throw new AppError('Environment variables and arguments must fit within 16 KiB.', 400)
   return options
-}
-
-export function imageData(image: SessionImageInput) {
-  const extension = imageExtensions[image.mediaType]
-  if (!extension) throw new AppError('Unsupported image type. Use a PNG, JPEG, GIF, or WebP image.', 400)
-  const data = image.data
-  if (data.length > Math.ceil(maxImageBytes / 3) * 4) throw new AppError('Images are limited to 16 MB.', 413)
-  if (data.length < 8 || data.length % 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
-    throw new AppError('Invalid image data', 400)
-  return { extension, data }
 }
 
 export interface SessionService {
@@ -63,7 +51,13 @@ export interface SessionService {
   acknowledge(context: TargetContext, id: string, completionId: string): Promise<Session>
   terminate(context: TargetContext, id: string): Promise<Session>
   remove(context: TargetContext, id: string): Promise<void>
-  pasteImage(context: TargetContext, id: string, image: SessionImageInput): Promise<SessionImage>
+  uploadImage(
+    context: TargetContext,
+    id: string,
+    data: Buffer,
+    mediaType: ImageMediaType,
+    signal: AbortSignal,
+  ): Promise<UploadedImage>
   directories(context: TargetContext, path: string, signal?: AbortSignal): Promise<DirectorySuggestions>
   search(context: TargetContext, input: ConversationSearch, signal?: AbortSignal): Promise<ConversationResults>
   /** The relay command for one terminal connection; see TerminalBroker. */
@@ -76,11 +70,11 @@ export class SessionClient implements SessionService {
     const operation = runtimeOperation(request)
     return { ...transport.runtime(operation.script), input: operation.input }
   }
-  private run<T>(context: TargetContext, request: Request, signal?: AbortSignal, stdin = '') {
+  private run<T>(context: TargetContext, request: Request, signal?: AbortSignal, stdin: string | Uint8Array = '') {
     return runProtocol<T>(this.command(context, request), stdin, {
       signal,
       env: this.env,
-      timeoutMs: request.action === 'fork' ? 120_000 : undefined,
+      timeoutMs: ['fork', 'upload-image'].includes(request.action) ? 120_000 : undefined,
     })
   }
   list(context: TargetContext, signal?: AbortSignal) {
@@ -110,9 +104,20 @@ export class SessionClient implements SessionService {
   search(context: TargetContext, input: ConversationSearch, signal?: AbortSignal) {
     return this.run<ConversationResults>(context, { action: 'coding-search', ...input }, signal)
   }
-  pasteImage(context: TargetContext, id: string, image: SessionImageInput) {
-    const { extension, data } = imageData(image)
-    return this.run<SessionImage>(context, { action: 'paste-image', id, extension }, undefined, data)
+  uploadImage(context: TargetContext, id: string, data: Buffer, mediaType: ImageMediaType, signal: AbortSignal) {
+    const problem = imageProblem({ type: mediaType, size: data.length })
+    if (problem) throw new AppError(problem, 400)
+    return this.run<UploadedImage>(
+      context,
+      {
+        action: 'upload-image',
+        id,
+        extension: imageExtensions[mediaType],
+        size: data.length,
+      },
+      signal,
+      data,
+    )
   }
   attach(context: TargetContext, id: string, cols: number, rows: number) {
     return this.command(context, { action: 'attach', id, cols, rows })

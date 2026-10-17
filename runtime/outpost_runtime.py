@@ -1,7 +1,6 @@
 """Per-operation target management, sent locally or through SSH. Sessions belong to outpost-terminal."""
 
 import base64
-import binascii
 import datetime
 import errno
 import fcntl
@@ -335,31 +334,20 @@ def same_process(process):
     return current is not None and current['start'] == process['start']
 
 
-def decode_image(extension, encoded):
-    if extension not in IMAGE_EXTENSIONS:
-        raise ValueError('Unsupported image type. Use a PNG, JPEG, GIF, or WebP image.')
-    if not isinstance(encoded, (str, bytes)) or len(encoded) > ((MAX_IMAGE_BYTES + 2) // 3) * 4:
-        raise ValueError('Images are limited to 16 MB.')
-    encoded = encoded.encode() if isinstance(encoded, str) else encoded
-    try:
-        data = base64.b64decode(encoded, validate=True)
-    except binascii.Error:
-        raise ValueError('Invalid image data') from None
-    if not data or base64.b64encode(data) != encoded:
-        raise ValueError('Invalid image data')
-    if len(data) > MAX_IMAGE_BYTES:
-        raise ValueError('Images are limited to 16 MB.')
-    return data
-
-
 def save_image(session, extension, data):
     directory = STATE / 'clipboard' / session['id']
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / (
         datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S-%f-') + uuid.uuid4().hex + '.' + extension
     )
-    with destination.open('xb') as stream:
-        stream.write(data)
+    pending = destination.with_suffix('.part')
+    try:
+        with pending.open('xb') as stream:
+            pending.chmod(0o600)
+            stream.write(data)
+        pending.replace(destination)
+    finally:
+        pending.unlink(missing_ok=True)
     # Keep only the newest uploads per session.
     for stale in sorted(directory.iterdir())[:-20]:
         try:
@@ -369,23 +357,20 @@ def save_image(session, extension, data):
     return destination
 
 
-def paste_reference(session, reference):
-    result = terminal.request(socket_name(session), {'type': 'paste', 'data': reference})
-    if not result.get('ok'):
-        raise ValueError('The image was saved but could not be pasted.')
-    try:
-        activity(session).input()
-    except (OSError, ValueError):
-        pass
-
-
-def paste_image(session, extension, encoded):
-    path = save_image(session, extension, decode_image(extension, encoded))
+def upload_image(session, request):
+    extension, size = request.get('extension'), request.get('size')
+    if extension not in IMAGE_EXTENSIONS:
+        fail('Unsupported image type. Use a PNG, JPEG, GIF, or WebP image.')
+    if type(size) is not int or not 0 < size <= MAX_IMAGE_BYTES:
+        fail('Images must be between 1 byte and 16 MB.', 413)
+    # Read exactly one bounded raw body; never strip binary whitespace or
+    # allocate a file for a truncated upload. Saving does not touch the PTY.
+    data = sys.stdin.buffer.read(size + 1)
+    if len(data) != size:
+        fail('Incomplete or invalid image upload.')
+    path = save_image(session, extension, data)
     reference = CODING_ADAPTERS[session['tool']].image_reference(str(path))
-    injected = alive(session)
-    if injected:
-        paste_reference(session, reference)
-    return {'path': str(path), 'reference': reference, 'injected': injected}
+    return {'path': str(path), 'reference': reference}
 
 
 def terminate_session(session):
@@ -535,11 +520,6 @@ class AttachHooks:
 
     def acknowledge(self, completion_id):
         self.observer.acknowledge(completion_id, alive(self.session))
-
-    def paste_image(self, extension, encoded):
-        path = save_image(self.session, extension, decode_image(extension, encoded))
-        reference = CODING_ADAPTERS[self.session['tool']].image_reference(str(path))
-        return {'reference': reference}
 
 
 def attach_session(session, cols, rows):
@@ -731,6 +711,13 @@ def main():
     if action in ('create', 'fork'):
         respond(create_session(request))
         return
+    if action == 'upload-image':
+        # Registry writes are atomic. Never hold its lock during file transfer.
+        session = next((s for s in read_registry()['sessions'] if s['id'] == request.get('id')), None)
+        if session is None:
+            fail('Session not found', 404)
+        respond(upload_image(session, request))
+        return
     with registry_lock():
         data = read_registry()
         sessions = data['sessions']
@@ -748,15 +735,6 @@ def main():
                     fail('Invalid completion ID')
                 activity(session).acknowledge(token, alive(session))
                 result = describe(session)
-            elif action == 'paste-image':
-                try:
-                    result = paste_image(
-                        session,
-                        request.get('extension'),
-                        sys.stdin.buffer.read(((MAX_IMAGE_BYTES + 2) // 3) * 4 + 2).strip(),
-                    )
-                except ValueError as error:
-                    fail(str(error), 413 if 'limited' in str(error) else 400)
             elif action == 'terminate':
                 result = terminate_session(session)
             elif action == 'delete':

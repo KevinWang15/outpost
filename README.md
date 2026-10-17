@@ -87,9 +87,9 @@ updated together; an incompatible terminal interface shows an update message.
 
 ### Web terminal
 
-Opens full-window in the browser. Paste images with your normal paste shortcut
-or the image button. On phones, an on-screen key bar (Esc, Tab, Ctrl, Alt,
-arrows, ⇧↩, ^C) and a message box are shown. Dropped connections reconnect by
+Opens full-window in the browser. Paste images with your normal paste shortcut,
+drop them onto the terminal, or use the image button. On phones, an on-screen
+key bar (Esc, Tab, Ctrl, Alt, arrows, ⇧↩, ^C) and a message box are shown. Dropped connections reconnect by
 themselves.
 
 #### Phones and tablets
@@ -145,6 +145,14 @@ on macOS and Windows. Copy uses the terminal selection; Select all selects
 output currently loaded in the terminal, not the entire remote conversation.
 Browser clipboard access may ask for permission; if Paste is blocked, use your
 normal paste shortcut. The message box keeps its usual text-editing menu.
+
+Attach images directly in the terminal: paste from the clipboard, drop a file
+onto the terminal, or use the image button (also available in the context menu).
+PNG, JPEG, GIF and WebP images up to 16 MB are supported. Outpost saves the image
+on the session's machine and pastes its reference into the current prompt;
+press Enter when you are ready to send. Uploads run separately from terminal
+input and are cancelled if the connection drops. Local shell tabs save images
+on your own computer.
 
 Press **Cmd+F** on macOS or **Ctrl+F** on Windows/Linux to find text in the
 current terminal. The search box floats at the top-right without resizing the

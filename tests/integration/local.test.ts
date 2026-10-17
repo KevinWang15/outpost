@@ -11,7 +11,7 @@ import { LocalDeployment } from '../../backend/deployment'
 import { api, fixtureHome, removeHome, TerminalClient } from './helpers'
 
 const execute = promisify(execFile)
-const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)]).toString('base64')
+const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)])
 
 test(
   'local target: create, connect from a web client, paste, signal, reconnect, detach, terminate',
@@ -103,20 +103,42 @@ test(
       assert.deepEqual(result, { type: 'result', id: 'draft-1', ok: true })
     })
 
-    await t.test('images are uploaded over the connection and pasted once', async () => {
-      client.send({ type: 'paste-image', id: 'image-1', mediaType: 'image/png', data: png })
+    await t.test('images are uploaded separately and their reference pasted once', async () => {
+      const headers = { authorization: `Bearer ${hello.resume}`, 'x-outpost-request': '1', 'content-type': 'image/png' }
+      const upload = await fetch(`http://127.0.0.1:${port}/api/terminal/image`, { method: 'POST', headers, body: png })
+      assert.equal(upload.status, 200)
+      const image = (await upload.json()) as { path: string; reference: string }
+      assert.ok(image.path.startsWith(join(home, '.outpost', 'clipboard', session.id)))
+      assert.deepEqual(await readFile(image.path), png)
+      client.send({ type: 'paste', id: 'image-1', data: image.reference })
       const result = await client.take('result')
       assert.equal(result.ok, true, result.message)
-      assert.match(
-        result.reference!,
-        new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.outpost/clipboard/${session.id}/.+\\.png$`),
-      )
       await client.until(
-        async () => (await readFile(join(project, 'input.bin'), 'utf8').catch(() => '')).includes(result.reference!),
+        async () => (await readFile(join(project, 'input.bin'), 'utf8').catch(() => '')).includes(image.reference),
         'pasted reference',
       )
-      client.send({ type: 'paste-image', id: 'image-2', mediaType: 'image/png', data: 'not-base64' })
-      assert.equal((await client.take('result')).message, 'Invalid image data')
+      const empty = await fetch(`http://127.0.0.1:${port}/api/terminal/image`, {
+        method: 'POST',
+        headers,
+        body: Buffer.alloc(0),
+      })
+      assert.equal(empty.status, 400)
+    })
+
+    await t.test('a full 16 MiB binary upload preserves bytes and does not send input by itself', async () => {
+      const data = Buffer.alloc(16 * 1024 * 1024, 0xa5)
+      png.copy(data)
+      data.set([0, 255, 13, 10, 32], data.length - 5)
+      const before = await readFile(join(project, 'input.bin'))
+      const upload = await fetch(`http://127.0.0.1:${port}/api/terminal/image`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${hello.resume}`, 'x-outpost-request': '1', 'content-type': 'image/png' },
+        body: data,
+      })
+      assert.equal(upload.status, 200)
+      const image = (await upload.json()) as { path: string }
+      assert.deepEqual(await readFile(image.path), data)
+      assert.deepEqual(await readFile(join(project, 'input.bin')), before)
     })
 
     await t.test('browser links from the session reach the attached client', async () => {

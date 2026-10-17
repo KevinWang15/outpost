@@ -1,4 +1,4 @@
-import type { ImageMediaType } from './model'
+import type { ImageMediaType } from './images'
 
 export interface ShellProfileSummary {
   id: string
@@ -21,5 +21,5 @@ export interface LocalTerminalBridge {
   resize(generation: string, cols: number, rows: number): Promise<void>
   acknowledge(generation: string, length: number): void
   stop(generation: string): Promise<void>
-  pasteImage(generation: string, data: string, mediaType: ImageMediaType): Promise<string>
+  pasteImage(generation: string, data: Uint8Array, mediaType: ImageMediaType): Promise<string>
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { GitFork, ImagePlus, LoaderCircle, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2 } from 'lucide-react'
+import { GitFork, LoaderCircle, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import type { Session } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
 import { Menu } from '../ui/Menu'
@@ -22,7 +22,6 @@ export default function SessionTable({
   onRefresh,
   onCreate,
   onConnect,
-  onImage,
   onFork,
   onCheck,
   onTerminate,
@@ -36,7 +35,6 @@ export default function SessionTable({
   onRefresh: () => void
   onCreate: () => void
   onConnect: (session: Session) => void
-  onImage: (session: Session) => void
   onFork: (session: Session) => void
   onCheck: (session: Session) => void
   onTerminate: (session: Session) => void
@@ -132,14 +130,6 @@ export default function SessionTable({
                 <div className="row-actions" role="cell">
                   <button className="button primary small" onClick={() => onConnect(session)}>
                     Connect
-                  </button>
-                  <button
-                    className="icon-button"
-                    title="Send an image"
-                    aria-label={`Send an image to ${session.name}`}
-                    onClick={() => onImage(session)}
-                  >
-                    <ImagePlus size={16} />
                   </button>
                   <Menu
                     label={`More actions for ${session.name}`}

@@ -2,7 +2,7 @@ import { createServer, type Socket } from 'node:net'
 import { chmodSync, unlinkSync } from 'node:fs'
 import headless from '@xterm/headless'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { checkpoint, headlessColors, writeHeadless } from '../shared/terminalCheckpoint'
+import { checkpoint, clearTerminal, headlessColors, writeHeadless } from '../shared/terminalCheckpoint'
 import { terminalService, terminalSize } from '../shared/terminalService'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { Sequences } from './sequences'
@@ -58,6 +58,7 @@ async function serve() {
   let listening = false
   let lastOutputAt = 0
   let drainTimer: ReturnType<typeof setTimeout> | undefined
+  let restoring = 0
   const send = (socket: Socket, packet: Buffer) => {
     if (socket.destroyed || socket.writableEnded) return
     socket.write(packet)
@@ -141,10 +142,22 @@ async function serve() {
             if (message.protocol !== terminalService.protocol)
               throw new Error('Terminal service protocol mismatch; install the current dependency')
             if (!terminalSize(message.cols, message.rows)) throw new Error('Invalid terminal size')
+            // A raw full-width checkpoint can hold about 50 MiB of cells. Bound
+            // concurrent captures; clients retry without pausing the live PTY.
+            if (restoring >= 2) {
+              sendControl(socket, {
+                type: 'error',
+                retryable: true,
+                message: 'Other viewers are restoring. Trying again shortly.',
+              })
+              socket.end()
+              return
+            }
             // A newly loading/hidden viewer must not resize an existing viewer.
             // It takes control only when the UI reports activation after ready.
             if (!controller) resize(message.cols, message.rows)
             const parts = checkpoint(term)
+            restoring++
             const attachment = new TerminalAttachment(socket)
             clients.set(socket, { attachment, cols: message.cols, rows: message.rows, active: false })
             attached = true
@@ -152,16 +165,23 @@ async function serve() {
             socket.setTimeout(0)
             // The capture above is atomic; subsequent bytes/geometry queue in
             // this attachment while encoding and transport yield to the PTY.
-            void attachment.restore(parts).catch(error => {
-              if (!socket.destroyed) {
-                sendControl(socket, { type: 'error', message: (error as Error).message })
-                socket.destroy()
-              }
-            })
+            void attachment
+              .restore(parts)
+              .catch(error => {
+                if (!socket.destroyed) {
+                  sendControl(socket, { type: 'error', message: (error as Error).message })
+                  socket.destroy()
+                }
+              })
+              .finally(() => {
+                restoring--
+              })
+          } else if (message.type === 'ping' && attached) {
+            sendControl(socket, { type: 'result', id: message.id, ok: true })
           } else if (message.type === 'clear' && attached) {
             // Clear the authoritative buffer, then apply the same operation in
             // every viewer's ordered stream. No bytes are sent to the coding tool.
-            term.clear()
+            clearTerminal(term)
             broadcast(terminalControl({ type: 'clear' }))
             sendControl(socket, { type: 'result', id: message.id, ok: true })
           } else if (message.type === 'resize' && attached) {
@@ -180,7 +200,7 @@ async function serve() {
               clients.set(socket, client)
               control(socket)
             } else if (controller === socket) control(activeViewer() ?? socket)
-          } else if ((message.type === 'send' && attached) || message.type === 'paste') {
+          } else if ((message.type === 'send' || message.type === 'paste') && attached) {
             if (typeof message.data !== 'string' || Buffer.byteLength(message.data) > 64 * 1024)
               throw new Error('Input exceeds 64 KiB')
             let data = message.data
@@ -189,9 +209,8 @@ async function serve() {
               sendControl(socket, { type: 'result', id: message.id, ok: false, message: 'The coding tool exited.' })
             } else {
               pty.write(data)
-              sendControl(socket, { type: 'result', id: message.id, ok: true, reference: message.reference })
+              sendControl(socket, { type: 'result', id: message.id, ok: true })
             }
-            if (!attached) socket.end()
           } else throw new Error('Unknown terminal operation')
         }
       } catch (error) {

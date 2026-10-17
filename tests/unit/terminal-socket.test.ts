@@ -3,6 +3,7 @@ import test, { type TestContext } from 'node:test'
 import { TerminalSocket } from '../../frontend/terminal/socket'
 import type { TerminalState } from '../../frontend/terminal/connection'
 import type { ServerMessage } from '../../shared/protocol'
+import { terminalConnectionPolicy } from '../../shared/protocol'
 
 class FakeSocket {
   static OPEN = 1
@@ -10,6 +11,7 @@ class FakeSocket {
   static CLOSED = 3
   static instances: FakeSocket[] = []
   readyState = 0
+  bufferedAmount = 0
   onmessage: ((event: { data: string }) => void) | null = null
   onclose: (() => void) | null = null
   sent: (string | Uint8Array)[] = []
@@ -134,11 +136,12 @@ test('a stale open socket is replaced after the probe deadline, preserving its r
   })
   socket.ready()
   client.resume()
-  t.mock.timers.tick(7999)
+  t.mock.timers.tick(terminalConnectionPolicy.probeMs - 1)
   await settle()
   assert.equal(FakeSocket.instances.length, 1)
   t.mock.timers.tick(1)
   await settle()
+  t.mock.timers.tick(1000)
   assert.equal(FakeSocket.instances.length, 2)
   assert.equal(FakeSocket.instances[1].url.searchParams.get('token'), 'resume-ticket')
 })
@@ -172,12 +175,12 @@ test('returning online bypasses backoff but does not create duplicate connection
   assert.equal(FakeSocket.instances.length, 2)
 })
 
-test('resume replaces a hung handshake only after its deadline; closing cancels all recovery', async t => {
+test('a hung handshake expires automatically; closing cancels all recovery', async t => {
   const { client } = setup(t)
   client.resume()
   assert.equal(FakeSocket.instances.length, 1)
-  t.mock.timers.tick(15_001)
-  client.resume()
+  t.mock.timers.tick(terminalConnectionPolicy.clientAttachMs)
+  t.mock.timers.tick(1000)
   assert.equal(FakeSocket.instances.length, 2)
   FakeSocket.instances[1].ready()
   client.resume()
@@ -186,4 +189,131 @@ test('resume replaces a hung handshake only after its deadline; closing cancels 
   await settle()
   client.resume()
   assert.equal(FakeSocket.instances.length, 2)
+})
+
+function readyForImages(socket: FakeSocket) {
+  socket.message({
+    type: 'hello',
+    resume: 'image-resume',
+    session: { id: 's', name: 'Session' },
+    target: { id: 't', name: 'Target' },
+  })
+  socket.ready()
+}
+const screenshot = () =>
+  new File([new Uint8Array([137, 80, 78, 71, 0, 255, 13, 10, 32])], 'screen.png', { type: 'image/png' })
+const flushPromises = async () => {
+  for (let i = 0; i < 40; i++) await Promise.resolve()
+}
+
+test('image upload sends the File as binary with resume authorization, then pastes once without Enter', async t => {
+  const { client, socket } = setup(t)
+  readyForImages(socket)
+  const file = screenshot()
+  const upload = t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, '/api/terminal/image')
+    assert.equal(options!.body, file)
+    assert.equal(options!.credentials, 'omit')
+    assert.deepEqual(options!.headers, {
+      authorization: 'Bearer image-resume',
+      'x-outpost-request': '1',
+      'content-type': 'image/png',
+    })
+    return Response.json({ path: '/image.png', reference: '/image.png' })
+  })
+  const work = client.pasteImage(file)
+  await flushPromises()
+  const paste = socket.requests().filter(message => message.type === 'paste')
+  assert.equal(paste.length, 1)
+  assert.equal(paste[0].data, '/image.png')
+  socket.message({ type: 'result', id: paste[0].id, ok: true })
+  assert.equal(await work, '/image.png')
+  assert.equal(upload.mock.callCount(), 1)
+  assert.equal(socket.sent.filter(message => typeof message !== 'string').length, 0)
+})
+
+test('a pending image upload cannot block interactive input or accept another image', async t => {
+  const { client, socket } = setup(t)
+  readyForImages(socket)
+  let finish!: (response: Response) => void
+  const fetch = t.mock.method(
+    globalThis,
+    'fetch',
+    () =>
+      new Promise<Response>(resolve => {
+        finish = resolve
+      }),
+  )
+  const upload = client.pasteImage(screenshot())
+  await assert.rejects(client.pasteImage(screenshot()), /previous image/)
+  assert.equal(client.input('typing while uploading'), true)
+  assert.ok(
+    socket.sent.some(
+      message => message instanceof Uint8Array && new TextDecoder().decode(message) === 'typing while uploading',
+    ),
+  )
+  finish(Response.json({ path: '/x.png', reference: '/x.png' }))
+  await flushPromises()
+  const paste = socket.requests().find(message => message.type === 'paste')!
+  socket.message({ type: 'result', id: paste.id, ok: true })
+  await upload
+  assert.equal(fetch.mock.callCount(), 1)
+})
+
+test('disconnect aborts an upload and a late response cannot paste into its replacement', async t => {
+  const { client, socket } = setup(t)
+  readyForImages(socket)
+  let finish!: (response: Response) => void
+  let signal!: AbortSignal
+  t.mock.method(globalThis, 'fetch', (_url, options) => {
+    signal = options!.signal as AbortSignal
+    return new Promise<Response>(resolve => {
+      finish = resolve
+    })
+  })
+  const work = client.pasteImage(screenshot())
+  const rejected = assert.rejects(work, /disconnected/)
+  socket.close()
+  await flushPromises()
+  assert.equal(signal.aborted, true)
+  client.reconnect()
+  const next = FakeSocket.instances.at(-1)!
+  readyForImages(next)
+  finish(Response.json({ path: '/late.png', reference: '/late.png' }))
+  await rejected
+  assert.equal(socket.requests().filter(message => message.type === 'paste').length, 0)
+  assert.equal(next.requests().filter(message => message.type === 'paste').length, 0)
+})
+
+test('upload errors and timeouts preserve the live terminal and allow another image', async t => {
+  const { client, socket } = setup(t)
+  readyForImages(socket)
+  const mock = t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ message: 'Image rejected' }, { status: 413 }),
+  )
+  await assert.rejects(client.pasteImage(screenshot()), /Image rejected/)
+  mock.mock.mockImplementation(async () => Response.json({ path: '/bad.png' }))
+  await assert.rejects(client.pasteImage(screenshot()), /image reference/)
+  mock.mock.mockImplementation(
+    (_url, options) =>
+      new Promise((_resolve, reject) => {
+        options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), { once: true })
+      }),
+  )
+  const timedOut = assert.rejects(client.pasteImage(screenshot()), /timed out/)
+  t.mock.timers.tick(150_000)
+  await timedOut
+  assert.equal(client.connected, true)
+  assert.equal(socket.requests().filter(message => message.type === 'paste').length, 0)
+})
+
+test('a lost paste acknowledgement never causes an automatic second insertion', async t => {
+  const { client, socket } = setup(t)
+  readyForImages(socket)
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ path: '/x.png', reference: '/x.png' }))
+  const rejected = assert.rejects(client.pasteImage(screenshot()), /did not confirm/)
+  await flushPromises()
+  t.mock.timers.tick(60_000)
+  await rejected
+  assert.equal(socket.requests().filter(message => message.type === 'paste').length, 1)
 })

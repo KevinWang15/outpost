@@ -37,9 +37,15 @@ interface XtermLine {
 export interface XtermBuffer extends Omit<BufferState, 'savedAttributes'> {
   ydisp: number
   savedCurAttrData: XtermAttributes
-  lines: { length: number; get(index: number): XtermLine; push(line: XtermLine): void }
+  lines: {
+    length: number
+    get(index: number): XtermLine
+    set(index: number, line: XtermLine | undefined): void
+    push(line: XtermLine): void
+  }
   getBlankLine(attributes: XtermAttributes, wrapped: boolean): XtermLine
   addMarker(row: number): Marker
+  clearAllMarkers(): void
 }
 export interface XtermLink {
   id: number
@@ -54,6 +60,7 @@ export interface XtermCore {
   _bufferService: {
     buffers: { normal: XtermBuffer; alt: XtermBuffer; active: XtermBuffer; activateAltBuffer(): void }
     _onScroll: { fire(position: number): void }
+    isUserScrolling: boolean
   }
   _inputHandler: {
     _curAttrData: XtermAttributes

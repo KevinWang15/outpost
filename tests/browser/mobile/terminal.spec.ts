@@ -1,3 +1,4 @@
+import { terminalConnectionPolicy } from '../../../shared/protocol'
 import { test, expect, mockTerminal, viewport, fitsScreen } from './helpers'
 
 test('portrait, narrow phone, landscape, and keyboard geometry keep controls accessible', async ({ page }, info) => {
@@ -15,7 +16,7 @@ test('portrait, narrow phone, landscape, and keyboard geometry keep controls acc
     await expect.poll(() => page.locator('.terminal-view').evaluate(e => e.clientHeight)).toBe(size.height)
     await fitsScreen(page)
   }
-  for (const button of await page.locator('.terminal-actions button, .key-bar button').all()) {
+  for (const button of await page.locator('.terminal-actions button:visible, .key-bar button:visible').all()) {
     const bounds = await button.boundingBox()
     expect(bounds!.width).toBeGreaterThanOrEqual(44)
     expect(bounds!.height).toBeGreaterThanOrEqual(44)
@@ -78,7 +79,7 @@ test('touch Send keeps focus, sends Unicode once, and preserves edits made durin
   await expect.poll(() => terminal.messages.filter(m => m.type === 'send').length).toBe(2)
   const failed = terminal.messages.filter(m => m.type === 'send').at(-1)!
   terminal.send({ type: 'result', id: failed.id, ok: false, message: 'Delivery failed' })
-  await expect(page.getByRole('alert')).toHaveText('Delivery failed')
+  await expect(page.getByRole('status').filter({ hasText: 'Delivery failed' })).toBeVisible()
   await expect(field).toHaveValue('Next draft while sending')
   await send.tap()
   await expect.poll(() => terminal.messages.filter(m => m.type === 'send').length).toBe(3)
@@ -200,11 +201,12 @@ test('returning to a healthy terminal probes once; a stale connection reconnects
     document.dispatchEvent(new Event('visibilitychange'))
   })
   await expect.poll(() => terminal.messages.filter(m => m.type === 'ping').length).toBe(2)
-  await page.clock.fastForward(8100)
+  await page.clock.fastForward(terminalConnectionPolicy.probeMs + 100)
+  await page.clock.fastForward(2000)
   await expect.poll(() => terminal.sockets.length).toBe(2)
   await expect(page.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()
   await expect(field).toHaveValue('Do not replay this')
-  await expect(page.getByRole('alert')).toContainText('Check the terminal before retrying')
+  await expect(page.getByRole('status').filter({ hasText: 'Check the terminal before retrying' })).toBeVisible()
   expect(terminal.messages.filter(m => m.type === 'send')).toHaveLength(1)
   expect(Buffer.concat(terminal.input).length).toBe(0)
   terminal.send({ type: 'closed', reason: 'ended', message: 'Session finished' })

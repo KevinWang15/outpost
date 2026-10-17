@@ -1,5 +1,4 @@
 import type { Terminal } from '@xterm/xterm'
-import { imageMediaTypes, maxImageBytes } from '../../shared/model'
 import { desktop } from '../desktop'
 import { touchInput } from '../browser'
 
@@ -14,12 +13,6 @@ export function screenText(term: Terminal) {
     text += line.translateToString(!buffer.getLine(row + 1)?.isWrapped)
   }
   return text.replace(/\n+$/, '')
-}
-
-export function imageProblem(file: Blob): string | null {
-  if (!(imageMediaTypes as readonly string[]).includes(file.type)) return 'That is not a PNG, JPEG, GIF, or WebP image.'
-  if (!file.size || file.size > maxImageBytes) return 'Images are limited to 16 MB.'
-  return null
 }
 
 /** Browser clipboard shims for the web terminal (principle 6): reads only on a
@@ -65,6 +58,22 @@ export function attachClipboard(
     const file = images[0].getAsFile()
     if (file) options.pasteImage(file)
   }
+  // File drops use the same path as paste and the image picker. Ignore other
+  // drags, including the desktop tab bar's own drag protocol.
+  const dragOver = (event: DragEvent) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = options.connected() ? 'copy' : 'none'
+  }
+  const drop = (event: DragEvent) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    const files = [...event.dataTransfer.files]
+    if (files.length !== 1) return options.status('Drop one image at a time.')
+    options.pasteImage(files[0])
+  }
   const nativeCopy = (event: ClipboardEvent) => {
     if (!term.hasSelection() || !event.clipboardData) return
     event.clipboardData.setData('text/plain', term.getSelection())
@@ -98,6 +107,8 @@ export function attachClipboard(
   window.addEventListener('mouseup', selectionEnd)
   window.addEventListener('blur', cancelSelection)
   element.addEventListener('paste', nativePaste, true)
+  element.addEventListener('dragover', dragOver, true)
+  element.addEventListener('drop', drop, true)
   element.addEventListener('copy', nativeCopy, true)
   const osc = term.parser.registerOscHandler(52, data => {
     const separator = data.indexOf(';')
@@ -190,6 +201,8 @@ export function attachClipboard(
       window.removeEventListener('blur', cancelSelection)
       selection.dispose()
       element.removeEventListener('paste', nativePaste, true)
+      element.removeEventListener('dragover', dragOver, true)
+      element.removeEventListener('drop', drop, true)
       element.removeEventListener('copy', nativeCopy, true)
       osc.dispose()
     },

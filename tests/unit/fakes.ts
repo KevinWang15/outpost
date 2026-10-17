@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { imageExtensions, imageProblem, type ImageMediaType } from '../../shared/images'
 import type { Session, SessionForkInput, SessionInput, SessionList } from '../../shared/model'
 import { AppError } from '../../backend/errors'
 import type { SessionService, TargetContext } from '../../backend/sessions'
@@ -66,8 +67,13 @@ export class FakeSessions implements SessionService {
       this.all(context).filter(item => item.id !== id),
     )
   }
-  async pasteImage() {
-    return { path: '/x.png', reference: '/x.png', injected: false }
+  async uploadImage(context: TargetContext, id: string, data: Buffer, type: ImageMediaType, signal: AbortSignal) {
+    signal.throwIfAborted()
+    this.find(context, id)
+    const problem = imageProblem({ type, size: data.length })
+    if (problem) throw new AppError(problem, 400)
+    const path = '/x.' + imageExtensions[type]
+    return { path, reference: path }
   }
   async directories() {
     return { directories: [], truncated: false }

@@ -3,7 +3,6 @@
 // drift. Strings exclude control characters unless they carry free text.
 import Type from 'typebox'
 import { harnesses, harnessIds } from './harnesses'
-import { imageMediaTypes } from './model'
 import { terminalChoices } from './terminals'
 
 const strict = { additionalProperties: false } as const
@@ -80,13 +79,6 @@ export const sessionInput = Type.Object(
 
 export const sessionForkInput = Type.Object({ branch: text(256), rootDir: session.rootDir }, strict)
 
-export const imageInput = Type.Object(
-  {
-    data: Type.String({ minLength: 8, maxLength: 24 * 1024 * 1024, pattern: '^[A-Za-z0-9+/]+={0,2}$' }),
-    mediaType: Type.Enum(imageMediaTypes),
-  },
-  strict,
-)
 export const acknowledgeInput = Type.Object({ completionId: Type.String({ pattern: '^[0-9a-f]{64}$' }) }, strict)
 export const conversationSearch = Type.Object(
   {

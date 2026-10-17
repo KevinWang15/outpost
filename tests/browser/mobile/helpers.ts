@@ -97,7 +97,7 @@ export async function fitsScreen(page: Page) {
     expect(bounds.y, selector).toBeGreaterThanOrEqual(screen.top - 1)
     expect(bounds.y + bounds.height, selector).toBeLessThanOrEqual(screen.top + screen.height + 1)
   }
-  for (const button of await page.locator('.terminal-actions button').all()) {
+  for (const button of await page.locator('.terminal-actions button:visible').all()) {
     const bounds = (await button.boundingBox())!
     expect(bounds.x).toBeGreaterThanOrEqual(0)
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(await page.evaluate(() => window.visualViewport!.width + 1))

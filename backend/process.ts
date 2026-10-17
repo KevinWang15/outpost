@@ -17,7 +17,7 @@ interface CommandOptions {
 
 export function runCommand(
   command: Command,
-  script: string,
+  input: string | Uint8Array,
   options: CommandOptions = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -87,7 +87,7 @@ export function runCommand(
       resolve({ code, stdout, stderr })
     })
     if (command.input) child.stdin.write(command.input)
-    child.stdin.end(script)
+    child.stdin.end(input)
   })
 }
 
@@ -123,8 +123,12 @@ export function protocolResult<T>(stdout: string): { ok: true; data: T } | { ok:
   return { ok: true, data: result.data }
 }
 
-export async function runProtocol<T>(command: Command, script: string, options: CommandOptions = {}): Promise<T> {
-  const { code, stdout, stderr } = await runCommand(command, script, options)
+export async function runProtocol<T>(
+  command: Command,
+  input: string | Uint8Array,
+  options: CommandOptions = {},
+): Promise<T> {
+  const { code, stdout, stderr } = await runCommand(command, input, options)
   const result = protocolResult<T>(stdout)
   if (result && !result.ok) throw result.error
   if (result?.ok && code === 0) return result.data

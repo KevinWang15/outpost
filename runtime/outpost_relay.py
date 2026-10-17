@@ -163,25 +163,10 @@ class Relay:
             raise ValueError('Unknown relay frame')
         message = json.loads(payload)
         action = message.get('type')
-        if action in ('resize', 'focus', 'send', 'clear'):
-            if action == 'send':
+        if action in ('resize', 'focus', 'send', 'paste', 'clear', 'ping'):
+            if action in ('send', 'paste'):
                 self.observed(message['data'].encode())
             self.incoming += control(message)
-        elif action == 'paste-image':
-            try:
-                result = self.hooks.paste_image(message.get('extension'), message.get('data'))
-                # Image paths share the same FIFO as typed input and drafts.
-                self.incoming += control(
-                    {
-                        'type': 'paste',
-                        'id': message['id'],
-                        'data': result['reference'],
-                        'reference': result['reference'],
-                    }
-                )
-                self.observed(result['reference'].encode())
-            except (OSError, ValueError) as error:
-                self.send({'type': 'result', 'id': message.get('id'), 'ok': False, 'message': str(error)})
         elif action == 'acknowledge':
             identifier, completion_id = message.get('id'), message.get('completionId')
             valid = (

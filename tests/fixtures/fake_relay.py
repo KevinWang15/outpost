@@ -2,7 +2,7 @@
 
 FAKE_RELAY=fail   prints a runtime error before the relay starts.
 Otherwise it prints login noise, then echoes input, reports resizes, answers
-paste-image requests and sends a signal when it receives the text 'signal:<url>'.
+paste requests and sends a signal when it receives the text 'signal:<url>'.
 """
 
 import json
@@ -64,17 +64,10 @@ while True:
             message = json.loads(payload)
             if message['type'] == 'resize':
                 frame(b'O', ('size:%dx%d' % (message['cols'], message['rows'])).encode())
-            elif message['type'] == 'send':
+            elif message['type'] == 'ping':
+                control({'type': 'result', 'id': message['id'], 'ok': True})
+            elif message['type'] in ('send', 'paste'):
                 frame(b'O', b'echo:' + message['data'].encode())
                 control({'type': 'result', 'id': message['id'], 'ok': True})
-            elif message['type'] == 'paste-image':
-                control(
-                    {
-                        'type': 'result',
-                        'id': message['id'],
-                        'ok': True,
-                        'reference': '/root/.outpost/clipboard/x.' + message['extension'],
-                    }
-                )
             elif message['type'] == 'signal-result':
                 frame(b'O', ('signal-result:' + json.dumps(message['ok'])).encode())

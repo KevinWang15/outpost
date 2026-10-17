@@ -8,7 +8,7 @@ import type { TerminalLike, XtermAttributes, XtermBuffer, XtermCore, XtermLink }
  * upgrading that layout. We transfer cells, not replayed escape sequences:
  * restoring cannot ring bells, run clipboard commands or answer old queries.
  * Snapshot parts are bounded and share output ordering/backpressure. */
-type CapturedLine = Omit<CellLine, 'cells'> & { cells: Uint32Array }
+type CapturedLine = Omit<CellLine, 'cells' | 'repeat'> & { cells: Uint32Array }
 
 function core(terminal: TerminalLike): XtermCore {
   // This is the sole unchecked engine boundary; keep all private reads typed
@@ -27,6 +27,8 @@ function core(terminal: TerminalLike): XtermCore {
     !(value._oscLinkService._entriesWithId instanceof Map) ||
     typeof value._oscLinkService._removeMarkerFromLink !== 'function' ||
     typeof value._bufferService.buffers.normal.getBlankLine !== 'function' ||
+    typeof value._bufferService.buffers.normal.clearAllMarkers !== 'function' ||
+    typeof value._bufferService.buffers.normal.lines.set !== 'function' ||
     typeof value._bufferService._onScroll?.fire !== 'function' ||
     (value._themeService && typeof value._handleColorEvent !== 'function')
   )
@@ -76,7 +78,7 @@ export function checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
     buffers = c._bufferService.buffers,
     input = c._inputHandler
   if (input._parser.currentState !== 0) throw new Error('Checkpoint requires a complete terminal sequence')
-  const begin: Checkpoint = {
+  const begin: Extract<Checkpoint, { part: 'begin' }> = {
     part: 'begin',
     version: 2,
     cols: terminal.cols,
@@ -105,28 +107,17 @@ export function checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
       colors: c.outpostColors ?? {},
     }),
   }
-  const captured: { name: 'normal' | 'alt'; lines: CapturedLine[] }[] = []
+  const captured: { name: 'normal' | 'alt'; lines: (CapturedLine | undefined)[] }[] = []
   for (const name of ['normal', 'alt'] as const) {
     const buffer = buffers[name]
     const lines: CapturedLine[] = []
     for (let index = 0; index < buffer.lines.length; index++) {
       const line = buffer.lines.get(index)
-      // Most history rows end in many identical blank cells. Preserve the exact
-      // final cell (including its style), storing that run only once.
-      let columns = terminal.cols
-      while (columns > 1) {
-        const end = (columns - 1) * 3
-        if (
-          line._data[end] !== line._data[end - 3] ||
-          line._data[end + 1] !== line._data[end - 2] ||
-          line._data[end + 2] !== line._data[end - 1]
-        )
-          break
-        columns--
-      }
+      // Only native typed-array copies belong in the atomic phase. Run-length
+      // scanning/encoding happens in the yielded parts below, not on the PTY's
+      // critical path. Raw cell storage is bounded by the terminal dimensions.
       lines.push({
-        cells: line._data.slice(0, columns * 3),
-        repeat: terminal.cols - columns,
+        cells: line._data.slice(0, terminal.cols * 3),
         wrapped: line.isWrapped,
         combined: { ...line._combined },
         extended: Object.entries(line._extendedAttrs)
@@ -139,19 +130,73 @@ export function checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
   return parts()
 
   function* parts(): Generator<Checkpoint> {
-    yield begin
-    for (const { name, lines } of captured) {
-      for (let first = 0; first < lines.length; first += 8) {
-        yield {
-          part: 'lines',
-          buffer: name,
-          first,
-          lines: lines.slice(first, first + 8).map(line => ({ ...line, cells: encode(line.cells) })),
+    try {
+      yield begin
+      for (const { name, lines } of captured) {
+        for (let first = 0; first < lines.length; first += 8) {
+          const encoded: CellLine[] = []
+          for (let index = first; index < Math.min(first + 8, lines.length); index++) {
+            const line = lines[index]!
+            const cells = line.cells
+            let columns = begin.cols
+            while (columns > 1) {
+              const end = (columns - 1) * 3
+              if (
+                cells[end] !== cells[end - 3] ||
+                cells[end + 1] !== cells[end - 2] ||
+                cells[end + 2] !== cells[end - 1]
+              )
+                break
+              columns--
+            }
+            encoded.push({ ...line, cells: encode(cells.subarray(0, columns * 3)), repeat: begin.cols - columns })
+            lines[index] = undefined // Release cells as soon as this part owns their encoding.
+          }
+          yield { part: 'lines', buffer: name, first, lines: encoded }
         }
       }
+      yield { part: 'end' }
+    } finally {
+      captured.length = 0
     }
-    yield { part: 'end' }
   }
+}
+
+/** Clear the active screen/history while keeping the cursor line. Unlike
+ * xterm.clear(), this also clears content below a cursor already on row zero.
+ * Both engines use this adapter so checkpoints and live viewers agree. */
+export function clearTerminal(terminal: TerminalLike) {
+  const c = core(terminal)
+  const buffer = c._bufferService.buffers.active
+  const line = buffer.lines.get(buffer.ybase + buffer.y)
+  const links = c._oscLinkService
+  const retained = new Set(Object.values(line._extendedAttrs).map(attr => attr?.urlId))
+  retained.add(c._inputHandler._curAttrData.extended.urlId)
+  const entries = [...retained].map(id => links._dataByLinkId.get(id)).filter(entry => entry !== undefined)
+  buffer.clearAllMarkers()
+  line.isWrapped = false
+  buffer.lines.set(0, line)
+  // CircularList.length truncates logically but retains the old array slots.
+  // Drop those references too so clearing actually releases discarded history.
+  for (let row = 1; row < buffer.lines.length; row++) buffer.lines.set(row, undefined)
+  buffer.lines.length = 1
+  buffer.y = buffer.ybase = buffer.ydisp = 0
+  const extended = c._inputHandler._curAttrData.extended.clone()
+  extended.ext = 0
+  extended.urlId = 0
+  for (let row = 1; row < terminal.rows; row++)
+    buffer.lines.push(buffer.getBlankLine({ fg: 0, bg: 0, extended }, false))
+  // Discarded rows release their OSC 8 entries; retained links get fresh markers.
+  for (const entry of entries) {
+    links._dataByLinkId.set(entry.id, entry)
+    if (entry.key) links._entriesWithId.set(entry.key, entry)
+    const marker = buffer.addMarker(0)
+    entry.lines.push(marker)
+    marker.onDispose(() => links._removeMarkerFromLink(entry, marker))
+  }
+  c._bufferService.isUserScrolling = false
+  c._bufferService._onScroll.fire(0)
+  terminal.refresh?.(0, terminal.rows - 1)
 }
 
 export class CheckpointReader {

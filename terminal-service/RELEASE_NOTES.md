@@ -2,7 +2,7 @@
 
 Persistent Linux PTY service for Outpost web and desktop terminals.
 
-This revision adds a shared clear-screen operation and includes process-exit recovery.
+This revision adds shared clear-screen behavior, process-exit recovery and connection hardening.
 
 - The service observes the coding process directly, independently of PTY stream closure.
 - Final output gets a bounded drain before shutdown; background descendants cannot
@@ -14,7 +14,16 @@ This revision adds a shared clear-screen operation and includes process-exit rec
   current cursor line. All viewers clear at the same point in the output stream;
   reconnect checkpoints retain the cleared state.
 - Clearing sends no keys or commands to the coding tool and does not resize it.
-- Terminal service protocol is now 3. Checkpoint schema remains 2.
+- Clear also works when a fullscreen application leaves its cursor on row zero;
+  retained hyperlinks stay valid and discarded markers are released.
+- Health probes reach the terminal service without sending input to the coding
+  tool. Attachments have deadlines and rapid disconnects retain their retry budget.
+- Browser/SSH input queues are bounded and stalled writes fail explicitly.
+- Image bytes upload separately from terminal input; the attached terminal
+  pastes the saved reference using the application’s bracketed-paste mode.
+- Checkpoint compression runs in yielded streaming slices; captured rows are
+  released after encoding, and concurrent restorations are limited to two.
+- Terminal service protocol is now 4; client protocol is 12. Checkpoint schema remains 2.
 
 ## Terminal behavior
 
@@ -31,5 +40,5 @@ executable into `~/.outpost/bin/outpost-terminal`. No public service port is ope
 
 Updating the executable does not terminate running processes. Existing services
 continue running the old build. After installing, save ongoing work and use
-**Terminate → Connect** on existing sessions to start protocol 3 and resume
-their conversations. Older service protocols cannot accept the new clear operation.
+**Terminate → Connect** on existing sessions to start protocol 4 and resume
+their conversations. Older service protocols cannot accept the current clear and health-check contract.

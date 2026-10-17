@@ -220,11 +220,15 @@ class RuntimeTest(unittest.TestCase):
         connection.expect_output(b'90x25')
         self.assertEqual(self.call({'action': 'get', 'id': session['id']})['status'], 'attached')
 
-        # Images travel over the open connection and are pasted into the persistent PTY once.
-        connection.send(control({'type': 'paste-image', 'id': 'p1', 'extension': 'png', 'data': PNG}))
+        # Image bytes use a separate operation; only the reference enters the live relay.
+        image = base64.b64decode(PNG)
+        saved = self.call(
+            {'action': 'upload-image', 'id': session['id'], 'extension': 'png', 'size': len(image)}, image
+        )
+        reference = saved['reference']
+        connection.send(control({'type': 'paste', 'id': 'p1', 'data': reference}))
         result = connection.expect_control('result')
         self.assertTrue(result['ok'], result)
-        reference = result['reference']
         self.assertTrue(reference.startswith(str(self.home / '.outpost' / 'clipboard' / session['id'])))
         self.assertTrue(Path(reference).read_bytes().startswith(b'\x89PNG'))
         wait_for(lambda: reference.encode() in read(self.project / 'input.bin'))
@@ -288,14 +292,53 @@ class RuntimeTest(unittest.TestCase):
         self.assertIn('"extra": true', registry.read_text())
         registry.write_text(json.dumps(data))
 
-    def test_management_image_upload_pastes_into_a_running_session(self):
+    def test_image_upload_saves_bytes_without_requiring_a_running_session(self):
         session = self.create()
-        stopped = self.call({'action': 'paste-image', 'id': session['id'], 'extension': 'png'}, PNG.encode())
-        self.assertFalse(stopped['injected'])
-        bad = self.call(
-            {'action': 'paste-image', 'id': session['id'], 'extension': 'png'}, b'not base64!', expect_ok=False
+        image = base64.b64decode(PNG)
+        request = {'action': 'upload-image', 'id': session['id'], 'extension': 'png', 'size': len(image)}
+        saved = self.call(request, image)
+        self.assertEqual(Path(saved['path']).read_bytes(), image)
+        bad = self.call(request, image[:-1], expect_ok=False)
+        self.assertEqual(bad['message'], 'Incomplete or invalid image upload.')
+
+    def test_binary_upload_limits_permissions_retention_and_invalid_sizes(self):
+        session = self.create()
+        data = bytes(range(256)) + b' \r\n'
+        request = {'action': 'upload-image', 'id': session['id'], 'extension': 'png', 'size': len(data)}
+        saved = []
+        for index in range(23):
+            saved.append(self.call({**request, 'extension': ('png', 'jpg', 'gif', 'webp')[index % 4]}, data))
+        directory = Path(saved[-1]['path']).parent
+        self.assertEqual(len(list(directory.iterdir())), 20)
+        self.assertFalse(Path(saved[0]['path']).exists())
+        for image in saved[-20:]:
+            path = Path(image['path'])
+            self.assertEqual(path.read_bytes(), data)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        for size in (0, -1, 16 * 1024 * 1024 + 1):
+            self.assertEqual(self.call({**request, 'size': size}, expect_ok=False)['status'], 413)
+        self.assertEqual(self.call({**request, 'extension': '../png'}, data, expect_ok=False)['status'], 400)
+        self.assertEqual(self.call(request, data[:-1], expect_ok=False)['status'], 400)
+        self.assertEqual(self.call(request, data + b'x', expect_ok=False)['status'], 400)
+        self.assertEqual(len(list(directory.iterdir())), 20)
+
+    def test_upload_waiting_for_bytes_does_not_hold_registry_lock_or_create_partial_images(self):
+        session = self.create()
+        data = base64.b64decode(PNG)
+        request = {'action': 'upload-image', 'id': session['id'], 'extension': 'png', 'size': len(data)}
+        upload = subprocess.Popen(
+            self.command(request), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env
         )
-        self.assertEqual(bad['message'], 'Invalid image data')
+        try:
+            upload.stdin.write(data[:1])
+            upload.stdin.flush()
+            time.sleep(0.2)
+            listing = subprocess.run(self.command({'action': 'list'}), capture_output=True, env=self.env, timeout=2)
+            self.assertEqual(listing.returncode, 0)
+            self.assertFalse((self.home / '.outpost' / 'clipboard' / session['id']).exists())
+        finally:
+            upload.kill()
+            upload.communicate(timeout=2)
 
 
 class Connection:

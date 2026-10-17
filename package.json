@@ -18,6 +18,7 @@
     "test:python": "python3 -m unittest discover -s tests/runtime",
     "test:integration": "node --import tsx --test 'tests/integration/*.test.ts'",
     "test:ui": "playwright test",
+    "test:desktop": "playwright test --config playwright.desktop.config.ts",
     "test:mobile": "playwright test --config playwright.mobile.config.ts",
     "check": "npm run lint && npm run lint:python && npm run build && npm test",
     "logo:generate": "node scripts/logo/generate.mjs",

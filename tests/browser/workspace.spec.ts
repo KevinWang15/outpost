@@ -43,7 +43,7 @@ test('add a target, create a session, and work in the web terminal', async ({ pa
   expect(await popup.evaluate(() => window.opener)).toBeNull()
   expect(new URL(popup.url()).searchParams.has('token')).toBe(false)
 
-  const terminal = popup.getByRole('dialog', { name: /Web terminal/ })
+  const terminal = popup.getByRole('dialog', { name: /^Terminal ·/ })
   await expect(terminal.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()
   await expect(terminal.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
   await terminal.locator('input[type=file]').setInputFiles({ name: 'design.png', mimeType: 'image/png', buffer: png })
@@ -107,12 +107,15 @@ test('phones get on-screen keys and a message box', async ({ browser }) => {
   const page = await context.newPage()
   await addTarget(page, 'Phone box')
   await createSession(page, 'Phone session', '~/phone-project')
-  await page.getByRole('row').filter({ hasText: 'Phone session' }).getByRole('button', { name: 'Connect' }).click()
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+  ).toBeLessThanOrEqual(1)
+  await page.getByRole('row').filter({ hasText: 'Phone session' }).getByRole('button', { name: 'Connect' }).tap()
   const popupPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: /Web terminal/ }).click()
   const popup = await popupPromise
   await expect(popup).toHaveTitle('Phone session · Phone box · Outpost')
-  const terminal = popup.getByRole('dialog', { name: /Web terminal/ })
+  const terminal = popup.getByRole('dialog', { name: /^Terminal ·/ })
   await expect(terminal.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()
   await expect(terminal.getByRole('group', { name: 'Terminal keys' })).toBeVisible()
   await terminal.getByLabel('Message to the session').fill('hello from the phone')

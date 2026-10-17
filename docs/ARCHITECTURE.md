@@ -254,18 +254,59 @@ of a bounded snapshot of the visible xterm rows, joining wrapped lines. Opening
 it sends no PTY input and the live terminal continues rendering behind it. This
 is a clipboard aid, not retained history; the snapshot is discarded on close.
 
-The relay retains a bounded FIFO for typed input, composer drafts and image
-pastes. Image paths share the service input FIFO with typed bytes and drafts. The service wraps a path in bracketed-paste delimiters only when the application requested that mode.
+The relay retains a bounded FIFO for typed input, composer drafts and pasted
+references. The service wraps a paste in bracketed-paste delimiters only when
+the application requested that mode. Image bytes never enter this FIFO.
 Drafts are confirmed only after the terminal service accepts their bytes into its PTY write queue; no queued
 input is replayed across reconnects.
+The browser and broker each cap queued transport input at 2 MiB. The broker's `BoundedWriter` stops writing when the SSH pipe
+applies backpressure, resumes on drain, and fails after 30 seconds without drain.
+Overflow closes the attachment with an explicit error and discards queued input.
+Binary input, composer drafts and pasted references share the 1 MiB/s input
+budget. These are transport bounds;
+Bun's PTY write API accepts bytes into its own internal queue and does not expose
+its buffered byte count.
+
+Image paste, image file drops and the terminal's image picker all call
+`TerminalSession.pasteImage(File)`. `shared/images.ts` owns the supported formats,
+16 MiB limit and saved-image response. The workspace has no separate upload
+control. Progress and success notices remain overlays and never resize xterm.
+
+For remote sessions, `TerminalSocket` POSTs raw bytes to `/api/terminal/image`,
+using its existing session-scoped resume token in the Authorization header.
+The route accepts resume tokens only and checks the originating login before
+buffering the bounded body. Launch tickets and workspace cookies cannot authorize
+an upload. Both web and desktop terminals use this same endpoint. `SessionClient`
+passes the bytes over the existing runtime-operation stdin transport, without
+Base64. The runtime reads a bounded body outside the registry lock, atomically
+saves the image, and returns its harness-specific reference; it sends no PTY input.
+
+The client then sends `paste {id, data}` on the original terminal connection and
+waits for acknowledgement. Disconnect cancels the HTTP request; a reconnect
+cannot receive an old upload's paste. One image is processed at a time per terminal.
+Neither uploads nor paste requests are automatically retried, and no Enter is
+appended. Failed/cancelled transfers can leave saved files but never submit a
+prompt; the existing newest-20 retention bounds remote clipboard storage.
+Local shells save raw bytes through their private desktop IPC, then paste the
+quoted local/WSL path with the owning shell generation checked before insertion.
 
 On visibility restoration, `pageshow`, or `online`, `TerminalSocket.resume()`
-probes an apparently live socket with an authenticated `ping` request. The broker
-answers directly without touching the PTY. A failed eight-second probe replaces
-only the same stale socket; healthy connections remain attached. Recoverable
-disconnects retry immediately, while ended, expired, and outdated
-connections require the existing explicit action. This complements the broker's
-WebSocket ping/pong heartbeat, which browser JavaScript cannot observe.
+probes an apparently live socket with an authenticated `ping` request. It travels
+through the broker and relay to the terminal service, which replies without
+writing any bytes to the coding process. A failed 30-second probe enters bounded
+recovery for that same attachment. The broker also probes the remote service
+every 15 seconds, suspending its deadline while renderer backpressure deliberately
+pauses stdout. A viewer that sends no rendering acknowledgements for 60 seconds
+while output is paused is disconnected for resynchronization. Browser WebSocket
+ping/pong independently detects lost clients.
+Attachment has a 60-second server deadline and a 75-second client deadline,
+including checkpoint rendering. Failure handling does not wait for a close
+handshake. Eight automatic retries use exponential backoff; their budget resets
+only after 30 seconds connected plus a successful service probe, or an explicit
+Reconnect. Returning online can
+skip a pending backoff without resetting that budget. Ended, expired, outdated,
+congested, and exhausted connections require explicit user action. All attempt
+timers and pending requests are disposed when the attachment ends.
 
 `useBellNotifications` manages browser permission requests, with an eight-second
 busy timeout and permission refresh on focus. Desktop uses the bridge's native
@@ -318,10 +359,10 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `resize {cols, rows}` | Client geometry |
 | → server | `focus {active}` | Whether this viewer is active; the latest active viewer controls PTY dimensions |
 | → server | `ack {bytes}` | Output rendered; flow control |
-| → server | `ping {id}` | Check a resumed browser's socket without sending terminal input |
+| → server | `ping {id}` | Probe the remote terminal service through the relay without sending terminal input |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
 | → server | `clear {id}` | Clear the shared screen and scrollback, keeping the current cursor line |
-| → server | `paste-image {id, mediaType, data}` | Upload an image and paste its path |
+| → server | `paste {id, data}` | Paste text using the running application’s bracketed-paste mode |
 | → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
 | → server | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
 | ← client | `hello {resume, session, target}` | Connection accepted |
@@ -330,7 +371,7 @@ JSON control messages (`shared/protocol.ts`):
 | ← client | `clear` | Clear the screen at this point in the ordered output stream |
 | ← client | `ready` | Checkpoint restored; attached to the persistent PTY |
 | ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
-| ← client | `result {id, ok, message?, reference?}` | Outcome of `ping` / `send` / `clear` / `paste-image` / `activate` / `acknowledge` |
+| ← client | `result {id, ok, message?}` | Outcome of `ping` / `send` / `clear` / `paste` / `activate` / `acknowledge` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `unavailable`, `error` |
 
@@ -343,7 +384,9 @@ user action, such as installing a missing helper or restarting an incompatible
 service. The broker preserves runtime HTTP error status through a single failure
 classifier, shared with API lookup failures. A missing session is `ended`;
 authentication errors are `expired`; other permanent request/setup errors are
-`unavailable`. Transport failures, timeouts and throttling remain retryable.
+`unavailable`. Transport failures, timeouts and target RPC throttling remain retryable.
+Input congestion and WebSocket policy violations require explicit reconnection;
+the client does not repeatedly retry rejected input.
 An explicit Reconnect is available after the user repairs an unavailable target.
 
 The coding process owns session lifetime. The Linux helper observes
@@ -397,7 +440,7 @@ session, missing terminal service), its `OUTPOST_RESULT` error becomes the clien
 | --- | --- | --- |
 | `I` | broker → relay | Input bytes for the persistent PTY |
 | `O` | relay → broker | Live PTY output |
-| `C` | both | JSON control: `resize`, `focus`, `send`, `clear`, `paste-image`, `acknowledge`, `signal-result` / `restore`, `geometry`, `clear`, `ready`, `activity`, `result`, `signal`, `exit` |
+| `C` | both | JSON control: `resize`, `focus`, `send`, `clear`, `paste`, `acknowledge`, `signal-result` / `restore`, `geometry`, `clear`, `ready`, `activity`, `result`, `signal`, `exit` |
 
 Framing separates terminal bytes from control messages. The relay connects to
 `~/.outpost/terminals/<id>.sock` and forwards complete frames, adding activity
@@ -439,7 +482,13 @@ updates and a checkpoint protocol bump. This coupling is intentional; separate
 terminal parsers would otherwise disagree about screen state.
 
 Snapshot capture copies owned cells and metadata synchronously between PTY
-callbacks. Checkpoint schema 2 encodes each row's repeated final cell once,
+callbacks using native typed-array copies. Row compression is deferred until
+streaming, so the atomic phase does not scan every cell in JavaScript. Captured
+rows are released as each part is encoded, and abandoned generators release their
+remaining rows. At most two viewers per service may be restoring simultaneously;
+additional viewers receive a transient error and retry. A maximum-size snapshot
+holds about 50 MiB of raw cells plus metadata before streaming releases them.
+Checkpoint schema 2 encodes each row's repeated final cell once,
 preserving its character and style as well as combined characters and links.
 `terminal-service/attachment.ts` encodes and streams this immutable snapshot in
 4 ms slices, honoring socket backpressure. The live PTY keeps running; each
@@ -470,7 +519,7 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract uses terminal service 1.2.0 / protocol 3 and client protocol 11.
+This contract uses terminal service 1.2.0 / protocol 4 and client protocol 12.
 Publish the matching helper before deploying the server. A service protocol
 change requires explicitly restarting existing service processes after installing
 the dependency; replacing the executable does not alter a running PTY service.
@@ -649,8 +698,11 @@ Outpost home tab and Settings list the shortcut. Plain Ctrl+K remains applicatio
 input. The operation is available while connected, and sends no keystrokes or
 shell commands. It does not restart the coding process or change terminal size.
 
-Clearing uses xterm's `clear()` semantics: discard the active screen and its
-scrollback, retaining the current cursor line at the top. Fullscreen applications
+Clearing uses the shared `clearTerminal` engine adapter: discard the active
+screen and its scrollback, retaining the current cursor line at the top. It also
+clears rows below a cursor already at row zero, where xterm's public `clear()`
+would return early. Discarded markers are removed, retained OSC 8 links receive
+new markers, and the viewport returns to live output. Fullscreen applications
 repaint according to their own behavior; clearing does not force a redraw.
 For remote sessions the request reaches the authoritative Linux service, which
 clears its buffer and broadcasts `clear` to all attached viewers. Checkpoints
@@ -659,7 +711,7 @@ directly in their renderer's ordered queue. Clear is a barrier between output
 batches, so output written afterward is retained. The search addon is recreated
 afterward to invalidate cached lines and decorations without private API access.
 
-The clear command requires terminal service protocol 3 and client protocol 11.
+The current clear and health-check contract uses terminal service protocol 4 and client protocol 12.
 Install the updated helper and explicitly restart existing service processes;
 older protocols are rejected instead of ignoring the operation.
 
@@ -752,7 +804,7 @@ generation ID rejects stale data, input, and acknowledgements after a restart.
 Each local tab starts in the user's home directory and retains up to 10,000 lines
 in xterm memory. There is no local session recovery after renderer reload or app
 exit. Local tabs report connection and bell state, without guessing coding-harness
-activity. Image paste saves a bounded file in the tab's private clipboard directory,
+activity. Image paste sends raw bytes over IPC and saves a bounded file in the tab's private clipboard directory,
 quotes the path for its shell, and uses `wslpath` for the default WSL distribution.
 Closing the tab cleans up those files. Native PTY bindings and spawn helpers are
 kept outside ASAR and rebuilt for Electron by the packaging tools. Windows uses
@@ -990,6 +1042,7 @@ the broker, and handle it in the shared client, delegating native actions throug
 | Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with the built service in both modes; conversation discovery |
 | Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout; mobile WebGL rendering, real clipboard copying, and GPU context-loss fallback |
 | Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
+| Native desktop | `tests/desktop/` via `npm run test:desktop` — Linux Electron, real preload/IPC/node-pty, image picker/drop/native clipboard, path insertion and stable viewport |
 | Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |
 
 Mobile automation uses real browser engines with emulated device sizes. Android swipes use Chromium's trusted
@@ -998,3 +1051,12 @@ the headless port cannot open a phone keyboard. Notification tests cover permiss
 cleanup races with browser API doubles, plus actual worker activation in both engines and notification
 registration in Chromium. They do not prove physical iOS selection handles, OS banners, Home Screen installation, or
 background suspension behavior. Those still need a physical iPhone/iPad and Android device check.
+
+For Linux native desktop checks, install `desktop/` dependencies, run
+`npm --prefix desktop run native` and `npm --prefix desktop run build`, then
+`xvfb-run -a npm run test:desktop` on a headless host. The suite uses an isolated
+app profile and a disposable input recorder. Browser image checks compare saved
+bytes and exact bracketed-paste input, including no automatic Enter; API/runtime
+checks cover 16 MiB boundaries, authorization/revocation, cancellation, retention,
+and uploads that must not hold the session registry lock. Native Windows/macOS
+clipboard and WSL path conversion still require those operating systems.

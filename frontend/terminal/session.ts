@@ -4,18 +4,17 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import type { SessionActivity } from '../../shared/activity'
 import type { TerminalHostState } from '../../shared/desktop'
 import type { LocalTerminalBridge } from '../../shared/localTerminal'
-import type { ImageMediaType } from '../../shared/model'
+import { imageProblem } from '../../shared/images'
 import { browserUrl } from '../../shared/signals'
 import { terminalService } from '../../shared/terminalService'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 import { terminalTheme } from '../../shared/terminalTheme'
-import { readImage } from '../api'
 import { touchInput } from '../browser'
 import { desktop } from '../desktop'
 import { TerminalActivity } from './activity'
 import { attachBell } from './bell'
 import { openBrowserTab } from './browser'
-import { attachClipboard, imageProblem } from './clipboard'
+import { attachClipboard } from './clipboard'
 import type { TerminalConnection, TerminalState } from './connection'
 import { TerminalGeometry } from './geometry'
 import { terminalKey, type TerminalModifiers } from './keys'
@@ -229,18 +228,23 @@ export class TerminalSession {
       })
   }
 
+  private imageBusy = false
+
   async pasteImage(file: File) {
     if (this.disposed) return
+    if (this.imageBusy) return this.notice('An image is already being attached. Please wait.', true)
+    if (!this.connection.connected) return this.notice('Connect the terminal before attaching an image.')
     const problem = imageProblem(file)
     if (problem) return this.notice(problem)
+    this.imageBusy = true
     this.notice(this.options.source.kind === 'local' ? 'Saving image…' : 'Uploading image…', true)
     try {
-      const data = await readImage(file)
-      if (this.disposed) return
-      await this.connection.pasteImage(data, file.type as ImageMediaType)
+      await this.connection.pasteImage(file)
       this.notice('Image pasted')
     } catch (error) {
       this.notice((error as Error).message)
+    } finally {
+      this.imageBusy = false
     }
   }
 

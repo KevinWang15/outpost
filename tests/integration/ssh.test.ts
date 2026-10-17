@@ -18,7 +18,7 @@ const docker = await execute('docker', ['info'], { timeout: 20_000 }).then(
   () => true,
   () => false,
 )
-const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(16, 3)]).toString('base64')
+const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(16, 3)])
 
 async function container(t: test.TestContext) {
   await execute('docker', ['build', '-q', '-t', 'outpost-v2-ssh-target', fixtures], { timeout: 600_000 })
@@ -105,10 +105,17 @@ async function lifecycle(
   await client.text(/OUTPOST_FIXTURE_READY \d+ 90x28/)
   client.send({ type: 'resize', cols: 70, rows: 20 })
   await client.text('70x20')
-  client.send({ type: 'paste-image', id: 'img', mediaType: 'image/png', data: png })
+  const upload = await fetch(`http://127.0.0.1:${port}/api/terminal/image`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${hello.resume}`, 'x-outpost-request': '1', 'content-type': 'image/png' },
+    body: png,
+  })
+  assert.equal(upload.status, 200)
+  const image = (await upload.json()) as { reference: string }
+  assert.match(image.reference, /^\/root\/\.outpost\/clipboard\/.+\.png$/)
+  client.send({ type: 'paste', id: 'img', data: image.reference })
   const pasted = await client.take('result')
   assert.equal(pasted.ok, true, pasted.message)
-  assert.match(pasted.reference!, /^\/root\/\.outpost\/clipboard\/.+\.png$/)
   const pid = /OUTPOST_FIXTURE_READY (\d+)/.exec(client.output)![1]
   client.socket.close()
   const again = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(hello.resume)}`)

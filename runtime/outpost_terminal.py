@@ -10,7 +10,7 @@ from pathlib import Path
 
 from outpost_frames import HEADER, control, header
 
-PROTOCOL = 3
+PROTOCOL = 4
 VERSION = '1.2.0'
 MAX_COLS = 400
 MAX_ROWS = 200

@@ -1,6 +1,6 @@
 import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
-import { protocolVersion } from '../../shared/protocol'
-import type { ImageMediaType } from '../../shared/model'
+import { maxInputMessage, maxInputQueue, protocolVersion, terminalConnectionPolicy } from '../../shared/protocol'
+import type { UploadedImage } from '../../shared/images'
 import type { SessionActivity } from '../../shared/activity'
 import type { TerminalRendering } from './rendering'
 import type { TerminalConnection, TerminalState } from './connection'
@@ -23,11 +23,13 @@ export class TerminalSocket implements TerminalConnection {
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
   private ready = false
+  private readyAt = 0
   private requestedSize: { cols: number; rows: number } | null = null
   private active = false
   private closedReason: CloseReason | null = null
-  private openedAt = 0
   private probing: WebSocket | null = null
+  private cleanup: (() => void) | null = null
+  private upload: AbortController | null = null
   private pending = new Map<
     string,
     { resolve: (message: Extract<ServerMessage, { type: 'result' }>) => void; reject: (error: Error) => void }
@@ -50,6 +52,7 @@ export class TerminalSocket implements TerminalConnection {
     if (this.stopped) return
     clearTimeout(this.timer)
     this.timer = undefined
+    this.detach()
     this.handlers.activity(null)
     const { cols, rows } = this.size()
     const url = new URL('/api/terminal', window.location.href)
@@ -61,7 +64,6 @@ export class TerminalSocket implements TerminalConnection {
       protocol: String(protocolVersion),
     }).toString()
     const socket = new WebSocket(url)
-    this.openedAt = Date.now()
     this.closedReason = null
     socket.binaryType = 'arraybuffer'
     this.socket = socket
@@ -71,6 +73,17 @@ export class TerminalSocket implements TerminalConnection {
     let acknowledged = 0
     let lastAck = 0
     let ackTimer: ReturnType<typeof setTimeout> | undefined
+    let stableTimer: ReturnType<typeof setTimeout> | undefined
+    const attachTimer = setTimeout(
+      () =>
+        this.lost(socket, { type: 'closed', reason: 'error', message: 'The terminal did not become ready in time.' }),
+      terminalConnectionPolicy.clientAttachMs,
+    )
+    this.cleanup = () => {
+      clearTimeout(ackTimer)
+      clearTimeout(attachTimer)
+      clearTimeout(stableTimer)
+    }
     const acknowledge = () => {
       clearTimeout(ackTimer)
       ackTimer = undefined
@@ -87,7 +100,6 @@ export class TerminalSocket implements TerminalConnection {
       if (acknowledged >= 64 * 1024 && performance.now() - lastAck >= 10) acknowledge()
       else ackTimer ??= setTimeout(acknowledge, 20)
     }
-    let closed: Extract<ServerMessage, { type: 'closed' }> | null = null
     socket.onmessage = event => {
       if (this.socket !== socket) return
       if (event.data instanceof ArrayBuffer) {
@@ -95,7 +107,14 @@ export class TerminalSocket implements TerminalConnection {
         this.rendering.output(bytes, () => rendered(bytes.length))
         return
       }
-      const message: ServerMessage = JSON.parse(event.data)
+      let message: ServerMessage
+      try {
+        message = JSON.parse(event.data)
+        if (!message || typeof message !== 'object' || typeof message.type !== 'string') throw new Error()
+      } catch {
+        this.fail('Outpost sent an invalid terminal message. Reload this terminal before reconnecting.')
+        return
+      }
       if (message.type === 'hello') {
         this.token = message.resume
         this.handlers.hello(message)
@@ -105,8 +124,13 @@ export class TerminalSocket implements TerminalConnection {
       } else if (message.type === 'ready') {
         this.rendering.flush(() => {
           if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
+          if (this.ready) return this.fail('Outpost sent duplicate terminal readiness.')
           this.ready = true
-          this.attempts = 0
+          this.readyAt = Date.now()
+          clearTimeout(attachTimer)
+          stableTimer = setTimeout(() => {
+            if (this.socket === socket && this.connected) this.resume()
+          }, terminalConnectionPolicy.stableMs)
           this.handlers.state({ kind: 'connected' })
           const { cols, rows } = this.size()
           this.resize(cols, rows)
@@ -118,37 +142,55 @@ export class TerminalSocket implements TerminalConnection {
         this.pending.get(message.id)?.resolve(message)
         this.pending.delete(message.id)
       } else if (message.type === 'signal') this.handlers.signal(message)
-      else if (message.type === 'closed') closed = message
+      else if (message.type === 'closed') this.lost(socket, message)
     }
-    socket.onclose = () => {
-      clearTimeout(ackTimer)
-      if (this.socket !== socket) return
-      this.ready = false
-      this.handlers.activity(null)
-      this.failPending('The connection closed before Outpost confirmed it. Check the terminal before retrying.')
-      if (this.stopped) return
-      const message = closed as Extract<ServerMessage, { type: 'closed' }> | null
-      this.closedReason = message?.reason ?? 'error'
-      if (message && message.reason !== 'error')
-        return this.handlers.state({ kind: 'closed', reason: message.reason, message: message.message })
-      if (++this.attempts > retries)
-        return this.handlers.state({
-          kind: 'closed',
-          reason: 'error',
-          message: message?.message ?? 'The connection to Outpost was lost.',
-        })
-      this.handlers.state({
-        kind: 'reconnecting',
-        attempt: this.attempts,
-        message: message?.message ?? 'Connection lost.',
+    socket.onclose = event =>
+      this.lost(socket, {
+        type: 'closed',
+        reason: event?.code === 1008 ? 'unavailable' : 'error',
+        message:
+          event?.code === 1008 ? event.reason || 'Terminal input was rejected.' : 'The connection to Outpost was lost.',
       })
-      this.timer = setTimeout(() => this.open(), Math.min(10_000, 500 * 2 ** this.attempts))
-    }
     this.handlers.state(
       this.attempts
         ? { kind: 'reconnecting', attempt: this.attempts, message: 'Reconnecting…' }
         : { kind: 'connecting' },
     )
+  }
+
+  /** End one attempt exactly once, without waiting for a stuck close handshake.
+   * Automatic recovery retains its budget; only explicit reconnect resets it. */
+  private lost(socket: WebSocket, message: Extract<ServerMessage, { type: 'closed' }>) {
+    if (this.socket !== socket) return
+    this.detach()
+    this.handlers.activity(null)
+    this.failPending('The connection closed before Outpost confirmed it. Check the terminal before retrying.')
+    if (this.stopped) return
+    this.closedReason = message.reason
+    if (message.reason !== 'error' || ++this.attempts > retries) {
+      this.stopped = true
+      this.handlers.state({ kind: 'closed', reason: message.reason, message: message.message })
+      return
+    }
+    this.handlers.state({ kind: 'reconnecting', attempt: this.attempts, message: message.message })
+    this.timer = setTimeout(() => this.open(), Math.min(10_000, 500 * 2 ** this.attempts))
+  }
+
+  private detach() {
+    this.upload?.abort(
+      new Error('The terminal disconnected before the image was pasted. Attach it again after reconnecting.'),
+    )
+    this.cleanup?.()
+    this.cleanup = null
+    const socket = this.socket
+    this.socket = null
+    this.ready = false
+    this.probing = null
+    if (socket) {
+      socket.onmessage = null
+      socket.onclose = null
+      socket.close()
+    }
   }
 
   /** Explicitly reconnect after an ended session or an unrecoverable connection error. */
@@ -157,23 +199,32 @@ export class TerminalSocket implements TerminalConnection {
     this.attempts = 0
     clearTimeout(this.timer)
     this.failPending('The terminal reconnected before Outpost confirmed it. Check the terminal before retrying.')
-    this.socket?.close()
     this.open()
   }
 
   /** A suspended page may still think its old socket is open. Probe before replacing a healthy connection. */
   resume() {
-    if (this.stopped || !this.socket || (this.closedReason && this.closedReason !== 'error')) return
-    const socket = this.socket
-    if (!this.connected) {
-      if (this.timer || socket.readyState >= WebSocket.CLOSING || Date.now() - this.openedAt > 15_000) this.reconnect()
+    if (this.stopped || (this.closedReason && this.closedReason !== 'error')) return
+    if (this.timer) {
+      this.open()
       return
     }
+    const socket = this.socket
+    if (!socket || !this.connected) return
     if (this.probing === socket) return
     this.probing = socket
-    void this.request({ type: 'ping', id: crypto.randomUUID() }, 8000)
+    void this.request({ type: 'ping', id: crypto.randomUUID() }, terminalConnectionPolicy.probeMs)
+      .then(result => {
+        if (!result.ok) throw new Error('The remote terminal service stopped responding.')
+        if (this.socket === socket && this.connected && Date.now() - this.readyAt >= terminalConnectionPolicy.stableMs)
+          this.attempts = 0
+      })
       .catch(() => {
-        if (this.socket === socket && !this.stopped && !this.closedReason) this.reconnect()
+        this.lost(socket, {
+          type: 'closed',
+          reason: 'error',
+          message: 'The remote terminal service stopped responding.',
+        })
       })
       .finally(() => {
         if (this.probing === socket) this.probing = null
@@ -200,19 +251,36 @@ export class TerminalSocket implements TerminalConnection {
   close() {
     this.stopped = true
     clearTimeout(this.timer)
+    this.timer = undefined
     this.handlers.activity(null)
     this.failPending('The terminal closed.')
-    this.socket?.close()
-    this.socket = null
+    this.detach()
   }
 
   private send(message: ClientMessage) {
-    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message))
+    const data = JSON.stringify(message)
+    if (this.canSend(new TextEncoder().encode(data).length)) this.socket!.send(data)
+  }
+
+  private canSend(bytes: number) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false
+    if (bytes + this.socket.bufferedAmount > maxInputQueue) {
+      this.fail('Terminal input is backed up. Check the terminal before reconnecting; unsent input is not retried.')
+      return false
+    }
+    return true
   }
 
   input(data: string | Uint8Array<ArrayBuffer>) {
     if (!this.connected) return false
-    this.socket!.send(typeof data === 'string' ? new TextEncoder().encode(data) : data)
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
+    if (bytes.length > 1024 * 1024) {
+      this.fail('Terminal input is limited to 1 MiB at a time. Reconnect and paste smaller sections.')
+      return false
+    }
+    if (!this.canSend(bytes.length)) return false
+    for (let offset = 0; offset < bytes.length; offset += maxInputMessage)
+      this.socket!.send(bytes.subarray(offset, offset + maxInputMessage))
     return true
   }
 
@@ -272,11 +340,44 @@ export class TerminalSocket implements TerminalConnection {
     if (!result.ok) throw new Error(result.message)
   }
 
-  /** Upload an image over this connection; the target pastes its path once. */
-  async pasteImage(data: string, mediaType: ImageMediaType) {
-    const result = await this.request({ type: 'paste-image', id: crypto.randomUUID(), data, mediaType })
-    if (!result.ok) throw new Error(result.message)
-    return result.reference!
+  /** Upload independently of interactive input, then paste into this attachment only. */
+  async pasteImage(file: File) {
+    if (!this.connected) throw new Error('Connect the terminal before attaching an image.')
+    if (this.upload) throw new Error('Wait for the previous image to finish.')
+    const socket = this.socket
+    const controller = new AbortController()
+    this.upload = controller
+    const timeout = setTimeout(
+      () => controller.abort(new Error('Image upload timed out. Try attaching it again.')),
+      150_000,
+    )
+    try {
+      const response = await fetch('/api/terminal/image', {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { authorization: `Bearer ${this.token}`, 'x-outpost-request': '1', 'content-type': file.type },
+        body: file,
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => null)
+        throw new Error(error?.message || `Image upload failed (${response.status}).`)
+      }
+      const image: UploadedImage = await response.json()
+      controller.signal.throwIfAborted()
+      if (!this.connected || this.socket !== socket)
+        throw new Error('The terminal changed before the image was pasted. Attach it again.')
+      if (typeof image.reference !== 'string' || !image.reference)
+        throw new Error('Outpost did not return an image reference.')
+      // The service applies the running application's bracketed-paste mode.
+      // A successful upload never submits the prompt or retries a paste.
+      const result = await this.request({ type: 'paste', id: crypto.randomUUID(), data: image.reference })
+      if (!result.ok) throw new Error(result.message)
+      return image.reference
+    } finally {
+      clearTimeout(timeout)
+      if (this.upload === controller) this.upload = null
+    }
   }
 
   private failPending(message: string) {

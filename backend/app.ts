@@ -40,8 +40,8 @@ export async function createApp(options: AppOptions) {
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, useDefaults: false } },
   })
   await app.register(cookies)
-  // Image pastes travel over the terminal socket, up to 16 MB before base64.
-  await app.register(websocket, { options: { maxPayload: 24 * 1024 * 1024, perMessageDeflate: false } })
+  // Allow JSON escaping of a 64 KiB input message, plus its control envelope.
+  await app.register(websocket, { options: { maxPayload: 512 * 1024, perMessageDeflate: false } })
 
   const sessions = options.sessions ?? new SessionClient(options.env)
   const software = options.software ?? new SoftwareClient(options.env)

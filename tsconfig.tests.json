@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["tests/browser", "shared"]
+  "include": ["tests/browser", "tests/desktop", "shared"]
 }

@@ -1,5 +1,5 @@
 import type { LocalTerminalBridge, LocalTerminalEvent } from '../../shared/localTerminal'
-import type { ImageMediaType } from '../../shared/model'
+import type { ImageMediaType } from '../../shared/images'
 import type { TerminalConnection, TerminalState } from './connection'
 import type { TerminalRendering } from './rendering'
 
@@ -105,8 +105,12 @@ export class LocalTerminalConnection implements TerminalConnection {
     this.rendering.restore({ type: 'clear' }, () => {})
   }
 
-  async pasteImage(data: string, mediaType: ImageMediaType) {
+  async pasteImage(file: File) {
     if (!this.connected) throw new Error('The shell is not running.')
-    return this.bridge.pasteImage(this.generation, data, mediaType)
+    const generation = this.generation
+    const data = new Uint8Array(await file.arrayBuffer())
+    if (!this.connected || this.generation !== generation)
+      throw new Error('The shell changed before the image was pasted.')
+    return this.bridge.pasteImage(generation, data, file.type as ImageMediaType)
   }
 }

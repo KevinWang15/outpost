@@ -38,3 +38,17 @@ test('connection status is visible only to its owner', () => {
   assert.equal(tokens.status(owner, id), 'connected')
   assert.equal(tokens.status({ userId: 'someone', loginId: 'x' }, id), 'pending')
 })
+
+test('upload authorization only accepts current resume grants and never consumes launch tickets', t => {
+  const tokens = new ConnectTokens('a'.repeat(64))
+  const launch = tokens.issue(grant)
+  assert.equal(tokens.authorize(launch.token), null)
+  assert.ok(tokens.redeem(launch.token))
+  const resume = tokens.resume(launch.id, grant)
+  assert.deepEqual(tokens.authorize(resume), grant)
+  assert.deepEqual(tokens.authorize(resume), grant)
+  assert.equal(tokens.authorize(resume + 'x'), null)
+  assert.equal(tokens.authorize('x'.repeat(8193)), null)
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 30 * 24 * 60 * 60_000 })
+  assert.equal(tokens.authorize(resume), null)
+})

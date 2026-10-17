@@ -11,13 +11,8 @@ export type Target = Static<typeof schemas.targetRecord>
 export type SshTarget = Extract<Target, { kind: 'ssh' }>
 export type SessionInput = Static<typeof schemas.sessionInput>
 export type SessionForkInput = Static<typeof schemas.sessionForkInput>
-export type SessionImageInput = Static<typeof schemas.imageInput>
 export type ConversationSearch = Static<typeof schemas.conversationSearch>
-export type ImageMediaType = SessionImageInput['mediaType']
 export type SoftwareId = (typeof schemas.softwareIds)[number]
-// Runtime constants stay here so the browser bundle never loads TypeBox.
-export const imageMediaTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
-
 export interface Environment {
   mode: 'local' | 'hosted'
   localTargets: boolean
@@ -64,19 +59,6 @@ export interface ConversationResults {
 export interface DirectorySuggestions {
   directories: string[]
   truncated: boolean
-}
-
-export const imageExtensions: Record<ImageMediaType, string> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
-}
-export const maxImageBytes = 16 * 1024 * 1024
-export interface SessionImage {
-  path: string
-  reference: string
-  injected: boolean
 }
 
 export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => [

@@ -6,7 +6,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { imageMediaTypes, maxImageBytes, type ImageMediaType } from '../../shared/model'
+import { imageExtensions, imageProblem, type ImageMediaType } from '../../shared/images'
 import { terminalSize } from '../../shared/terminalService'
 import type { LocalTerminalEvent } from '../../shared/localTerminal'
 import type { ShellProfile } from './shell-profiles'
@@ -14,12 +14,6 @@ import type { ShellProfile } from './shell-profiles'
 const execute = promisify(execFile)
 const highWater = 256 * 1024
 const lowWater = 64 * 1024
-const extensions: Record<ImageMediaType, string> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
-}
 
 /** A local tab owns its PTY. Native pause/resume bounds unread output without
  * consuming Ctrl+S/Ctrl+Q; xterm acknowledges only output it has rendered. */
@@ -115,22 +109,19 @@ export class LocalTerminal {
     }
   }
 
-  async pasteImage(generation: string, data: string, mediaType: ImageMediaType) {
+  async pasteImage(generation: string, data: Uint8Array, mediaType: ImageMediaType) {
     const pty = this.current(generation)
     if (this.imageBusy) throw new Error('Wait for the previous image to finish.')
-    if (
-      !(imageMediaTypes as readonly string[]).includes(mediaType) ||
-      typeof data !== 'string' ||
-      data.length > Math.ceil(maxImageBytes / 3) * 4
-    )
-      throw new Error('Images are limited to PNG, JPEG, GIF or WebP up to 16 MB.')
-    const bytes = Buffer.from(data, 'base64')
-    if (!bytes.length || bytes.length > maxImageBytes || this.imageBytes + bytes.length > 256 * 1024 * 1024)
+    if (!(data instanceof Uint8Array)) throw new Error('Invalid image data.')
+    const problem = imageProblem({ type: mediaType, size: data.byteLength })
+    if (problem) throw new Error(problem)
+    const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+    if (this.imageBytes + bytes.length > 256 * 1024 * 1024)
       throw new Error('This tab has reached its image storage limit. Open another local tab.')
     this.imageBusy = true
     try {
       await mkdir(this.images, { recursive: true, mode: 0o700 })
-      let path = join(this.images, `${randomUUID()}.${extensions[mediaType]}`)
+      let path = join(this.images, `${randomUUID()}.${imageExtensions[mediaType]}`)
       await writeFile(path, bytes, { mode: 0o600, flag: 'wx' })
       this.imageBytes += bytes.length
       if (this.profile.wsl) {

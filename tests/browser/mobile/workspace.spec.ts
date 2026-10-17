@@ -3,6 +3,51 @@ import { join } from 'node:path'
 import { test, expect, viewport, fitsScreen } from './helpers'
 import type { Session, Target } from '../../../shared/model'
 
+test('long target and session lists stay within the viewport and Connect remains tappable', async ({ page }, info) => {
+  const headers = { 'x-outpost-request': '1' }
+  let target!: Target
+  for (let index = 0; index < 10; index++) {
+    const response = await page.request.post('/api/targets', {
+      headers,
+      data: { kind: 'local', name: `Layout ${info.project.name} target ${index}`, tools: ['claude'] },
+    })
+    expect(response.status()).toBe(201)
+    target = await response.json()
+  }
+  for (let index = 0; index < 6; index++) {
+    const response = await page.request.post(`/api/targets/${target.id}/sessions`, {
+      headers,
+      data: {
+        name: `Layout ${info.project.name} session ${index}`,
+        rootDir: `~/layout-${info.project.name}-${index}`,
+        tool: 'claude',
+        createDirectory: true,
+      },
+    })
+    expect(response.status()).toBe(201)
+  }
+  await page.goto('/')
+  const navigation = page.getByRole('navigation', { name: 'Targets' })
+  const selected = navigation.getByRole('button', { name: new RegExp(target.name) })
+  await selected.tap()
+  await expect(page.getByRole('heading', { name: target.name, exact: true })).toBeVisible()
+  const session = `Layout ${info.project.name} session 5`
+  for (const width of [320, 390, 768]) {
+    await page.setViewportSize({ width, height: 780 })
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth))
+      .toBeLessThanOrEqual(1)
+    await expect
+      .poll(() => navigation.evaluate(element => element.scrollWidth - element.clientWidth))
+      .toBeGreaterThan(0)
+    await page.getByRole('row').filter({ hasText: session }).getByRole('button', { name: 'Connect', exact: true }).tap()
+    const dialog = page.getByRole('dialog', { name: `Connect to ${session}`, exact: true })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Close dialog', exact: true }).tap()
+    expect(await page.evaluate(() => scrollX)).toBe(0)
+  }
+})
+
 test('create and connect on a phone, send to the real process, resize, and resume without restarting', async ({
   page,
 }, info) => {
@@ -28,7 +73,9 @@ test('create and connect on a phone, send to the real process, resize, and resum
   await writeFile(join(session.rootDir, 'capture-input'), '')
   const row = page.getByRole('row').filter({ hasText: `Mobile coding ${suffix}` })
   await expect(row).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+  ).toBeLessThanOrEqual(1)
   await page.screenshot({ path: info.outputPath('session-list.png'), fullPage: true })
   await row.getByRole('button', { name: 'Connect', exact: true }).tap()
   const connect = page.getByRole('dialog', { name: `Connect to Mobile coding ${suffix}` })
@@ -47,12 +94,23 @@ test('create and connect on a phone, send to the real process, resize, and resum
   const input = () => readFile(join(session.rootDir, 'input.bin'), 'utf8').catch(() => '')
   await expect.poll(input).toContain(message.replace('\n', '\r'))
   expect((await input()).split(message.replace('\n', '\r'))).toHaveLength(2)
+  const imageGeometry = await terminal.locator('.xterm-screen').boundingBox()
+  const imageResponse = terminal.waitForResponse(response => response.url().endsWith('/api/terminal/image'))
   await terminal.locator('input[type=file]').setInputFiles({
     name: 'mobile-image.png',
     mimeType: 'image/png',
     buffer: Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)]),
   })
   await expect(terminal.getByRole('status').filter({ hasText: 'Image pasted' })).toBeVisible()
+  const uploaded = await imageResponse
+  expect(uploaded.status()).toBe(200)
+  const image = await uploaded.json()
+  expect(await readFile(image.path)).toEqual(
+    Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)]),
+  )
+  expect(await terminal.locator('.xterm-screen').boundingBox()).toEqual(imageGeometry)
+  await expect.poll(input).toContain(`\x1b[200~${image.reference}\x1b[201~`)
+  expect((await input()).endsWith('\x1b[201~')).toBe(true)
   await expect.poll(input).toContain(`/.outpost/clipboard/${session.id}/`)
   const starts = await readFile(join(session.rootDir, 'starts.log'), 'utf8')
   const sizes = await readFile(join(session.rootDir, 'sizes.log'), 'utf8')

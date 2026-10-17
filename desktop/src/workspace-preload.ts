@@ -11,7 +11,7 @@ function invoke<Name extends keyof WorkspaceCommands>(
 const bridge: WorkspaceBridge = {
   newLocal: profile => invoke('newLocal', profile),
   shellMenu: () => invoke('shellMenu'),
-  createSession: server => invoke('createSession', server),
+  openOutpostTerminal: server => invoke('openOutpostTerminal', server),
   tabGeometry: value => invoke('tabGeometry', value),
   dragStart: id => invoke('dragStart', id),
   dragEnd: cancel => invoke('dragEnd', cancel),

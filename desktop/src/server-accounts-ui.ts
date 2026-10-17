@@ -70,7 +70,7 @@ export function serverAccountsControls(api: WorkspaceBridge, run: (work: Promise
     status.onclick = () => run(server.status === 'expired' ? api.loginServer(server.origin) : api.refreshServers())
     const create = row.querySelector<HTMLButtonElement>('.server-create')!
     create.disabled = pending || server.status === 'expired' || server.status === 'signing-out'
-    create.onclick = () => run(api.createSession(server.origin))
+    create.onclick = () => run(api.openOutpostTerminal(server.origin))
     create.setAttribute('aria-label', `New session on ${server.origin}`)
     const signout = row.querySelector<HTMLButtonElement>('.server-signout')!
     signout.disabled = pending || server.status === 'signing-out'

@@ -181,8 +181,7 @@ export class DesktopWorkspace {
           return this.accounts.hasAccount(entry.server, entry.accountId)
         }),
       openRecent: (source, id) => this.openRecent(source, id),
-      findSession: (source, target, anchor) => this.findSession(source, target, anchor),
-      createSession: (source, target, server) => this.createSession(source, target, server),
+      findSession: (source, target, anchor, server) => this.findSession(source, target, anchor, server),
       serverAccounts: () => this.accounts.snapshot(),
       loginServer: origin => this.accounts.login(origin),
       cancelServerLogin: origin => this.accounts.cancel(origin),
@@ -258,7 +257,7 @@ export class DesktopWorkspace {
     return entry
   }
 
-  private async findSession(source: WorkspaceWindow, target: SessionTarget, anchor: Point) {
+  private async findSession(source: WorkspaceWindow, target: SessionTarget, anchor: Point, server?: string) {
     this.drag.cancel()
     const window = source.browserWindow
     if (!window || window.isDestroyed()) return
@@ -276,6 +275,7 @@ export class DesktopWorkspace {
               errors,
             }),
           ),
+        () => this.createSession(source, target, server),
       )
       if (selected !== null) await this.openSessionAt(source, target, selected)
     } finally {
@@ -283,11 +283,14 @@ export class DesktopWorkspace {
     }
   }
 
-  private async createSession(source: WorkspaceWindow, target: SessionTarget, server?: string) {
+  private async createSession(
+    source: WorkspaceWindow,
+    target: SessionTarget,
+    server?: string,
+  ): Promise<DesktopSessionReference | null> {
     this.drag.cancel()
-    this.finder.cancel()
     const window = source.browserWindow
-    if (!window || window.isDestroyed() || this.stopping) return
+    if (!window || window.isDestroyed() || this.stopping) return null
     const anchor = target.kind === 'split' ? this.terminals.panes.get(target.paneId) : undefined
     const reference = anchor?.connection.kind === 'remote' ? anchor.connection.reference : undefined
     try {
@@ -301,16 +304,7 @@ export class DesktopWorkspace {
         { server: defaultServer, targetId: server ? undefined : reference?.targetId },
         () => this.sessionPlacement(source, target),
       )
-      if (selected !== null) {
-        try {
-          await this.openSessionAt(source, target, selected)
-        } catch (error) {
-          throw new Error(
-            `The session was created, but could not open here. Find it in Outpost terminal. ${String(error)}`,
-            { cause: error },
-          )
-        }
-      }
+      return selected
     } finally {
       source.restoreFocus()
     }

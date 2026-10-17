@@ -30,8 +30,7 @@ export interface WorkspaceHost {
   newLocal(source: WorkspaceWindow, profile?: string, placement?: PanePlacement): void
   recentSessions(): RecentSessionSummary[]
   openRecent(source: WorkspaceWindow, id: string): Promise<void>
-  findSession(source: WorkspaceWindow, target: SessionTarget, anchor: Point): Promise<void>
-  createSession(source: WorkspaceWindow, target: SessionTarget, server?: string): Promise<void>
+  findSession(source: WorkspaceWindow, target: SessionTarget, anchor: Point, server?: string): Promise<void>
   serverAccounts(): ServerAccountsSnapshot
   loginServer(origin: string): Promise<void>
   cancelServerLogin(origin: string): void
@@ -96,8 +95,8 @@ export class WorkspaceWindow {
         return this.host.newLocal(this, command.args[0])
       case 'shellMenu':
         return this.shellMenu()
-      case 'createSession':
-        return this.host.createSession(this, { kind: 'tab' }, command.args[0])
+      case 'openOutpostTerminal':
+        return this.host.findSession(this, { kind: 'tab' }, screen.getCursorScreenPoint(), command.args[0])
       case 'activateTab':
         return this.activateTab(command.args[0], command.args[1] !== false)
       case 'activatePane':
@@ -649,16 +648,11 @@ export class WorkspaceWindow {
       })),
       { type: 'separator' },
       { label: 'Outpost terminal…', click: () => this.findSession({ kind: 'tab' }, anchor) },
-      { label: 'New Outpost session…', click: () => this.createSession({ kind: 'tab' }) },
     ]).popup({ window: this.window })
   }
 
   private findSession(target: SessionTarget, anchor: Point) {
     void this.host.findSession(this, target, anchor).catch(error => this.reportError(String(error)))
-  }
-
-  private createSession(target: SessionTarget) {
-    void this.host.createSession(this, target).catch(error => this.reportError(String(error)))
   }
 
   private tabMenu(id: number) {
@@ -685,10 +679,6 @@ export class WorkspaceWindow {
       {
         label: 'Split with Outpost terminal…',
         click: () => this.findSession({ kind: 'split', tabId: id, paneId: group.activePaneId }, anchor),
-      },
-      {
-        label: 'Split with new Outpost session…',
-        click: () => this.createSession({ kind: 'split', tabId: id, paneId: group.activePaneId }),
       },
       {
         label: 'Move beside current tab',

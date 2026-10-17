@@ -42,7 +42,7 @@ const validators: Record<keyof WorkspaceCommands, (args: unknown[]) => boolean> 
   state: none,
   newLocal: args => args.length <= 1 && (args[0] === undefined || text(args[0], 256)),
   shellMenu: none,
-  createSession: args => args.length <= 1 && (args[0] === undefined || text(args[0], 8192)),
+  openOutpostTerminal: args => args.length <= 1 && (args[0] === undefined || text(args[0], 8192)),
   activateTab: args =>
     args.length >= 1 &&
     args.length <= 2 &&

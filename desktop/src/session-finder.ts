@@ -3,10 +3,12 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tabBarHeight } from './layout'
 import type { SessionFinderState } from './session-finder-api'
-import type { DesktopSessionChoice } from '../../shared/desktopAuth'
+import { desktopSessionId, type DesktopSessionChoice, type DesktopSessionReference } from '../../shared/desktopAuth'
 
 type Catalogue = Pick<SessionFinderState, 'sessions' | 'errors'>
+type FinderUpdate = Partial<Catalogue> & Pick<SessionFinderState, 'focusId'> & { loading?: boolean }
 type LoadSessions = (signal: AbortSignal, publish: (catalogue: Catalogue) => void) => Promise<void>
+type CreateSession = () => Promise<DesktopSessionReference | null>
 
 /** One reusable native popover, above terminal views without hiding or resizing them. */
 export class SessionFinder {
@@ -14,6 +16,9 @@ export class SessionFinder {
     window: BrowserWindow
     state: SessionFinderState
     finish(id: string | null, error?: Error): void
+    create: CreateSession
+    refresh(focusId?: string): void
+    creating: boolean
   } | null = null
 
   constructor(private directory: string) {
@@ -28,6 +33,25 @@ export class SessionFinder {
       if (id === null || (typeof id === 'string' && current.state.sessions.some(session => session.id === id)))
         current.finish(id)
     })
+    ipcMain.on('session-finder:create', event => {
+      const current = this.sender(event)
+      if (!current || current.creating) return
+      current.creating = true
+      current.window.hide()
+      void current
+        .create()
+        .then(reference => {
+          if (this.current !== current) return
+          current.creating = false
+          if (reference) current.refresh(desktopSessionId(reference))
+          if (!current.window.isDestroyed()) {
+            current.window.show()
+            current.window.focus()
+            current.window.webContents.focus()
+          }
+        })
+        .catch(error => current.finish(null, error instanceof Error ? error : new Error(String(error))))
+    })
   }
 
   private sender(event: IpcMainEvent | IpcMainInvokeEvent) {
@@ -41,7 +65,13 @@ export class SessionFinder {
       : null
   }
 
-  pick(parent: BrowserWindow, title: string, anchor: Point, load: LoadSessions): Promise<DesktopSessionChoice | null> {
+  pick(
+    parent: BrowserWindow,
+    title: string,
+    anchor: Point,
+    load: LoadSessions,
+    create: CreateSession,
+  ): Promise<DesktopSessionChoice | null> {
     this.current?.finish(null)
     if (parent.isDestroyed()) return Promise.resolve(null)
     const area = screen.getDisplayMatching(parent.getBounds()).workArea
@@ -76,13 +106,35 @@ export class SessionFinder {
     window.webContents.on('will-navigate', event => event.preventDefault())
     return new Promise((resolve, reject) => {
       let settled = false
-      const abort = new AbortController()
+      let abort = new AbortController()
       let state: SessionFinderState = { title, revision: 0, sessions: [], errors: [], loading: true }
-      const update = (next: Partial<Catalogue> & { loading?: boolean }) => {
+      const update = (next: FinderUpdate) => {
         if (settled) return
         state = { ...state, ...next, revision: state.revision + 1 }
         if (this.current?.window === window) this.current.state = state
         if (!window.webContents.isDestroyed()) window.webContents.send('session-finder:state', state)
+      }
+      const refresh = (focusId?: string) => {
+        if (settled) return
+        abort.abort()
+        const controller = new AbortController()
+        abort = controller
+        update({ loading: true, ...(focusId ? { focusId } : {}) })
+        const publish = (catalogue: Catalogue) => {
+          if (abort === controller && !controller.signal.aborted) update(catalogue)
+        }
+        void load(controller.signal, publish)
+          .then(() => {
+            if (abort === controller && !controller.signal.aborted)
+              update({ loading: false, ...(focusId ? { focusId: undefined } : {}) })
+          })
+          .catch(error => {
+            if (abort === controller && !controller.signal.aborted)
+              update({
+                loading: false,
+                errors: [error instanceof Error ? error.message : 'Could not load sessions.'],
+              })
+          })
       }
       const finish = (id: string | null, error?: Error) => {
         if (settled) return
@@ -97,12 +149,15 @@ export class SessionFinder {
         else resolve(state.sessions.find(session => session.id === id) ?? null)
       }
       const cancel = () => finish(null)
-      this.current = { window, state, finish }
+      const current = { window, state, finish, create, refresh, creating: false }
+      this.current = current
       parent.once('closed', cancel)
       parent.once('hide', cancel)
       parent.once('minimize', cancel)
       window.on('closed', cancel)
-      window.on('blur', cancel)
+      window.on('blur', () => {
+        if (!current.creating) cancel()
+      })
       window.webContents.on('render-process-gone', () =>
         finish(null, new Error('The session finder stopped responding. Please try again.')),
       )
@@ -120,11 +175,7 @@ export class SessionFinder {
         window.webContents.focus()
       })
       void window.loadFile(join(this.directory, 'session-finder.html')).catch(error => finish(null, error))
-      void load(abort.signal, update)
-        .then(() => update({ loading: false }))
-        .catch(error =>
-          update({ loading: false, errors: [error instanceof Error ? error.message : 'Could not load sessions.'] }),
-        )
+      refresh()
     })
   }
   cancel() {

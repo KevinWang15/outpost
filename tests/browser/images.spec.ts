@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import type { Session, Target } from '../../shared/model'
 import type { UploadedImage } from '../../shared/images'
-import { desktopTerminal, appConnection } from './terminal-fixture'
+import { desktopTerminal, appConnection, showTerminalToolbar } from './terminal-fixture'
 
 const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 32, 10])
 
@@ -28,7 +28,7 @@ async function openSession(page: Page, mode: 'web' | 'desktop') {
     const connection = await appConnection(page.request, target.id, session.id)
     await desktopTerminal(page, connection.token)
     await page.goto('/terminal/desktop')
-    await page.getByRole('button', { name: 'Show terminal toolbar' }).click()
+    await showTerminalToolbar(page)
   } else await page.goto(`/terminal?target=${target.id}&session=${session.id}`)
   await expect(page.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()
   await expect(page.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')

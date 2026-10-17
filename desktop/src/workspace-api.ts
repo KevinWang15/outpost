@@ -57,7 +57,7 @@ export interface WorkspaceSnapshot {
 export interface WorkspaceBridge {
   newLocal(profile?: string): Promise<void>
   shellMenu(): Promise<void>
-  createSession(server?: string): Promise<void>
+  openOutpostTerminal(server?: string): Promise<void>
   tabGeometry(value: TabGeometry): Promise<void>
   dragStart(item: WorkspaceItem): Promise<void>
   dragEnd(cancel: boolean): Promise<void>

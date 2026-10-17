@@ -56,6 +56,12 @@ export async function desktopTerminal(page: Page, token: string) {
   return host
 }
 
+/** Desktop panes keep the optional terminal toolbar behind the terminal menu. */
+export async function showTerminalToolbar(page: Page) {
+  await page.locator('.terminal-surface').click({ button: 'right' })
+  await page.getByRole('menuitemcheckbox', { name: 'Terminal toolbar', exact: true }).click()
+}
+
 /** Browser socket fixtures use the same initial checkpoint as the real service. */
 export function restoreEmptyTerminal(socket: WebSocketRoute) {
   const params = new URL(socket.url()).searchParams

@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import type { PaneBounds } from '../../desktop/src/layout'
 import type { WorkspaceSnapshot } from '../../desktop/src/workspace-api'
+import { showTerminalToolbar } from './terminal'
 
 const execute = promisify(execFile)
 test.skip(process.platform !== 'linux', 'Native pointer/keyboard coverage uses X11 and xdotool on Linux.')
@@ -250,7 +251,7 @@ test('tab-bar hover previews cancel cleanly, then commit without reloading the t
   const moving = (await state()).panes[0].id,
     page = await terminal(moving)
   await chrome.locator(`[data-pane="${moving}"] .pane-select`).click()
-  await page.getByRole('button', { name: 'Show terminal toolbar', exact: true }).click()
+  await showTerminalToolbar(page)
   await page.getByRole('button', { name: 'Message box', exact: true }).click()
   const draft = page.getByRole('textbox', { name: 'Message to the session', exact: true })
   await draft.fill('preserve this unsent prompt across moves')

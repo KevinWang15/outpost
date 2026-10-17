@@ -64,24 +64,42 @@ export async function serverRequest(
 
 /** One queue per catalogue load, shared by target and session requests. */
 export function requestQueue(limit: number, signal?: AbortSignal) {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Request queue limit must be positive.')
   let active = 0
-  const waiting: (() => void)[] = []
-  return <T>(work: () => Promise<T>): Promise<T> =>
-    new Promise((resolve, reject) => {
-      const start = () => {
-        active++
-        void Promise.resolve()
-          .then(() => {
-            signal?.throwIfAborted()
-            return work()
-          })
-          .then(resolve, reject)
-          .finally(() => {
-            active--
-            waiting.shift()?.()
-          })
-      }
-      if (active < limit) start()
-      else waiting.push(start)
+  let stopped = false
+  const waiting: {
+    work: () => Promise<unknown>
+    resolve: (value: unknown) => void
+    reject: (error: unknown) => void
+  }[] = []
+  const stop = () => {
+    stopped = true
+    const error = signal?.reason ?? new Error('The request queue was cancelled.')
+    while (waiting.length) waiting.shift()!.reject(error)
+  }
+  signal?.addEventListener('abort', stop, { once: true })
+  const pump = () => {
+    while (!stopped && active < limit && waiting.length) {
+      const item = waiting.shift()!
+      active++
+      void Promise.resolve()
+        .then(() => {
+          signal?.throwIfAborted()
+          return item.work()
+        })
+        .then(item.resolve, item.reject)
+        .finally(() => {
+          active--
+          pump()
+        })
+    }
+  }
+  return <T>(work: () => Promise<T>): Promise<T> => {
+    if (stopped || signal?.aborted)
+      return Promise.reject(signal?.reason ?? new Error('The request queue was cancelled.'))
+    return new Promise<T>((resolve, reject) => {
+      waiting.push({ work, resolve: value => resolve(value as T), reject })
+      pump()
     })
+  }
 }

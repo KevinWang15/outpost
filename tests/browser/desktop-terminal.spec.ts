@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
-import { desktopTerminal, appConnection } from './terminal-fixture'
+import { desktopTerminal, appConnection, showTerminalToolbar } from './terminal-fixture'
 
 const ticketKey = 'outpost.desktop.ticket'
 
@@ -57,7 +57,7 @@ test('app tickets attach without a browser login; reload and toolbar changes reu
   expect(await page.evaluate(key => sessionStorage.getItem(key), ticketKey)).toBeNull()
   expect(await page.evaluate(key => localStorage.getItem(key), ticketKey)).toBeNull()
 
-  await page.getByRole('button', { name: 'Show terminal toolbar' }).click()
+  await showTerminalToolbar(page)
   const before = await page.locator('.terminal-surface').evaluate(element => element.clientHeight)
   await page.getByRole('button', { name: 'Hide terminal toolbar' }).click()
   await expect(page.locator('.terminal-bar')).toBeHidden()
@@ -69,8 +69,7 @@ test('app tickets attach without a browser login; reload and toolbar changes reu
   await expect(page.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
   expect(sockets).toHaveLength(2)
   expect(new URL(sockets[1]).searchParams.get('token')).toBe(resume)
-  await expect(page.getByRole('button', { name: 'Show terminal toolbar' })).toBeVisible()
-  await page.getByRole('button', { name: 'Show terminal toolbar' }).click()
+  await showTerminalToolbar(page)
   await expect(page.locator('.terminal-bar')).toBeVisible()
   expect(sockets).toHaveLength(2)
   expect(
@@ -113,7 +112,7 @@ test('storage restrictions do not prevent a desktop launch or reload', async ({ 
   await expect(page.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
   await expect(page).toHaveURL(/\/terminal\/desktop$/)
   await page.getByRole('button', { name: 'Hide terminal toolbar' }).click()
-  await page.getByRole('button', { name: 'Show terminal toolbar' }).click()
+  await showTerminalToolbar(page)
   await expect(page.locator('.terminal-state')).toHaveText('Connected')
   await page.reload()
   await expect(page.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')

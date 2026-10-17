@@ -2,6 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test, expect, _electron as electron } from '@playwright/test'
+import { showTerminalToolbar } from './terminal'
 
 test.skip(process.platform !== 'linux', 'The native input recorder requires Linux and Python 3.')
 
@@ -27,7 +28,7 @@ test('local desktop image picker, drop and native clipboard save bytes and paste
     expect(await app.evaluate(({ app }) => app.getPath('userData'))).toBe(userData)
     await expect.poll(() => app.windows().some(page => page.url().includes('/local-terminal/'))).toBe(true)
     const page = app.windows().find(page => page.url().includes('/local-terminal/'))!
-    await page.getByRole('button', { name: 'Show terminal toolbar' }).click()
+    await showTerminalToolbar(page)
     await expect(page.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()
     const field = page.getByRole('textbox', { name: 'Terminal input' })
     await field.pressSequentially(`unset HISTFILE; exec python3 -u '${script}' '${capture}'`)

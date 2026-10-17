@@ -246,7 +246,8 @@ checkpoint restoration. During pinch
 zoom it preserves the last unzoomed layout instead of reflowing terminal text.
 Touch controls use larger targets and 16px form text, and the composer stays
 focused while a send is pending. Floating notices remain visible and dismissible
-on narrow screens, and leave the toolbar toggle reachable when the toolbar is hidden.
+on narrow screens; browser terminals leave the toolbar toggle reachable when the
+toolbar is hidden, while desktop panes use their terminal context menu.
 
 `touch.ts` maps a single-finger vertical swipe to xterm's existing wheel handler;
 it owns that touch gesture to avoid also scrolling xterm's local viewport.
@@ -849,6 +850,12 @@ never silently redirects the result to the currently selected tab. If a
 created session cannot open, it remains discoverable through the catalogue.
 Creation does not issue or store an independent terminal credential; opening
 uses `ServerAccounts.launch` like every other remote session entry point.
+
+The session finder owns the complete choose-or-create interaction. Its native
+window hides while the creator modal is active, then reloads the same catalogue
+and focuses the returned session identity. Cancelling creation returns to the
+finder without changing the layout; cancelling the finder resolves the whole
+operation with no pane change.
 
 ### Recent remote sessions
 

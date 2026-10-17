@@ -143,9 +143,11 @@ in both the browser and Outpost Desktop. **Command+V** continues to work.
 The browser may ask for clipboard permission for Ctrl+V; if access is blocked,
 use Command+V instead.
 
-Use **Hide terminal toolbar** for more screen space; the small button at the
-top right restores it. This preference also applies to Outpost Desktop. Connection
-errors, link prompts and bell notices remain visible while the toolbar is hidden.
+Use **Hide terminal toolbar** for more screen space. In the browser, the small
+button at the top right restores it; in Outpost Desktop, right-click the terminal
+and enable **Terminal toolbar**. This preference is shared by both clients.
+Connection errors, link prompts and bell notices remain visible while the toolbar
+is hidden.
 
 Right-click the terminal (or press **Shift+F10** / the **Menu** key) for **Copy**,
 **Paste**, **Select all**, image upload, and toggles for the toolbar, message box
@@ -291,20 +293,21 @@ Right-click a tab and choose **Split with Outpost terminal…**, or right-click
 **+** and choose **Outpost terminal…** for a new tab. The shared finder loads
 all sessions on your logged-in servers, including sessions you have never
 opened in the app. Type to filter by session, target, tool, directory or server;
-use **↑ / ↓** and **Enter**, or click a result; **Esc** cancels. Servers and
-unreachable targets report errors independently, so available results remain
-usable. An already-open session moves its existing pane into the chosen split
-or tab, preserving its connection and draft. A split uses the selected pane of
-the tab whose menu you opened.
+use **↑ / ↓** and **Enter**, click a result, or choose **New session** in the
+finder; **Esc** cancels. Servers and unreachable targets report errors
+independently, so available results remain usable. An already-open session moves
+its existing pane into the chosen split or tab, preserving its connection and
+draft. A split uses the selected pane of the tab whose menu you opened.
 
-To create a remote session directly in the app, choose **New session** beside
-a logged-in server, **+ → New Outpost session…** (right-click), or a tab's
-**Split with new Outpost session…** menu item. All three open the same dialog:
+The finder's **New session** action opens the same dialog as **New session** beside
+a logged-in server. It temporarily hides the finder, then refreshes the full
+catalogue and highlights the created session so Enter opens it in the original
+destination. The server row preselects its server; splitting beside a remote
+pane preselects that pane's server and target. All creation fields are shared:
 Outpost server, execution target, then the web workspace's session name, coding
 tool, project directory (with suggestions), directory creation, arguments and
-environment fields. The server row preselects its server; splitting beside a
-remote pane preselects that pane's server and target. A single available server
-or target is selected automatically. You can change either selection.
+environment fields. A single available server or target is selected
+automatically. You can change either selection.
 
 **Cancel** creates nothing and leaves the layout alone. **Create session**
 creates the session and opens it in the original new-tab or split destination.
@@ -356,7 +359,7 @@ the unchecked state returns with an error. Browser terminals use the same logic
 when you return to their page.
 
 Settings remembers text size, bell sound, and the default local shell. The toolbar starts hidden in the
-app and can be revealed from the terminal's upper corner. The same xterm.js
+app and can be revealed from the terminal context menu. The same xterm.js
 client handles input, selection, image paste and reconnects in both clients.
 WebGL accelerates rendering when available, with a DOM renderer fallback.
 Local panes use the same terminal screen with a native PTY connection and have no

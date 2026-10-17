@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { test, expect, _electron as electron } from '@playwright/test'
 import { desktopEntryUrl } from '../../shared/desktopAuth'
 import type { DesktopBridge } from '../../shared/desktop'
+import { showTerminalToolbar } from './terminal'
 
 test('native wake and unlock reach all remote tabs without reloading pages or touching local shells', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-wake-'))
@@ -71,7 +72,7 @@ test('native wake and unlock reach all remote tabs without reloading pages or to
     })
     await expect.poll(() => app.windows().some(page => page.url().includes('/local-terminal/'))).toBe(true)
     const local = app.windows().find(page => page.url().includes('/local-terminal/'))!
-    await local.getByRole('button', { name: 'Show terminal toolbar' }).click()
+    await showTerminalToolbar(local)
     await expect(local.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()
     await local.evaluate(() => {
       document.body.dataset.wakes = ''

@@ -297,7 +297,8 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
           </button>
         </div>
       </header>
-      {!toolbarShown && (
+      {/* Desktop panes use their context menu to reveal this optional toolbar. */}
+      {!toolbarShown && !desktop && (
         <button
           className="icon-button terminal-show-toolbar"
           title="Show terminal toolbar"
@@ -333,7 +334,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         </TerminalContextMenu>
         {search.visible && state.kind !== 'closed' && <TerminalSearch search={search} />}
         {/* Notices float over the screen; they must never change PTY geometry. */}
-        <div className={`terminal-notices${toolbarShown ? '' : ' toolbar-hidden'}`}>
+        <div className={`terminal-notices${!toolbarShown && !desktop ? ' toolbar-hidden' : ''}`}>
           {(status || (!toolbarShown && (state.kind === 'connecting' || state.kind === 'reconnecting'))) && (
             <div className="terminal-notice" role="status">
               <span>{status || label}</span>

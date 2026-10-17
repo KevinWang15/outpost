@@ -7,11 +7,13 @@ export interface SessionFinderState {
   sessions: DesktopSessionChoice[]
   errors: string[]
   loading: boolean
+  focusId?: string
 }
 export interface SessionFinderBridge {
   state(): Promise<SessionFinderState>
   onState(listener: (state: SessionFinderState) => void): () => void
   choose(id: string): void
+  create(): void
   cancel(): void
 }
 

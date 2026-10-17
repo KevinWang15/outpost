@@ -28,14 +28,18 @@ export class ServerLoginStore {
     if (!Array.isArray(raw)) throw new Error('Invalid app server login file.')
     for (const entry of raw) {
       if (!validDesktopCredential(entry) || !('origin' in entry) || typeof entry.origin !== 'string') continue
-      const origin = desktopOrigin(entry.origin)
-      if (allowed(origin))
-        this.records.set(origin, {
-          origin,
-          token: entry.token,
-          expiresAt: entry.expiresAt,
-          account: { id: entry.account.id, name: entry.account.name, email: entry.account.email },
-        })
+      try {
+        const origin = desktopOrigin(entry.origin)
+        if (allowed(origin))
+          this.records.set(origin, {
+            origin,
+            token: entry.token,
+            expiresAt: entry.expiresAt,
+            account: { id: entry.account.id, name: entry.account.name, email: entry.account.email },
+          })
+      } catch {
+        // Ignore malformed origins without loading a credential for them.
+      }
     }
   }
   put(entry: SavedServerLogin) {

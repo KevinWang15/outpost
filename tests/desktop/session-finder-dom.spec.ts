@@ -20,6 +20,7 @@ async function open(page: Page, entries = sessions) {
         state: async () => state,
         onState: () => () => {},
         choose: id => window.finderCalls.push(id),
+        create: () => window.finderCalls.push('create'),
         cancel: () => window.finderCalls.push(null),
       }
     },

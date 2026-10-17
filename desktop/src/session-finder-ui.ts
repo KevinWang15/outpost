@@ -25,7 +25,8 @@ function render(preserve = true) {
   )
   // Search the entire catalogue, but keep a bounded list of visible rows.
   matches = filtered.slice(0, 200)
-  const retained = matches.findIndex(session => session.id === previous)
+  const preferred = state.focusId ? matches.findIndex(session => session.id === state.focusId) : -1
+  const retained = preferred >= 0 ? preferred : matches.findIndex(session => session.id === previous)
   selected = retained >= 0 ? retained : Math.max(0, Math.min(selected, matches.length - 1))
   reconcileElements(
     list,
@@ -84,6 +85,9 @@ input.onkeydown = event => {
   }
 }
 document.querySelector<HTMLButtonElement>('#cancel')!.onclick = () => api.cancel()
+const create = document.querySelector<HTMLButtonElement>('#create')!
+create.onpointerdown = event => event.preventDefault()
+create.onclick = () => api.create()
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !event.isComposing) {
     event.preventDefault()
@@ -93,6 +97,12 @@ window.addEventListener('keydown', event => {
 window.addEventListener('focus', () => input.focus())
 function accept(next: SessionFinderState) {
   if (next.revision <= state.revision || resolved) return
+  if (next.focusId && input.value) {
+    // A newly created session should remain selectable even when the old query
+    // would have filtered it out.
+    input.value = ''
+    selected = 0
+  }
   state = next
   document.querySelector<HTMLElement>('#title')!.textContent = next.title
   render()

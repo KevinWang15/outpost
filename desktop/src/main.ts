@@ -1,4 +1,4 @@
-import { app, dialog, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, dialog, Menu, powerMonitor, type MenuItemConstructorOptions } from 'electron'
 import { join, resolve } from 'node:path'
 import { parseLaunch } from './launch'
 import { Preferences } from './preferences'
@@ -15,6 +15,7 @@ const trusted = new TrustedServers(join(app.getPath('userData'), 'servers.json')
 const preferences = new Preferences(join(app.getPath('userData'), 'preferences.json'))
 const recentSessions = new RecentSessions(join(app.getPath('userData'), 'recent-sessions.json'))
 let workspace: DesktopWorkspace | undefined
+const resumeTerminals = () => workspace?.resume()
 const waiting: string[] = []
 let operations = Promise.resolve()
 let pending = 0
@@ -220,6 +221,8 @@ else {
       await Promise.all([trusted.load(), preferences.load(), recentSessions.load()])
       await recentSessions.retainServers(origin => trusted.has(origin))
       workspace = new DesktopWorkspace(__dirname, trusted, preferences, recentSessions, trust)
+      powerMonitor.on('resume', resumeTerminals)
+      powerMonitor.on('unlock-screen', resumeTerminals)
       app.setAboutPanelOptions({
         applicationName: 'Outpost',
         applicationVersion: app.getVersion(),
@@ -248,5 +251,9 @@ else {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin' && pending === 0) app.quit()
   })
-  app.on('will-quit', () => workspace?.dispose())
+  app.on('will-quit', () => {
+    powerMonitor.removeListener('resume', resumeTerminals)
+    powerMonitor.removeListener('unlock-screen', resumeTerminals)
+    workspace?.dispose()
+  })
 }

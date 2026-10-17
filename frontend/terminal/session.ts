@@ -321,7 +321,9 @@ export class TerminalSession {
       if (document.visibilityState === 'visible') this.connection.resume?.()
     }
     this.listen(window, 'pageshow', resume)
-    this.listen(window, 'online', resume)
+    this.listen(window, 'focus', resume)
+    this.listen(window, 'online', () => this.connection.networkChanged?.(true))
+    this.listen(window, 'offline', () => this.connection.networkChanged?.(false))
     this.listen(document, 'visibilitychange', resume)
   }
 
@@ -335,7 +337,8 @@ export class TerminalSession {
             this.bells.acknowledge()
             this.acknowledgeActivity()
           }
-        } else if (command === 'reconnect') this.connection.reconnect()
+        } else if (command === 'resume') this.connection.resume?.()
+        else if (command === 'reconnect') this.connection.reconnect()
         else if (command === 'find') this.options.openSearch()
         else if (command === 'clear') this.clearScreen()
         else if (command === 'select-all') {
@@ -363,6 +366,7 @@ export class TerminalSession {
         if (focused) {
           this.geometry.refresh(true)
           this.bells.acknowledge()
+          this.connection.resume?.()
         }
       }),
     )

@@ -748,8 +748,12 @@ def main():
                 result = {'ok': True}
             elif action == 'attach':
                 cols, rows = terminal_size(request)
+                if not isinstance(request.get('start'), bool):
+                    fail('Invalid terminal start intent')
                 terminal.command()
                 if not alive(session):
+                    if not request['start']:
+                        fail('The coding tool exited. Click Reconnect to start it in the same conversation.', 410)
                     start_session(session, cols, rows)
                 session['lastConnectedAt'] = now()
                 save(data)

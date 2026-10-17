@@ -190,7 +190,7 @@ class RuntimeTest(unittest.TestCase):
 
     def attach(self, session, cols=100, rows=30):
         process = subprocess.Popen(
-            self.command({'action': 'attach', 'id': session['id'], 'cols': cols, 'rows': rows}),
+            self.command({'action': 'attach', 'id': session['id'], 'cols': cols, 'rows': rows, 'start': True}),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             env=self.env,

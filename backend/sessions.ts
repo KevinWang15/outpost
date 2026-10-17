@@ -26,7 +26,7 @@ export interface TargetContext {
 }
 
 type Request =
-  | { action: 'attach'; id: string; cols: number; rows: number }
+  | { action: 'attach'; id: string; cols: number; rows: number; start: boolean }
   | { action: 'list' }
   | ({ action: 'coding-search' } & ConversationSearch)
   | { action: 'directories'; path: string }
@@ -61,7 +61,7 @@ export interface SessionService {
   directories(context: TargetContext, path: string, signal?: AbortSignal): Promise<DirectorySuggestions>
   search(context: TargetContext, input: ConversationSearch, signal?: AbortSignal): Promise<ConversationResults>
   /** The relay command for one terminal connection; see TerminalBroker. */
-  attach(context: TargetContext, id: string, cols: number, rows: number): Command
+  attach(context: TargetContext, id: string, cols: number, rows: number, start: boolean): Command
 }
 
 export class SessionClient implements SessionService {
@@ -119,7 +119,7 @@ export class SessionClient implements SessionService {
       data,
     )
   }
-  attach(context: TargetContext, id: string, cols: number, rows: number) {
-    return this.command(context, { action: 'attach', id, cols, rows })
+  attach(context: TargetContext, id: string, cols: number, rows: number, start: boolean) {
+    return this.command(context, { action: 'attach', id, cols, rows, start })
   }
 }

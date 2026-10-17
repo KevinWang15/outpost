@@ -136,7 +136,7 @@ test('a stale open socket is replaced after the probe deadline, preserving its r
   })
   socket.ready()
   client.resume()
-  t.mock.timers.tick(terminalConnectionPolicy.probeMs - 1)
+  t.mock.timers.tick(terminalConnectionPolicy.wakeProbeMs - 1)
   await settle()
   assert.equal(FakeSocket.instances.length, 1)
   t.mock.timers.tick(1)
@@ -144,9 +144,14 @@ test('a stale open socket is replaced after the probe deadline, preserving its r
   t.mock.timers.tick(1000)
   assert.equal(FakeSocket.instances.length, 2)
   assert.equal(FakeSocket.instances[1].url.searchParams.get('token'), 'resume-ticket')
+  assert.equal(socket.url.searchParams.get('start'), '1')
+  assert.equal(FakeSocket.instances[1].url.searchParams.get('start'), '0')
+  FakeSocket.instances[1].message({ type: 'closed', reason: 'ended', message: 'Exited while away' })
+  client.reconnect()
+  assert.equal(FakeSocket.instances[2].url.searchParams.get('start'), '1')
 })
 
-for (const reason of ['ended', 'expired', 'outdated'] as const) {
+for (const reason of ['ended', 'expired', 'outdated', 'unavailable'] as const) {
   test(`returning to a ${reason} session does not reconnect automatically`, async t => {
     const { client, socket, states } = setup(t)
     socket.ready()
@@ -189,6 +194,110 @@ test('a hung handshake expires automatically; closing cancels all recovery', asy
   await settle()
   client.resume()
   assert.equal(FakeSocket.instances.length, 2)
+})
+
+test('transient failures keep retrying beyond the old limit with capped backoff', async t => {
+  const { client, states } = setup(t)
+  for (let attempt = 0; attempt < 60; attempt++) {
+    FakeSocket.instances.at(-1)!.close()
+    await settle()
+    assert.equal(states.at(-1)?.kind, 'reconnecting')
+    t.mock.timers.tick(terminalConnectionPolicy.retryMaxMs)
+    assert.equal(FakeSocket.instances.length, attempt + 2)
+  }
+  FakeSocket.instances.at(-1)!.ready()
+  assert.equal(client.connected, true)
+})
+
+test('offline retries pause for hours and returning online opens exactly one attachment', async t => {
+  const { client, socket, states } = setup(t)
+  socket.ready()
+  socket.close()
+  await settle()
+  client.networkChanged(false)
+  t.mock.timers.tick(4 * 60 * 60_000)
+  assert.equal(FakeSocket.instances.length, 1)
+  assert.match((states.at(-1) as { message: string }).message, /Waiting for a network/)
+  client.networkChanged(true)
+  client.networkChanged(true)
+  client.resume()
+  assert.equal(FakeSocket.instances.length, 2)
+  FakeSocket.instances[1].ready()
+  assert.equal(client.connected, true)
+})
+
+test('an offline OS hint does not tear down a working connection to a local server', async t => {
+  const { client, socket } = setup(t)
+  socket.ready()
+  client.networkChanged(false)
+  t.mock.timers.tick(terminalConnectionPolicy.heartbeatMs)
+  const ping = socket.requests().find(message => message.type === 'ping')!
+  socket.message({ type: 'result', id: ping.id, ok: true })
+  assert.equal(client.connected, true)
+  assert.equal(FakeSocket.instances.length, 1)
+})
+
+test('periodic probes detect a half-open idle connection without any focus or network events', t => {
+  const { socket } = setup(t)
+  socket.ready()
+  for (let index = 0; index < 6; index++) {
+    t.mock.timers.tick(terminalConnectionPolicy.heartbeatMs)
+    const pings = socket.requests().filter(message => message.type === 'ping')
+    assert.equal(pings.length, index + 1)
+    socket.message({ type: 'result', id: pings.at(-1).id, ok: true })
+  }
+  t.mock.timers.tick(terminalConnectionPolicy.heartbeatMs)
+  t.mock.timers.tick(terminalConnectionPolicy.probeMs)
+  t.mock.timers.tick(1000)
+  assert.equal(FakeSocket.instances.length, 2)
+})
+
+test('wake shortens an existing periodic probe; event bursts cannot extend its deadline', t => {
+  const { client, socket } = setup(t)
+  socket.ready()
+  t.mock.timers.tick(terminalConnectionPolicy.heartbeatMs)
+  client.resume()
+  for (let seconds = 0; seconds < 5; seconds++) {
+    t.mock.timers.tick(1000)
+    if (seconds < 4) client.resume()
+  }
+  t.mock.timers.tick(1000)
+  assert.equal(socket.requests().filter(message => message.type === 'ping').length, 1)
+  assert.equal(FakeSocket.instances.length, 2)
+})
+
+test('wake replaces a handshake suspended for hours and ignores late events from its old socket', t => {
+  const { client, socket } = setup(t)
+  socket.readyState = FakeSocket.OPEN
+  socket.message({
+    type: 'hello',
+    resume: 'sleep-resume',
+    target: { id: 't', name: 'Target' },
+    session: { id: 's', name: 'Session' },
+  })
+  const lateMessage = socket.onmessage!
+  t.mock.timers.setTime(Date.now() + 4 * 60 * 60_000)
+  client.resume()
+  client.resume()
+  const next = FakeSocket.instances[1]
+  assert.equal(FakeSocket.instances.length, 2)
+  assert.equal(next.url.searchParams.get('token'), 'sleep-resume')
+  next.ready()
+  lateMessage({ data: JSON.stringify({ type: 'closed', reason: 'expired', message: 'stale' }) })
+  assert.equal(client.connected, true)
+})
+
+test('closing during offline recovery cancels future network and wake attempts', async t => {
+  const { client, socket } = setup(t)
+  socket.ready()
+  client.networkChanged(false)
+  socket.close()
+  await settle()
+  client.close()
+  client.networkChanged(true)
+  client.resume()
+  t.mock.timers.tick(4 * 60 * 60_000)
+  assert.equal(FakeSocket.instances.length, 1)
 })
 
 function readyForImages(socket: FakeSocket) {

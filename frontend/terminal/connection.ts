@@ -20,6 +20,7 @@ export interface TerminalConnection {
   clear(): Promise<void>
   pasteImage(file: File): Promise<string>
   resume?(): void
+  networkChanged?(online: boolean): void
   activate?(token: string): Promise<void>
   acknowledge?(completionId: string): Promise<void>
 }

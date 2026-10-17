@@ -178,6 +178,48 @@ test(
       await again.closed
     })
 
+    await t.test('resume can retry when old viewers temporarily occupy all connection slots', async () => {
+      const url = `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(hello.resume)}`
+      const viewers = Array.from({ length: 16 }, () => new TerminalClient(url))
+      clients.push(...viewers)
+      await Promise.all(viewers.map(viewer => viewer.message('ready')))
+      const crowded = new TerminalClient(url)
+      clients.push(crowded)
+      assert.equal((await crowded.message('closed')).reason, 'error')
+      await crowded.closed
+      viewers[0].socket.terminate()
+      await viewers[0].closed
+      const recovered = new TerminalClient(url)
+      clients.push(recovered)
+      await recovered.message('ready')
+      for (const viewer of [...viewers, recovered]) viewer.socket.terminate()
+      await Promise.all([...viewers, recovered].map(viewer => viewer.closed))
+      assert.equal((await readFile(join(project, 'starts.log'), 'utf8')).trim().split('\n').length, 1)
+    })
+
+    await t.test('a tool that exits while offline stays ended until an explicit reconnect', async () => {
+      const starts = await readFile(join(project, 'starts.log'), 'utf8')
+      process.kill(Number(starts.trim()), 'SIGTERM')
+      await client.until(
+        async () =>
+          (await request<Session>('GET', `/targets/${target.id}/sessions/${session.id}`)).status === 'stopped',
+        'tool exit',
+      )
+      const url = `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(hello.resume)}`
+      const automatic = new TerminalClient(`${url}&start=0`)
+      clients.push(automatic)
+      assert.equal((await automatic.message('closed')).reason, 'ended')
+      await automatic.closed
+      assert.equal(await readFile(join(project, 'starts.log'), 'utf8'), starts)
+      const explicit = new TerminalClient(`${url}&start=1`)
+      clients.push(explicit)
+      await explicit.message('ready')
+      await explicit.text('OUTPOST_FIXTURE_READY')
+      assert.equal((await readFile(join(project, 'starts.log'), 'utf8')).trim().split('\n').length, 2)
+      explicit.socket.close()
+      await explicit.closed
+    })
+
     await t.test('terminating closes terminals and keeps the record', async () => {
       const live = new TerminalClient(
         `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(await connect())}`,

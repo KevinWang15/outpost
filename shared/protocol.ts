@@ -9,7 +9,7 @@ import type { Checkpoint } from './terminalState'
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 12
+export const protocolVersion = 13
 export const maxInputMessage = 64 * 1024
 // Interactive input only; binary image uploads use a separate HTTP request.
 export const maxInputQueue = 2 * 1024 * 1024
@@ -18,6 +18,8 @@ export const terminalConnectionPolicy = {
   clientAttachMs: 75_000,
   heartbeatMs: 15_000,
   probeMs: 30_000,
+  wakeProbeMs: 5_000,
+  retryMaxMs: 30_000,
   stableMs: 30_000,
   inputStallMs: 30_000,
   outputStallMs: 60_000,

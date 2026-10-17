@@ -94,6 +94,9 @@ export class DesktopWorkspace {
       this.create()
     )
   }
+  resume() {
+    this.terminals.resume()
+  }
   forAction() {
     // Menu/OS actions finish any provisional drag before resolving ownership.
     this.drag.cancel()

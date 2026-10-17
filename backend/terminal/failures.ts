@@ -6,7 +6,7 @@ import { AppError } from '../errors'
 export function terminalFailure(error: unknown): { reason: CloseReason; message: string } {
   let reason: CloseReason = 'error'
   if (error instanceof AppError) {
-    if (error.statusCode === 404) reason = 'ended'
+    if (error.statusCode === 404 || error.statusCode === 410) reason = 'ended'
     else if (error.statusCode === 401 || error.statusCode === 403) reason = 'expired'
     else if (error.statusCode >= 400 && error.statusCode < 500 && ![408, 429].includes(error.statusCode))
       reason = 'unavailable'

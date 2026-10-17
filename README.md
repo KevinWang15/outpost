@@ -92,6 +92,15 @@ drop them onto the terminal, or use the image button. On phones, an on-screen
 key bar (Esc, Tab, Ctrl, Alt, arrows, ⇧↩, ^C) and a message box are shown. Dropped connections reconnect by
 themselves.
 
+Both the web terminal and Outpost Desktop keep retrying through long outages,
+with pauses between attempts. Returning online or waking a laptop checks the
+connection immediately; Desktop also checks remote tabs in background windows.
+Recovery restores the running session, its saved screen/history and current size,
+and keeps unsent message drafts. It never automatically resends input or image
+pastes. If delivery was interrupted, check the terminal before sending again.
+If the tool exited while you were away, choose **Reconnect** to start it again.
+Expired or revoked credentials require a fresh **Connect** from Outpost.
+
 #### Phones and tablets
 
 Open your hosted Outpost address in the phone's browser and choose **Connect →

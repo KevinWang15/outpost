@@ -80,7 +80,10 @@ export class TerminalClient {
   constructor(url: string) {
     const term = new headless.Terminal({ allowProposedApi: true, scrollback: 10_000 })
     const checkpoints = new CheckpointReader(term)
-    this.socket = new WebSocket(url.includes('protocol=') ? url : `${url}&protocol=${protocolVersion}`)
+    const address = new URL(url)
+    if (!address.searchParams.has('protocol')) address.searchParams.set('protocol', String(protocolVersion))
+    if (!address.searchParams.has('start')) address.searchParams.set('start', '1')
+    this.socket = new WebSocket(address)
     this.opened = new Promise((resolve, reject) => {
       this.socket.once('open', () => resolve())
       this.socket.once('error', reject)
@@ -108,10 +111,14 @@ export class TerminalClient {
     })
     this.socket.once('close', () => term.dispose())
   }
-  async until<T>(check: () => T | undefined | false, label: string, timeout = 15_000): Promise<T> {
+  async until<T>(
+    check: () => T | undefined | false | Promise<T | undefined | false>,
+    label: string,
+    timeout = 15_000,
+  ): Promise<T> {
     const deadline = Date.now() + timeout
     while (Date.now() < deadline) {
-      const value = check()
+      const value = await check()
       if (value) return value
       await new Promise(resolve => setTimeout(resolve, 25))
     }

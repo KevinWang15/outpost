@@ -25,6 +25,7 @@ export interface TerminalQuery {
   cols?: string
   rows?: string
   protocol?: string
+  start?: string
 }
 
 interface Dependencies {
@@ -427,7 +428,12 @@ export class TerminalBroker {
       return reject('expired', closedMessages.expired)
     const { grant } = redeemed
     if ([...this.connections].filter(connection => connection.grant.owner.userId === grant.owner.userId).length >= 16) {
-      return reject('unavailable', 'Too many open terminals. Close one and try again.')
+      // After a network change, old viewers may occupy slots until their
+      // heartbeat expires. An established session must be able to retry then.
+      return reject(
+        redeemed.kind === 'resume' ? 'error' : 'unavailable',
+        'Too many open terminals. Close one and try again.',
+      )
     }
     const cols = Number(query.cols ?? 80),
       rows = Number(query.rows ?? 24)
@@ -450,6 +456,7 @@ export class TerminalBroker {
         grant.sessionId,
         Number.isInteger(cols) ? Math.min(terminalService.maxCols, Math.max(2, cols)) : 80,
         Number.isInteger(rows) ? Math.min(terminalService.maxRows, Math.max(2, rows)) : 24,
+        query.start === '1',
       )
       connection.start(
         spawn(command.executable, command.args, { stdio: 'pipe', env: this.dependencies.env ?? process.env }),

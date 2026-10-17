@@ -117,10 +117,16 @@ async function lifecycle(
   const pasted = await client.take('result')
   assert.equal(pasted.ok, true, pasted.message)
   const pid = /OUTPOST_FIXTURE_READY (\d+)/.exec(client.output)![1]
-  client.socket.close()
+  // Abrupt transport loss (no WebSocket close handshake) must only detach the
+  // viewer. Repeated attachments restore the same process and its screen.
+  client.socket.terminate()
+  await client.closed
   const again = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(hello.resume)}`)
   t.after(() => again.socket.terminate())
   await again.text(`OUTPOST_FIXTURE_READY ${pid}`)
+  await again.message('ready')
+  again.send({ type: 'ping', id: 'after-network-loss' })
+  assert.deepEqual(await again.take('result'), { type: 'result', id: 'after-network-loss', ok: true })
   again.socket.close()
   await again.closed
   assert.equal((await call<Session>('POST', `/targets/${added.id}/sessions/${session.id}/terminate`)).status, 'stopped')

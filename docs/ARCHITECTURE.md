@@ -290,23 +290,46 @@ prompt; the existing newest-20 retention bounds remote clipboard storage.
 Local shells save raw bytes through their private desktop IPC, then paste the
 quoted local/WSL path with the owning shell generation checked before insertion.
 
-On visibility restoration, `pageshow`, or `online`, `TerminalSocket.resume()`
-probes an apparently live socket with an authenticated `ping` request. It travels
-through the broker and relay to the terminal service, which replies without
-writing any bytes to the coding process. A failed 30-second probe enters bounded
-recovery for that same attachment. The broker also probes the remote service
-every 15 seconds, suspending its deadline while renderer backpressure deliberately
-pauses stdout. A viewer that sends no rendering acknowledgements for 60 seconds
-while output is paused is disconnected for resynchronization. Browser WebSocket
-ping/pong independently detects lost clients.
-Attachment has a 60-second server deadline and a 75-second client deadline,
-including checkpoint rendering. Failure handling does not wait for a close
-handshake. Eight automatic retries use exponential backoff; their budget resets
-only after 30 seconds connected plus a successful service probe, or an explicit
-Reconnect. Returning online can
-skip a pending backoff without resetting that budget. Ended, expired, outdated,
-congested, and exhausted connections require explicit user action. All attempt
-timers and pending requests are disposed when the attachment ends.
+`TerminalSocket` owns recovery for both web and desktop remote terminals. Every
+15 seconds after readiness or a successful health check, it sends an authenticated
+`ping` through the broker and relay to the terminal service. The service replies
+without writing bytes to the coding process. A missing reply after 30 seconds
+replaces the attachment, including when an idle socket still claims to be OPEN.
+Returning to a visible page, browser focus, `pageshow`, or `online` checks it
+immediately with a shorter 5-second deadline. Desktop forwards Electron's system
+resume and screen-unlock events to **all** remote tabs, including hidden tabs and
+minimized windows. Local shell PTYs are left running. An in-flight probe is shared
+across these events; wake can shorten its deadline but never extend it.
+
+Transient transport failures retry indefinitely with jittered exponential backoff,
+capped at 30 seconds. The backoff resets after 30 seconds connected and a successful
+service probe. An OS offline hint pauses background retries, without tearing down
+a working connection (loopback/LAN may still work). Returning online or to the
+terminal skips the backoff. Wake replaces stale handshakes while preserving ones
+still receiving data. Fresh attachments otherwise have a 60-second server and
+75-second client deadline, including checkpoint rendering. Closing or replacing an
+attachment disposes its timers, pending requests and uploads; failure handling
+does not wait for a WebSocket close handshake. Temporary connection-slot exhaustion
+is retryable with a resume grant, allowing old network connections time to expire.
+
+Recovery reuses the session-scoped resume grant and restores the current screen
+and scrollback checkpoint into the same terminal, with its latest size and focus.
+The coding process keeps running and composer drafts stay in the page. Input,
+submissions, and image pastes are **never replayed**; a missing delivery confirmation
+asks the user to check before retrying. Ended, expired, outdated, setup-error,
+renderer-error, and input-congested connections still require explicit action.
+This cannot recover an expired/revoked credential or a machine that lost the remote
+PTY automatically. Initial connections and explicit Reconnect include `start=1`;
+automatic attachments use `start=0`. The target checks that intent under the registry
+lock, so a process that exited while the client was offline is reported as ended,
+even when its original exit event never reached the client. A single-use launch lost before the client receives its first resume grant
+requires a fresh Connect from Outpost. Browser/OS suspension delays JavaScript;
+recovery begins when the page can run again.
+
+The broker independently probes the remote service every 15 seconds, suspending
+its deadline while renderer backpressure deliberately pauses stdout. A viewer
+that sends no rendering acknowledgements for 60 seconds while output is paused
+is disconnected for resynchronization. WebSocket ping/pong detects lost clients.
 
 `useBellNotifications` manages browser permission requests, with an eight-second
 busy timeout and permission refresh on focus. Desktop uses the bridge's native
@@ -382,7 +405,7 @@ is independently scheduled by xterm's renderer.
 Only `error` permits automatic reconnection. `unavailable` means setup requires
 user action, such as installing a missing helper or restarting an incompatible
 service. The broker preserves runtime HTTP error status through a single failure
-classifier, shared with API lookup failures. A missing session is `ended`;
+classifier, shared with API lookup failures. A missing session or exited process is `ended`;
 authentication errors are `expired`; other permanent request/setup errors are
 `unavailable`. Transport failures, timeouts and target RPC throttling remain retryable.
 Input congestion and WebSocket policy violations require explicit reconnection;
@@ -519,7 +542,7 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract uses terminal service 1.2.0 / protocol 4 and client protocol 12.
+This contract uses terminal service 1.2.0 / protocol 4 and client protocol 13.
 Publish the matching helper before deploying the server. A service protocol
 change requires explicitly restarting existing service processes after installing
 the dependency; replacing the executable does not alter a running PTY service.
@@ -711,7 +734,7 @@ directly in their renderer's ordered queue. Clear is a barrier between output
 batches, so output written afterward is retained. The search addon is recreated
 afterward to invalidate cached lines and decorations without private API access.
 
-The current clear and health-check contract uses terminal service protocol 4 and client protocol 12.
+The current clear and health-check contract uses terminal service protocol 4 and client protocol 13.
 Install the updated helper and explicitly restart existing service processes;
 older protocols are rejected instead of ignoring the operation.
 

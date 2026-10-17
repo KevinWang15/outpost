@@ -256,6 +256,14 @@ export class TerminalTabs {
       contents.send('terminal:host-state', next)
     }
   }
+  resume() {
+    // Wake every remote tab, including tabs in minimized/background windows.
+    // Local shells keep their PTY and require no reconnection.
+    for (const tab of this.tabs.values()) {
+      if (tab.connection.kind === 'remote' && !tab.view.webContents.isDestroyed())
+        tab.view.webContents.send('terminal:command', 'resume')
+    }
+  }
   dispose(id: number) {
     const tab = this.tabs.get(id)
     if (!tab) return

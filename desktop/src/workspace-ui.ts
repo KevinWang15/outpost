@@ -1,15 +1,11 @@
-import { tabDragging } from './tab-drag-ui'
+import { tabBarHeight } from './layout'
+import { workspaceDragging } from './workspace-drag-ui'
 import { createTabStatus, tabStatusLabel, updateTabStatus } from './tab-status'
-import {
-  tabBarHeight,
-  type WorkspaceBridge,
-  type WorkspacePanel,
-  type WorkspaceSnapshot,
-  type TabSummary,
-} from './workspace-api'
-import { paneLayout, type PaneBounds } from './layout'
+import type { WorkspaceBridge, WorkspaceSnapshot, PaneSummary } from './workspace-api'
+import type { WorkspacePanel } from './workspace-model'
+import { paneControls } from './pane-ui'
 import { reconcileElements } from './keyed-elements'
-import { tabActionShortcuts } from './tab-shortcuts'
+import { paneActionShortcuts, tabActionShortcuts } from './workspace-shortcuts'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 
 declare global {
@@ -44,16 +40,15 @@ const run = (work: Promise<unknown>) => {
 let state: WorkspaceSnapshot | null = null
 let panelKey = ''
 let selected = 0
-let matches: TabSummary[] = []
+let matches: PaneSummary[] = []
 const tabNodes = new Map<number, HTMLElement>()
 const serverNodes = new Map<string, HTMLElement>()
 const recentNodes = new Map<string, HTMLElement>()
 const sessionNodes = new Map<number, HTMLElement>()
-const placeholderNodes = new Map<number, HTMLElement>()
 const tabs = el('tabs')
-const divider = el('divider')
 const search = el<HTMLInputElement>('session-search')
-tabDragging(tabs, api, run)
+workspaceDragging(document.body, api, run)
+const renderPanes = paneControls(el('stage'), api, run)
 let geometryFrame = 0
 let scrollFrame = 0
 const dragSpace = document.querySelector<HTMLElement>('.window-drag')!
@@ -83,12 +78,14 @@ function tabNode(id: number) {
   const node = document.createElement('div')
   node.className = 'tab'
   node.dataset.tab = String(id)
-  const select = button('', () => run(api.activate(id)), 'tab-select')
+  const select = button('', () => run(api.activateTab(id)), 'tab-select')
   select.setAttribute('role', 'tab')
   const label = document.createElement('span')
   label.className = 'tab-label'
-  select.append(createTabStatus(), label)
-  select.ondblclick = () => run(api.panel({ rename: id }))
+  const count = document.createElement('span')
+  count.className = 'pane-count'
+  select.append(createTabStatus(), label, count)
+  select.ondblclick = () => run(api.panel({ renameTab: id }))
   select.onkeydown = event => {
     if (!state) return
     const index = state.tabs.findIndex(tab => tab.id === id)
@@ -104,19 +101,19 @@ function tabNode(id: number) {
               : -1
     if (next >= 0) {
       event.preventDefault()
-      run(api.activate(state.tabs[next].id))
+      run(api.activateTab(state.tabs[next].id))
     }
   }
-  const close = button('×', () => run(api.close(id)), 'tab-close')
+  const close = button('×', () => run(api.closeTab(id)), 'tab-close')
   node.append(select, close)
   node.oncontextmenu = event => {
     event.preventDefault()
-    run(api.contextMenu(id))
+    run(api.tabMenu(id))
   }
   node.onauxclick = event => {
     if (event.button === 1) {
       event.preventDefault()
-      run(api.close(id))
+      run(api.closeTab(id))
     }
   }
   return node
@@ -131,17 +128,27 @@ function renderTabs(panel: WorkspacePanel) {
     tab => tabNode(tab.id),
     (node, tab) => {
       // The active terminal is remembered while a workspace page covers it.
-      const selected = panel === null && tab.id === state!.active
+      const selected = panel === null && tab.id === state!.activeTabId
       node.classList.toggle('selected', selected)
-      node.classList.toggle('visible', panel === null && (state!.split?.ids.includes(tab.id) ?? false))
       const select = node.querySelector<HTMLButtonElement>('.tab-select')!
       select.setAttribute('aria-selected', String(selected))
-      select.tabIndex = tab.id === state!.active ? 0 : -1
-      const description = `${tabStatusLabel(tab)}${tab.hasDraft ? ' · Unsent message' : ''}`
-      select.title = `${tab.label}\n${tab.origin}\n${description}`
+      select.tabIndex = tab.id === state!.activeTabId ? 0 : -1
+      const description = `${tabStatusLabel(tab.status)}${tab.hasDraft ? ' · Unsent message' : ''}`
+      const paneDescriptions = tab.panes.flatMap(id => {
+        const pane = state!.panes.find(pane => pane.id === id)
+        return pane ? [`${pane.label}: ${tabStatusLabel(pane)}`] : []
+      })
+      select.title =
+        tab.panes.length > 1
+          ? `${tab.label} · ${tab.panes.length} panes\n${paneDescriptions.join('\n')}`
+          : `${tab.label}\n${state!.panes.find(pane => pane.id === tab.activePaneId)?.origin ?? ''}\n${description}`
       select.setAttribute('aria-label', `${tab.label} · ${description}`)
       node.querySelector('.tab-label')!.textContent = tab.label
-      updateTabStatus(node.querySelector<HTMLElement>('.tab-status')!, tab)
+      const count = node.querySelector<HTMLElement>('.pane-count')!
+      count.hidden = tab.panes.length < 2
+      count.textContent = String(tab.panes.length)
+      count.title = `${tab.panes.length} panes`
+      updateTabStatus(node.querySelector<HTMLElement>('.tab-status')!, tab.status)
       const close = node.querySelector<HTMLButtonElement>('.tab-close')!
       close.classList.toggle('draft', tab.hasDraft)
       close.textContent = tab.hasDraft ? '•' : '×'
@@ -150,12 +157,15 @@ function renderTabs(panel: WorkspacePanel) {
     },
   )
   for (const [id, node] of tabNodes) {
-    node.classList.toggle('dragging', Boolean(state.drag?.source && state.drag.id === id))
-    node.classList.toggle('merging', Boolean(state.drag?.target && !state.drag.source && state.drag.id === id))
+    node.classList.toggle('dragging', Boolean(state.drag?.source && state.drag.kind === 'tab' && state.drag.id === id))
+    node.classList.toggle(
+      'merging',
+      Boolean(state.drag?.target && !state.drag.source && state.drag.kind === 'tab' && state.drag.id === id),
+    )
     delete node.dataset.drop
   }
   const drag = state.drag
-  document.documentElement.classList.toggle('tab-dragging', Boolean(drag?.source))
+  document.documentElement.classList.toggle('workspace-dragging', Boolean(drag?.source))
   tabs.classList.toggle('drop-empty', Boolean(drag?.target && !state.tabs.length))
   if (drag?.target && drag.source) {
     const id = drag.before ?? state.tabs.at(-1)?.id
@@ -189,7 +199,7 @@ function renderServers() {
         'row-main',
       )
       const forget = button('Forget', () => run(api.forgetServer(origin)))
-      forget.setAttribute('aria-label', `Forget ${origin} and close its tabs`)
+      forget.setAttribute('aria-label', `Forget ${origin} and close its panes`)
       row.append(open, forget)
       return row
     },
@@ -232,20 +242,20 @@ function renderRecents() {
 function renderMatches(preserveSelection = true) {
   const query = search.value.trim().toLocaleLowerCase()
   const selectedId = preserveSelection ? matches[selected]?.id : undefined
-  matches = (state?.tabs ?? []).filter(tab =>
-    `${tab.label} ${tab.title} ${tab.origin}`.toLocaleLowerCase().includes(query),
+  matches = (state?.panes ?? []).filter(pane =>
+    `${pane.label} ${pane.title} ${pane.origin}`.toLocaleLowerCase().includes(query),
   )
-  const retained = matches.findIndex(tab => tab.id === selectedId)
+  const retained = matches.findIndex(pane => pane.id === selectedId)
   selected = retained >= 0 ? retained : preserveSelection ? Math.max(0, Math.min(selected, matches.length - 1)) : 0
   const list = el('session-list')
   reconcileElements(
     list,
     sessionNodes,
     matches,
-    tab => tab.id,
-    tab => {
+    pane => pane.id,
+    pane => {
       const row = document.createElement('li')
-      const open = button('', () => run(api.activate(tab.id)), 'row-main')
+      const open = button('', () => run(api.activatePane(pane.id)), 'row-main')
       const title = document.createElement('strong')
       title.className = 'session-title'
       const indicator = createTabStatus()
@@ -254,84 +264,37 @@ function renderMatches(preserveSelection = true) {
       title.append(indicator, label)
       const subtitle = document.createElement('small')
       open.append(title, subtitle)
-      const pair = button('◫', () => run(api.pair(tab.id)))
+      const pair = button('◫', () => run(api.movePaneBeside(pane.id, state!.activePaneId!)))
       pair.title = 'Show beside current session'
       row.append(open, pair)
       return row
     },
-    (row, tab, index) => {
+    (row, pane, index) => {
       row.classList.toggle('highlighted', index === selected)
-      updateTabStatus(row.querySelector<HTMLElement>('.tab-status')!, tab)
-      row.querySelector('.tab-label')!.textContent = tab.label
-      row.querySelector('small')!.textContent = `${tab.origin} · ${tabStatusLabel(tab)}`
+      updateTabStatus(row.querySelector<HTMLElement>('.tab-status')!, pane)
+      row.querySelector('.tab-label')!.textContent = pane.label
+      row.querySelector('small')!.textContent = `${pane.origin} · ${tabStatusLabel(pane)}`
       const pair = row.lastElementChild as HTMLButtonElement
-      pair.disabled = tab.id === state?.active || state?.active === null
-      pair.setAttribute('aria-label', `Show ${tab.label} beside current session`)
+      pair.disabled = pane.id === state?.activePaneId || state?.activePaneId === null
+      pair.setAttribute('aria-label', `Show ${pane.label} beside current session`)
     },
   )
   el('no-matches').hidden = matches.length > 0
 }
 function renderStage() {
-  if (!state) return
-  const area = el('stage').getBoundingClientRect()
-  const visible = state.panel === null ? (state.split?.ids ?? (state.active === null ? [] : [state.active])) : []
-  const columns = state.split?.direction !== 'rows'
-  const geometry = paneLayout(area.width, area.height, state.split)
-  const place = (node: HTMLElement, bounds: PaneBounds) =>
-    Object.assign(node.style, {
-      left: `${bounds.x}px`,
-      top: `${bounds.y}px`,
-      width: `${bounds.width}px`,
-      height: `${bounds.height}px`,
-    })
-  const placeholders = el('placeholders')
-  const errors = visible.flatMap((id, index) => {
-    const tab = state!.tabs.find(tab => tab.id === id)
-    return tab?.error ? [{ tab, bounds: geometry.panes[index] }] : []
-  })
-  reconcileElements(
-    placeholders,
-    placeholderNodes,
-    errors,
-    item => item.tab.id,
-    ({ tab }) => {
-      const box = document.createElement('div')
-      box.className = 'placeholder'
-      const title = document.createElement('h2')
-      const message = document.createElement('p')
-      const actions = document.createElement('div')
-      actions.append(
-        button('Reload terminal', () => run(api.reload(tab.id)), 'primary'),
-        button('Open server ↗', () => run(api.openServer(tab.origin))),
-      )
-      box.append(title, message, actions)
-      return box
-    },
-    (box, { tab, bounds }) => {
-      place(box, bounds)
-      box.querySelector('h2')!.textContent = tab.label
-      box.querySelector('p')!.textContent = tab.error
-    },
-  )
-  divider.hidden = visible.length !== 2
-  divider.classList.toggle('row-split', !columns)
-  divider.setAttribute('aria-orientation', columns ? 'vertical' : 'horizontal')
-  divider.setAttribute('aria-valuemin', '20')
-  divider.setAttribute('aria-valuemax', '80')
-  divider.setAttribute('aria-valuenow', String(Math.round((state.split?.ratio ?? 0.5) * 100)))
-  if (geometry.divider) place(divider, geometry.divider)
+  if (state) renderPanes(state)
 }
 function render(next: WorkspaceSnapshot) {
-  const previousActive = state?.active
-  const panel: WorkspacePanel = next.panel ?? (next.active === null ? 'sessions' : null)
+  const previousActive = state?.activeTabId
+  const panel: WorkspacePanel = next.panel ?? (next.activePaneId === null ? 'sessions' : null)
   state = next
   renderTabs(panel)
   renderServers()
   renderRecents()
   renderMatches()
   renderStage()
-  if (previousActive !== next.active && next.active !== null)
-    tabNodes.get(next.active)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  if (previousActive !== next.activeTabId && next.activeTabId !== null)
+    tabNodes.get(next.activeTabId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   const key = JSON.stringify(panel)
   const changedPanel = panelKey !== key
   panelKey = key
@@ -347,10 +310,10 @@ function render(next: WorkspaceSnapshot) {
     if (panel === page) control.setAttribute('aria-current', 'page')
     else control.removeAttribute('aria-current')
   }
-  el('back').hidden = next.active === null || panel === 'sessions'
-  el('split').setAttribute('aria-label', next.split ? 'Return to single pane' : 'Split side by side')
-  el('split').title = next.split ? 'Return to single pane' : 'Split side by side'
-  el('split').setAttribute('aria-pressed', String(Boolean(next.split)))
+  el('back').hidden = next.activePaneId === null || panel === 'sessions'
+  el('split').setAttribute('aria-label', 'Split with new local terminal')
+  el('split').title = 'Split with new local terminal (right-click for top and bottom)'
+  el<HTMLButtonElement>('split').disabled = next.panel !== null || next.activePaneId === null
   el('version').textContent = `Outpost ${next.version} · Preview`
   if (changedPanel) {
     // A provisional transfer may empty the source or cover the target's panel.
@@ -369,7 +332,7 @@ function render(next: WorkspaceSnapshot) {
       el<HTMLInputElement>('sound').checked = next.preferences.sound
       el('saved').textContent = ''
     } else if (panel && typeof panel === 'object') {
-      const tab = next.tabs.find(tab => tab.id === panel.rename)
+      const tab = next.tabs.find(tab => tab.id === panel.renameTab)
       const field = el<HTMLInputElement>('tab-name')
       field.value = tab?.label ?? ''
       if (!next.drag) {
@@ -404,7 +367,11 @@ el('new-tab').oncontextmenu = event => {
 el('switch').onclick = () => run(api.panel('switcher'))
 el('settings').onclick = () => run(api.panel('settings'))
 el('back').onclick = () => run(api.panel(null))
-el('split').onclick = () => run(api.split(state?.split ? null : 'columns'))
+el('split').onclick = () => run(api.splitPane(state!.activePaneId!, 'columns'))
+el('split').oncontextmenu = event => {
+  event.preventDefault()
+  run(api.splitPane(state!.activePaneId!, 'rows'))
+}
 el('updates').onclick = () => run(api.checkUpdates())
 search.oninput = () => {
   renderMatches(false)
@@ -417,11 +384,17 @@ search.onkeydown = event => {
     el('session-list').children[selected]?.scrollIntoView({ block: 'nearest' })
   } else if (event.key === 'Enter' && matches[selected]) {
     event.preventDefault()
-    run(api.activate(matches[selected].id))
+    run(api.activatePane(matches[selected].id))
   }
 }
 window.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && state && state.active !== null && state.panel !== null && state.panel !== 'sessions') {
+  if (
+    event.key === 'Escape' &&
+    state &&
+    state.activePaneId !== null &&
+    state.panel !== null &&
+    state.panel !== 'sessions'
+  ) {
     event.preventDefault()
     run(api.panel(null))
   }
@@ -460,49 +433,7 @@ el<HTMLFormElement>('preferences-form').onsubmit = event => {
 el<HTMLFormElement>('rename-form').onsubmit = event => {
   event.preventDefault()
   if (state?.panel && typeof state.panel === 'object')
-    run(api.rename(state.panel.rename, el<HTMLInputElement>('tab-name').value))
-}
-let resizing = false
-let frame = 0
-let ratio = 0.5
-const finishResize = () => {
-  resizing = false
-  divider.classList.remove('dragging')
-}
-divider.onpointerdown = event => {
-  if (event.button !== 0) return
-  resizing = true
-  divider.setPointerCapture(event.pointerId)
-  divider.classList.add('dragging')
-  event.preventDefault()
-}
-divider.onpointermove = event => {
-  if (!resizing || !state?.split) return
-  const rect = el('stage').getBoundingClientRect()
-  ratio =
-    state.split.direction === 'columns'
-      ? (event.clientX - rect.left) / rect.width
-      : (event.clientY - rect.top) / rect.height
-  if (!frame)
-    frame = requestAnimationFrame(() => {
-      frame = 0
-      run(api.ratio(ratio))
-    })
-}
-divider.onpointerup = divider.onpointercancel = divider.onlostpointercapture = finishResize
-divider.ondblclick = () => run(api.ratio(0.5))
-divider.onkeydown = event => {
-  if (!state?.split) return
-  const delta =
-    event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-      ? -0.05
-      : event.key === 'ArrowRight' || event.key === 'ArrowDown'
-        ? 0.05
-        : 0
-  if (delta || event.key === 'Home') {
-    event.preventDefault()
-    run(api.ratio(event.key === 'Home' ? 0.5 : state.split.ratio + delta))
-  }
+    run(api.renameTab(state.panel.renameTab, el<HTMLInputElement>('tab-name').value))
 }
 window.addEventListener('resize', renderStage)
 api.onState(render)
@@ -517,14 +448,12 @@ run(
     el('open-local').textContent = `Open local terminal (${tabShortcuts.newTab.keys})`
     const shortcuts = [
       ['New window', mac ? '⌘Shift+N' : 'Ctrl+Shift+N'],
-      ['Cancel tab drag', 'Esc'],
+      ['Cancel pane or tab drag', 'Esc'],
       [tabShortcuts.newTab.label, tabShortcuts.newTab.keys],
       ['Switch session', `${modifier}P`],
-      [tabShortcuts.closeTab.label, tabShortcuts.closeTab.keys],
       ['Next / previous tab', 'Ctrl+Tab / Ctrl+Shift+Tab'],
       ['Go to tab 1–8 / last tab', `${mac ? '⌘' : 'Alt+'}1–9`],
-      ['Split side by side', `${modifier}D`],
-      ['Focus other pane', `${mac ? '⌘' : 'Ctrl+'}Alt+→`],
+      ...Object.values(paneActionShortcuts(value.platform)).map(shortcut => [shortcut.label, shortcut.keys]),
       ['Find in terminal', `${mac ? '⌘' : 'Ctrl+'}F`],
       [clearShortcut.label, clearShortcut.keys],
       ['Larger terminal text', `${mac ? '⌘' : 'Ctrl+'}= or ${mac ? '⌘' : 'Ctrl+'}+`],

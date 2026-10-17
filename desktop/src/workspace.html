@@ -22,7 +22,8 @@
     </header>
     <div id="stage">
       <div id="placeholders"></div>
-      <div id="divider" role="separator" tabindex="0" aria-label="Resize terminal panes" hidden></div>
+      <div id="pane-headers"></div>
+      <div id="dividers"></div>
       <main id="panels">
         <button id="back" class="back" hidden>← Back to terminal <kbd>Esc</kbd></button>
         <section id="sessions-panel" hidden>
@@ -36,7 +37,7 @@
           <form id="server-form"><label for="server">Outpost server</label><div class="address"><input id="server" type="url" placeholder="https://outpost.example.com" required autocomplete="url" /><button class="primary" type="submit">Open server ↗</button></div></form>
           <h2>Trusted servers</h2><ul id="servers" class="rows"></ul>
           <p id="no-servers" class="hint">Add your server address above to get started.</p>
-          <div class="tip"><strong>Sessions that move with you.</strong><p>Drag tabs to reorder, out of the tab bar to make a window, or into another window's tab bar to merge. Press Esc to cancel a drag. Right-click a tab for move and split actions. Moving tabs keeps their connections and drafts. Click a tab to return to its terminal.</p><p>Closing a tab always asks for confirmation. Closing a local tab ends its shell and running processes; remote sessions keep running. Unsent messages are discarded, and local terminal history is not saved.</p></div>
+          <div class="tip"><strong>Sessions that move with you.</strong><p>Drag tabs to reorder or move them between windows. Drag a pane’s header to a terminal edge to split there, to the tab bar for its own tab, or outside all windows for a new window. The highlighted half shows where it will land. Press Esc to cancel. Moving panes keeps their connections, history and drafts; empty windows close automatically.</p><p>The split button opens a new local shell beside the focused pane; right-click it to split top and bottom. To arrange existing remote sessions, drag their tabs or use ◫ in the session switcher. Drag dividers to resize; double-click a pane header to zoom or restore it.</p><p>Closing a pane or tab always asks for confirmation. Closing a local tab ends its shell and running processes; remote sessions keep running. Unsent messages are discarded, and local terminal history is not saved.</p></div>
           <h2>Keyboard shortcuts</h2><dl id="home-shortcuts"></dl>
           <p id="open-result" role="status" aria-live="polite"></p>
         </section>
@@ -49,7 +50,7 @@
         <section id="settings-panel" hidden>
           <p class="eyebrow">MAKE IT YOURS</p><h1>Terminal settings</h1>
           <form id="preferences-form">
-            <div class="setting"><div><label for="local-shell">Default local shell</label><p>Used by + and the new-terminal shortcut. Right-click + to choose another shell.</p></div><select id="local-shell" required></select></div>
+            <div class="setting"><div><label for="local-shell">Default local shell</label><p>Used by +, splits and the new-terminal shortcut. Right-click + to choose another shell.</p></div><select id="local-shell" required></select></div>
             <div class="setting"><div><label for="font-size">Text size</label><p>Applied to all terminal tabs.</p></div><input id="font-size" type="number" min="10" max="28" step="0.5" required /><span>px</span></div>
             <div class="setting"><div><label for="sound">Bell sound</label><p>Visual indicators and system notifications stay available.</p></div><input id="sound" type="checkbox" /></div>
             <button class="primary" type="submit">Save settings</button><span id="saved" role="status"></span>

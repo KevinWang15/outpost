@@ -246,8 +246,10 @@ already have a distribution installed. Settings lets you choose the default shel
 Local and remote tabs share splits, dragging between windows, clipboard handling,
 font settings, and bell notifications. Local shells start in your home directory.
 
-Closing a tab always asks for confirmation, whether you use its close button,
-the menu, or **⌘W** on macOS / **Ctrl+Shift+W** on Windows. Closing a window or
+**⌘W** on macOS / **Ctrl+Shift+W** on Windows closes only the focused pane,
+after confirmation. Remaining panes expand; an empty tab and then an empty window
+are removed. To close every pane in a tab, use its **×** or **File → Close current tab**,
+which also asks for confirmation. Closing a window or
 quitting also asks when any terminal tabs remain. **Cancel** is the default.
 Closing a local tab or quitting the app ends its shell. Reloading a local terminal
 asks before restarting a running shell. Local terminal history is held in memory
@@ -269,12 +271,36 @@ Tabs share the top row with the native macOS or Windows window controls, with
 no separate title bar. Drag the empty space between **+** and
 the workspace tools to move the window, even when many tabs are open.
 
-Open two sessions, then right-click a tab and choose **Show beside current tab**.
-**View → Split side by side / Split top and bottom** also pairs open sessions.
-Drag the divider to resize; double-click it to reset. **View → Single pane**
-returns to one session. Each tab keeps its connection, terminal buffer and
-message draft while you switch or rearrange it. Up to 32 tabs across 16 windows
-can stay open. Connect and notifications select the session in its owning window.
+Each tab can contain nested split panes, mixing local shells and remote sessions.
+Each pane owns its terminal; tabs group panes, and windows group tabs. Switching
+tabs restores that tab's focused pane. Workspace pages preserve the selection
+without letting pane shortcuts close or split a hidden terminal.
+
+**View → Split side by side / Split top and bottom** opens a new local shell
+beside the focused pane using your default shell profile. The split toolbar button
+splits side by side; right-click it for top and bottom. To split with an existing
+remote session, drag its tab to a terminal edge, or use **◫** in the session switcher.
+
+Drag a pane's header to reorganize it:
+
+- Drop on the left, right, top or bottom of another terminal to split there. A
+  translucent preview highlights the destination, including in another window.
+- Drop in a tab bar to make the pane its own tab at that position.
+- Drop outside all Outpost windows to create a window containing the pane.
+- Press **Esc** to cancel. Dropping onto itself or an invalid workspace area also cancels.
+
+Dragging a tab moves its entire pane group. Closing or moving the last pane removes
+the empty tab and window; remaining siblings expand into the space. Transfers keep
+the same terminal processes, connections, history and message drafts.
+Drag dividers to resize (arrow keys also work); double-click a divider to reset it.
+The divider is a one-pixel line with a wider grab area. Inactive panes are subtly
+gray; clicking them restores their normal appearance without resizing the terminal.
+On macOS, **⌘D** splits side by side and **⌘Shift+D** splits top and bottom.
+Double-click a pane header, or use **View → Zoom / restore pane**, to temporarily
+expand a pane without removing its siblings. The pane header menu also provides
+move, split, reload and close actions. Closing a pane or a whole tab asks for confirmation.
+Up to 32 terminal panes across 16 windows can stay open. Connecting an already-open
+session or clicking its notification focuses the correct pane, tab and window.
 
 **Ctrl+Tab** selects the next tab and **Ctrl+Shift+Tab** the previous one in the
 current window, wrapping at either end of the tab strip. Both shortcuts use
@@ -301,9 +327,11 @@ Settings remembers text size, bell sound, and the default local shell. The toolb
 app and can be revealed from the terminal's upper corner. The same xterm.js
 client handles input, selection, image paste and reconnects in both clients.
 WebGL accelerates rendering when available, with a DOM renderer fallback.
-Local tabs use the same terminal screen with a native PTY connection. Their badges
-show shell connection and bell state; coding-harness activity detection is available
-for managed Outpost sessions.
+Local panes use the same terminal screen with a native PTY connection and have no
+activity badge. A split tab aggregates its remote panes: connection problems, unread
+bells/completions, then working activity take priority. Pane headers show each remote
+session’s own status, and hovering the tab lists all its panes. Focusing one pane
+acknowledges only that session.
 
 Desktop bells use Outpost's system notification permission. Allow **Outpost**
 in macOS or Windows notification settings and check Focus / Do Not Disturb.
@@ -319,16 +347,18 @@ for manual installation; remote sessions survive closing or upgrading the app.
 | Newline in coding tool | Shift+Enter | Shift+Enter |
 | New local terminal | ⌘T | Ctrl+Shift+T |
 | New window | ⌘Shift+N | Ctrl+Shift+N |
-| Cancel tab drag | Esc | Esc |
+| Cancel pane or tab drag | Esc | Esc |
 | Switch session | ⌘P | Ctrl+Shift+P |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Ctrl+Tab / Ctrl+Shift+Tab |
 | Go to tab 1–8 / last tab | ⌘1–9 | Alt+1–9 |
-| Split side by side | ⌘D | Ctrl+Shift+D |
+| Split with local shell, side by side | ⌘D | Ctrl+Shift+D |
+| Split with local shell, top and bottom | ⌘Shift+D | Ctrl+Alt+D |
+| Zoom / restore focused pane | ⌘Shift+Enter | Ctrl+Shift+Enter |
+| Close focused pane | ⌘W | Ctrl+Shift+W |
 | Focus other pane | ⌘Option+Right | Ctrl+Alt+Right |
 | Larger terminal text | ⌘= or ⌘Plus | Ctrl+= or Ctrl+Plus |
 | Smaller terminal text | ⌘Minus | Ctrl+Minus |
 | Reset terminal text size | ⌘0 | Ctrl+0 |
-| Close tab | ⌘W | Ctrl+Shift+W |
 | Close window | ⌘Shift+W | Alt+F4 |
 
 The app remembers trusted servers and opens their workspaces in your browser.

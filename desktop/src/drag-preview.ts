@@ -1,14 +1,15 @@
-import { BrowserWindow, type Point } from 'electron'
-import { tabBarHeight } from './workspace-api'
+import { BrowserWindow, type Point, type Rectangle } from 'electron'
+import { tabBarHeight } from './layout'
 
 const size = { width: 240, height: tabBarHeight }
 
-/** A fixed-size native label, independent of tab-strip measurements. */
-export class TabDragPreview {
+/** A native, click-through drag label or split preview above terminal views.
+ * Bounds come from geometry, never from measuring this popup. */
+export class DragPreview {
   private window: BrowserWindow
   private ready = false
   private visible = false
-  private position: Point | null = null
+  private bounds: Rectangle | null = null
 
   constructor(title: string, point: Point) {
     const window = new BrowserWindow({
@@ -49,17 +50,25 @@ export class TabDragPreview {
       .catch(() => {})
   }
 
-  show(point: Point) {
+  private place(bounds: Rectangle, opacity: number) {
     const window = this.window
     if (window.isDestroyed()) return
-    if (!this.position || this.position.x !== point.x || this.position.y !== point.y) {
-      // Supplying all four bounds avoids cumulative frame/DPI rounding. A
-      // stationary pointer causes no native move or resize calls at all.
-      window.setBounds({ x: point.x + 12, y: point.y + 16, ...size }, false)
-      this.position = point
+    if (
+      !this.bounds ||
+      Object.keys(bounds).some(key => bounds[key as keyof Rectangle] !== this.bounds![key as keyof Rectangle])
+    ) {
+      window.setBounds(bounds, false)
+      this.bounds = bounds
     }
+    if (window.getOpacity() !== opacity) window.setOpacity(opacity)
     this.visible = true
     if (this.ready && !window.isVisible()) window.showInactive()
+  }
+  show(point: Point) {
+    this.place({ x: point.x + 12, y: point.y + 16, ...size }, 1)
+  }
+  highlight(bounds: Rectangle) {
+    this.place(bounds, 0.65)
   }
   hide() {
     this.visible = false

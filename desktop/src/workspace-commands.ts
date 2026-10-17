@@ -1,12 +1,12 @@
 import { validPreferences } from './preferences'
 import type { TabGeometry, WorkspaceCommand, WorkspaceCommands } from './workspace-api'
 
-const tabId = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0
+const entityId = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0
 const text = (value: unknown, limit: number): value is string => typeof value === 'string' && value.length <= limit
 const none = (args: unknown[]) => args.length === 0
-const tab = (args: unknown[]) => args.length === 1 && tabId(args[0])
+const entity = (args: unknown[]) => args.length === 1 && entityId(args[0])
 const identifier = (args: unknown[]) => args.length === 1 && text(args[0], 8192)
-const direction = (value: unknown) => value === null || value === 'rows' || value === 'columns'
+const direction = (value: unknown) => value === 'rows' || value === 'columns'
 
 function panel(value: unknown) {
   return (
@@ -14,7 +14,7 @@ function panel(value: unknown) {
     value === 'sessions' ||
     value === 'switcher' ||
     value === 'settings' ||
-    (typeof value === 'object' && Object.keys(value).length === 1 && 'rename' in value && tabId(value.rename))
+    (typeof value === 'object' && Object.keys(value).length === 1 && 'renameTab' in value && entityId(value.renameTab))
   )
 }
 
@@ -31,7 +31,7 @@ function geometry(value: unknown): value is TabGeometry {
     Array.isArray(item.tabs) &&
     item.tabs.length <= 32 &&
     item.tabs.every(
-      tab => tab && tabId(tab.id) && coordinate(tab.left) && coordinate(tab.right) && tab.right >= tab.left,
+      tab => tab && entityId(tab.id) && coordinate(tab.left) && coordinate(tab.right) && tab.right >= tab.left,
     )
   )
 }
@@ -42,21 +42,32 @@ const validators: Record<keyof WorkspaceCommands, (args: unknown[]) => boolean> 
   state: none,
   newLocal: args => args.length <= 1 && (args[0] === undefined || text(args[0], 256)),
   shellMenu: none,
-  activate: args =>
-    args.length >= 1 && args.length <= 2 && tabId(args[0]) && (args[1] === undefined || typeof args[1] === 'boolean'),
-  close: tab,
-  reorder: args => args.length === 2 && tabId(args[0]) && (args[1] === null || tabId(args[1])),
-  rename: args =>
+  activateTab: args =>
+    args.length >= 1 &&
+    args.length <= 2 &&
+    entityId(args[0]) &&
+    (args[1] === undefined || typeof args[1] === 'boolean'),
+  activatePane: args =>
+    args.length >= 1 &&
+    args.length <= 2 &&
+    entityId(args[0]) &&
+    (args[1] === undefined || typeof args[1] === 'boolean'),
+  closeTab: entity,
+  closePane: entity,
+  paneMenu: entity,
+  zoomPane: entity,
+  renameTab: args =>
     args.length === 2 &&
-    tabId(args[0]) &&
+    entityId(args[0]) &&
     text(args[1], 120) &&
     [...args[1]].every(c => c.charCodeAt(0) >= 32 && c.charCodeAt(0) !== 127),
   panel: args => args.length === 1 && panel(args[0]),
-  pair: tab,
-  split: args => args.length === 1 && direction(args[0]),
-  ratio: args => args.length === 1 && typeof args[0] === 'number' && Number.isFinite(args[0]),
-  contextMenu: tab,
-  reload: tab,
+  movePaneBeside: args => args.length === 2 && args.every(entityId),
+  splitPane: args => args.length === 2 && entityId(args[0]) && direction(args[1]),
+  resizeSplit: args =>
+    args.length === 2 && entityId(args[0]) && typeof args[1] === 'number' && Number.isFinite(args[1]),
+  tabMenu: entity,
+  reloadPane: entity,
   openServer: identifier,
   forgetServer: identifier,
   openRecent: identifier,
@@ -66,7 +77,19 @@ const validators: Record<keyof WorkspaceCommands, (args: unknown[]) => boolean> 
   checkUpdates: none,
   reportError: args => args.length === 1 && text(args[0], 16_384),
   tabGeometry: args => args.length === 1 && geometry(args[0]),
-  dragStart: tab,
+  dragStart: args => {
+    const item = args[0]
+    return (
+      args.length === 1 &&
+      !!item &&
+      typeof item === 'object' &&
+      'kind' in item &&
+      'id' in item &&
+      Object.keys(item).length === 2 &&
+      (item.kind === 'tab' || item.kind === 'pane') &&
+      entityId(item.id)
+    )
+  },
   dragEnd: args => args.length === 1 && typeof args[0] === 'boolean',
 }
 
@@ -76,5 +99,5 @@ export function workspaceCommand(name: unknown, args: unknown[]): WorkspaceComma
   return { name, args } as WorkspaceCommand
 }
 
-export const keepsTabDrag = (name: WorkspaceCommand['name']) =>
+export const keepsWorkspaceDrag = (name: WorkspaceCommand['name']) =>
   name === 'state' || name === 'tabGeometry' || name === 'dragStart' || name === 'dragEnd'

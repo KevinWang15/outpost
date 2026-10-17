@@ -5,7 +5,7 @@ import { Preferences } from './preferences'
 import { TrustedServers } from './store'
 import { DesktopWorkspace } from './workspace'
 import { checkUpdates } from './updates'
-import { tabActionShortcuts } from './tab-shortcuts'
+import { paneActionShortcuts, tabActionShortcuts, type PaneAction } from './workspace-shortcuts'
 import { RecentSessions } from './recent-sessions'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 
@@ -69,9 +69,10 @@ function receive(value: string) {
 function menus() {
   const mac = process.platform === 'darwin'
   const tabShortcuts = tabActionShortcuts(process.platform)
+  const paneShortcuts = paneActionShortcuts(process.platform)
   const clearShortcut = clearScreenShortcut(mac)
   const shortcut = (key: string) => (mac ? 'Cmd+' : 'Ctrl+Shift+') + key
-  const increaseFontSize = () => workspace!.forAction().fontSize(1)
+  const increaseFontSize = () => workspace!.forAction()?.fontSize(1)
   const newLocal = (profile?: string) => {
     try {
       workspace!.newLocal(profile)
@@ -90,15 +91,23 @@ function menus() {
           label: 'New terminal with profile',
           submenu: workspace!.shells.map(profile => ({ label: profile.name, click: () => newLocal(profile.id) })),
         },
-        { label: 'Servers and sessions…', click: () => workspace!.forAction().panel('sessions') },
-        { label: 'Switch session…', accelerator: shortcut('P'), click: () => workspace!.forAction().panel('switcher') },
-        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => workspace!.forAction().panel('settings') },
+        { label: 'Servers and sessions…', click: () => workspace!.forAction()?.panel('sessions') },
+        {
+          label: 'Switch session…',
+          accelerator: shortcut('P'),
+          click: () => workspace!.forAction()?.panel('switcher'),
+        },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => workspace!.forAction()?.panel('settings') },
         { type: 'separator' },
         {
-          label: tabShortcuts.closeTab.label,
-          accelerator: tabShortcuts.closeTab.accelerator,
+          label: paneShortcuts.close.label,
+          accelerator: paneShortcuts.close.accelerator,
+          click: () => workspace!.forAction()?.paneAction('close'),
+        },
+        {
+          label: 'Close current tab',
           click: () => {
-            void workspace!.forAction().close()
+            void workspace!.forAction()?.closeTab()
           },
         },
         { role: 'close', label: 'Close window', accelerator: mac ? 'Cmd+Shift+W' : 'Alt+F4' },
@@ -108,33 +117,32 @@ function menus() {
     {
       label: 'Edit',
       submenu: [
-        { label: 'Copy', accelerator: shortcut('C'), click: () => workspace!.forAction().edit('copy') },
-        { label: 'Paste', accelerator: shortcut('V'), click: () => workspace!.forAction().edit('paste') },
-        { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.forAction().command('select-all') },
+        { label: 'Copy', accelerator: shortcut('C'), click: () => workspace!.forAction()?.edit('copy') },
+        { label: 'Paste', accelerator: shortcut('V'), click: () => workspace!.forAction()?.edit('paste') },
+        { label: 'Select all', accelerator: shortcut('A'), click: () => workspace!.forAction()?.command('select-all') },
         { type: 'separator' },
-        { label: 'Find in terminal…', accelerator: 'CmdOrCtrl+F', click: () => workspace!.forAction().command('find') },
+        {
+          label: 'Find in terminal…',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => workspace!.forAction()?.command('find'),
+        },
         {
           label: clearShortcut.label,
           accelerator: clearShortcut.accelerator,
-          click: () => workspace!.forAction().command('clear'),
+          click: () => workspace!.forAction()?.command('clear'),
         },
       ],
     },
     {
       label: 'View',
       submenu: [
-        {
-          label: 'Split side by side',
-          accelerator: shortcut('D'),
-          click: () => workspace!.forAction().split('columns'),
-        },
-        { label: 'Split top and bottom', click: () => workspace!.forAction().split('rows') },
-        { label: 'Single pane', click: () => workspace!.forAction().split(null) },
-        {
-          label: 'Focus other pane',
-          accelerator: 'CmdOrCtrl+Alt+Right',
-          click: () => workspace!.forAction().otherPane(),
-        },
+        ...(Object.keys(paneShortcuts) as PaneAction[])
+          .filter(action => action !== 'close')
+          .map(action => ({
+            label: paneShortcuts[action].label,
+            accelerator: paneShortcuts[action].accelerator,
+            click: () => workspace!.forAction()?.paneAction(action),
+          })),
         { type: 'separator' },
         {
           label: 'Larger terminal text',
@@ -152,20 +160,20 @@ function menus() {
         {
           label: 'Smaller terminal text',
           accelerator: 'CmdOrCtrl+-',
-          click: () => workspace!.forAction().fontSize(-1),
+          click: () => workspace!.forAction()?.fontSize(-1),
         },
         {
           label: 'Reset terminal text size',
           accelerator: 'CmdOrCtrl+0',
-          click: () => workspace!.forAction().fontSize(null),
+          click: () => workspace!.forAction()?.fontSize(null),
         },
         { type: 'separator' },
-        { label: 'Reconnect terminal', click: () => workspace!.forAction().command('reconnect') },
+        { label: 'Reconnect terminal', click: () => workspace!.forAction()?.command('reconnect') },
         {
           label: 'Reload terminal',
           accelerator: shortcut('R'),
           click: () => {
-            void workspace!.forAction().reload()
+            void workspace!.forAction()?.reloadPane()
           },
         },
         { role: 'togglefullscreen' },
@@ -175,13 +183,13 @@ function menus() {
     {
       label: 'Tabs',
       submenu: [
-        { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => workspace!.forAction().cycle(1) },
-        { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => workspace!.forAction().cycle(-1) },
+        { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => workspace!.forAction()?.cycle(1) },
+        { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => workspace!.forAction()?.cycle(-1) },
         { type: 'separator' },
         ...Array.from({ length: 9 }, (_, index) => ({
           label: index === 8 ? 'Last tab' : `Tab ${index + 1}`,
           accelerator: `${mac ? 'Cmd' : 'Alt'}+${index + 1}`,
-          click: () => workspace!.forAction().select(index),
+          click: () => workspace!.forAction()?.select(index),
         })),
       ],
     },
@@ -189,7 +197,7 @@ function menus() {
     {
       role: 'help',
       submenu: [
-        { label: 'Outpost guide and shortcuts', click: () => workspace!.forAction().panel('sessions') },
+        { label: 'Outpost guide and shortcuts', click: () => workspace!.forAction()?.panel('sessions') },
         { type: 'separator' },
         {
           label: 'Check for updates…',
@@ -233,7 +241,7 @@ else {
       else if (process.platform === 'win32' && process.argv[1])
         app.setAsDefaultProtocolClient('outpost', process.execPath, [resolve(process.argv[1])])
       menus()
-      if (waiting.length) workspace.forAction().show()
+      if (waiting.length) workspace.present()
       else workspace.show()
       for (const url of waiting.splice(0)) receive(url)
       app.on('activate', () => workspace!.show())

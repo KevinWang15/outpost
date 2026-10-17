@@ -1,23 +1,24 @@
-# Outpost Desktop 0.7.0 preview
+# Outpost Desktop 0.8.0 preview
 
-Direct image uploads, shared clear-screen commands, and more reliable connections.
+Split panes, flexible workspace organization, and more seamless connection recovery.
 
 ## What's new
 
-- **Direct images:** paste, drop, or choose an image in the terminal. Remote images upload as binary data separately from terminal input; local shells use native IPC. The saved reference is pasted once, without submitting the prompt.
-- **Safe upload lifecycle:** disconnecting cancels an upload, and late results cannot paste into a replacement connection or shell. Upload notices keep the terminal viewport unchanged.
-- **Clear screen:** use the terminal menu or Command+K on macOS. Remote viewers and reconnect history share the cleared buffer, without sending commands to the coding tool.
-- **Connection recovery:** health checks reach the persistent terminal service, stalled attachments time out, and rapid disconnects retain their retry budget.
-- **Bounded resource use:** terminal input queues have explicit limits, while large history checkpoints are compressed in yielding slices with limited concurrent restorations.
-- **Mobile workspace:** long target lists scroll within their navigation, and session filters wrap on narrow screens so Connect remains tappable.
+- **Nested split panes:** mix local shells and remote sessions in one tab. Split side by side with Command+D on macOS or Ctrl+Shift+D on Windows; split top and bottom with Command+Shift+D or Ctrl+Alt+D.
+- **Move panes freely:** drag a pane header to a terminal edge to split, to the tab bar to make a tab, or outside the window to make a new window. Move panes between windows and drag whole tabs with all their panes. Existing connections, history, and unsent drafts stay with their terminals.
+- **Live drag previews:** hovering another window's tab bar shows the incoming terminals there. Pane-edge drops show the destination split. Escape cancels a move and restores the previous layout.
+- **Focused pane controls:** thin adjustable dividers, subtle inactive-pane dimming, and Command+Shift+Enter / Ctrl+Shift+Enter to zoom or restore the focused pane. Header menus expose move, split, reload, and close actions.
+- **Clear close behavior:** Command+W / Ctrl+Shift+W closes only the focused pane after confirmation. A tab's close button closes all its panes; Command+Shift+W / Alt+F4 closes the window. Empty tabs and windows disappear automatically. Confirmation applies only to the panes still belonging to that scope, protecting moved terminals and newly arriving sessions.
+- **Consistent status and focus:** tabs remember their selected pane and summarize their remote panes' activity. Local shells have no activity badge. Pane shortcuts do not affect hidden terminals while an Outpost workspace page is open.
+- **Sleep and network recovery:** reconnect after offline periods, stale connections, laptop sleep, or unlock without unnecessarily replacing healthy connections. Closed or expired sessions remain closed, and local shells keep running.
 
-Local verification covers 166 tests across unit/runtime checks, real SSH, browser and mobile browser engines, and native Linux Electron. Windows/macOS installers are built in GitHub Actions; native clipboard and WSL behavior still need platform verification.
+Verification includes 79 unit tests, 23 runtime tests, and 16 native Linux Electron/DOM scenarios with repeated runs. Coverage includes cross-window transfers, drag cancellation, retained drafts, real PTY resizing, close scopes, and sessions arriving during a close confirmation. Windows/macOS installers are built in GitHub Actions; physical platform verification remains necessary.
 
-The Outpost home tab still remembers ten recent remote sessions. Reconnect credentials last 30 days and refresh after a successful reconnect; expired entries require a fresh **Connect → Outpost Desktop** from the server.
+The Outpost home tab remembers ten recent remote sessions. Reconnect credentials last 30 days and refresh after a successful reconnect; expired entries require a fresh **Connect → Outpost Desktop** from the server.
 
-Up to 32 tabs across 16 windows can stay open. Closing a local terminal ends its shell; local shells and history do not survive quitting the app. Closing or upgrading the app leaves remote sessions running.
+Up to 32 terminal panes across 16 windows can stay open. Closing a local pane ends its shell; local shells and history do not survive quitting the app. Closing or upgrading the app leaves remote sessions running.
 
-Use the matching Outpost server and reload open web terminals after deployment (client protocol 12). Install **Outpost Terminal 1.2.0** through **Required Software → Outpost Terminal → Install**. Its service protocol is 4. Updating the executable leaves running sessions on their old build: after saving ongoing work, use **Terminate → Connect** to start the new service and resume the conversation. Deploying the server does not restart target sessions automatically.
+Use Desktop 0.8.0 with the matching server update (client protocol 13), and reload open web terminals after deployment. Older desktop previews need this update to reconnect. **Outpost Terminal 1.2.0** remains the required helper (service protocol 4); this release does not require updating the helper or restarting target sessions.
 
 ## Install
 

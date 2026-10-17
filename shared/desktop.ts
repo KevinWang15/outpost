@@ -9,7 +9,7 @@ export interface TerminalPreferences {
 export interface TerminalHostState extends TerminalPreferences {
   focused: boolean
 }
-export interface TerminalTabState {
+export interface TerminalPaneState {
   title: string
   connection: 'connecting' | 'connected' | 'reconnecting' | 'closed'
   /** null only before the first observation or while disconnected. Failures are unknown. */
@@ -21,7 +21,7 @@ export type TerminalCommand = 'select-all' | 'focus' | 'reconnect' | 'resume' | 
 export interface DesktopBridge {
   version: number
   notificationsSupported: boolean
-  /** Credential for this tab only, delivered in memory rather than a page URL. */
+  /** Credential for this pane only, delivered in memory rather than a page URL. */
   ticket(): Promise<string | null>
   /** Called only after the server accepts a connection and issues a resume grant. */
   saveResume(token: string, title: string): Promise<void>
@@ -30,7 +30,7 @@ export interface DesktopBridge {
   onLaunch(listener: (token: string) => void): () => void
   launchHandled(token: string): Promise<void>
   onHostState(listener: (state: TerminalHostState) => void): () => void
-  reportState(state: TerminalTabState): Promise<void>
+  reportState(state: TerminalPaneState): Promise<void>
   pasteClipboard(): Promise<boolean>
   copyText(text: string): Promise<boolean>
   notifyBell(name: string): Promise<boolean>

@@ -140,8 +140,8 @@ input::placeholder {
 .tab.dragging {
   opacity: 0.4;
 }
-.tab-dragging,
-.tab-dragging * {
+.workspace-dragging,
+.workspace-dragging * {
   cursor: grabbing !important;
 }
 #tabs.drop-empty {
@@ -173,10 +173,6 @@ input::placeholder {
 .tab.merging {
   border-color: #60a5fa;
   box-shadow: inset 0 0 0 1px #60a5fa;
-}
-.tab.visible:not(.selected) {
-  background: #121d30;
-  border-bottom-color: #405575;
 }
 .tab:hover {
   background: #172338;
@@ -518,20 +514,38 @@ dd {
 #rename-form input {
   width: 100%;
 }
-#divider {
+.pane-divider {
   position: absolute;
-  background: #1d2a40;
+  background: #0f172a;
   z-index: 1;
   cursor: col-resize;
   touch-action: none;
 }
-#divider.row-split {
+.pane-divider.row-split {
   cursor: row-resize;
 }
-#divider:hover,
-#divider:focus-visible,
-#divider.dragging {
-  background: #3b82f6;
+.pane-divider::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 1px);
+  width: 1px;
+  background: #344258;
+  pointer-events: none;
+}
+.pane-divider.row-split::after {
+  top: calc(50% - 1px);
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 1px;
+}
+.pane-divider:hover::after,
+.pane-divider:focus-visible::after,
+.pane-divider.dragging::after {
+  background: #60a5fa;
 }
 .placeholder {
   position: absolute;
@@ -586,4 +600,71 @@ dd {
   .tab-status[data-state] svg {
     animation: none;
   }
+}
+
+/* Headers occupy reserved space above each native terminal, never its viewport. */
+.pane-header {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  background: #101a2b;
+  border-bottom: 1px solid #28364d;
+  color: #93a4bd;
+  box-sizing: border-box;
+  user-select: none;
+  touch-action: none;
+}
+.pane-header.active {
+  background: #18263c;
+  color: #e2e8f0;
+  border-bottom-color: #60a5fa;
+}
+.pane-header.dragging {
+  opacity: 0.55;
+}
+.pane-header button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 24px;
+  border: 0;
+  border-radius: 3px;
+  padding: 0 5px;
+  margin: 0;
+  color: inherit;
+  background: transparent;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.pane-header button:hover {
+  background: #2a3b55;
+}
+.pane-header .pane-select {
+  justify-content: flex-start;
+  flex: 1;
+  min-width: 0;
+  gap: 7px;
+  cursor: grab;
+  padding-left: 9px;
+  font-size: 12px;
+}
+.pane-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pane-header .tab-status {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+}
+.pane-count {
+  font-size: 10px;
+  min-width: 15px;
+  border-radius: 3px;
+  background: #26364e;
+  line-height: 16px;
+  text-align: center;
 }

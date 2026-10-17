@@ -1,15 +1,15 @@
-import type { TerminalTabState } from '../../shared/desktop'
+import type { TerminalPaneState } from '../../shared/desktop'
 import { activityLabels } from '../../shared/activity'
-import type { TabSummary } from './workspace-api'
+import type { PaneStatus } from './workspace-api'
 
 const connectionLabels = {
   connected: 'Connected',
   connecting: 'Connecting…',
   reconnecting: 'Reconnecting…',
   closed: 'Disconnected',
-} satisfies Record<TerminalTabState['connection'], string>
+} satisfies Record<TerminalPaneState['connection'], string>
 
-export function tabStatusLabel(tab: TerminalTabState) {
+export function tabStatusLabel(tab: PaneStatus) {
   const parts = [connectionLabels[tab.connection]]
   if (tab.connection === 'connected') {
     if (tab.activity) parts.push(activityLabels[tab.activity.state])
@@ -38,7 +38,7 @@ const icons = {
   unknown: [circle, 'M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3m.1 4h.01'],
 }
 
-function tabStatusIcon(tab: TerminalTabState): keyof typeof icons {
+function tabStatusIcon(tab: PaneStatus): keyof typeof icons {
   if (tab.connection !== 'connected') return tab.connection === 'reconnecting' ? 'connecting' : tab.connection
   if (tab.attention) return 'attention'
   return tab.activity === null ? 'connected' : tab.activity.state
@@ -51,7 +51,7 @@ export function createTabStatus() {
   return node
 }
 
-export function updateTabStatus(node: HTMLElement, tab: TabSummary) {
+export function updateTabStatus(node: HTMLElement, tab: PaneStatus) {
   // Local shells have no managed-session activity badge. Hiding the whole
   // element also removes its space in both the tab strip and session switcher.
   node.hidden = tab.kind === 'local'

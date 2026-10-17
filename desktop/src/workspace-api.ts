@@ -1,15 +1,24 @@
-import type { TerminalPreferences, TerminalTabState } from '../../shared/desktop'
+import type { TerminalPreferences, TerminalPaneState } from '../../shared/desktop'
 import type { ShellProfileSummary } from '../../shared/localTerminal'
 import type { RecentSessionSummary } from './recent-sessions'
+import type { WorkspacePanel, PaneNode, SplitDirection, WorkspaceItem } from './workspace-model'
 
-export type WorkspacePanel = 'sessions' | 'switcher' | 'settings' | { rename: number } | null
-export type SplitDirection = 'columns' | 'rows'
-export interface TabSummary extends TerminalTabState {
+export interface PaneSummary extends TerminalPaneState {
   kind: 'local' | 'remote'
   id: number
   origin: string
   label: string
   error: string | null
+}
+export type PaneStatus = Pick<PaneSummary, 'kind' | 'connection' | 'activity' | 'attention'>
+/** Tabs own layout and aggregate presentation, never a terminal connection. */
+export interface TabSummary {
+  id: number
+  label: string
+  activePaneId: number
+  panes: number[]
+  status: PaneStatus
+  hasDraft: boolean
 }
 export interface TabGeometry {
   left: number
@@ -17,8 +26,9 @@ export interface TabGeometry {
   viewportRight: number
   tabs: { id: number; left: number; right: number }[]
 }
-export interface TabDragState {
+export interface WorkspaceDragState {
   id: number
+  kind: WorkspaceItem['kind']
   source: boolean
   target: boolean
   before: number | null
@@ -28,15 +38,18 @@ export interface WorkspaceSnapshot {
   version: string
   platform: string
   tabs: TabSummary[]
-  active: number | null
-  split: { ids: [number, number]; direction: SplitDirection; ratio: number } | null
+  panes: PaneSummary[]
+  activePaneId: number | null
+  activeTabId: number | null
+  tree: PaneNode | null
+  zoomed: boolean
   panel: WorkspacePanel
   servers: string[]
   recentSessions: RecentSessionSummary[]
   preferences: TerminalPreferences
   shells: ShellProfileSummary[]
   defaultShell: string
-  drag: TabDragState | null
+  drag: WorkspaceDragState | null
 }
 
 /** Local app chrome only. Terminal pages receive the separate DesktopBridge. */
@@ -44,21 +57,24 @@ export interface WorkspaceBridge {
   newLocal(profile?: string): Promise<void>
   shellMenu(): Promise<void>
   tabGeometry(value: TabGeometry): Promise<void>
-  dragStart(id: number): Promise<void>
+  dragStart(item: WorkspaceItem): Promise<void>
   dragEnd(cancel: boolean): Promise<void>
   state(): Promise<WorkspaceSnapshot>
   onState(listener: (state: WorkspaceSnapshot) => void): () => void
   /** Pointer presses select immediately, deferring terminal focus until release. */
-  activate(id: number, focusTerminal?: boolean): Promise<void>
-  close(id: number): Promise<void>
-  reorder(id: number, before: number | null): Promise<void>
-  rename(id: number, label: string): Promise<void>
+  activateTab(id: number, focusTerminal?: boolean): Promise<void>
+  activatePane(id: number, focusTerminal?: boolean): Promise<void>
+  closeTab(id: number): Promise<void>
+  closePane(id: number): Promise<void>
+  paneMenu(id: number): Promise<void>
+  renameTab(id: number, label: string): Promise<void>
   panel(panel: WorkspacePanel): Promise<void>
-  pair(id: number): Promise<void>
-  split(direction: SplitDirection | null): Promise<void>
-  ratio(value: number): Promise<void>
-  contextMenu(id: number): Promise<void>
-  reload(id: number): Promise<void>
+  movePaneBeside(id: number, anchor: number): Promise<void>
+  splitPane(id: number, direction: SplitDirection): Promise<void>
+  zoomPane(id: number): Promise<void>
+  resizeSplit(id: number, value: number): Promise<void>
+  tabMenu(id: number): Promise<void>
+  reloadPane(id: number): Promise<void>
   openServer(origin: string): Promise<boolean>
   forgetServer(origin: string): Promise<void>
   openRecent(id: string): Promise<void>
@@ -73,6 +89,3 @@ export type WorkspaceCommands = Omit<WorkspaceBridge, 'onState'>
 export type WorkspaceCommand = {
   [Name in keyof WorkspaceCommands]: { name: Name; args: Parameters<WorkspaceCommands[Name]> }
 }[keyof WorkspaceCommands]
-
-export const tabBarHeight = 36
-export const splitGap = 8

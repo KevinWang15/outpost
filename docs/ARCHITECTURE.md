@@ -162,7 +162,7 @@ authentication or desktop trust confirmation.
    ticket matches the connection's full grant before consuming it and marking the
    handoff connected. The routing key itself never authorizes access. Disconnected
    tabs use the fresh ticket to reconnect without replacing their renderer or draft.
-   There are at most 16 pending OS launches and 32 tabs.
+   There are at most 16 pending OS launches and 32 terminal panes.
 
 ### Client choices and shared responsibilities
 
@@ -794,7 +794,7 @@ a profile. `shell-profiles.ts` resolves the login shell on macOS/Linux and
 PowerShell, Command Prompt, and WSL on Windows. Only native profile IDs cross
 the chrome bridge; the renderer cannot supply an executable, environment, or cwd.
 
-`TerminalTab.connection` distinguishes a remote launch from a local PTY owner.
+`TerminalPane.connection` distinguishes a remote launch from a local PTY owner.
 The same registry, window layout, tab transfer, split, focus, notification, and
 clipboard infrastructure serves both. Moving a local tab preserves its view and
 PTY. Closing it ends its shell; quitting ends all local shells. Tab, window and
@@ -824,12 +824,12 @@ Output and geometry share one ordered IPC channel. Render acknowledgements pause
 PTY reads at 262,144 unrendered UTF-16 code units and resume below 65,536. A
 generation ID rejects stale data, input, and acknowledgements after a restart.
 
-Each local tab starts in the user's home directory and retains up to 10,000 lines
+Each local pane starts in the user's home directory and retains up to 10,000 lines
 in xterm memory. There is no local session recovery after renderer reload or app
-exit. Local tabs report connection and bell state, without guessing coding-harness
-activity. Image paste sends raw bytes over IPC and saves a bounded file in the tab's private clipboard directory,
+exit. Local panes report connection and bell state, without guessing coding-harness
+activity. Image paste sends raw bytes over IPC and saves a bounded file in the pane's private clipboard directory,
 quotes the path for its shell, and uses `wslpath` for the default WSL distribution.
-Closing the tab cleans up those files. Native PTY bindings and spawn helpers are
+Closing the pane cleans up those files. Native PTY bindings and spawn helpers are
 kept outside ASAR and rebuilt for Electron by the packaging tools. Windows uses
 node-pty's bundled ConPTY DLL; `desktop/scripts/native-assets.mjs` restores its
 DLL and OpenConsole helper beside rebuilt bindings after packaging and in dev.
@@ -838,16 +838,41 @@ RunAsNode fuse disabled.
 
 ### Shared workspace
 
-`workspace.ts` owns all windows and a single app-wide `TerminalTabs` registry.
-Each terminal ID has one owning `WorkspaceWindow`; duplicate launches and
+The hierarchy is **application → windows → tabs → pane trees**. A pane is a
+terminal instance; a tab is a layout container; a window owns an ordered list of
+tabs. `workspace-model.ts` defines these domain types independently of Electron
+and the renderer bridge. `workspace.ts` owns all windows, the pane-to-window
+ownership map and a single app-wide `TerminalPanes` registry. The registry owns
+terminal resources, connections, reload and disposal, and exposes a read-only map.
+Each pane ID has one owning `WorkspaceWindow`; duplicate launches and
 notification clicks resolve that owner dynamically, including after a transfer.
-`workspace-window.ts` owns one `BrowserWindow`, its close/reload confirmation and
-local chrome. Its `TabLayout` owns ordered tab IDs, the active session, an optional
-two-session split and shared pane geometry. Menus resolve the focused window.
+`workspace-window.ts` owns one `BrowserWindow`, native view placement and local
+chrome. `WindowLayout` owns membership and selection: the window selects one tab,
+and each tab remembers one active pane in its binary split tree, with an optional
+label and a zoom flag. The active pane is derived from those selections, never
+stored a second time at window level. A workspace page preserves that selection
+but has no focused terminal; pane shortcuts do not act on hidden panes.
+
+Tab and split IDs are stable layout identities; leaf IDs identify the actual
+terminal web contents. Tab values and trees are read-only to callers; model
+operations replace them. Whole-layout restores and transfer insertions validate
+unique membership, valid ratios and selections before changing state. Removing a
+leaf collapses its parent, removing an empty group selects a neighboring tab, and
+zoom changes visibility without discarding the tree. One recursive `paneLayout`
+computes the native content rectangles, pane headers, dividers and hit-test bounds.
+Minimum sizes compress proportionally when the window is too small, leaving saved
+ratios intact. Dividers paint a one-pixel stroke inside a six-pixel native gap;
+the gap is also the pointer target and supports keyboard resizing. Menus resolve
+the focused or most recently focused window. Resolving an action never creates a
+window; explicit launch/new-window actions own creation and clean up failed pane
+attachments.
 `workspace-ui.ts` renders the tab strip, session switcher, server launcher and
-settings. Its `workspace-preload.ts` bridge accepts only enumerated local UI
-actions; one IPC dispatcher verifies the bundled main frame and routes each call
-to that sender's window. Tab actions check ownership before changing a terminal.
+settings. `pane-ui.ts` renders keyed pane headers, keyboard-accessible dividers and
+error panels in the space reserved around native terminal views. The
+`workspace-preload.ts` bridge accepts only enumerated local UI actions; one IPC dispatcher verifies the bundled main frame and routes each call
+to that sender's window. Actions name their scope (`activateTab`, `activatePane`,
+`closeTab`, `closePane`, `splitPane`, `zoomPane`, `reloadPane`) and take explicit
+target IDs. Each action checks membership in that sender's window.
 `workspace-commands.ts` validates argument shapes at that IPC boundary. Command
 names and argument types are derived from `WorkspaceBridge`, used by both the
 preload and dispatcher; there is no separate string-alias registry. The window
@@ -858,8 +883,12 @@ switcher and error panels; metadata refreshes update their contents without
 resetting keyboard focus or icon animations. The switcher retains the selected
 session by ID across updates. Native host-state messages are sent only when
 focus or preferences change, not on every activity refresh.
-The local renderer receives tab labels, connection and activity state, attention and draft
-flags, never grants, terminal bytes or draft contents.
+The local renderer receives separate pane and tab summaries, never grants,
+terminal bytes or draft contents. `workspace-summary.ts` projects tab labels,
+member IDs and aggregate status from the model and pane states. A tab summary
+does not inherit a representative pane's identity, origin, error or connection
+capability. This projection is shared with DOM fixtures, keeping presentation
+tests on the production aggregation rules.
 
 `tab-status.ts` renders the same status icons and text in tabs and the session
 switcher. Connecting/reconnecting and disconnected states take priority. Connected
@@ -875,54 +904,80 @@ bell/focus path; unchecked completion follows the shared activity checkpoints.
 Activation applies view visibility before restoring or focusing the native window.
 Native focus events may select another visible split pane, but cannot override an
 activation in progress or reactivate a view already hidden by the current layout.
+`pane-appearance.ts` owns inactive-pane dimming in the native presentation layer,
+independent of the server page and terminal bridge. It inserts a fixed,
+click-through CSS overlay, serializes focus updates and reapplies after navigation.
+Focus never alters view bounds or xterm's layout. The active pane retains its
+normal appearance when the application loses focus.
 
-`tab-shortcuts.ts` shares new-tab and close-tab accelerators between the native
-menu and the workspace guide: Cmd+T/W on macOS, Ctrl+Shift+T/W on Windows.
+`workspace-shortcuts.ts` shares tab and pane accelerators between the native
+menu and the workspace guide: Cmd+T/W and Cmd+D/Shift+D on macOS,
+Ctrl+Shift+T/W and Ctrl+Shift+D/Ctrl+Alt+D on Windows. Zoom, pane close and pane
+cycling use the same definition in both places.
+Cmd+W / Ctrl+Shift+W closes only the focused pane, with confirmation. Layout removal
+collapses its split and removes empty tabs; an empty window closes afterward.
+Closing all panes in a tab is an explicit File/tab-menu or tab-close-button action.
+Cmd+Shift+W / Alt+F4 remains the separate native window-close action.
+`workspace-close.ts` handles all three close scopes through one policy. It permits
+one pending confirmation per window, captures the exact terminal instances, and
+rechecks membership after confirmation before disposing each pane. A moved pane,
+new arrival or replacement is not covered by the earlier confirmation. Empty
+tabs collapse in the model; empty native windows close after removal. App quit
+also checks for arrivals during confirmation and cleanup before exiting.
+Pane accelerators are intercepted in native `before-input-event` as well: terminal
+renderers can consume Enter before a menu accelerator runs. The shared definition
+drives matching and dispatch, suppressing repeat presses and duplicate menu delivery.
 Both the Outpost home page and Settings render the same shortcut list. The home
 page stays open until a tab or another page is selected; it has no Back/Escape
 control. Transient panels retain Escape dismissal.
 
-`tab-shortcuts.ts` also reserves Ctrl+Tab and Ctrl+Shift+Tab in Electron's
+`workspace-shortcuts.ts` also reserves Ctrl+Tab and Ctrl+Shift+Tab in Electron's
 `before-input-event` for both the workspace and terminal web contents. It prevents
 renderer delivery and the duplicate menu accelerator, then uses the existing
-`TabLayout.cycle` order and activation path. Terminal callbacks resolve the
+`WindowLayout.cycleTabs` order and activation path. Terminal callbacks resolve the
 current owner after cancelling provisional drags, so shortcuts follow moved tabs
 without adding renderer IPC or keeping a second tab order.
+The same native input handler consumes Escape during a drag, including repeats
+and key release. Keyboard focus can remain inside a terminal while the workspace
+holds pointer capture, so a workspace DOM listener alone cannot cancel reliably.
 
-`tab-drag-ui.ts` starts a drag after an eight-pixel threshold, transferring pointer
-capture from the tab button to the stable strip so removing a tab node cannot
-cancel the gesture. `tab-drag.ts` owns one drag across the app and resolves drop
-positions from native DIP cursor coordinates and each chrome's measured geometry.
-A 32 ms timer runs only during a drag, including while edge scrolling. Hit testing
-respects the temporary stacking order of the raised hover destination and never
-drops through an overlapping Outpost window. Holding the pointer over the inserted
-tab retains its position, so changing flex widths cannot cause a reorder loop.
+`workspace-drag-ui.ts` handles both tab buttons and pane headers. It selects on
+press, starts a drag after an eight-pixel threshold, and moves pointer capture to
+the stable workspace body so removing a header or tab cannot cancel the gesture.
+`workspace-drag.ts` owns one drag across the app. Its payload contains only a
+layout kind and ID; it carries no grants, terminal data or message contents.
+A 32 ms timer resolves screen DIP coordinates against window bounds, measured tab
+bars and shared pane geometry, respecting the temporary native stacking order.
 
-Hovering over another tab bar provisionally transfers the **live** terminal using
-`tab-transfer.ts`, the same ownership/reparenting path used for permanent moves.
-It saves both `TabLayout` snapshots first. The destination selects the incoming
-tab and displays its live view; an empty source becomes transparent using native
-window opacity. The source is kept open and focused so it retains mouse-up and
-Escape; `hide()` would discard that capture. The destination is raised without
-taking focus. Leaving its strip restores both layouts, including split panes,
-selection and panels. Release commits the provisional move without a second
-reparent. Escape, capture loss, blur, renderer failure, tab disposal or closing
-either participating window restore it. Menu and launch actions cancel before
-resolving ownership. No grant or terminal data enters drag payloads.
+`pane-transfer.ts` is the single transfer path for dragging, context menus and the
+session switcher. A small structural window interface keeps the transaction
+independent of Electron and testable with the real layout model. It snapshots source and destination layouts, extracts a pane or
+whole tab subtree, inserts it at a tab position or pane edge, and reparents the
+same native views while changing their app-wide owners. Failure or cancellation
+restores both layouts and ownership, including active panes, zoom and panels.
+No terminal process, connection, renderer, buffer or draft is recreated.
 
-Outside tab bars, `tab-drag-preview.ts` shows a noninteractive native label. It
-always supplies a fixed width and height when moving and disables Windows resize
-insets. No native move occurs for a stationary pointer, and no read-back window
-dimensions feed the next update. Asynchronous loading cannot reshow a hidden or
-destroyed preview.
+Hover over another window's tab bar provisionally transfers the live view(s).
+The destination selects the incoming tab. An empty source uses native opacity to
+stay focused and keep pointer capture while becoming invisible; `hide()` would
+discard that capture. The destination is raised without taking focus. Hovering
+the inserted tab retains its anchor to avoid flex-width feedback. Leaving restores
+the layout, and release commits without another reparent. Esc, capture loss, blur,
+renderer failure, terminal disposal or closing either participating window cancels.
+Menu and launch actions cancel the drag before resolving current ownership.
 
-A release inside the source strip reorders; an outside drop creates a window.
-A lone tab instead moves its existing window. Transfers never reload, reconnect
-or consume another ticket. Failed attachment restores both layouts. Moving the
-last tab into another window closes the empty source only after the move commits.
-A source split collapses to its remaining session. New window bounds are clamped
-to the destination display's work area. The renderer, connection, terminal buffer
-and draft stay alive.
+Pane-edge hover instead shows a click-through native highlight above terminal views.
+It does not mutate the tree or resize views while hit testing; therefore a stationary
+pointer cannot create a layout/measurement feedback loop. Release commits through
+the same transfer transaction. A self-drop or invalid area inside a workspace cancels;
+outside every workspace it creates a window. Moving all of a lone window's contents
+moves that native window instead. Empty windows close only after a committed move.
+
+`drag-preview.ts` paints the native highlight or an outside-drag title label. Every
+update supplies complete bounds from pane geometry or fixed label dimensions,
+never previous popup measurements. Windows resize insets are disabled. Loading
+asynchronously cannot reshow a hidden or destroyed preview. New window bounds are
+clamped to the destination display's work area.
 
 The tab strip replaces the system title bar using Electron's
 `titleBarStyle: 'hidden'` and [Window Controls Overlay](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar#custom-window-controls).
@@ -945,9 +1000,9 @@ markers, tab highlight and live terminal preview.
 `terminals.ts` owns each session's sandboxed `WebContentsView` and native bridge.
 Views use nonpersistent sessions partitioned by server origin. Switching tabs
 only changes visibility; hidden views retain their size and keep processing
-output and acknowledgements. A split displays two existing views and changes
-their bounds. Moving/reordering tabs never redeems another grant. There is a
-32-tab limit across at most 16 workspace windows. Closing a tab explicitly destroys
+output and acknowledgements. Nested splits place existing views using the shared
+tree geometry. Moving/reordering panes never redeems another grant. There is a
+32-pane limit across at most 16 workspace windows. Closing a tab explicitly destroys
 its web contents; closing a window destroys only the views it still owns. Quit
 confirmation covers tabs and drafts across all windows. Renderer failures are
 shown per tab and do not reset the workspace or other sessions.
@@ -1065,7 +1120,9 @@ the broker, and handle it in the shared client, delegating native actions throug
 | Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with the built service in both modes; conversation discovery |
 | Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout; mobile WebGL rendering, real clipboard copying, and GPU context-loss fallback |
 | Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
-| Native desktop | `tests/desktop/` via `npm run test:desktop` — Linux Electron, real preload/IPC/node-pty, image picker/drop/native clipboard, path insertion and stable viewport |
+| Desktop model | `tests/unit/desktop-panes.test.ts` — split-tree invariants, small-window geometry, transfer/rollback and destroyed views, platform shortcuts and dimming races |
+| Workspace DOM | `tests/desktop/workspace-dom.spec.ts` — packaged chrome, real layout model, pane focus/zoom, divider input, drag cancellation, stable DOM identity, error actions and shortcut guide |
+| Native desktop | `tests/desktop/` via `npm run test:desktop` — Linux Electron, real preload/IPC/node-pty, native keyboard/mouse, cross-window pane/tab transfers, hover cancellation, drafts, dimming, PTY resize, close confirmation, wake recovery and image clipboard/cleanup |
 | Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |
 
 Mobile automation uses real browser engines with emulated device sizes. Android swipes use Chromium's trusted
@@ -1077,8 +1134,13 @@ background suspension behavior. Those still need a physical iPhone/iPad and Andr
 
 For Linux native desktop checks, install `desktop/` dependencies, run
 `npm --prefix desktop run native` and `npm --prefix desktop run build`, then
-`xvfb-run -a npm run test:desktop` on a headless host. The suite uses an isolated
-app profile and a disposable input recorder. Browser image checks compare saved
+`xvfb-run -a --server-args='-screen 0 2400x1400x24' npm run test:desktop` on a headless
+host with `xdotool` installed. The large virtual display fits multiple native windows
+and an outside drop target. The suite uses isolated app profiles and disposable
+input/resize recorders; it exercises real OS pointer capture and menu/input routing.
+macOS/Windows accelerator definitions are unit-tested, but native window management,
+scaling and keyboard behavior still need checks on those operating systems.
+Browser image checks compare saved
 bytes and exact bracketed-paste input, including no automatic Enter; API/runtime
 checks cover 16 MiB boundaries, authorization/revocation, cancellation, retention,
 and uploads that must not hold the session registry lock. Native Windows/macOS

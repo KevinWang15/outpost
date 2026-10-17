@@ -16,19 +16,20 @@ import {
   type IpcMainEvent,
   type WebContents,
 } from 'electron'
-import type { DesktopLaunch, TerminalHostState, TerminalTabState } from '../../shared/desktop'
+import type { DesktopLaunch, TerminalHostState, TerminalPaneState } from '../../shared/desktop'
 import { parseSessionActivity } from '../../shared/activity'
 import { pagePaths } from '../../shared/pages'
 import { browserUrl } from '../../shared/signals'
-import { attachTabShortcuts } from './tab-shortcuts'
+import { attachWorkspaceShortcuts, type PaneAction } from './workspace-shortcuts'
+import { PaneAppearance } from './pane-appearance'
 import { remoteSessionId, validResumeToken, type RecentSession } from './recent-sessions'
 
-export interface TerminalTab {
+export interface TerminalPane {
   id: number
   view: WebContentsView
+  appearance: PaneAppearance
   origin: string
-  label: string | null
-  state: TerminalTabState
+  state: TerminalPaneState
   error: string | null
   notification: Notification | null
   externalAt: number
@@ -52,6 +53,8 @@ interface Host {
   activate(id: number): void
   focus(id: number): void
   cycle(id: number, delta: 1 | -1): void
+  cancelDrag(): boolean
+  paneAction(id: number, action: PaneAction): void
   close(id: number): Promise<void>
   removing(id: number): void
   removed(id: number): void
@@ -66,11 +69,15 @@ const cleanTitle = (value: string) =>
     .slice(0, 512)
 
 /** Owns isolated terminal contents and their narrow native capabilities. */
-export class TerminalTabs {
-  readonly tabs = new Map<number, TerminalTab>()
+export class TerminalPanes {
+  private live = new Map<number, TerminalPane>()
+  get panes(): ReadonlyMap<number, TerminalPane> {
+    return this.live
+  }
   private sessions = new WeakSet<Electron.Session>()
-  private sessionTabs = new Map<string, number>()
+  private sessionPanes = new Map<string, number>()
   private hostStates = new WeakMap<WebContents, TerminalHostState>()
+  private cleanup = new Set<Promise<void>>()
   constructor(
     private directory: string,
     private host: Host,
@@ -81,12 +88,12 @@ export class TerminalTabs {
       return connection.kind === 'remote' ? connection.token : null
     })
     ipcMain.handle('terminal:save-resume', (event, token: unknown, title: unknown) => {
-      const tab = this.sender(event)
-      const connection = tab.connection
+      const pane = this.sender(event)
+      const connection = pane.connection
       if (connection.kind !== 'remote' || !validResumeToken(token) || typeof title !== 'string' || title.length > 512)
         throw new Error('Invalid session reconnect credential.')
       connection.token = token
-      return this.remember(tab, cleanTitle(title))
+      return this.remember(pane, cleanTitle(title))
     })
     ipcMain.handle('terminal:pending-launches', event => {
       const connection = this.sender(event).connection
@@ -97,9 +104,9 @@ export class TerminalTabs {
       if (connection.kind === 'remote' && typeof token === 'string') connection.pendingLaunches.delete(token)
     })
     ipcMain.handle('terminal:state', (event, value: unknown) => {
-      const tab = this.sender(event)
+      const pane = this.sender(event)
       if (!value || typeof value !== 'object') return
-      const state = value as TerminalTabState
+      const state = value as TerminalPaneState
       const activity = parseSessionActivity(state.activity)
       if (
         typeof state.title !== 'string' ||
@@ -112,23 +119,23 @@ export class TerminalTabs {
         return
       // The renderer owns bell state, including acknowledgement on activation.
       // Native notification handlers must not race these ordered reports.
-      tab.state = {
+      pane.state = {
         title: cleanTitle(state.title),
         connection: state.connection,
         activity: state.connection === 'connected' ? activity : null,
         attention: state.attention,
         hasDraft: state.hasDraft,
       }
-      clearTimeout(tab.interfaceTimer)
-      tab.interfaceReady = true
-      tab.error = null
-      this.host.changed(tab.id)
+      clearTimeout(pane.interfaceTimer)
+      pane.interfaceReady = true
+      pane.error = null
+      this.host.changed(pane.id)
     })
     ipcMain.handle('terminal:open-external', async (event, value: unknown) => {
-      const tab = this.sender(event)
+      const pane = this.sender(event)
       const url = browserUrl({ url: value })
-      if (Date.now() - tab.externalAt < 500) return false
-      tab.externalAt = Date.now()
+      if (Date.now() - pane.externalAt < 500) return false
+      pane.externalAt = Date.now()
       try {
         await shell.openExternal(url)
         return true
@@ -137,10 +144,10 @@ export class TerminalTabs {
       }
     })
     ipcMain.handle('terminal:copy', (event, value: unknown) => {
-      const tab = this.sender(event)
+      const pane = this.sender(event)
       if (
-        !this.host.focused(tab.id) ||
-        !tab.view.webContents.isFocused() ||
+        !this.host.focused(pane.id) ||
+        !pane.view.webContents.isFocused() ||
         typeof value !== 'string' ||
         Buffer.byteLength(value, 'utf8') > 1024 * 1024
       )
@@ -149,28 +156,28 @@ export class TerminalTabs {
       return true
     })
     ipcMain.handle('terminal:paste', event => {
-      const tab = this.sender(event)
-      if (!this.host.focused(tab.id) || !tab.view.webContents.isFocused()) return false
-      tab.view.webContents.paste()
+      const pane = this.sender(event)
+      if (!this.host.focused(pane.id) || !pane.view.webContents.isFocused()) return false
+      pane.view.webContents.paste()
       return true
     })
     ipcMain.handle('terminal:bell', (event, name: unknown) => {
-      const tab = this.sender(event)
-      if (typeof name !== 'string' || name.length > 512 || this.host.focused(tab.id)) return false
+      const pane = this.sender(event)
+      if (typeof name !== 'string' || name.length > 512 || this.host.focused(pane.id)) return false
       if (!Notification.isSupported()) return false
-      if (tab.notification) return true
+      if (pane.notification) return true
       const notification = new Notification({
         title: 'Outpost · Terminal bell',
         body: `${cleanTitle(name)} rang a bell`,
         icon: join(this.directory, 'outpost.png'),
         silent: true,
       })
-      tab.notification = notification
-      notification.on('click', () => this.host.activate(tab.id))
+      pane.notification = notification
+      notification.on('click', () => this.host.activate(pane.id))
       notification.on('close', () => {
-        if (tab.notification === notification) tab.notification = null
+        if (pane.notification === notification) pane.notification = null
       })
-      notification.on('failed', () => this.dismiss(tab))
+      notification.on('failed', () => this.dismiss(pane))
       notification.show()
       return true
     })
@@ -196,25 +203,25 @@ export class TerminalTabs {
     return pathToFileURL(join(this.directory, 'local-terminal/index.html')).href
   }
 
-  private allowed(value: string, tab: TerminalTab) {
+  private allowed(value: string, pane: TerminalPane) {
     try {
       const url = new URL(value)
-      if (tab.connection.kind === 'local') return url.href === this.localPage
-      return url.origin === tab.origin && url.pathname === pagePaths.desktopTerminal && !url.search
+      if (pane.connection.kind === 'local') return url.href === this.localPage
+      return url.origin === pane.origin && url.pathname === pagePaths.desktopTerminal && !url.search
     } catch {
       return false
     }
   }
   private sender(event: IpcMainInvokeEvent | IpcMainEvent) {
-    const tab = this.tabs.get(event.sender.id)
+    const pane = this.live.get(event.sender.id)
     if (
-      !tab ||
+      !pane ||
       !event.senderFrame ||
       event.senderFrame !== event.sender.mainFrame ||
-      !this.allowed(event.senderFrame.url, tab)
+      !this.allowed(event.senderFrame.url, pane)
     )
       throw new Error('Desktop action is unavailable in this page.')
-    return tab
+    return pane
   }
   private local(event: IpcMainInvokeEvent | IpcMainEvent) {
     const connection = this.sender(event).connection
@@ -222,20 +229,20 @@ export class TerminalTabs {
     return connection.terminal
   }
 
-  dismiss(tab: TerminalTab) {
-    const notification = tab.notification
-    tab.notification = null
+  dismiss(pane: TerminalPane) {
+    const notification = pane.notification
+    pane.notification = null
     if (notification) {
       notification.removeAllListeners()
       notification.close()
     }
   }
-  async remember(tab: TerminalTab, title = tab.state.title) {
-    const connection = tab.connection
+  async remember(pane: TerminalPane, title = pane.state.title) {
+    const connection = pane.connection
     if (connection.kind !== 'remote' || !connection.remember) return
     await this.host.remember({
-      id: remoteSessionId(tab.origin, connection.sessionKey),
-      server: tab.origin,
+      id: remoteSessionId(pane.origin, connection.sessionKey),
+      server: pane.origin,
       sessionKey: connection.sessionKey,
       token: connection.token,
       title,
@@ -244,10 +251,10 @@ export class TerminalTabs {
   }
   hostState(ids: Iterable<number>) {
     for (const id of ids) {
-      const tab = this.tabs.get(id)
-      if (!tab || tab.view.webContents.isDestroyed()) continue
-      const contents = tab.view.webContents
-      const next = this.host.state(tab.id)
+      const pane = this.live.get(id)
+      if (!pane || pane.view.webContents.isDestroyed()) continue
+      const contents = pane.view.webContents
+      const next = this.host.state(pane.id)
       const previous = this.hostStates.get(contents)
       // Activity refreshes repaint chrome; focus and preferences change separately.
       if (previous?.focused === next.focused && previous.fontSize === next.fontSize && previous.sound === next.sound)
@@ -257,77 +264,92 @@ export class TerminalTabs {
     }
   }
   resume() {
-    // Wake every remote tab, including tabs in minimized/background windows.
+    // Wake every remote pane, including panes in minimized/background windows.
     // Local shells keep their PTY and require no reconnection.
-    for (const tab of this.tabs.values()) {
-      if (tab.connection.kind === 'remote' && !tab.view.webContents.isDestroyed())
-        tab.view.webContents.send('terminal:command', 'resume')
+    for (const pane of this.live.values()) {
+      if (pane.connection.kind === 'remote' && !pane.view.webContents.isDestroyed())
+        pane.view.webContents.send('terminal:command', 'resume')
     }
   }
   dispose(id: number) {
-    const tab = this.tabs.get(id)
-    if (!tab) return
+    const pane = this.live.get(id)
+    if (!pane) return
     // A hover transfer must be restored before destroying its native view.
     this.host.removing(id)
-    this.dismiss(tab)
-    clearTimeout(tab.interfaceTimer)
-    this.tabs.delete(id)
-    if (tab.connection.kind === 'remote')
-      this.sessionTabs.delete(remoteSessionId(tab.origin, tab.connection.sessionKey))
-    else tab.connection.terminal.dispose()
-    const window = this.host.window(tab.id)
-    if (window && !window.isDestroyed()) window.contentView.removeChildView(tab.view)
+    this.dismiss(pane)
+    clearTimeout(pane.interfaceTimer)
+    this.live.delete(id)
+    if (pane.connection.kind === 'remote')
+      this.sessionPanes.delete(remoteSessionId(pane.origin, pane.connection.sessionKey))
+    else {
+      const cleanup = pane.connection.terminal.dispose()
+      this.cleanup.add(cleanup)
+      void cleanup.finally(() => this.cleanup.delete(cleanup))
+    }
+    const window = this.host.window(pane.id)
+    if (window && !window.isDestroyed()) window.contentView.removeChildView(pane.view)
     // Native child views are not destroyed with the BrowserWindow automatically.
-    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close({ waitForBeforeUnload: false })
+    if (!pane.view.webContents.isDestroyed()) pane.view.webContents.close({ waitForBeforeUnload: false })
     this.host.removed(id)
+  }
+  reloadPane(id: number) {
+    const pane = this.live.get(id)
+    if (!pane || pane.view.webContents.isDestroyed()) return
+    pane.error = null
+    pane.state = { ...pane.state, hasDraft: false, connection: 'connecting', activity: null }
+    pane.view.webContents.reload()
+    this.host.changed(id)
+  }
+  async flushCleanup() {
+    await Promise.all(this.cleanup)
   }
   open(launch: DesktopLaunch) {
     const launchKey = createHash('sha256').update(launch.token).digest('hex')
     const sessionKey = remoteSessionId(launch.server, launch.sessionKey)
-    const existing = this.sessionTabs.get(sessionKey)
+    const existing = this.sessionPanes.get(sessionKey)
     if (existing !== undefined) {
-      const tab = this.tabs.get(existing)!
-      const connection = tab.connection
-      if (connection.kind !== 'remote') throw new Error('Invalid remote tab.')
+      const pane = this.live.get(existing)!
+      const connection = pane.connection
+      if (connection.kind !== 'remote') throw new Error('Invalid remote pane.')
       connection.remember = true
       if (connection.launchKey !== launchKey) {
         if (connection.pendingLaunches.size >= 16)
           throw new Error('This terminal is still opening. Try Connect again shortly.')
         connection.launchKey = launchKey
-        // A healthy tab consumes this launch via activate; keep its reusable
+        // A healthy pane consumes this launch via activate; keep its reusable
         // resume credential for reloads instead of the single-use launch ticket.
-        if (tab.error) {
-          // Recover a failed page in the same tab. A healthy renderer handles
+        if (pane.error) {
+          // Recover a failed page in the same pane. A healthy renderer handles
           // launches through its existing socket and retains its composer draft.
           connection.pendingLaunches.clear()
           connection.token = launch.token
-          tab.error = null
-          tab.state = { ...tab.state, connection: 'connecting', activity: null, hasDraft: false }
-          void tab.view.webContents.loadURL(connection.url).catch(() => {})
+          pane.error = null
+          pane.state = { ...pane.state, connection: 'connecting', activity: null, hasDraft: false }
+          void pane.view.webContents.loadURL(connection.url).catch(() => {})
         } else {
           connection.pendingLaunches.add(launch.token)
-          tab.view.webContents.send('terminal:launch', launch.token)
+          pane.view.webContents.send('terminal:launch', launch.token)
         }
       }
-      return { tab, created: false }
+      return { pane, created: false }
     }
     return this.createRemote(launch, launchKey)
   }
 
   openRecent(entry: RecentSession) {
-    const existing = this.sessionTabs.get(entry.id)
+    const existing = this.sessionPanes.get(entry.id)
     // A saved resume credential must never enter the fresh-launch activation path.
     if (existing !== undefined) {
-      const tab = this.tabs.get(existing)!
-      if (tab.connection.kind === 'remote') tab.connection.remember = true
-      return { tab, created: false }
+      const pane = this.live.get(existing)!
+      if (pane.connection.kind === 'remote') pane.connection.remember = true
+      return { pane, created: false }
     }
     return this.createRemote(entry, '')
   }
 
   private createRemote(entry: Pick<DesktopLaunch, 'server' | 'sessionKey' | 'token' | 'title'>, launchKey: string) {
     const sessionKey = remoteSessionId(entry.server, entry.sessionKey)
-    const tab = this.create(entry.server, entry.title, {
+    const pane = this.create(entry.server, entry.title, {
       kind: 'remote',
       launchKey,
       sessionKey: entry.sessionKey,
@@ -336,16 +358,16 @@ export class TerminalTabs {
       pendingLaunches: new Set(),
       url: `${entry.server}${pagePaths.desktopTerminal}`,
     })
-    this.sessionTabs.set(sessionKey, tab.id)
-    return { tab, created: true }
+    this.sessionPanes.set(sessionKey, pane.id)
+    return { pane, created: true }
   }
 
   forgetRecent(id?: string) {
-    for (const tab of this.tabs.values()) {
-      const connection = tab.connection
+    for (const pane of this.live.values()) {
+      const connection = pane.connection
       if (
         connection.kind === 'remote' &&
-        (id === undefined || remoteSessionId(tab.origin, connection.sessionKey) === id)
+        (id === undefined || remoteSessionId(pane.origin, connection.sessionKey) === id)
       )
         connection.remember = false
     }
@@ -353,14 +375,14 @@ export class TerminalTabs {
 
   openLocal(profile: ShellProfile) {
     const terminal = new LocalTerminal(profile, event => {
-      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.send('local:event', event)
+      if (!pane.view.webContents.isDestroyed()) pane.view.webContents.send('local:event', event)
     })
-    const tab = this.create('This computer', `${profile.name} · Local`, { kind: 'local', terminal })
-    return tab
+    const pane = this.create('This computer', `${profile.name} · Local`, { kind: 'local', terminal })
+    return pane
   }
 
-  private create(origin: string, title: string, connection: TerminalTab['connection']) {
-    if (this.tabs.size >= 32) throw new Error('Close a tab before opening another session (32 tabs maximum).')
+  private create(origin: string, title: string, connection: TerminalPane['connection']) {
+    if (this.live.size >= 32) throw new Error('Close a pane before opening another session (32 panes maximum).')
     const partition =
       connection.kind === 'local' ? 'outpost-local' : 'outpost-' + createHash('sha256').update(origin).digest('hex')
     const browserSession = session.fromPartition(partition, { cache: false })
@@ -390,11 +412,11 @@ export class TerminalTabs {
     view.setVisible(false)
     view.setBackgroundColor('#0f172a')
     const contents = view.webContents
-    const tab: TerminalTab = {
+    const pane: TerminalPane = {
       id: contents.id,
       view,
+      appearance: new PaneAppearance(contents),
       origin,
-      label: null,
       error: null,
       notification: null,
       externalAt: 0,
@@ -408,39 +430,43 @@ export class TerminalTabs {
         hasDraft: false,
       },
     }
-    this.tabs.set(tab.id, tab)
-    attachTabShortcuts(contents, delta => this.host.cycle(tab.id, delta))
+    this.live.set(pane.id, pane)
+    attachWorkspaceShortcuts(contents, {
+      cycle: delta => this.host.cycle(pane.id, delta),
+      cancelDrag: () => this.host.cancelDrag(),
+      pane: action => this.host.paneAction(pane.id, action),
+    })
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
     contents.on('will-attach-webview', event => event.preventDefault())
     contents.on('will-frame-navigate', event => {
-      if (!event.isMainFrame || !this.allowed(event.url, tab)) event.preventDefault()
+      if (!event.isMainFrame || !this.allowed(event.url, pane)) event.preventDefault()
     })
     contents.on('will-redirect', (event, url) => {
-      if (!this.allowed(url, tab)) event.preventDefault()
+      if (!this.allowed(url, pane)) event.preventDefault()
     })
     contents.on('focus', () => {
-      if (contents.isFocused() && this.host.window(tab.id)?.isFocused()) this.host.focus(tab.id)
+      if (contents.isFocused() && this.host.window(pane.id)?.isFocused()) this.host.focus(pane.id)
     })
     contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
       if (mainFrame && !inPlace) {
         if (connection.kind === 'local') connection.terminal.stop()
         this.hostStates.delete(contents)
-        clearTimeout(tab.interfaceTimer)
-        tab.interfaceReady = false
+        clearTimeout(pane.interfaceTimer)
+        pane.interfaceReady = false
       }
     })
     contents.on('did-finish-load', () => {
       // Old server pages silently ignore a newer preload. Make that failure
       // visible; a late reportState clears the error if loading was merely slow.
-      clearTimeout(tab.interfaceTimer)
-      if (tab.interfaceReady) return
-      tab.interfaceTimer = setTimeout(() => {
-        if (tab.interfaceReady || tab.error) return
-        tab.error =
+      clearTimeout(pane.interfaceTimer)
+      if (pane.interfaceReady) return
+      pane.interfaceTimer = setTimeout(() => {
+        if (pane.interfaceReady || pane.error) return
+        pane.error =
           'The terminal interface did not initialize. Update Outpost Desktop and your server together, then reload.'
-        tab.state.connection = 'closed'
-        tab.state.activity = null
-        this.host.changed(tab.id)
+        pane.state.connection = 'closed'
+        pane.state.activity = null
+        this.host.changed(pane.id)
       }, 15_000)
     })
     contents.on('context-menu', (_event, params) => {
@@ -457,32 +483,32 @@ export class TerminalTabs {
         { type: 'separator' },
         { label: 'Select all', enabled: params.editFlags.canSelectAll, click: () => contents.selectAll() },
       ])
-      const window = this.host.window(tab.id)
+      const window = this.host.window(pane.id)
       if (window) menu.popup({ window })
     })
     contents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
       if (!mainFrame || code === -3) return
-      tab.error =
+      pane.error =
         connection.kind === 'local'
-          ? 'Could not load the local terminal. Reinstall Outpost Desktop or open a new tab.'
+          ? 'Could not load the local terminal. Reinstall Outpost Desktop or open a new pane.'
           : 'Could not load the terminal. Check the server connection, then reload or open a new connection.'
-      tab.state.connection = 'closed'
-      tab.state.activity = null
-      this.host.changed(tab.id)
+      pane.state.connection = 'closed'
+      pane.state.activity = null
+      this.host.changed(pane.id)
     })
     contents.on('render-process-gone', () => {
       if (connection.kind === 'local') connection.terminal.stop()
-      tab.error =
+      pane.error =
         connection.kind === 'local'
           ? 'The local terminal stopped responding. Reload to start a new shell.'
           : 'This terminal stopped responding. Reload it to reconnect. Your remote session keeps running.'
-      tab.state.connection = 'closed'
-      tab.state.activity = null
-      this.host.changed(tab.id)
+      pane.state.connection = 'closed'
+      pane.state.activity = null
+      this.host.changed(pane.id)
     })
-    contents.on('destroyed', () => this.dispose(tab.id))
+    contents.on('destroyed', () => this.dispose(pane.id))
     // The isolated terminal requests its own credential through the preload.
     void contents.loadURL(connection.kind === 'local' ? this.localPage : connection.url).catch(() => {})
-    return tab
+    return pane
   }
 }

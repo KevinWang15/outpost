@@ -2,27 +2,31 @@ import { app, BrowserWindow, dialog, Menu, shell, type IpcMainInvokeEvent, type 
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { desktopOrigin, type TerminalCommand, type TerminalPreferences } from '../../shared/desktop'
-import { paneLayout, splitRatio, TabLayout, type TabLayoutState } from './layout'
+import { paneLayout, paneIds, tabBarHeight, WindowLayout } from './layout'
+import { WorkspaceClose } from './workspace-close'
+import { summarizeTabs } from './workspace-summary'
 import { defaultPreferences, Preferences, validPreferences } from './preferences'
 import { TrustedServers } from './store'
-import { TerminalTabs, type TerminalTab } from './terminals'
-import { attachTabShortcuts } from './tab-shortcuts'
+import { TerminalPanes, type TerminalPane } from './terminals'
+import { attachWorkspaceShortcuts, type PaneAction } from './workspace-shortcuts'
 import { checkUpdates } from './updates'
-import { keepsTabDrag, workspaceCommand } from './workspace-commands'
+import { keepsWorkspaceDrag, workspaceCommand } from './workspace-commands'
 import type { ShellProfile } from './shell-profiles'
 import type { RecentSessionSummary } from './recent-sessions'
-import {
-  tabBarHeight,
-  type SplitDirection,
-  type WorkspacePanel,
-  type WorkspaceSnapshot,
-  type TabGeometry,
-  type TabDragState,
-} from './workspace-api'
+import type { WorkspaceSnapshot, TabGeometry, WorkspaceDragState, PaneSummary } from './workspace-api'
+import type {
+  CloseScope,
+  TabGroup,
+  WindowLayoutState,
+  SplitDirection,
+  WorkspacePanel,
+  WorkspaceItem,
+  PanePlacement,
+} from './workspace-model'
 
 export interface WorkspaceHost {
   shells(): ShellProfile[]
-  newLocal(source: WorkspaceWindow, profile?: string): void
+  newLocal(source: WorkspaceWindow, profile?: string, split?: SplitDirection): void
   recentSessions(): RecentSessionSummary[]
   openRecent(source: WorkspaceWindow, id: string): Promise<void>
   removeRecent(id: string): Promise<void>
@@ -32,32 +36,43 @@ export interface WorkspaceHost {
   focused(window: WorkspaceWindow): void
   closed(window: WorkspaceWindow): void
   changed(): void
-  move(id: number, destination: number | null): void
+  move(source: WorkspaceWindow, item: WorkspaceItem, destination: number | null, placement?: PanePlacement): void
   destinations(source: WorkspaceWindow): { id: number; label: string }[]
-  dragStart(source: WorkspaceWindow, id: number): void
+  dragStart(source: WorkspaceWindow, item: WorkspaceItem): void
   dragEnd(source: WorkspaceWindow, cancel: boolean): void
-  dragCancel(window: WorkspaceWindow): void
-  dragState(window: WorkspaceWindow): TabDragState | null
+  dragCancel(window: WorkspaceWindow): boolean
+  dragState(window: WorkspaceWindow): WorkspaceDragState | null
 }
 
 /** One window owns layout and chrome; the application owns terminal lifetimes. */
 export class WorkspaceWindow {
   private window: BrowserWindow | null = null
-  private layout = new TabLayout()
+  private layout = new WindowLayout()
   private geometry: TabGeometry | null = null
-  private closing = new Set<number>()
-  private confirmingWindow = false
+  private readonly closing: WorkspaceClose<TerminalPane>
   private reportingError = false
-  private allowWindowClose = false
   private presenting = false
   constructor(
     private directory: string,
     private trusted: TrustedServers,
     private preferences: Preferences,
     private trust: (origin: string) => Promise<boolean>,
-    private terminals: TerminalTabs,
+    private terminals: TerminalPanes,
     private host: WorkspaceHost,
-  ) {}
+  ) {
+    this.closing = new WorkspaceClose({
+      resolve: scope => {
+        const ids = scope.kind === 'window' ? this.paneIds : this.layout.selection(scope)
+        return ids.flatMap(id => this.pane(id) ?? [])
+      },
+      confirm: (scope, panes) => this.confirmClose(scope, panes),
+      dispose: pane => this.terminals.dispose(pane.id),
+      settled: () => {
+        this.closeEmpty()
+        this.restoreFocus()
+      },
+    })
+  }
   invoke(event: IpcMainInvokeEvent, name: unknown, values: unknown[]) {
     const url = pathToFileURL(join(this.directory, 'workspace.html')).href
     if (
@@ -68,7 +83,7 @@ export class WorkspaceWindow {
     )
       throw new Error('This action is only available in the Outpost workspace.')
     const command = workspaceCommand(name, values)
-    if (!keepsTabDrag(command.name)) this.host.dragCancel(this)
+    if (!keepsWorkspaceDrag(command.name)) this.host.dragCancel(this)
     switch (command.name) {
       case 'state':
         return this.snapshot()
@@ -76,43 +91,44 @@ export class WorkspaceWindow {
         return this.host.newLocal(this, command.args[0])
       case 'shellMenu':
         return this.shellMenu()
-      case 'activate':
-        return this.activate(command.args[0], command.args[1] !== false)
-      case 'close':
-        return this.close(command.args[0])
-      case 'reorder':
-        this.layout.move(...command.args)
-        return this.render()
-      case 'rename': {
+      case 'activateTab':
+        return this.activateTab(command.args[0], command.args[1] !== false)
+      case 'activatePane':
+        return this.activatePane(command.args[0], command.args[1] !== false)
+      case 'closeTab':
+        return this.closeTab(command.args[0])
+      case 'closePane':
+        return this.closePane(command.args[0])
+      case 'paneMenu':
+        return this.paneMenu(command.args[0])
+      case 'zoomPane':
+        return this.zoomPane(command.args[0])
+      case 'renameTab': {
         const [id, label] = command.args
-        const tab = this.tab(id)
+        const tab = this.layout.tab(id)
         if (tab) {
-          tab.label = label.trim() || null
+          this.layout.renameTab(id, label)
           this.panel(null)
         }
         return
       }
       case 'panel': {
         const value = command.args[0]
-        if (value === null || typeof value === 'string' || this.has(value.rename)) this.panel(value)
+        if (value === null || typeof value === 'string' || this.layout.tab(value.renameTab)) this.panel(value)
         return
       }
-      case 'pair':
-        this.layout.pair(command.args[0])
+      case 'movePaneBeside':
+        return this.movePaneBeside(...command.args)
+      case 'splitPane':
+        return this.splitPane(...command.args)
+      case 'resizeSplit':
+        this.layout.resizeSplit(...command.args)
         this.render()
-        return this.focusTerminal()
-      case 'split':
-        return this.split(command.args[0])
-      case 'ratio':
-        if (this.layout.split) {
-          this.layout.split.ratio = Math.max(0.2, Math.min(0.8, command.args[0]))
-          this.render()
-        }
         return
-      case 'contextMenu':
-        return this.contextMenu(command.args[0])
-      case 'reload':
-        return this.reload(command.args[0])
+      case 'tabMenu':
+        return this.tabMenu(command.args[0])
+      case 'reloadPane':
+        return this.reloadPane(command.args[0])
       case 'openServer':
         return this.openServer(command.args[0])
       case 'forgetServer':
@@ -134,7 +150,7 @@ export class WorkspaceWindow {
       case 'reportError':
         return this.reportError(command.args[0])
       case 'tabGeometry':
-        if (command.args[0].tabs.every(tab => this.has(tab.id))) this.geometry = command.args[0]
+        if (command.args[0].tabs.every(tab => this.layout.tab(tab.id))) this.geometry = command.args[0]
         return
       case 'dragStart':
         return this.host.dragStart(this, command.args[0])
@@ -150,42 +166,59 @@ export class WorkspaceWindow {
   get browserWindow() {
     return this.window
   }
-  get ids() {
-    return [...this.layout.ids]
+  get paneIds() {
+    return [...this.layout.paneIds]
   }
-  has(id: number) {
-    return this.layout.ids.includes(id)
+  hasPane(id: number) {
+    return this.layout.paneIds.includes(id)
   }
-  private tab(id: number) {
-    return this.has(id) ? this.terminals.tabs.get(id) : undefined
+  private pane(id: number) {
+    return this.hasPane(id) ? this.terminals.panes.get(id) : undefined
   }
   get hasTabs() {
-    return this.layout.ids.length > 0
+    return this.layout.tabs.length > 0
   }
   focused(id: number) {
     return Boolean(
       this.window?.isFocused() &&
       !this.host.dragState(this) &&
       this.layout.panel === null &&
-      this.layout.active === id &&
-      !this.terminals.tabs.get(id)?.error,
+      this.layout.activePaneId === id &&
+      !this.terminals.panes.get(id)?.error,
     )
   }
   focus(id: number) {
     if (
       !this.host.dragState(this) &&
       !this.presenting &&
-      this.layout.visible().includes(id) &&
-      this.layout.active !== id
+      this.layout.visiblePaneIds().includes(id) &&
+      this.layout.activePaneId !== id
     )
-      this.activate(id)
+      this.activatePane(id)
   }
   private snapshot(): WorkspaceSnapshot {
+    const panes: PaneSummary[] = this.paneIds.flatMap(id => {
+      const pane = this.terminals.panes.get(id)
+      return pane
+        ? [
+            {
+              ...pane.state,
+              kind: pane.connection.kind,
+              id,
+              origin: pane.origin,
+              label: pane.state.title,
+              error: pane.error,
+            },
+          ]
+        : []
+    })
     return {
       version: app.getVersion(),
       platform: process.platform,
-      active: this.layout.active,
-      split: this.layout.split,
+      activePaneId: this.layout.activePaneId,
+      activeTabId: this.layout.activeTabId,
+      tree: this.layout.activeTab?.root ?? null,
+      zoomed: this.layout.activeTab?.zoomed ?? false,
       panel: this.layout.panel,
       servers: this.trusted.list(),
       recentSessions: this.host.recentSessions(),
@@ -194,26 +227,12 @@ export class WorkspaceWindow {
       defaultShell:
         this.host.shells().find(profile => profile.id === this.preferences.localShell)?.id ?? this.host.shells()[0].id,
       drag: this.host.dragState(this),
-      tabs: this.layout.ids.flatMap(id => {
-        const tab = this.terminals.tabs.get(id)
-        return tab
-          ? [
-              {
-                ...tab.state,
-                id,
-                kind: tab.connection.kind,
-                origin: tab.origin,
-                label: tab.label || tab.state.title,
-                error: tab.error,
-              },
-            ]
-          : []
-      }),
+      panes,
+      tabs: summarizeTabs(this.layout.tabs, panes),
     }
   }
   ensureWindow() {
     if (this.window && !this.window.isDestroyed()) return this.window
-    this.allowWindowClose = false
     const window = new BrowserWindow({
       title: 'Outpost',
       width: 1280,
@@ -241,9 +260,16 @@ export class WorkspaceWindow {
       },
     })
     this.window = window
-    attachTabShortcuts(window.webContents, delta => {
-      this.host.dragCancel(this)
-      this.cycle(delta)
+    attachWorkspaceShortcuts(window.webContents, {
+      cycle: delta => {
+        this.host.dragCancel(this)
+        this.cycle(delta)
+      },
+      cancelDrag: () => this.host.dragCancel(this),
+      pane: action => {
+        this.host.dragCancel(this)
+        this.paneAction(action)
+      },
     })
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
@@ -259,32 +285,21 @@ export class WorkspaceWindow {
     window.on('minimize', () => this.host.dragCancel(this))
     window.on('focus', () => {
       this.host.focused(this)
-      this.terminals.hostState(this.ids)
+      this.terminals.hostState(this.paneIds)
     })
     window.on('blur', () => {
       this.host.dragCancel(this)
-      this.terminals.hostState(this.ids)
+      this.terminals.hostState(this.paneIds)
     })
     window.on('close', event => {
       this.host.dragCancel(this)
-      if (this.allowWindowClose || this.host.quitting() || !this.hasTabs) return
+      if (this.host.quitting() || !this.hasTabs) return
       event.preventDefault()
-      if (this.confirmingWindow) return
-      this.confirmingWindow = true
-      void this.confirmWindow()
-        .then(confirmed => {
-          if (confirmed && !window.isDestroyed()) {
-            this.allowWindowClose = true
-            window.close()
-          }
-        })
-        .finally(() => {
-          this.confirmingWindow = false
-        })
+      void this.requestClose({ kind: 'window' }).catch(error => this.reportError(String(error)))
     })
     window.on('closed', () => {
       this.window = null
-      for (const id of this.ids) this.terminals.dispose(id)
+      for (const id of this.paneIds) this.terminals.dispose(id)
       this.host.closed(this)
     })
     window.once('ready-to-show', () => {
@@ -308,62 +323,87 @@ export class WorkspaceWindow {
       this.presenting = false
     }
   }
-  add(tab: TerminalTab, before: number | null = null) {
-    const window = this.ensureWindow()
-    window.contentView.addChildView(tab.view)
-    this.layout.add(tab.id)
-    this.layout.move(tab.id, before)
+  addPane(pane: TerminalPane, split?: SplitDirection) {
+    const previous = this.layout.activePaneId
+    if (!this.attach(pane.id)) throw new Error('This terminal has closed.')
+    this.layout.addPane(
+      pane.id,
+      split && previous !== null
+        ? { kind: 'pane', pane: previous, edge: split === 'columns' ? 'right' : 'bottom' }
+        : { kind: 'tab', before: null },
+    )
+  }
+  attach(id: number) {
+    const pane = this.terminals.panes.get(id)
+    // Cancellation can run from a terminal's destroyed event. The other views
+    // still return to their owner; restoreLayout prunes the dead leaf afterward.
+    if (!pane || pane.view.webContents.isDestroyed()) return false
+    this.ensureWindow().contentView.addChildView(pane.view)
+    return true
+  }
+  detach(id: number) {
+    const pane = this.terminals.panes.get(id)
+    if (!pane) return
+    if (!pane.view.webContents.isDestroyed()) pane.view.setVisible(false)
+    if (this.window?.contentView.children.includes(pane.view)) this.window.contentView.removeChildView(pane.view)
+  }
+  selection(item: WorkspaceItem) {
+    return this.layout.selection(item)
+  }
+  groupForPane(id: number) {
+    return this.layout.tabForPane(id)?.id
+  }
+  extract(item: WorkspaceItem) {
+    return this.layout.take(item)
+  }
+  insert(group: TabGroup, placement: PanePlacement) {
+    this.layout.insert(group, placement)
   }
   captureLayout() {
     return this.layout.snapshot()
   }
-  restoreLayout(state: TabLayoutState) {
+  restoreLayout(state: WindowLayoutState) {
     this.layout.restore(state)
-    for (const id of this.ids) {
-      const tab = this.terminals.tabs.get(id)
-      if (!tab || tab.view.webContents.isDestroyed()) this.layout.remove(id)
+    for (const id of this.paneIds) {
+      const pane = this.terminals.panes.get(id)
+      if (!pane || pane.view.webContents.isDestroyed()) this.layout.removePane(id)
     }
-    this.geometry = null
     this.render()
   }
-  release(id: number) {
-    const tab = this.terminals.tabs.get(id)
-    if (!tab) return
-    if (!tab.view.webContents.isDestroyed()) tab.view.setVisible(false)
-    this.window?.contentView.removeChildView(tab.view)
-    this.remove(id)
-  }
-  remove(id: number) {
-    this.layout.remove(id)
-    this.geometry = null
+  removePane(id: number) {
+    this.layout.removePane(id)
     this.render()
   }
   reorder(id: number, before: number | null) {
-    this.layout.move(id, before)
-    this.activate(id)
+    this.layout.moveTab(id, before)
+    this.activateTab(id)
   }
   placeTab(id: number, before: number | null) {
-    this.layout.move(id, before)
+    this.layout.moveTab(id, before)
   }
   closeEmpty() {
     if (!this.hasTabs) this.window?.close()
   }
-  activate(id: number, focusTerminal = true) {
-    if (!this.has(id)) return
-    this.layout.activate(id)
+  activatePane(id: number, focusTerminal = true) {
+    if (!this.hasPane(id)) return
+    this.layout.activatePane(id)
     if (focusTerminal) this.show()
     else this.render()
+  }
+  activateTab(id: number, focusTerminal = true) {
+    const group = this.layout.tab(id)
+    if (group) this.activatePane(group.activePaneId, focusTerminal)
   }
   panel(panel: WorkspacePanel) {
     this.layout.panel = panel
     this.show()
   }
   private focusTerminal() {
-    const tab = this.layout.active === null ? undefined : this.terminals.tabs.get(this.layout.active)
-    if (this.layout.panel !== null || !tab || tab.error) this.window?.webContents.focus()
+    const pane = this.layout.activePaneId === null ? undefined : this.terminals.panes.get(this.layout.activePaneId)
+    if (this.layout.panel !== null || !pane || pane.error) this.window?.webContents.focus()
     else {
-      tab.view.webContents.focus()
-      tab.view.webContents.send('terminal:command', 'focus')
+      pane.view.webContents.focus()
+      pane.view.webContents.send('terminal:command', 'focus')
     }
   }
   restoreFocus() {
@@ -394,106 +434,160 @@ export class WorkspaceWindow {
     if (!window || window.isDestroyed()) return
     const [width, height] = window.getContentSize()
     const area = { x: 0, y: tabBarHeight, width, height: Math.max(0, height - tabBarHeight) }
-    const visible = this.layout.visible()
-    if (this.layout.split) this.layout.split.ratio = splitRatio(area.width, area.height, this.layout.split)
-    const geometry = paneLayout(area.width, area.height, this.layout.split)
-    for (const id of this.layout.ids) {
-      const tab = this.terminals.tabs.get(id)!
-      const shown = visible.includes(tab.id) && !tab.error
+    const visible = this.layout.visiblePaneIds()
+    const geometry = this.paneGeometry(area.width, area.height)
+    for (const id of this.layout.paneIds) {
+      const pane = this.terminals.panes.get(id)!
+      if (!pane || pane.view.webContents.isDestroyed()) continue
+      const rectangle = geometry.panes.find(pane => pane.id === id)
+      const shown =
+        visible.includes(pane.id) &&
+        !pane.error &&
+        !!rectangle &&
+        rectangle.content.width > 0 &&
+        rectangle.content.height > 0
       if (shown) {
-        const bounds = geometry.panes[visible.indexOf(tab.id)]
+        const bounds = rectangle!.content
         const next = { ...bounds, y: bounds.y + tabBarHeight }
-        const previous = tab.view.getBounds()
+        const previous = pane.view.getBounds()
         if (
           next.x !== previous.x ||
           next.y !== previous.y ||
           next.width !== previous.width ||
           next.height !== previous.height
         )
-          tab.view.setBounds(next)
+          pane.view.setBounds(next)
       }
-      if (tab.view.getVisible() !== shown) tab.view.setVisible(shown)
+      pane.appearance.setDimmed(shown && id !== this.layout.activePaneId)
+      if (pane.view.getVisible() !== shown) pane.view.setVisible(shown)
     }
-    const active = this.layout.active === null ? undefined : this.terminals.tabs.get(this.layout.active)
-    window.setTitle(active ? `${active.label || active.state.title} · Outpost` : 'Outpost')
+    const active = this.layout.activePaneId === null ? undefined : this.terminals.panes.get(this.layout.activePaneId)
+    window.setTitle(active ? `${this.layout.activeTab?.label || active.state.title} · Outpost` : 'Outpost')
     window.webContents.send('workspace:state', this.snapshot())
-    this.terminals.hostState(this.ids)
+    this.terminals.hostState(this.paneIds)
   }
   cycle(delta: number) {
-    this.layout.cycle(delta)
+    this.layout.cycleTabs(delta)
     this.render()
     this.focusTerminal()
   }
   select(index: number) {
-    const id = index === 8 ? this.layout.ids.at(-1) : this.layout.ids[index]
-    if (id !== undefined) this.activate(id)
+    const tab = index === 8 ? this.layout.tabs.at(-1) : this.layout.tabs[index]
+    if (tab) this.activateTab(tab.id)
   }
-  split(direction: SplitDirection | null) {
-    if (direction !== null && direction !== 'columns' && direction !== 'rows') return
-    if (direction !== null && this.layout.ids.length < 2) return this.panel('sessions')
-    this.layout.direction(direction)
-    this.layout.panel = null
+  splitPane(id: number, direction: SplitDirection) {
+    if (!this.hasPane(id)) return
+    this.layout.activatePane(id)
+    try {
+      this.host.newLocal(this, undefined, direction)
+    } catch (error) {
+      void this.reportError((error as Error).message)
+    }
+  }
+  paneAction(action: PaneAction) {
+    const id = this.layout.focusedPaneId
+    if (id === null) return
+    switch (action) {
+      case 'splitColumns':
+        return this.splitPane(id, 'columns')
+      case 'splitRows':
+        return this.splitPane(id, 'rows')
+      case 'zoom':
+        return this.zoomPane(id)
+      case 'close':
+        void this.closePane(id)
+        return
+      case 'next':
+        return this.otherPane()
+    }
+  }
+  zoomPane(id: number) {
+    const tab = this.layout.tabForPane(id)
+    if (!tab || tab.root.kind === 'pane') return
+    this.layout.activatePane(id)
+    this.layout.toggleZoom(id)
     this.render()
     this.focusTerminal()
   }
+  private movePaneBeside(id: number, active: number) {
+    if (id !== active && this.hasPane(id) && this.hasPane(active))
+      this.host.move(this, { kind: 'pane', id }, this.window!.id, { kind: 'pane', pane: active, edge: 'right' })
+  }
   otherPane() {
-    const id = this.layout.split?.ids.find(id => id !== this.layout.active)
-    if (id !== undefined) this.activate(id)
+    const group = this.layout.activeTab
+    if (!group) return
+    const ids = paneIds(group.root)
+    this.activatePane(ids[(ids.indexOf(group.activePaneId) + 1) % ids.length])
+  }
+  private paneGeometry(width?: number, height?: number) {
+    const size = this.window?.getContentSize() ?? [0, 0]
+    const tab = this.layout.activeTab
+    return paneLayout(
+      width ?? size[0],
+      height ?? Math.max(0, size[1] - tabBarHeight),
+      tab?.root ?? null,
+      tab?.zoomed ? tab.activePaneId : null,
+    )
   }
   command(command: Exclude<TerminalCommand, 'focus'>) {
-    const tab = this.layout.active === null ? undefined : this.terminals.tabs.get(this.layout.active)
-    if (this.layout.panel === null && tab && !tab.error) {
-      if (command === 'find') tab.view.webContents.focus()
-      tab.view.webContents.send('terminal:command', command)
+    const pane = this.layout.activePaneId === null ? undefined : this.terminals.panes.get(this.layout.activePaneId)
+    if (this.layout.panel === null && pane && !pane.error) {
+      if (command === 'find') pane.view.webContents.focus()
+      pane.view.webContents.send('terminal:command', command)
     } else if (command === 'select-all') this.window?.webContents.selectAll()
   }
   edit(action: 'copy' | 'paste') {
-    const tab = this.layout.active === null ? undefined : this.terminals.tabs.get(this.layout.active)
-    const contents = this.layout.panel === null && tab && !tab.error ? tab.view.webContents : this.window?.webContents
+    const pane = this.layout.activePaneId === null ? undefined : this.terminals.panes.get(this.layout.activePaneId)
+    const contents =
+      this.layout.panel === null && pane && !pane.error ? pane.view.webContents : this.window?.webContents
     if (!contents || contents.isDestroyed()) return
     contents.focus()
     if (action === 'copy') contents.copy()
     else contents.paste()
   }
-  async close(id = this.layout.active) {
-    if (id === null || this.closing.has(id)) return
-    const tab = this.tab(id)
-    if (!tab) return
-    this.closing.add(id)
-    try {
-      if (!(await this.confirmClose(tab))) return
-      if (!this.has(id)) return
-      this.terminals.dispose(id)
-      this.focusTerminal()
-    } finally {
-      this.closing.delete(id)
-    }
+  private requestClose(scope: CloseScope) {
+    this.host.dragCancel(this)
+    return this.closing.request(scope)
   }
-  private async confirmClose(tab: TerminalTab) {
-    if (!this.window) return false
-    const detail =
-      tab.connection.kind === 'remote'
-        ? 'The remote session will keep running. You can reconnect through your Outpost server.'
-        : tab.connection.terminal.running
-          ? 'The local shell and its running processes will end. This terminal’s history will be discarded.'
-          : 'This local shell has ended. Its terminal history will be discarded.'
-    const result = await dialog.showMessageBox(this.window, {
+  async closePane(id = this.layout.focusedPaneId) {
+    if (id !== null) await this.requestClose({ kind: 'pane', id })
+  }
+  async closeTab(id = this.layout.panel === null ? this.layout.activeTabId : null) {
+    if (id !== null) await this.requestClose({ kind: 'tab', id })
+  }
+  private async confirmClose(scope: CloseScope, panes: readonly TerminalPane[]) {
+    const window = this.window
+    if (!window || window.isDestroyed()) return false
+    const title =
+      scope.kind === 'pane'
+        ? `“${panes[0].state.title}”`
+        : scope.kind === 'tab'
+          ? `this tab and its ${panes.length} panes`
+          : `this window and its ${panes.length} panes`
+    const detail = [
+      panes.some(pane => pane.connection.kind === 'local') ? 'Local shells and their processes will end.' : '',
+      panes.some(pane => pane.connection.kind === 'remote') ? 'Remote sessions keep running.' : '',
+      panes.some(pane => pane.state.hasDraft) ? 'Unsent messages will be discarded.' : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    const result = await dialog.showMessageBox(window, {
       type: 'question',
-      message: `Close “${tab.label || tab.state.title}”?`,
-      detail: `${detail}${tab.state.hasDraft ? ' The unsent message will also be discarded.' : ''}`,
-      buttons: ['Close tab', 'Cancel'],
+      message: `Close ${title}?`,
+      detail,
+      buttons: [scope.kind === 'pane' ? 'Close pane' : scope.kind === 'tab' ? 'Close tab' : 'Close window', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
     })
     return result.response === 0
   }
-  private async confirmDraft(tab: TerminalTab) {
+  private async confirmDraft(pane: TerminalPane) {
     if (!this.window) return false
     const result = await dialog.showMessageBox(this.window, {
       type: 'question',
       message: 'Discard the unsent message?',
-      detail: `${tab.label || tab.state.title} has a draft in its message box.${tab.connection.kind === 'remote' ? ' The remote session will keep running.' : ''}`,
+      detail: `${pane.state.title} has a draft in its message box.${pane.connection.kind === 'remote' ? ' The remote session will keep running.' : ''}`,
       buttons: ['Discard draft', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
@@ -501,11 +595,11 @@ export class WorkspaceWindow {
     })
     return result.response === 0
   }
-  async reload(id = this.layout.active) {
+  async reloadPane(id = this.layout.focusedPaneId) {
     if (id === null) return
-    const tab = this.tab(id)
-    if (!tab || (tab.state.hasDraft && !(await this.confirmDraft(tab)))) return
-    if (tab.connection.kind === 'local' && tab.connection.terminal.running && this.window) {
+    const pane = this.pane(id)
+    if (!pane || (pane.state.hasDraft && !(await this.confirmDraft(pane)))) return
+    if (pane.connection.kind === 'local' && pane.connection.terminal.running && this.window) {
       const result = await dialog.showMessageBox(this.window, {
         type: 'question',
         message: 'Restart this local terminal?',
@@ -517,25 +611,8 @@ export class WorkspaceWindow {
       })
       if (result.response !== 0) return
     }
-    if (!this.has(id)) return
-    tab.error = null
-    tab.state = { ...tab.state, hasDraft: false, connection: 'connecting', activity: null }
-    tab.view.webContents.reload()
-    this.render()
-  }
-  private async confirmWindow() {
-    if (!this.window) return true
-    const draft = this.ids.some(id => this.tab(id)?.state.hasDraft)
-    const result = await dialog.showMessageBox(this.window, {
-      type: 'question',
-      message: `Close ${this.layout.ids.length} terminal tabs?`,
-      detail: `Local shells will end. Remote sessions keep running.${draft ? ' Unsent messages in the message boxes will be discarded.' : ''}`,
-      buttons: ['Close tabs', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-    })
-    return result.response === 0
+    if (this.pane(id) !== pane) return
+    this.terminals.reloadPane(id)
   }
   private async openServer(value: unknown) {
     if (typeof value !== 'string') throw new Error('Enter an Outpost server URL.')
@@ -548,12 +625,12 @@ export class WorkspaceWindow {
   private async forgetServer(value: unknown) {
     if (typeof value !== 'string' || !this.window) return
     const origin = desktopOrigin(value)
-    const tabs = [...this.terminals.tabs.values()].filter(tab => tab.origin === origin)
-    if (tabs.length) {
+    const panes = [...this.terminals.panes.values()].filter(pane => pane.origin === origin)
+    if (panes.length) {
       const answer = await dialog.showMessageBox(this.window, {
         type: 'question',
-        message: `Forget this server and close ${tabs.length} tabs across all windows?`,
-        detail: `Remote sessions keep running. Unsent messages in these tabs will be discarded.\n${origin}`,
+        message: `Forget this server and close ${panes.length} panes across all windows?`,
+        detail: `Remote sessions keep running. Unsent messages in these panes will be discarded.\n${origin}`,
         buttons: ['Forget server', 'Cancel'],
         defaultId: 1,
         cancelId: 1,
@@ -562,7 +639,7 @@ export class WorkspaceWindow {
       if (answer.response !== 0) return
     }
     await this.trusted.set(origin, false)
-    for (const tab of tabs) this.terminals.dispose(tab.id)
+    for (const pane of panes) this.terminals.dispose(pane.id)
     await this.host.forgetRecents()
     this.host.changed()
   }
@@ -592,60 +669,141 @@ export class WorkspaceWindow {
     ).popup({ window: this.window })
   }
 
-  private contextMenu(id: number) {
-    const tab = this.tab(id)
-    if (!tab || !this.window) return
+  private tabMenu(id: number) {
+    const group = this.layout.tab(id)
+    if (!group || !this.window) return
+    const item: WorkspaceItem = { kind: 'tab', id }
     Menu.buildFromTemplate([
-      { label: 'Rename tab…', click: () => this.panel({ rename: id }) },
-      { label: 'Move tab to new window', click: () => this.host.move(id, null) },
+      { label: 'Rename tab…', click: () => this.panel({ renameTab: id }) },
+      { label: 'Move tab to new window', click: () => this.host.move(this, item, null) },
       {
         label: 'Move tab to window',
         enabled: this.host.destinations(this).length > 0,
-        submenu: this.host.destinations(this).map(destination => ({
-          label: destination.label,
-          click: () => this.host.move(id, destination.id),
-        })),
+        submenu: this.host
+          .destinations(this)
+          .map(destination => ({ label: destination.label, click: () => this.host.move(this, item, destination.id) })),
       },
       {
-        label: 'Show beside current tab',
-        enabled: this.layout.active !== id && this.layout.active !== null,
+        label: 'Split with new local terminal',
         click: () => {
-          this.layout.pair(id)
-          this.render()
-          this.focusTerminal()
+          this.splitPane(group.activePaneId, 'columns')
+        },
+      },
+      {
+        label: 'Move beside current tab',
+        enabled: this.layout.activePaneId !== null && this.layout.activeTab?.id !== id,
+        click: () => {
+          const active = this.layout.activePaneId
+          if (active !== null && this.layout.activeTab?.id !== id)
+            this.host.move(this, item, this.window!.id, { kind: 'pane', pane: active, edge: 'right' })
+        },
+      },
+      {
+        label: 'Reload focused terminal',
+        click: () => {
+          void this.reloadPane(group.activePaneId)
         },
       },
       { type: 'separator' },
       {
         label: 'Move tab left',
-        enabled: this.layout.ids.indexOf(id) > 0,
+        enabled: this.layout.tabs.findIndex(tab => tab.id === id) > 0,
         click: () => {
-          this.layout.move(id, this.layout.ids[this.layout.ids.indexOf(id) - 1])
-          this.render()
+          const index = this.layout.tabs.findIndex(tab => tab.id === id)
+          if (index > 0) this.reorder(id, this.layout.tabs[index - 1].id)
         },
       },
       {
         label: 'Move tab right',
-        enabled: this.layout.ids.indexOf(id) < this.layout.ids.length - 1,
+        enabled: this.layout.tabs.findIndex(tab => tab.id === id) < this.layout.tabs.length - 1,
         click: () => {
-          this.layout.move(this.layout.ids[this.layout.ids.indexOf(id) + 1], id)
-          this.render()
+          const index = this.layout.tabs.findIndex(tab => tab.id === id)
+          if (index >= 0) this.reorder(id, this.layout.tabs[index + 2]?.id ?? null)
         },
+      },
+      { type: 'separator' },
+      {
+        label: 'Close tab',
+        click: () => {
+          void this.closeTab(id)
+        },
+      },
+    ]).popup({ window: this.window })
+  }
+  private paneMenu(id: number) {
+    if (!this.hasPane(id) || !this.window) return
+    const item: WorkspaceItem = { kind: 'pane', id }
+    Menu.buildFromTemplate([
+      {
+        label: 'Split side by side with local terminal',
+        click: () => {
+          this.splitPane(id, 'columns')
+        },
+      },
+      {
+        label: 'Split top and bottom with local terminal',
+        click: () => {
+          this.splitPane(id, 'rows')
+        },
+      },
+      {
+        label: this.layout.tabForPane(id)?.zoomed ? 'Restore split panes' : 'Zoom pane',
+        click: () => {
+          this.zoomPane(id)
+        },
+      },
+      { type: 'separator' },
+      { label: 'Move pane to its own tab', click: () => this.host.move(this, item, this.window!.id) },
+      { label: 'Move pane to new window', click: () => this.host.move(this, item, null) },
+      {
+        label: 'Move pane to window',
+        enabled: this.host.destinations(this).length > 0,
+        submenu: this.host
+          .destinations(this)
+          .map(destination => ({ label: destination.label, click: () => this.host.move(this, item, destination.id) })),
       },
       { type: 'separator' },
       {
         label: 'Reload terminal',
         click: () => {
-          void this.reload(id)
+          void this.reloadPane(id)
         },
       },
       {
-        label: 'Close tab',
+        label: 'Close pane',
         click: () => {
-          void this.close(id)
+          void this.closePane(id)
         },
       },
     ]).popup({ window: this.window })
+  }
+  paneDropAt(point: Point, excluded: number[]) {
+    if (!this.window || this.layout.panel !== null) return null
+    const origin = this.window.getContentBounds(),
+      x = point.x - origin.x,
+      y = point.y - origin.y - tabBarHeight
+    const pane = this.paneGeometry().panes.find(
+      ({ bounds: b }) => x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height,
+    )
+    if (!pane || excluded.includes(pane.id)) return null
+    const b = pane.bounds
+    const distances = {
+      left: (x - b.x) / b.width,
+      right: (b.x + b.width - x) / b.width,
+      top: (y - b.y) / b.height,
+      bottom: (b.y + b.height - y) / b.height,
+    }
+    const edge = (Object.keys(distances) as (keyof typeof distances)[]).sort((a, b) => distances[a] - distances[b])[0]
+    const horizontal = edge === 'left' || edge === 'right'
+    const bounds = { x: origin.x + b.x, y: origin.y + tabBarHeight + b.y, width: b.width, height: b.height }
+    if (horizontal) {
+      bounds.width = Math.floor(bounds.width / 2)
+      if (edge === 'right') bounds.x += b.width - bounds.width
+    } else {
+      bounds.height = Math.floor(bounds.height / 2)
+      if (edge === 'bottom') bounds.y += b.height - bounds.height
+    }
+    return { placement: { kind: 'pane' as const, pane: pane.id, edge }, bounds }
   }
 
   dropAt(point: Point, dragged?: number): number | null | undefined {
@@ -657,9 +815,10 @@ export class WorkspaceWindow {
     // Keep a provisional insertion stable while the pointer is over it. Its
     // arrival changes flex widths; feeding those changes straight back into the
     // insertion decision makes a stationary pointer shuffle tabs indefinitely.
-    const moving = this.geometry.tabs.find(tab => tab.id === dragged)
+    const tabs = this.geometry.tabs.filter(tab => this.layout.tab(tab.id))
+    const moving = tabs.find(tab => tab.id === dragged)
     if (moving && x >= moving.left && x < moving.right) return dragged
-    return this.geometry.tabs.find(tab => x < (tab.left + tab.right) / 2)?.id ?? null
+    return tabs.find(tab => x < (tab.left + tab.right) / 2)?.id ?? null
   }
   scrollAt(point: Point) {
     if (!this.window || !this.geometry) return 0

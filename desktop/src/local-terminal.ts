@@ -165,6 +165,6 @@ export class LocalTerminal {
   dispose() {
     this.disposed = true
     this.stop()
-    void rm(this.images, { recursive: true, force: true }).catch(() => {})
+    return rm(this.images, { recursive: true, force: true }).catch(() => {})
   }
 }

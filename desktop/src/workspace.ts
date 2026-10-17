@@ -2,21 +2,22 @@ import { app, BrowserWindow, dialog, ipcMain, screen, type Point } from 'electro
 import type { DesktopLaunch } from '../../shared/desktop'
 import { Preferences } from './preferences'
 import { TrustedServers } from './store'
-import { TerminalTabs, type TerminalTab } from './terminals'
+import { TerminalPanes, type TerminalPane } from './terminals'
 import { RecentSessions } from './recent-sessions'
-import { TabDrag } from './tab-drag'
-import { transferTab } from './tab-transfer'
+import { WorkspaceDrag } from './workspace-drag'
+import { transferPanes } from './pane-transfer'
+import type { WorkspaceItem, PanePlacement, SplitDirection } from './workspace-model'
 import { WorkspaceWindow } from './workspace-window'
 import { shellProfiles } from './shell-profiles'
 
-/** App-wide terminal identity and ownership; moving a tab never recreates its view. */
+/** App-wide pane identity and window ownership; transfers preserve terminal views. */
 export class DesktopWorkspace {
   readonly shells = shellProfiles()
   private windows = new Map<number, WorkspaceWindow>()
   private owners = new Map<number, WorkspaceWindow>()
   private recent: number[] = []
-  private terminals: TerminalTabs
-  private drag: TabDrag
+  private terminals: TerminalPanes
+  private drag: WorkspaceDrag
   private confirmingQuit = false
   quitting = false
 
@@ -27,21 +28,26 @@ export class DesktopWorkspace {
     private recentSessions: RecentSessions,
     private trust: (origin: string) => Promise<boolean>,
   ) {
-    this.terminals = new TerminalTabs(directory, {
+    this.terminals = new TerminalPanes(directory, {
       window: id => this.owners.get(id)?.browserWindow ?? null,
       focused: id => this.owners.get(id)?.focused(id) ?? false,
       activate: id => {
         this.drag.cancel()
-        this.owners.get(id)?.activate(id)
+        this.owners.get(id)?.activatePane(id)
       },
       focus: id => this.owners.get(id)?.focus(id),
+      cancelDrag: () => this.drag.cancel(),
+      paneAction: (id, action) => {
+        this.drag.cancel()
+        this.owners.get(id)?.paneAction(action)
+      },
       cycle: (id, delta) => {
         this.drag.cancel()
         this.owners.get(id)?.cycle(delta)
       },
       close: async id => {
         this.drag.cancel()
-        await this.owners.get(id)?.close(id)
+        await this.owners.get(id)?.closePane(id)
       },
       removing: id => {
         const owner = this.owners.get(id)
@@ -50,7 +56,8 @@ export class DesktopWorkspace {
       removed: id => {
         const owner = this.owners.get(id)
         this.owners.delete(id)
-        owner?.remove(id)
+        owner?.removePane(id)
+        owner?.closeEmpty()
       },
       changed: id => this.owners.get(id)?.render(),
       state: id => ({ ...preferences.value, focused: this.owners.get(id)?.focused(id) ?? false }),
@@ -60,23 +67,20 @@ export class DesktopWorkspace {
         this.render()
       },
     })
-    this.drag = new TabDrag({
+    this.drag = new WorkspaceDrag({
       windows: () => this.recent.flatMap(id => this.windows.get(id) ?? []),
       changed: () => this.render(),
-      preview: (id, target, before) => {
-        const source = this.owners.get(id),
-          tab = this.terminals.tabs.get(id)
-        if (!source || !tab) throw new Error('This terminal is no longer available.')
-        return transferTab(tab, source, target, before, window => this.owners.set(id, window))
-      },
-      drop: (source, id, destination, before, point) => {
-        this.move(id, destination, before, point)
+      preview: (source, item, target, before) =>
+        transferPanes(item, source, target, { kind: 'tab', before }, (id, window) => this.owners.set(id, window)),
+      drop: (source, item, destination, placement, point) => this.move(source, item, destination, placement, point),
+      committed: (source, target, active) => {
+        target.activatePane(active)
         source.closeEmpty()
       },
       failed: error =>
         dialog.showErrorBox(
-          'Could not move tab',
-          error instanceof Error ? error.message : 'Try dragging the tab again.',
+          'Could not move terminal',
+          error instanceof Error ? error.message : 'Try dragging the pane or tab again.',
         ),
     })
     ipcMain.handle('workspace:action', (event, name: unknown, ...values: unknown[]) => {
@@ -91,7 +95,7 @@ export class DesktopWorkspace {
     return (
       (focused && this.windows.get(focused.id)) ||
       this.recent.map(id => this.windows.get(id)).find(window => window !== undefined) ||
-      this.create()
+      null
     )
   }
   resume() {
@@ -103,15 +107,22 @@ export class DesktopWorkspace {
     return this.current
   }
   show() {
-    const window = this.forAction()
+    const window = this.forAction() ?? this.create()
     if (!window.hasTabs) this.newLocal(undefined, window)
     else window.show()
   }
+  present() {
+    const window = this.forAction() ?? this.create()
+    window.show()
+  }
   newWindow() {
     this.drag.cancel()
+    let window: WorkspaceWindow | undefined
     try {
-      this.newLocal(undefined, this.create())
+      window = this.create()
+      this.newLocal(undefined, window)
     } catch (error) {
+      window?.closeEmpty()
       dialog.showErrorBox('Outpost', (error as Error).message)
     }
   }
@@ -134,7 +145,7 @@ export class DesktopWorkspace {
       },
       changed: () => this.render(),
       shells: () => this.shells,
-      newLocal: (source, profile) => this.newLocal(profile, source),
+      newLocal: (source, profile, split) => this.newLocal(profile, source, split),
       recentSessions: () => this.recentSessions.list(),
       openRecent: (source, id) => this.openRecent(source, id),
       removeRecent: async id => {
@@ -155,20 +166,21 @@ export class DesktopWorkspace {
             id,
             label: window.browserWindow?.getTitle() || 'Outpost',
           })),
-      move: (id, destination) => {
+      move: (source, item, destination, placement = { kind: 'tab', before: null }) => {
         const target = destination === null ? null : this.windows.get(destination)
         if (target === undefined) return
-        this.drag.cancelTab(id)
+        this.drag.cancel()
         try {
-          this.move(id, target, null)
+          this.move(source, item, target, placement)
         } catch (error) {
           dialog.showErrorBox('Outpost', (error as Error).message)
         }
       },
-      dragStart: (source, id) => {
-        if (this.quitting || !source.has(id) || !source.browserWindow?.isFocused()) return
-        const tab = this.terminals.tabs.get(id)!
-        this.drag.start(source, id, tab.label || tab.state.title)
+      dragStart: (source, item) => {
+        const ids = source.selection(item)
+        if (this.quitting || !ids.length || !source.browserWindow?.isFocused()) return
+        const pane = this.terminals.panes.get(ids[0])!
+        this.drag.start(source, item, pane.state.title)
       },
       dragEnd: (source, cancel) => this.drag.end(source, cancel),
       dragCancel: window => this.drag.cancelWindow(window),
@@ -193,33 +205,44 @@ export class DesktopWorkspace {
   }
 
   private async activateOpened(
-    { tab, created }: { tab: TerminalTab; created: boolean },
+    { pane, created }: { pane: TerminalPane; created: boolean },
     destination?: WorkspaceWindow,
   ) {
-    let owner = this.owners.get(tab.id)
+    let owner = this.owners.get(pane.id)
     if (created) {
-      owner = destination ?? this.current
-      this.owners.set(tab.id, owner)
-      owner.add(tab)
+      owner = this.attachNewPane(pane, destination)
     }
-    owner?.activate(tab.id)
-    if (!created && tab.state.connection === 'connected') await this.terminals.remember(tab)
+    owner?.activatePane(pane.id)
+    if (!created && pane.state.connection === 'connected') await this.terminals.remember(pane)
   }
 
-  newLocal(profileId?: string, owner = this.forAction()) {
+  newLocal(profileId?: string, destination?: WorkspaceWindow, split?: SplitDirection) {
     this.drag.cancel()
     const profile =
       this.shells.find(item => item.id === (profileId ?? this.preferences.localShell)) ??
       (profileId === undefined ? this.shells[0] : undefined)
     if (!profile) throw new Error('Choose an available local shell.')
-    const tab = this.terminals.openLocal(profile)
-    this.owners.set(tab.id, owner)
-    owner.add(tab)
-    owner.activate(tab.id)
+    const pane = this.terminals.openLocal(profile)
+    const owner = this.attachNewPane(pane, destination, split)
+    owner.activatePane(pane.id)
+  }
+
+  private attachNewPane(pane: TerminalPane, destination?: WorkspaceWindow, split?: SplitDirection) {
+    let owner = destination ?? this.current
+    try {
+      owner ??= this.create()
+      this.owners.set(pane.id, owner)
+      owner.addPane(pane, split)
+      return owner
+    } catch (error) {
+      this.terminals.dispose(pane.id)
+      owner?.closeEmpty()
+      throw error
+    }
   }
 
   dispose() {
-    for (const id of [...this.terminals.tabs.keys()]) this.terminals.dispose(id)
+    for (const id of [...this.terminals.panes.keys()]) this.terminals.dispose(id)
   }
 
   private position(window: BrowserWindow, source: BrowserWindow, point?: Point) {
@@ -237,15 +260,17 @@ export class DesktopWorkspace {
     })
   }
 
-  private move(id: number, destination: WorkspaceWindow | null, before: number | null, point?: Point) {
-    const source = this.owners.get(id),
-      tab = this.terminals.tabs.get(id)
-    if (!source || !tab || !source.browserWindow || this.quitting) return
-    if (destination === source) return source.reorder(id, before)
-    if (destination && (!destination.browserWindow || (before !== null && !destination.has(before)))) return
-    // A lone tab already has its own window. Moving that window preserves its
-    // native identity too; no temporary empty window or app exit is needed.
-    if (!destination && source.ids.length === 1 && !source.browserWindow.isFullScreen()) {
+  private move(
+    source: WorkspaceWindow,
+    item: WorkspaceItem,
+    destination: WorkspaceWindow | null,
+    placement: PanePlacement,
+    point?: Point,
+  ) {
+    const ids = source.selection(item)
+    if (!ids.length || !source.browserWindow || this.quitting) return
+    // Moving the entire contents of a lone window preserves its native identity.
+    if (!destination && source.paneIds.length === ids.length && !source.browserWindow.isFullScreen()) {
       this.position(source.browserWindow, source.browserWindow, point)
       source.show()
       return
@@ -253,13 +278,13 @@ export class DesktopWorkspace {
     const target = destination ?? this.create()
     if (!destination) this.position(target.browserWindow!, source.browserWindow, point)
     try {
-      transferTab(tab, source, target, before, window => this.owners.set(id, window))
+      const result = transferPanes(item, source, target, placement, (id, window) => this.owners.set(id, window))
+      target.activatePane(result.activePaneId)
+      source.closeEmpty()
     } catch (error) {
       if (!destination) target.closeEmpty()
       throw error
     }
-    target.activate(id)
-    source.closeEmpty()
   }
 
   private render() {
@@ -271,12 +296,12 @@ export class DesktopWorkspace {
     this.confirmingQuit = true
     this.drag.cancel()
     try {
-      const tabs = [...this.terminals.tabs.values()]
-      const draft = tabs.some(tab => tab.state.hasDraft)
-      if (tabs.length > 0) {
-        const result = await dialog.showMessageBox(this.current.ensureWindow(), {
+      const panes = [...this.terminals.panes.values()]
+      const draft = panes.some(pane => pane.state.hasDraft)
+      if (panes.length > 0) {
+        const result = await dialog.showMessageBox(this.current!.ensureWindow(), {
           type: 'question',
-          message: `Close ${tabs.length} terminal tabs across ${this.windows.size} windows?`,
+          message: `Close ${panes.length} terminal panes across ${this.windows.size} windows?`,
           detail: `Local shells will end. Remote sessions keep running.${draft ? ' Unsent messages will be discarded.' : ''}`,
           buttons: ['Quit Outpost', 'Cancel'],
           defaultId: 1,
@@ -286,6 +311,12 @@ export class DesktopWorkspace {
         if (result.response !== 0) return
       }
       await this.recentSessions.flush()
+      // A new launch while confirmation or persistence was pending is not part
+      // of the approved shutdown. Leave it open and let the user request quit again.
+      if ([...this.terminals.panes.values()].some(pane => !panes.includes(pane))) return
+      this.dispose()
+      await this.terminals.flushCleanup()
+      if (this.terminals.panes.size) return
       this.quitting = true
       app.quit()
     } finally {

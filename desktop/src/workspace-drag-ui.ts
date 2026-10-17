@@ -1,10 +1,17 @@
 import type { WorkspaceBridge } from './workspace-api'
+import type { WorkspaceItem } from './workspace-model'
 
 /** Pointer capture keeps release/cancellation in the source window even outside
  * its tab bar. The native process resolves the destination in screen coordinates. */
-export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (work: Promise<unknown>) => void) {
-  let gesture: { pointer: number; id: number; x: number; y: number; started: boolean; capture: HTMLElement } | null =
-    null
+export function workspaceDragging(root: HTMLElement, api: WorkspaceBridge, report: (work: Promise<unknown>) => void) {
+  let gesture: {
+    pointer: number
+    item: WorkspaceItem
+    x: number
+    y: number
+    started: boolean
+    capture: HTMLElement
+  } | null = null
   let suppressClick = false
   const finish = (cancel: boolean) => {
     const current = gesture
@@ -14,15 +21,15 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
     if (current.started) {
       suppressClick = true
       report(api.dragEnd(cancel))
-      setTimeout(() => {
-        suppressClick = false
-      }, 0)
     }
   }
-  tabs.addEventListener('pointerdown', event => {
+  root.addEventListener('pointerdown', event => {
     if (event.button !== 0 || !event.isPrimary || !(event.target instanceof Element)) return
-    const select = event.target.closest<HTMLButtonElement>('.tab-select')
-    const node = select?.closest<HTMLElement>('.tab')
+    // Cancellation may precede mouse release by seconds. Keep suppressing that
+    // gesture's trailing click until a fresh pointer press, not a timer tick.
+    suppressClick = false
+    const select = event.target.closest<HTMLButtonElement>('.tab-select, .pane-select')
+    const node = select?.closest<HTMLElement>('[data-tab], [data-pane]')
     if (!node || !select) return
     // Select on press without focusing the button or the separate terminal view.
     // Moving native focus now would cancel pointer capture before a drag starts.
@@ -31,14 +38,18 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
     event.preventDefault()
     gesture = {
       pointer: event.pointerId,
-      id: Number(node.dataset.tab),
+      item: node.dataset.pane
+        ? { kind: 'pane', id: Number(node.dataset.pane) }
+        : { kind: 'tab', id: Number(node.dataset.tab) },
       x: event.clientX,
       y: event.clientY,
       started: false,
       capture: select,
     }
     select.setPointerCapture(event.pointerId)
-    report(api.activate(gesture.id, false))
+    report(
+      gesture.item.kind === 'tab' ? api.activateTab(gesture.item.id, false) : api.activatePane(gesture.item.id, false),
+    )
   })
   window.addEventListener('pointermove', event => {
     const current = gesture
@@ -47,11 +58,11 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
       if (Math.hypot(event.clientX - current.x, event.clientY - current.y) < 8) return
       current.started = true
       // Keep normal clicks targeted at the button. Once dragging starts, the
-      // tab node may leave this window, so capture its stable strip instead.
-      current.capture = tabs
-      tabs.setPointerCapture(event.pointerId)
+      // tab node may leave this window, so capture the stable workspace instead.
+      current.capture = root
+      root.setPointerCapture(event.pointerId)
       report(
-        api.dragStart(current.id).catch(error => {
+        api.dragStart(current.item).catch(error => {
           finish(true)
           throw error
         }),
@@ -62,8 +73,8 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
     if (gesture?.pointer === event.pointerId) finish(false)
   })
   window.addEventListener('pointercancel', () => finish(true))
-  tabs.addEventListener('lostpointercapture', event => {
-    // Transferring capture from the button to the strip is intentional.
+  root.addEventListener('lostpointercapture', event => {
+    // Transferring capture from the button to the workspace is intentional.
     if (event.target === gesture?.capture) finish(true)
   })
   window.addEventListener('blur', () => finish(true))
@@ -78,10 +89,11 @@ export function tabDragging(tabs: HTMLElement, api: WorkspaceBridge, report: (wo
     },
     true,
   )
-  tabs.addEventListener(
+  root.addEventListener(
     'click',
     event => {
-      if (suppressClick) {
+      if (suppressClick && event.detail !== 0) {
+        suppressClick = false
         event.preventDefault()
         event.stopPropagation()
       }

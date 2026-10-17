@@ -11,6 +11,7 @@ import { parseDesktopLaunch } from './launch'
 import { ServerLoginStore, type SavedServerLogin } from './server-login-store'
 import { ServerSignIn } from './server-sign-in'
 import { loadSessionCatalogue, type SessionCatalogue } from './server-catalogue'
+import { sessionCreationServer } from './server-session-creation'
 
 interface Host {
   openBrowser(url: string): Promise<void>
@@ -102,7 +103,7 @@ export class ServerAccounts {
   private async request(
     entry: SavedServerLogin,
     path: string,
-    options: { signal?: AbortSignal; method?: string } = {},
+    options: { signal?: AbortSignal; method?: string; body?: unknown } = {},
   ) {
     this.require(entry)
     const signal = options.signal ? AbortSignal.any([options.signal, this.lifetime.signal]) : this.lifetime.signal
@@ -233,6 +234,16 @@ export class ServerAccounts {
       signal,
       publish,
     )
+  }
+  creationServers() {
+    return this.store
+      .list()
+      .filter(entry => this.valid(entry))
+      .map(entry =>
+        sessionCreationServer({ origin: entry.origin, account: entry.account }, (path, options) =>
+          this.request(entry, path, options),
+        ),
+      )
   }
   async launch(session: DesktopSessionReference) {
     const entry = this.store.get(session.server)

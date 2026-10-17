@@ -1,17 +1,28 @@
 import type { FastifyInstance } from 'fastify'
 import Type from 'typebox'
-import { desktopOrigin, desktopProofPattern, type DesktopSession, type DesktopLaunch } from '../../shared/desktopAuth'
+import {
+  desktopOrigin,
+  desktopProofPattern,
+  type DesktopSession,
+  type DesktopLaunch,
+  type DesktopTarget,
+} from '../../shared/desktopAuth'
 import { AppError } from '../errors'
 import type { DesktopAccess } from '../desktop-access'
 import { RateLimit } from '../rate-limit'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
+import type { SessionInput } from '../../shared/model'
+import { directoryQuery, sessionInput } from '../../shared/schemas'
+import { sessionCreationOptions } from '../../shared/sessionCreation'
+import { createSession, inspectTargetSoftware } from '../session-actions'
 
 const proof = Type.String({ pattern: desktopProofPattern })
 const strict = { additionalProperties: false }
-type Params = { targetId: string; sessionId: string }
+type TargetParams = { targetId: string }
+type SessionParams = TargetParams & { sessionId: string }
 
-/** App bearers can only browse sessions and issue scoped terminal launches.
+/** App bearers can browse/create sessions and issue scoped terminal launches.
  * Browser credentials alone can approve access; app credentials cannot approve themselves. */
 export function desktopRoutes(app: FastifyInstance, services: Services, access: DesktopAccess) {
   const { deployment, sessions, tokens } = services
@@ -75,9 +86,40 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
     const owner = access.authorize(request)
     const targets = await deployment.workspace(owner).list()
     if (!access.active(owner)) throw new AppError('App sign-in expired.', 401)
-    return targets.map(({ id, name }) => ({ id, name }))
+    return targets.map(({ id, name }) => ({ id, name }) satisfies DesktopTarget)
   })
-  app.get<{ Params: Params }>('/api/desktop/targets/:targetId/sessions', async (request, reply) =>
+  app.get<{ Params: TargetParams }>('/api/desktop/targets/:targetId/session-options', async (request, reply) =>
+    withRequestSignal(reply, async signal => {
+      const owner = access.authorize(request)
+      const context = await services.resolve(owner, request.params.targetId)
+      const report = await inspectTargetSoftware(services, context, signal)
+      return sessionCreationOptions(context.target, report.software)
+    }),
+  )
+  app.get<{ Params: TargetParams; Querystring: { path: string } }>(
+    '/api/desktop/targets/:targetId/directories',
+    { schema: { querystring: directoryQuery } },
+    async (request, reply) =>
+      withRequestSignal(reply, async signal => {
+        const owner = access.authorize(request)
+        const context = await services.resolve(owner, request.params.targetId)
+        const result = await sessions.directories(context, request.query.path, signal)
+        if (!access.active(owner)) throw new AppError('App sign-in expired.', 401)
+        return result
+      }),
+  )
+  app.post<{ Params: TargetParams; Body: SessionInput }>(
+    '/api/desktop/targets/:targetId/sessions',
+    { schema: { body: sessionInput } },
+    async (request, reply) => {
+      const owner = access.authorize(request)
+      const session = await createSession(services, owner, request.params.targetId, request.body)
+      // Return identity separately from terminal authorization. Opening belongs
+      // to the caller's original tab/split action, after the dialog resolves.
+      return reply.code(201).send({ sessionId: session.id })
+    },
+  )
+  app.get<{ Params: TargetParams }>('/api/desktop/targets/:targetId/sessions', async (request, reply) =>
     withRequestSignal(reply, async signal => {
       const owner = access.authorize(request)
       const context = await services.resolve(owner, request.params.targetId)
@@ -94,22 +136,24 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
       )
     }),
   )
-  app.post<{ Params: Params }>('/api/desktop/targets/:targetId/sessions/:sessionId/connect', async (request, reply) =>
-    withRequestSignal(reply, async signal => {
-      const owner = access.authorize(request)
-      const context = await services.resolve(owner, request.params.targetId)
-      const session = await sessions.get(context, request.params.sessionId, signal)
-      if (!access.active(owner)) throw new AppError('App sign-in expired.', 401)
-      const grant = { owner, targetId: context.target.id, sessionId: session.id }
-      return {
-        server: desktopOrigin(deployment.origin(request)),
-        accountId: owner.userId,
-        targetId: context.target.id,
-        sessionId: session.id,
-        loginId: owner.loginId,
-        token: tokens.issue(grant).token,
-        title: `${session.name} · ${context.target.name}`,
-      } satisfies DesktopLaunch
-    }),
+  app.post<{ Params: SessionParams }>(
+    '/api/desktop/targets/:targetId/sessions/:sessionId/connect',
+    async (request, reply) =>
+      withRequestSignal(reply, async signal => {
+        const owner = access.authorize(request)
+        const context = await services.resolve(owner, request.params.targetId)
+        const session = await sessions.get(context, request.params.sessionId, signal)
+        if (!access.active(owner)) throw new AppError('App sign-in expired.', 401)
+        const grant = { owner, targetId: context.target.id, sessionId: session.id }
+        return {
+          server: desktopOrigin(deployment.origin(request)),
+          accountId: owner.userId,
+          targetId: context.target.id,
+          sessionId: session.id,
+          loginId: owner.loginId,
+          token: tokens.issue(grant).token,
+          title: `${session.name} · ${context.target.name}`,
+        } satisfies DesktopLaunch
+      }),
   )
 }

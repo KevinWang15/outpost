@@ -7,11 +7,12 @@ import { withRequestSignal } from '../request'
 import type { Services } from '../services'
 import { planInstallation } from '../software'
 import { installationInput, targetInput, targetUpdate } from '../../shared/schemas'
+import { inspectTargetSoftware } from '../session-actions'
 
 type Params = { targetId: string }
 
 export function workspaceRoutes(app: FastifyInstance, services: Services) {
-  const { deployment, software, installations } = services
+  const { deployment, installations } = services
   app.get('/api/environment', async request => {
     deployment.owner(request)
     return { mode: deployment.mode, localTargets: deployment.localTargets } satisfies Environment
@@ -48,9 +49,7 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
   app.get<{ Params: Params }>('/api/targets/:targetId/software', async (request, reply) =>
     withRequestSignal(reply, async signal => {
       const context = await services.context(request, request.params.targetId)
-      const report = await software.inspect(context, signal)
-      await context.workspace.setEnvironment(context.target.id, report.environment)
-      return { ...report, installation: installations.latest(context.owner, context.target.id) }
+      return inspectTargetSoftware(services, context, signal)
     }),
   )
   app.get<{ Params: Params & { softwareId: SoftwareId } }>(

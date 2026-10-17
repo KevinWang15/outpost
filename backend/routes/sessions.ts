@@ -3,7 +3,7 @@ import type { ConversationSearch, SessionForkInput, SessionInput } from '../../s
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
-import { launchOptions } from '../sessions'
+import { createSession } from '../session-actions'
 import {
   acknowledgeInput,
   conversationSearch,
@@ -22,11 +22,8 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
     ),
   )
   app.post<{ Params: Params; Body: SessionInput }>(base, { schema: { body: sessionInput } }, async (request, reply) => {
-    const context = await services.context(request, request.params.targetId)
-    if (!context.target.tools.includes(request.body.tool))
-      throw new AppError('Add this coding tool to the target before creating a session.', 400)
-    launchOptions(request.body)
-    return reply.code(201).send(await sessions.create(context, request.body))
+    const owner = services.deployment.owner(request)
+    return reply.code(201).send(await createSession(services, owner, request.params.targetId, request.body))
   })
   app.get<{ Params: Params }>(`${base}/:sessionId`, async (request, reply) =>
     withRequestSignal(reply, async signal =>

@@ -44,6 +44,10 @@ export interface DesktopAuthorization {
   requestId: string
   expiresAt: number
 }
+export interface DesktopTarget {
+  id: string
+  name: string
+}
 export interface DesktopSession {
   sessionId: string
   targetId: string

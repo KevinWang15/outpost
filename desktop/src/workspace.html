@@ -28,7 +28,7 @@
         <button id="back" class="back" hidden>← Back to terminal <kbd>Esc</kbd></button>
         <section id="sessions-panel" hidden>
           <div class="intro"><img src="outpost.png" width="52" height="52" alt="" /><div><p class="eyebrow">YOUR TERMINAL WORKSPACE</p><h1>A place for every session.</h1></div></div>
-          <p class="description">Open a local terminal with <strong>+</strong>, or right-click <strong>+</strong> to find a session on your logged-in Outpost servers. Local and remote sessions share the same tabs and splits.</p>
+          <p class="description">Open a local terminal with <strong>+</strong>, or right-click <strong>+</strong> to find or create a session on your logged-in Outpost servers. Local and remote sessions share the same tabs and splits.</p>
           <div class="section-heading"><h2 id="recent-heading">Recent sessions</h2><button id="clear-recent" type="button" class="subtle">Clear recent sessions</button></div>
           <ul id="recent-sessions" class="rows" aria-labelledby="recent-heading"></ul>
           <p id="no-recent" class="hint">Your 10 most recent Outpost sessions will appear here after connecting. Local terminals aren't saved.</p>
@@ -36,6 +36,7 @@
           <button id="open-local" class="primary" type="button">Open local terminal</button>
           <div class="section-heading"><h2>Logged-in Outpost servers</h2><button id="refresh-servers" type="button" class="subtle">Refresh</button></div>
           <ul id="servers" class="rows" aria-label="Logged-in Outpost servers"></ul>
+          <p class="hint">Choose New session to create and open a terminal on that server. To create one in a split, right-click its destination tab and choose Split with new Outpost session.</p>
           <p id="no-servers" class="hint">No servers signed in yet.</p>
           <form id="server-form"><label for="server">Connect a server</label><div class="address"><input id="server" type="url" placeholder="https://outpost.example.com" required autocomplete="url" /><button class="primary" type="submit">Sign in with browser ↗</button></div></form>
           <div id="server-signins" role="status" aria-live="polite"></div>

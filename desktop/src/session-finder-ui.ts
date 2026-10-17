@@ -5,6 +5,7 @@ import { reconcileElements } from './keyed-elements'
 const api = window.outpostSessionFinder
 const input = document.querySelector<HTMLInputElement>('#query')!
 const list = document.querySelector<HTMLElement>('#results')!
+const status = document.querySelector<HTMLElement>('#status')!
 const empty = document.querySelector<HTMLElement>('#empty')!
 const rows = new Map<string, HTMLElement>()
 let state: SessionFinderState = { revision: -1, title: '', sessions: [], errors: [], loading: true }
@@ -52,18 +53,16 @@ function render(preserve = true) {
   if (matches.length) input.setAttribute('aria-activedescendant', `result-${selected}`)
   else input.removeAttribute('aria-activedescendant')
   list.hidden = matches.length === 0
-  empty.hidden = matches.length > 0
-  empty.textContent = state.loading
-    ? 'Loading sessions…'
-    : state.sessions.length
-      ? 'No matching sessions.'
-      : 'No sessions available. Sign in to your Outpost servers from the Outpost tab.'
-  document.querySelector<HTMLElement>('#loading')!.textContent =
+  empty.hidden = state.loading || matches.length > 0
+  empty.textContent = state.sessions.length
+    ? 'No matching sessions.'
+    : 'No sessions available. Sign in to your Outpost servers from the Outpost tab.'
+  const count =
     filtered.length > matches.length
       ? `Showing ${matches.length} of ${filtered.length} matches. Type to narrow the search.`
-      : state.loading
-        ? 'Loading sessions…'
-        : `${filtered.length} sessions`
+      : `${filtered.length} ${filtered.length === 1 ? 'session' : 'sessions'}`
+  status.hidden = !state.loading && matches.length === 0
+  status.textContent = state.loading ? `Loading sessions…${matches.length ? ' ' + count : ''}` : count
   const errors = document.querySelector<HTMLElement>('#errors')!
   errors.textContent = state.errors.join('\n')
   errors.hidden = state.errors.length === 0
@@ -107,6 +106,8 @@ void api
     input.focus()
   })
   .catch(() => {
+    status.hidden = true
+    list.hidden = true
     empty.hidden = false
     empty.textContent = 'Could not load sessions. Close this finder and try again.'
   })

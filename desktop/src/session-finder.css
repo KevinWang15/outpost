@@ -105,7 +105,7 @@ footer,
   color: #93a4bd;
   font-size: 12px;
 }
-#loading {
+#status {
   margin: 8px 0 0;
   color: #93a4bd;
   font-size: 12px;
@@ -125,6 +125,7 @@ footer,
 }
 footer {
   flex-shrink: 0;
+  margin-top: auto;
   padding-top: 8px;
   border-top: 1px solid #28364d;
 }

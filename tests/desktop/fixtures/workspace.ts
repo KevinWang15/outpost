@@ -60,6 +60,9 @@ function emit() {
   for (const listener of listeners) listener(snapshot())
 }
 const bridge: WorkspaceBridge = {
+  createSession: async server => {
+    calls.push({ name: 'createSession', args: [server] })
+  },
   state: async () => snapshot(),
   onState: listener => {
     listeners.add(listener)

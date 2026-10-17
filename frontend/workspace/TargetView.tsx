@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Monitor, Pencil, Plus, Search, Server, Trash2 } from 'lucide-react'
 import type { ConversationMatch, Session, SessionInput, Target, TargetUpdate } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
@@ -17,6 +17,8 @@ import TargetDialog from './TargetDialog'
 import { useSessions } from './useSessions'
 import { useSoftware } from './useSoftware'
 import { address } from './labels'
+import { sessionCreationOptions } from '../../shared/sessionCreation'
+import type { DirectorySuggestions } from '../../shared/model'
 
 type Panel =
   | { kind: 'session'; conversation: ConversationMatch | null }
@@ -41,9 +43,18 @@ export default function TargetView({
   const software = useSoftware(target.id, target.tools.join(','))
   const [panel, setPanel] = useState<Panel | null>(null)
   const [checking, setChecking] = useState<string[]>([])
-  const installed = new Set(software.report?.software.filter(item => item.status === 'installed').map(item => item.id))
-  const tools = target.tools.filter(tool => installed.has(tool))
-  const ready = ['bash', 'python3', 'outpost-terminal'].every(id => installed.has(id as never)) && tools.length > 0
+  const { tools, missing } = sessionCreationOptions(target, software.report?.software ?? [])
+  const ready = missing.length === 0 && tools.length > 0
+  const directories = useCallback(
+    (path: string, signal: AbortSignal) =>
+      api<DirectorySuggestions>(
+        `/targets/${target.id}/directories?path=${encodeURIComponent(path)}`,
+        'GET',
+        undefined,
+        signal,
+      ),
+    [target.id],
+  )
   const close = () => setPanel(null)
 
   function connect(session: Session) {
@@ -136,6 +147,7 @@ export default function TargetView({
           target={target}
           tools={tools}
           conversation={panel.conversation}
+          directories={directories}
           onClose={close}
           onSave={async (input: SessionInput) => {
             const session = await api<Session>(`/targets/${target.id}/sessions`, 'POST', input)

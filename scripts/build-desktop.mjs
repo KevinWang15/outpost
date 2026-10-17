@@ -17,6 +17,7 @@ await build({
     'desktop/src/local-preload.ts',
     'desktop/src/workspace-preload.ts',
     'desktop/src/session-finder-preload.ts',
+    'desktop/src/session-creator-preload.ts',
   ],
   outdir: 'desktop/dist',
   outExtension: { '.js': '.cjs' },
@@ -40,15 +41,16 @@ await build({
 })
 for (const file of ['workspace.html', 'workspace.css', 'session-finder.html', 'session-finder.css'])
   await cp(new URL('src/' + file, root), new URL(file, dist))
-// Package the same terminal screen used by the server, with a local PTY adapter.
-await buildFrontend({
-  configFile: false,
-  root: fileURLToPath(new URL('local-terminal/', root)),
-  base: './',
-  publicDir: false,
-  plugins: [react()],
-  build: { outDir: fileURLToPath(new URL('local-terminal/', dist)), emptyOutDir: true },
-})
+// Native screens reuse the web terminal and session form with narrow IPC adapters.
+for (const page of ['local-terminal', 'session-creator'])
+  await buildFrontend({
+    configFile: false,
+    root: fileURLToPath(new URL(page + '/', root)),
+    base: './',
+    publicDir: false,
+    plugins: [react()],
+    build: { outDir: fileURLToPath(new URL(page + '/', dist)), emptyOutDir: true },
+  })
 const png = await readFile(new URL('../public/outpost.png', import.meta.url))
 await writeFile(new URL('outpost.png', dist), png)
 await mkdir(new URL('resources/', root), { recursive: true })

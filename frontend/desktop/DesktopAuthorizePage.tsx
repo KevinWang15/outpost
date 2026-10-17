@@ -74,8 +74,8 @@ export default function DesktopAuthorizePage({ requestId }: { requestId: string 
               Signed in as <strong>{user ? `${user.name} (${user.email})` : 'Local workspace'}</strong>.
             </p>
             <p>
-              The app will be able to list and open your terminal sessions on this server for 30 days. You can sign out
-              in the app at any time.
+              The app will be able to list, create and open your terminal sessions on this server for 30 days. You can
+              sign out in the app at any time.
             </p>
             <p>
               <ShieldCheck size={18} /> Only approve this if you started sign-in in Outpost Desktop.

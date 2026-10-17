@@ -780,7 +780,7 @@ Trust, account login and terminal attachment are separate capabilities:
   it knows nothing about trust, credential persistence or browser approval.
   The renderer gets only presentation metadata through `server-accounts-api.ts`.
 - `backend/desktop-access.ts` owns browser approvals and durable app grants.
-  `backend/routes/desktop.ts` exposes the narrowly scoped catalogue/connect API.
+  `backend/routes/desktop.ts` exposes the scoped catalogue, creation and connect APIs.
   Browser workspace/account routes continue to require the browser login.
 
 The app generates random state and a PKCE S256 verifier, then starts a ten-minute
@@ -809,7 +809,7 @@ network failure is distinguished from authentication expiry. Expiry stays invali
 until the user completes a new sign-in; a late success or network error cannot
 overwrite authentication expiry. Credentials expire without automatic renewal.
 
-Only catalogue endpoints and new terminal launches accept the app bearer. The
+Catalogue, session-creation endpoints and new terminal launches accept the app bearer. The
 app lists targets, then their sessions with at most four concurrent requests.
 Results stream into the finder; a slow or failed target does not block other
 servers. `server-api.ts` bounds response size, enforces timeouts/cancellation,
@@ -817,6 +817,36 @@ and refuses redirects so credentials cannot move to another origin. Signing out
 requires successful revocation (an already-invalid grant also counts); network
 failure leaves the login visible for retry. Local deployments use the same
 approval and grant path, with their single local-workspace identity.
+
+### Creating sessions in the app
+
+`SessionCreator` owns a sandboxed native modal with a narrow IPC bridge. The
+renderer reuses the web workspace's `SessionDialog` and `DirectoryInput`;
+`SessionCreatorPage` supplies server/target selectors and an IPC directory
+source. `shared/sessionCreation.ts` defines available tools and dependency
+readiness for both web and desktop. No parallel desktop form or readiness
+heuristic is maintained.
+
+`ServerAccounts.creationServers()` captures request capabilities for the exact
+saved logins when the modal opens. `server-session-creation.ts` adapts those
+capabilities into validated target, software, directory and create operations.
+The creator and catalogue use the same target response validator in
+`server-targets.ts`; `DesktopTarget` defines that shared API shape.
+Credentials stay in the main process; replacing or signing out a login
+invalidates its captured capability. App bearers resolve the same owner and
+target context as browser creation. `backend/session-actions.ts` shares the
+creation policy and software inspection between both route families. Reads are
+cancellable; an explicit Create starts a durable mutation with no automatic
+retry. App shutdown drains submissions before disposing account capabilities.
+
+The modal returns only the created session identity. `DesktopWorkspace`
+captures the original `SessionTarget` and validates it before creating and
+again after authorization, then uses the same placement path as the existing
+session finder. Cancellation never opens a pane. A moved/closed destination
+never silently redirects the result to the currently selected tab. If a
+created session cannot open, it remains discoverable through the catalogue.
+Creation does not issue or store an independent terminal credential; opening
+uses `ServerAccounts.launch` like every other remote session entry point.
 
 ### Recent remote sessions
 

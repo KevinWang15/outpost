@@ -1,0 +1,30 @@
+import type { DesktopAccount, DesktopTarget } from '../../shared/desktopAuth'
+import type { DirectorySuggestions, SessionInput } from '../../shared/model'
+import type { SessionCreationOptions } from '../../shared/sessionCreation'
+
+export interface SessionCreatorServerSummary {
+  origin: string
+  account: DesktopAccount
+}
+export interface SessionCreationSelection {
+  server: string
+  targetId: string
+}
+export interface SessionCreatorSetup {
+  servers: SessionCreatorServerSummary[]
+  defaults: { server?: string; targetId?: string }
+}
+/** Only form data crosses this bridge. Credentials and destination panes stay native. */
+export interface SessionCreatorBridge {
+  setup(): Promise<SessionCreatorSetup>
+  targets(server: string): Promise<DesktopTarget[]>
+  options(selection: SessionCreationSelection): Promise<SessionCreationOptions>
+  directories(selection: SessionCreationSelection, path: string): Promise<DirectorySuggestions>
+  create(selection: SessionCreationSelection, input: SessionInput): Promise<void>
+  cancel(): void
+}
+declare global {
+  interface Window {
+    outpostSessionCreator: SessionCreatorBridge
+  }
+}

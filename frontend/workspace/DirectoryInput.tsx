@@ -1,11 +1,11 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { CornerDownRight } from 'lucide-react'
 import type { DirectorySuggestions } from '../../shared/model'
-import { api } from '../api'
 
-type Lookup = { targetId: string; path: string; data?: DirectorySuggestions; error?: string }
+export type DirectorySource = (path: string, signal: AbortSignal) => Promise<DirectorySuggestions>
+type Lookup = { source: DirectorySource; path: string; data?: DirectorySuggestions; error?: string }
 
-export default function DirectoryInput({ targetId }: { targetId: string }) {
+export default function DirectoryInput({ source }: { source: DirectorySource }) {
   const id = useId()
   const field = useRef<HTMLDivElement>(null)
   const control = useRef<HTMLDivElement>(null)
@@ -18,7 +18,7 @@ export default function DirectoryInput({ targetId }: { targetId: string }) {
   const valid =
     (path === '' || path === '~' || path.startsWith('~/') || path.startsWith('/')) &&
     !Array.from(path).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
-  const current = lookup?.targetId === targetId && lookup.path === path ? lookup : null
+  const current = lookup?.source === source && lookup.path === path ? lookup : null
   const directories = current?.data?.directories ?? []
   const visible = open && valid
   const activeId = visible && directories[active] ? `${id}-option-${active}` : undefined
@@ -27,24 +27,19 @@ export default function DirectoryInput({ targetId }: { targetId: string }) {
     if (!open || !valid) return
     const controller = new AbortController()
     const timer = setTimeout(() => {
-      api<DirectorySuggestions>(
-        `/targets/${targetId}/directories?path=${encodeURIComponent(path)}`,
-        'GET',
-        undefined,
-        controller.signal,
-      )
+      source(path, controller.signal)
         .then(data => {
-          if (!controller.signal.aborted) setLookup({ targetId, path, data })
+          if (!controller.signal.aborted) setLookup({ source, path, data })
         })
         .catch(error => {
-          if (!controller.signal.aborted) setLookup({ targetId, path, error: (error as Error).message })
+          if (!controller.signal.aborted) setLookup({ source, path, error: (error as Error).message })
         })
     }, 250)
     return () => {
       clearTimeout(timer)
       controller.abort()
     }
-  }, [targetId, path, open, valid, attempt])
+  }, [source, path, open, valid, attempt])
 
   useEffect(() => {
     if (activeId) document.getElementById(activeId)?.scrollIntoView({ block: 'nearest' })

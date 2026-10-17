@@ -297,6 +297,22 @@ usable. An already-open session moves its existing pane into the chosen split
 or tab, preserving its connection and draft. A split uses the selected pane of
 the tab whose menu you opened.
 
+To create a remote session directly in the app, choose **New session** beside
+a logged-in server, **+ → New Outpost session…** (right-click), or a tab's
+**Split with new Outpost session…** menu item. All three open the same dialog:
+Outpost server, execution target, then the web workspace's session name, coding
+tool, project directory (with suggestions), directory creation, arguments and
+environment fields. The server row preselects its server; splitting beside a
+remote pane preselects that pane's server and target. A single available server
+or target is selected automatically. You can change either selection.
+
+**Cancel** creates nothing and leaves the layout alone. **Create session**
+creates the session and opens it in the original new-tab or split destination.
+During creation, the dialog waits for the server to finish before it can close.
+If creation succeeds but opening fails, the session remains available in the
+finder. Missing target software must first be installed from the web workspace.
+This works with both local-mode and hosted Outpost servers.
+
 Drag a pane's header to reorganize it:
 
 - Drop on the left, right, top or bottom of another terminal to split there. A

@@ -1,5 +1,6 @@
 import { desktopSessionId, validDesktopId, type DesktopSessionChoice } from '../../shared/desktopAuth'
 import { requestQueue } from './server-api'
+import { parseServerTargets } from './server-targets'
 
 interface CatalogueServer {
   origin: string
@@ -40,13 +41,7 @@ export async function loadSessionCatalogue(
   await Promise.all(
     servers.map(async server => {
       try {
-        const targets = await queue(() => server.request('/targets', signal))
-        if (
-          !Array.isArray(targets) ||
-          targets.length > 1000 ||
-          !targets.every(target => target && validDesktopId(target.id) && text(target.name))
-        )
-          throw new Error('Invalid server target list.')
+        const targets = parseServerTargets(await queue(() => server.request('/targets', signal)))
         if (!server.current() || signal.aborted) return
         const sessions: DesktopSessionChoice[] = []
         found.set(server, sessions)

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { SessionCreatorBridge } from './session-creator-api'
+import type { SessionCreatorBridge } from '../../shared/sessionCreator'
 
 const bridge: SessionCreatorBridge = {
   setup: () => ipcRenderer.invoke('session-creator:setup'),

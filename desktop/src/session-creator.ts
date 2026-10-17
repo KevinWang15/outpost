@@ -5,7 +5,7 @@ import { Ajv } from 'ajv'
 import { directoryQuery, sessionInput } from '../../shared/schemas'
 import type { SessionInput } from '../../shared/model'
 import { validDesktopId, type DesktopSessionReference } from '../../shared/desktopAuth'
-import type { SessionCreationSelection, SessionCreatorSetup } from './session-creator-api'
+import type { SessionCreationSelection, SessionCreatorSetup } from '../../shared/sessionCreator'
 import type { SessionCreationServer } from './server-session-creation'
 
 const ajv = new Ajv({ strict: false, coerceTypes: false, removeAdditional: false, useDefaults: false })

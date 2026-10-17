@@ -1,6 +1,6 @@
-import type { DesktopAccount, DesktopTarget } from '../../shared/desktopAuth'
-import type { DirectorySuggestions, SessionInput } from '../../shared/model'
-import type { SessionCreationOptions } from '../../shared/sessionCreation'
+import type { DesktopAccount, DesktopTarget } from './desktopAuth'
+import type { DirectorySuggestions, SessionInput } from './model'
+import type { SessionCreationOptions } from './sessionCreation'
 
 export interface SessionCreatorServerSummary {
   origin: string

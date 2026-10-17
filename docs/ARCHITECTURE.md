@@ -820,8 +820,10 @@ approval and grant path, with their single local-workspace identity.
 
 ### Creating sessions in the app
 
-`SessionCreator` owns a sandboxed native modal with a narrow IPC bridge. The
-renderer reuses the web workspace's `SessionDialog` and `DirectoryInput`;
+`SessionCreator` owns a sandboxed native modal with a narrow IPC bridge.
+Its contract lives in `shared/sessionCreator.ts`, so frontend and server
+builds do not depend on the Electron package's source tree.
+The renderer reuses the web workspace's `SessionDialog` and `DirectoryInput`;
 `SessionCreatorPage` supplies server/target selectors and an IPC directory
 source. `shared/sessionCreation.ts` defines available tools and dependency
 readiness for both web and desktop. No parallel desktop form or readiness

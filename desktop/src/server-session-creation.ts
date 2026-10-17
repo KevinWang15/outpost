@@ -3,7 +3,7 @@ import type { DirectorySuggestions, SessionInput } from '../../shared/model'
 import { harnessIds } from '../../shared/harnesses'
 import { softwareIds } from '../../shared/schemas'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
-import type { SessionCreatorServerSummary } from './session-creator-api'
+import type { SessionCreatorServerSummary } from '../../shared/sessionCreator'
 import { parseServerTargets } from './server-targets'
 
 type Request = (path: string, options?: { signal?: AbortSignal; body?: unknown }) => Promise<unknown>

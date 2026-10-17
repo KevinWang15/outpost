@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { SessionCreatorSetup } from '../../desktop/src/session-creator-api'
+import type { SessionCreatorSetup } from '../../shared/sessionCreator'
 import type { DesktopTarget } from '../../shared/desktopAuth'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
 import { Dialog } from '../ui/Dialog'

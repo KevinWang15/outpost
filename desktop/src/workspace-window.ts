@@ -58,6 +58,7 @@ export class WorkspaceWindow {
   private readonly closing: WorkspaceClose<TerminalPane>
   private reportingError = false
   private presenting = false
+  private focusRestoreTimer: ReturnType<typeof setTimeout> | null = null
   constructor(
     private directory: string,
     private preferences: Preferences,
@@ -296,8 +297,17 @@ export class WorkspaceWindow {
     window.on('focus', () => {
       this.host.focused(this)
       this.terminals.hostState(this.paneIds)
+      // macOS can reactivate the BrowserWindow while leaving focus on the
+      // workspace chrome (often the + button). Native terminal views do not
+      // automatically regain keyboard focus, so restore it after Electron has
+      // finished dispatching the activation event.
+      if (!this.presenting && this.layout.panel === null) {
+        this.focusTerminal()
+        this.scheduleFocusRestore(window)
+      }
     })
     window.on('blur', () => {
+      this.cancelFocusRestore()
       this.host.dragCancel(this)
       this.terminals.hostState(this.paneIds)
     })
@@ -308,6 +318,7 @@ export class WorkspaceWindow {
       void this.requestClose({ kind: 'window' }).catch(error => this.reportError(String(error)))
     })
     window.on('closed', () => {
+      this.cancelFocusRestore()
       this.window = null
       for (const id of this.paneIds) this.terminals.dispose(id)
       this.host.closed(this)
@@ -410,8 +421,31 @@ export class WorkspaceWindow {
       pane.view.webContents.send('terminal:command', 'focus')
     }
   }
+  private scheduleFocusRestore(window: BrowserWindow) {
+    this.cancelFocusRestore()
+    this.focusRestoreTimer = setTimeout(() => {
+      this.focusRestoreTimer = null
+      if (
+        this.window !== window ||
+        window.isDestroyed() ||
+        !window.isFocused() ||
+        this.presenting ||
+        this.layout.panel !== null
+      )
+        return
+      this.focusTerminal()
+    }, 0)
+  }
+  private cancelFocusRestore() {
+    if (this.focusRestoreTimer === null) return
+    clearTimeout(this.focusRestoreTimer)
+    this.focusRestoreTimer = null
+  }
   restoreFocus() {
-    if (this.window?.isFocused()) this.focusTerminal()
+    if (this.window?.isFocused()) {
+      this.focusTerminal()
+      this.scheduleFocusRestore(this.window)
+    }
   }
   private async reportError(message: string) {
     const window = this.window

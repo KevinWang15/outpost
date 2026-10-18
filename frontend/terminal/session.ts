@@ -186,9 +186,10 @@ export class TerminalSession {
     this.options.titleChanged(name)
   }
 
-  focus() {
+  focus(force = false) {
     const active = document.activeElement
     if (
+      !force &&
       active instanceof HTMLElement &&
       active !== this.terminal.textarea &&
       (active.closest('[role="menu"]') ||
@@ -332,7 +333,9 @@ export class TerminalSession {
       desktop?.onCommand(command => {
         if (command === 'focus') {
           this.geometry.refresh(true)
-          this.focus()
+          // Native window reactivation must win over a stale toolbar control
+          // that remained focused while the app was backgrounded.
+          this.focus(true)
           if (this.focused) {
             this.bells.acknowledge()
             this.acknowledgeActivity()

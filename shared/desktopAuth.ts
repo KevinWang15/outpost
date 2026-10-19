@@ -104,7 +104,8 @@ export function parseDesktopEntry(value: string): DesktopEntry {
   if (
     url.protocol !== 'outpost:' ||
     url.hostname !== 'server' ||
-    url.pathname ||
+    // Windows shell handoffs canonicalize the link to outpost://server/?…
+    (url.pathname !== '' && url.pathname !== '/') ||
     url.hash ||
     url.username ||
     url.password ||

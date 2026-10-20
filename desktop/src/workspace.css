@@ -279,13 +279,24 @@ input::placeholder {
   animation: tab-spin 1s linear infinite;
 }
 .tab-status[data-state='attention'],
+.tab-status[data-state='waiting'],
 .tab-status[data-state='finished'] {
   color: #fbbf24;
 }
 .tab-status[data-state='attention'] svg,
+.tab-status[data-state='waiting'] svg,
 .tab-status[data-state='finished'] svg {
   transform-origin: 50% 20%;
   animation: tab-bell-ring 2.4s ease-in-out infinite;
+}
+.tab-status[data-state='error'] {
+  color: #f87171;
+}
+.tab-status[data-observation='stale'] {
+  opacity: 0.6;
+}
+.tab-status[data-observation='stale'] svg {
+  animation: none;
 }
 .tab-close {
   width: 25px;

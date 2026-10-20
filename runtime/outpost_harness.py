@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Optional
 
 
+class LiveStatusUnavailable(ValueError):
+    """The native status service does not own this CLI's conversation."""
+
+
 def storage_home(environment, key, default, cwd=None):
     home = environment.get('HOME', str(Path.home()))
     path = environment.get(key) or str(Path(home) / default)
@@ -117,16 +121,25 @@ class CodingSessionAdapter(ABC):
         """Native main-agent event logs for this exact conversation and store."""
 
     def activity_event(self, record):
-        """Return (working/idle/finished/unknown, timestamp), or None for non-turn events."""
+        """Return (native state, timestamp), or None for non-turn events."""
         return self.sessions.activity_event(record)
 
     def activity_marker(self, records):
-        """Select a native turn event and its byte offset from bounded reverse records."""
+        """Select a native turn event and its byte offset from reverse records."""
         return self.sessions.activity_marker(records)
+
+    def activity_update(self, record, offset, previous, history):
+        return self.sessions.activity_update(record, offset, previous, history)
 
     def live_activity(self, session, running):
         """Return LiveActivity when the harness owns a live status API; otherwise use turn markers."""
         return None
+
+    def prepare_activity(self, directory, session, generation, executable):
+        """Install native lifecycle reporting for this terminal launch."""
+        import outpost_activity_install
+
+        return getattr(outpost_activity_install, self.tool)(directory, session, generation, executable)
 
     @abstractmethod
     def arguments(self, session):

@@ -11,7 +11,7 @@ import time
 from contextlib import closing
 from pathlib import Path
 
-from outpost_harness import LiveActivity
+from outpost_harness import LiveActivity, LiveStatusUnavailable
 from outpost_rpc_socket import JsonRpcSocket
 
 
@@ -65,6 +65,10 @@ def observe(home, thread_id, running):
             # With no daemon and no terminal, only unread persisted completions
             # remain meaningful. A missing daemon for a running CLI is Unknown.
             return LiveActivity('idle', selected_rollout(home, thread_id))
+        if error.errno in (errno.ENOENT, errno.ECONNREFUSED):
+            raise LiveStatusUnavailable(
+                'The shared Codex daemon is unavailable; lifecycle tracking requires a session restart.'
+            ) from error
         raise ValueError('Could not read live Codex status: ' + str(error)) from error
     status = thread['status']
     kind = status.get('type')
@@ -82,11 +86,14 @@ def observe(home, thread_id, running):
         detail = 'Codex has an active turn waiting for ' + ' and '.join(waiting) + '.' if waiting else None
         # Live work survives terminal restarts and never depends on a saved
         # task_started, startup baseline, or completion acknowledgement.
-        return LiveActivity('working', detail=detail)
+        return LiveActivity('waiting' if waiting else 'working', detail=detail)
     if kind == 'systemError':
-        raise ValueError('Codex reports a thread error')
+        return LiveActivity('error', detail='Codex reports a thread error.')
     if kind == 'notLoaded' and running:
-        raise ValueError('This Codex thread is not loaded in the local daemon; its live activity is unavailable')
+        raise LiveStatusUnavailable(
+            'This conversation is not loaded in the shared Codex daemon. '
+            'Restart this managed session to enable tracking of conversation switches.'
+        )
     if kind not in ('idle', 'notLoaded'):
         raise ValueError('Codex returned an unsupported thread status')
     return LiveActivity('idle', rollout_path(home, thread.get('path')))

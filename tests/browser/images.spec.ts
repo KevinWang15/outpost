@@ -127,7 +127,14 @@ test('upload progress leaves the viewport and live typing intact, and a second i
     await expect(page.getByRole('status').filter({ hasText: 'Uploading image' })).toBeVisible()
     expect(await page.locator('.xterm-screen').boundingBox()).toEqual(size)
     await page.getByRole('textbox', { name: 'Terminal input' }).pressSequentially('typing-during-upload')
-    await expect.poll(() => readFile(join(session.rootDir, 'input.bin'), 'utf8')).toBe('typing-during-upload')
+    await expect
+      .poll(() =>
+        readFile(join(session.rootDir, 'input.bin'), 'utf8').catch(error => {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+          throw error
+        }),
+      )
+      .toBe('typing-during-upload')
     await gesture(page, 'drop')
     await expect(page.getByRole('status').filter({ hasText: 'An image is already' })).toBeVisible()
     expect(uploads).toBe(1)

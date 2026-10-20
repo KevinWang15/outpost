@@ -28,6 +28,8 @@ const program = deflateSync(
     '        return importlib.util.spec_from_loader(name, self) if name in _sources else None',
     '    def create_module(self, spec):',
     '        return None',
+    '    def get_source(self, name):',
+    '        return _sources[name]',
     '    def exec_module(self, module):',
     "        exec(compile(_sources[module.__name__], module.__name__, 'exec'), module.__dict__)",
     'sys.meta_path.insert(0, _Runtime())',

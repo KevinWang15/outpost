@@ -7,7 +7,10 @@ import os
 import re
 import tempfile
 import time
+import uuid
 from contextlib import contextmanager
+
+from outpost_activity_events import STATES, file_lock, read_json, write_json
 
 MAX_PATHS = 4096
 
@@ -41,8 +44,25 @@ def checkpoint(stream, info, offset):
     return {'source': source_key(info), 'offset': offset, 'anchor': anchor}
 
 
+def valid_checkpoint(point):
+    return (
+        isinstance(point, dict)
+        and set(point) == {'source', 'offset', 'anchor'}
+        and isinstance(point['source'], str)
+        and re.fullmatch(r'\d+:\d+', point['source'])
+        and type(point['offset']) is int
+        and point['offset'] >= 0
+        and isinstance(point['anchor'], str)
+        and re.fullmatch(r'[0-9a-f]{64}', point['anchor'])
+    )
+
+
 def covered(point, stream, info, offset):
-    if point is None or point['source'] != source_key(info) or not offset <= point['offset'] <= info.st_size:
+    if (
+        not valid_checkpoint(point)
+        or point['source'] != source_key(info)
+        or not offset <= point['offset'] <= info.st_size
+    ):
         return False
     # A rewritten or truncated transcript must not inherit an old byte watermark.
     return checkpoint(stream, info, point['offset']) == point
@@ -58,25 +78,77 @@ class Activity:
         self.path = directory / (session['id'] + '.json')
         self.last_input = None
 
+    def events(self):
+        value = read_json(self.directory / (self.session['id'] + '.events.json'))
+        if value is not None and (
+            not isinstance(value, dict)
+            or not self.adapter.valid_id(value.get('session'))
+            or not isinstance(value.get('generation'), str)
+            or type(value.get('received')) is not int
+            or value.get('state') not in (*STATES, None)
+            or type(value.get('observed')) is not bool
+        ):
+            raise ValueError('Invalid activity lifecycle metadata.')
+        return value
+
+    def selected_session(self):
+        events = self.events()
+        return {**self.session, 'cliSessionId': events['session']} if events else self.session
+
+    def begin_launch(self, executable):
+        generation = uuid.uuid4().hex
+        path = self.directory / (self.session['id'] + '.events.json')
+        with file_lock(self.directory / (self.session['id'] + '.events.lock')):
+            write_json(
+                path,
+                {
+                    'generation': generation,
+                    'session': self.session['cliSessionId'],
+                    'state': None,
+                    'turn': None,
+                    'received': time.time_ns(),
+                    'observed': False,
+                    'event': None,
+                    'error': None,
+                },
+            )
+        try:
+            arguments = self.adapter.prepare_activity(self.directory, self.session, generation, executable)
+        except (OSError, ValueError) as error:
+            # Optional activity integration must never make a terminal unusable.
+            with file_lock(self.directory / (self.session['id'] + '.events.lock')):
+                value = read_json(path)
+                value['error'] = str(error)[:2000]
+                write_json(path, value)
+            arguments = []
+        return generation, arguments
+
+    def event_seen(self, token):
+        return token in self.seen_events()
+
+    def seen_events(self):
+        seen = read_json(self.directory / (self.session['id'] + '.seen.json')) or []
+        if (
+            not isinstance(seen, list)
+            or len(seen) > 64
+            or any(not isinstance(token, str) or not re.fullmatch(r'[0-9a-f]{64}', token) for token in seen)
+        ):
+            raise ValueError('Invalid activity acknowledgement.')
+        return seen
+
+    def see_event(self, token):
+        path = self.directory / (self.session['id'] + '.seen.json')
+        with file_lock(self.directory / (self.session['id'] + '.seen.lock')):
+            seen = self.seen_events()
+            if token not in seen:
+                write_json(path, [*seen[-63:], token])
+
     def read(self):
-        with self.path.open('rb') as stream:
-            raw = stream.read(8193)
-        if len(raw) > 8192:
-            raise ValueError('Activity metadata exceeds its size limit.')
-        data = json.loads(raw)
+        data = read_json(self.path, limit=8192)
         if not isinstance(data, dict) or set(data) != {'baseline', 'checked'}:
             raise ValueError('Invalid activity metadata; expected the current schema.')
         for point in data.values():
-            if point is not None and (
-                not isinstance(point, dict)
-                or set(point) != {'source', 'offset', 'anchor'}
-                or not isinstance(point['source'], str)
-                or not re.fullmatch(r'\d+:\d+', point['source'])
-                or type(point['offset']) is not int
-                or point['offset'] < 0
-                or not isinstance(point['anchor'], str)
-                or not re.fullmatch(r'[0-9a-f]{64}', point['anchor'])
-            ):
+            if point is not None and not valid_checkpoint(point):
                 raise ValueError('Invalid activity acknowledgement.')
         return data
 
@@ -100,7 +172,7 @@ class Activity:
                 os.unlink(temporary)
 
     def snapshot(self):
-        found = latest_file(self.adapter, self.session)
+        found = latest_file(self.adapter, self.selected_session())
         if found is None:
             return None
         with found[0].open('rb') as stream:
@@ -116,6 +188,8 @@ class Activity:
                 # The normal observer reports any ongoing discovery failure.
                 point = None
             self.save({'baseline': point, 'checked': point})
+        for suffix in ('observation.json', 'transcript.json'):
+            (self.directory / (self.session['id'] + '.' + suffix)).unlink(missing_ok=True)
 
     def describe(self, running):
         from outpost_activity import describe
@@ -129,6 +203,11 @@ class Activity:
 
     def input(self):
         # Only an offset and checksum are saved. Keystrokes never enter metadata.
+        from outpost_activity import event_token
+
+        events = self.events()
+        if events and events.get('state') == 'finished':
+            self.see_event(event_token(events))
         with self.lock():
             # Capture the watermark under the same lock as browser checks and
             # other terminals, so an older input cannot undo a newer check.
@@ -143,3 +222,14 @@ class Activity:
     def remove(self):
         self.path.unlink(missing_ok=True)
         (self.directory / (self.session['id'] + '.lock')).unlink(missing_ok=True)
+        for suffix in (
+            'events.json',
+            'events.lock',
+            'seen.json',
+            'seen.lock',
+            'observation.json',
+            'observation.lock',
+            'transcript.json',
+            'transcript.lock',
+        ):
+            (self.directory / (self.session['id'] + '.' + suffix)).unlink(missing_ok=True)

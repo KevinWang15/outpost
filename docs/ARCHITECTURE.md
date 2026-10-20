@@ -637,100 +637,105 @@ error identifies the created worktree so it can be reused or removed manually.
 
 ### Shared session activity
 
-`Activity.describe()` in the target runtime is the source for both the session
-list and live terminal activity. Harness adapters supply live state when the CLI
-has an authoritative status API; other harnesses use native turn markers.
-Terminal output rate, elapsed silence and local typing never infer Working or
-Idle. Current activity and unread completions are separate: live Working always
-wins over startup baselines and acknowledgement checkpoints. Reading activity
-does not acknowledge it.
+`Activity.describe()` in the target runtime is the single source for the session
+list and terminal streams. `shared/activity.ts` defines `working | waiting | idle |
+finished | error | unknown`, display labels, attention semantics, and the bounded
+wire parser. `finished` means an unread completion; `waiting` means native
+approval/input is required. Only completions are dismissible. Terminal output
+rate, silence and keyboard input never infer whether the agent is working.
 
-**Codex** reads `thread/read` (`includeTurns: false`) from the existing daemon's
-`CODEX_HOME/app-server-control/app-server-control.sock`. This observes an exact
-thread without starting a process, resuming/subscribing to a thread, or submitting
-a model request. An active turn is Working, including a turn that survived a
-terminal restart.
-Approval/input waiting flags appear in the activity description. Idle permits
-checking for an unread completion; stale transcript start markers cannot keep a
-daemon-confirmed idle thread Working. A running terminal whose thread is not
-loaded in that daemon, an unreachable daemon, or an unsupported response becomes
-Unknown instead of guessing from old files. If neither terminal nor daemon is
-running, persisted completions can still be checked.
+**Identity and native observations.** Every managed launch installs a small
+Python observer through the harness's own hooks. SessionStart and human submission
+select the current native conversation, including in-CLI resume/new/clear actions.
+Codex defers SessionStart until the first turn. Restarts resume the last observed
+conversation. The native store remains pinned; neither terminal text nor another
+conversation's modification time can select an identity.
 
-Codex 0.162.1's `/review` does not emit a parent start event, and its own live
-status can remain Idle before delegated work starts. The adapter recognizes
-native review entry/exit records (including paginated `ItemCompleted` records).
-An unresolved review with no confirmed live work shows Unknown until an active
-status or later lifecycle event resolves it; acknowledgement and startup
-checkpoints cannot turn that uncertainty into Idle.
+`outpost_activity_install.py` owns harness setup:
 
-The native API supplies the current transcript path. Local input/startup
-checkpoints use the selected path in Codex's `state_5.sqlite`, opened read-only
-with bounded queries. Reverts keep the logical thread ID but switch to a new
-rollout; filename globs and modification time cannot select it correctly.
-An unindexed new thread has no checkpoint yet. Paths stay within the pinned
-`CODEX_HOME`; index errors never fall back to an obsolete file. The adapter owns
-these native-format details. Changing the conversation inside Codex still does
-not change Outpost's pinned thread identity.
+- Codex uses invocation-only `-c` hooks. A short-lived app-server reads `hooks/list`
+  to obtain the native identities and hashes, then the launch trusts exactly these
+  generated commands. It does not change config.toml, grant blanket hook trust,
+  start a thread, or invoke a model. Live status reads `thread/read` from the
+  existing `app-server-control` Unix socket. Active waiting flags become Waiting;
+  system errors become Error. When that daemon does not own the thread, the
+  launch's native hooks provide lifecycle state. A confirmed daemon Idle takes
+  precedence over an obsolete Working hook. Codex can select its embedded
+  app-server for launches with hook overrides; both native modes are supported.
+- Claude uses invocation-only `--settings` hooks for selection, submission, tools,
+  permission/elicitation waits, completion and failure. Native transcript markers
+  provide persisted state and account for delayed/out-of-order prompt writes.
+- Kimi uses an additive local plugin in its installed-plugin registry, preserving
+  other entries and leaving config.toml alone. Its hooks only select the main
+  conversation; they are inert outside an Outpost launch. Main-agent wire records
+  determine state because Kimi's generic turn hooks do not reliably identify
+  subagents. Pending interactions remain Waiting until all are resolved; failed
+  turns become Error.
 
-`outpost_rpc.py` shares JSON-RPC response handling between allocation processes
-and the local observer. `outpost_rpc_socket.py` provides a stdlib-only Unix
-WebSocket client with peer-user verification, bounded HTTP/frame/message sizes,
-fragmentation and ping/pong support, and a two-second whole-observation deadline.
-No observation performs socket I/O while holding the acknowledgement lock or
-from terminal input handling. Startup tolerates unavailable native activity data;
-subsequent observations report failures without preventing terminal attachment.
+The helper persists only a launch generation, native ID, state, event/turn IDs
+and timestamps in `~/.outpost/activity/<id>.events.json`. Atomic replacement and
+separate locks serialize writers. Old-launch events, subagents, late completions
+from another conversation and identifiable old-turn completions cannot overwrite
+the current turn. A read checks its identity again before publishing or checking
+completion. Hook commands emit no output or decisions, and optional integration
+failures do not prevent the terminal starting. Existing agent processes need a
+managed-session restart to install hooks; reconnecting a client does not restart
+its agent. Native formats and hook configuration are owned by harness adapters.
 
-The baseline and acknowledgement checkpoints decide whether a completed turn
-is still unchecked. Only completion notices consult them for Codex; the other
-harnesses also use the startup baseline to discard stale transcript work markers.
-Actual terminal input, the list's explicit check action and the terminal's
-explicit completion acknowledgement update those checkpoints. Focus-report
-escape sequences and attachment itself do not advance the watermark.
+**Transcript indexing.** `outpost_activity_transcript.py` stores only a state,
+timestamp and integrity checkpoints. A cold read walks backwards to a native
+marker with bounded record memory; there is no 4 MiB distance cutoff that loses
+a long-running turn. Subsequent reads incrementally consume appended records in
+4 MiB batches. Partial JSON lines wait for completion; malformed records are
+skipped. Individual records are limited to 16 MiB. Corrupt derived indexes are
+rebuilt. File identity, offsets, anchors and rewrite metadata invalidate an index
+on replacement/truncation. Claude owns timestamp ordering; Kimi owns unresolved
+interaction reduction. Warm polls with no appended data do not rescan transcripts.
 
-`TerminalActivity` acknowledges the displayed completion on activation or a
-local click/key gesture, through the existing terminal socket. Native host focus
-covers tab clicks, keyboard cycling and window activation; browser focus and
-visibility events use the same controller. Activation before the first observation
-checks that first result only while still active. Later completions require a new
-activation or interaction. Pending and confirmed completion IDs suppress stale
-echoes locally; only that ID is shown as Idle, and a failed request restores the
-unchecked state with a notice. A bounded set retains recent confirmations, and
-connection generations discard results from an old attachment.
+For Codex, the live API supplies its selected rollout. Read-only bounded queries
+of `state_5.sqlite` select it when no live service owns the thread and for input
+checkpoints. Reverts can retain obsolete rollout files, so globs/mtime are never
+a substitute. Paths remain inside the pinned native store. Unresolved native
+review state remains Unknown until the CLI supplies an authoritative transition.
 
-`outpost_activity_stream.py` samples this reader immediately after attachment
-and two seconds after each completed read, with one read in flight. Its worker
-starts with the relay and runs separately from its I/O loop; the persistent
-terminal service owns the PTY independently.
-Only the latest result is retained, so backpressure cannot accumulate a queue
-of observations. Reads that exceed five seconds show Unknown until the reader
-returns; a stalled read never spawns replacement workers. The worker is a daemon,
-and closing the stream stops scheduling reads without making terminal shutdown
-wait for filesystem I/O. Worker startup and read failures become Unknown.
-Completion acknowledgements wake the same worker immediately and reuse the list's
-exact-ID check under the target's activity lock. At most 32 requests can be queued,
-in flight or awaiting delivery combined. They run outside the PTY loop, refresh
-the observation after saving, and return request results on the existing stream.
-Only changed metadata is emitted over the existing relay and WebSocket; it
-opens no additional SSH connection or account API request. Polling continues
-without terminal output so completions and acknowledgements from other clients
-are observed. Clients clear stale activity on close/reconnect.
+**Freshness and completion.** Observation health is independent of agent state:
+`current`, `stale`, or `unavailable`, with an `observedAt` timestamp. A transient
+failure retains the last observation for at most 15 seconds, visibly labeled
+“last known” with animation stopped. Further failures never extend that deadline.
+Then it becomes Unknown with a diagnostic. Cached observations cannot cross launch
+or conversation identities. There is no fabricated Idle during a read failure.
 
-`shared/activity.ts` owns the `working | idle | finished | unknown` enum,
-`SessionActivity` and display labels. Unknown is an explicit observation state;
-diagnostics carry details, not a second source of state. A client's `null` means
-no observation has arrived on this connection yet, never a failed observation.
-Both `ActivityBadge` and `tab-status.ts`
-use it; the broker and native IPC use its bounded parser. The relay sends state,
-timestamp, opaque completion ID and any diagnostic, never transcript content.
-The desktop bridge contract is defined by `desktopBridgeVersion` in
-`shared/desktop.ts`; server and app must be updated together.
-The renderer alone owns the terminal bell flag. The native shell displays reported
-state and owns OS notifications, but does not independently rewrite attention on
-activation or notification creation. Both a host focus transition and an explicit
-focus command acknowledge the bell, including reselecting the active tab. The
-preload ignores an initial host-state response if a newer focus event arrived
-while that response was in flight.
+Native transcript baseline/checkpoints and bounded hook-completion IDs implement
+shared acknowledgement. Live work/waiting/errors do not depend on those watermarks.
+Late transcript flushes of a hook completion retain the same completion identity.
+Actual terminal input, explicit list checks and terminal acknowledgements update
+seen state; focus escape sequences and attachment do not. Old acknowledgements
+cannot clear newer completions or roll a watermark backward.
+
+`TerminalActivity` acknowledges the displayed completion on activation or a local
+interaction. Pending/confirmed IDs give immediate local feedback; a failed request
+restores the notice, and connection generations discard old replies. Activation
+before fresh metadata waits for a current observation. Stale completions are not
+automatically acknowledged. Later completions require a new interaction.
+
+`outpost_activity_stream.py` samples immediately and every two seconds, with one
+reader independent of terminal I/O. Slow reads show stale/unavailable metadata;
+they never start replacement workers or block terminal shutdown. The latest result
+slot and a 32-request acknowledgement bound prevent backpressure from accumulating
+work. Meaningful metadata changes use the existing relay/WebSocket, without another
+SSH connection; successful timestamp-only refreshes do not restart UI animations.
+
+The app and list share all states. Unknown has a diagnostic; `null` means no
+observation yet. Server and app must use the same `desktopBridgeVersion`. Terminal
+bells remain a separate renderer-owned signal; the desktop does not independently
+rewrite agent state. Local shell tabs have no coding-agent badge.
+
+Tests include deterministic lifecycle/race/corruption/large-transcript regressions,
+shared controller tests and DOM badge checks. Run native integration tests with
+`OUTPOST_TEST_NATIVE_ACTIVITY=1 python3 -m unittest discover -s tests/runtime -p
+ test_activity_native.py`: installed Codex, Claude and Kimi run in disposable homes
+against a local HTTP model fixture, exercising real hooks and completion records
+without paid model calls or modifying the user's native stores.
 
 ### Terminal search
 

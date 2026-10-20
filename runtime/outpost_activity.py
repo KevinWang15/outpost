@@ -1,140 +1,186 @@
-"""Shared live activity and bounded unread-completion detection."""
+"""Native activity, unread completion and observation health are independent."""
 
 import datetime
 import hashlib
 import json
 import os
+import time
 
-from outpost_activity_state import checkpoint, covered, latest_file
+from outpost_activity_events import STATES, file_lock, read_json, write_json
+from outpost_activity_state import covered, latest_file
+from outpost_activity_transcript import marker, timestamp
+from outpost_harness import LiveStatusUnavailable
 
-MAX_TAIL = 4 * 1024 * 1024
-
-
-def reverse_records(stream, size):
-    """Read complete records backwards in small blocks within the tail limit."""
-    position, remaining = size, MAX_TAIL
-    buffer = b''
-    end = size
-    trim_partial = True
-    while position and remaining:
-        count = min(position, remaining, 64 * 1024)
-        position -= count
-        remaining -= count
-        stream.seek(position)
-        buffer = stream.read(count) + buffer
-        if trim_partial:
-            newline = buffer.rfind(b'\n')
-            if newline < 0:
-                continue
-            buffer = buffer[: newline + 1]
-            end = position + len(buffer)
-            trim_partial = False
-        while buffer:
-            separator = buffer[:-1].rfind(b'\n')
-            if separator < 0 and position:
-                break
-            line = buffer[separator + 1 :]
-            offset = end
-            end -= len(line)
-            buffer = buffer[: separator + 1]
-            try:
-                record = json.loads(line)
-            except (ValueError, UnicodeDecodeError, RecursionError):
-                continue
-            if isinstance(record, dict):
-                yield record, offset
-    if position:
-        raise ValueError('No turn marker in the last 4 MiB of the native transcript.')
+STALE_SECONDS = 15
 
 
-def timestamp(value):
-    try:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return datetime.datetime.fromtimestamp(value / 1000, datetime.timezone.utc).isoformat()
-        if isinstance(value, str):
-            parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
-            if parsed.tzinfo:
-                return parsed.astimezone(datetime.timezone.utc).isoformat()
-    except (ValueError, OverflowError, OSError):
-        pass
-    return None
-
-
-def inspect(activity, running, live, metadata=None):
-    adapter, session = activity.adapter, activity.session
-    result = {'state': 'idle', 'updatedAt': None, 'completionId': None, 'detail': None}
-    if live is not None and live.state != 'idle':
-        result.update(state=live.state, detail=live.detail)
-        return result, None
-    # Liveness wins even when acknowledgement metadata is missing/corrupt.
-    # Only completed-turn notices consult the persisted checkpoints for a
-    # harness with authoritative live state.
-    if metadata is None:
-        metadata = activity.read()
-    if live is None:
-        found = latest_file(adapter, session)
-        path = found[0] if found else None
-    else:
-        path = live.path
-    if path is None:
-        return result, None
-    with path.open('rb') as stream:
-        info = os.fstat(stream.fileno())
-        marker = adapter.activity_marker(reverse_records(stream, info.st_size))
-        if marker is not None:
-            event, offset = marker
-            state, updated = event
-            if state == 'unknown':
-                result = unavailable(
-                    'The native transcript records an operation whose live status cannot be confirmed.'
-                )
-                result['updatedAt'] = timestamp(updated)
-                return result, None
-            point = checkpoint(stream, info, offset)
-            token = hashlib.sha256(json.dumps(point, sort_keys=True).encode()).hexdigest()
-            if live is not None and state != 'finished':
-                state = live.state
-            elif covered(metadata['baseline'], stream, info, offset):
-                state = 'idle'
-            elif state == 'working' and not running:
-                state = 'idle'
-            elif state == 'finished' and covered(metadata['checked'], stream, info, offset):
-                state = 'idle'
-            result.update(
-                state=state, updatedAt=timestamp(updated), completionId=token if state == 'finished' else None
-            )
-            return result, point
-        return result, None
-
-
-def unavailable(detail):
+def result(state='idle', updated=None, completion=None, detail=None):
     return {
-        'state': 'unknown',
-        'updatedAt': None,
-        'completionId': None,
-        'detail': 'Activity unavailable: ' + str(detail)[:4000],
+        'state': state,
+        'updatedAt': updated,
+        'completionId': completion,
+        'detail': detail,
+        'observation': 'current',
+        'observedAt': None,
     }
 
 
-def describe(activity, running):
+def event_token(events):
+    return hashlib.sha256(
+        json.dumps([events['generation'], events['session'], events['received']]).encode()
+    ).hexdigest()
+
+
+def hook_observation(activity, events, running):
+    if not events or not events.get('observed') or events.get('state') is None:
+        return None
+    state = events['state']
+    if state in ('working', 'waiting') and not running:
+        state = 'idle'
+    token = event_token(events) if state == 'finished' else None
+    if token and activity.event_seen(token):
+        state, token = 'idle', None
+    return result(state, timestamp(events['received'] / 1_000_000), token)
+
+
+def inspect(activity, running, events):
+    adapter = activity.adapter
+    session = {**activity.session, 'cliSessionId': events['session']} if events else activity.session
+    hook = hook_observation(activity, events, running)
     try:
-        live = activity.adapter.live_activity(activity.session, running)
-        return inspect(activity, running, live)[0]
+        live = adapter.live_activity(session, running)
+    except LiveStatusUnavailable:
+        # Embedded Codex instances have no shared-daemon status. Launch-scoped
+        # hooks still identify the conversation and report native lifecycle.
+        if hook is None and (events is None or events.get('error')):
+            raise
+        live = None
+    if live is not None and live.state != 'idle':
+        return result(live.state, detail=live.detail), None
+    found = latest_file(adapter, session) if live is None else None
+    path = found[0] if found else live.path if live is not None else None
+    selected = marker(activity.directory, session['id'], adapter, path) if path else None
+    updated = timestamp(selected[0][1]) if selected else None
+    # A hook can arrive before its transcript flush. A subsequent transcript
+    # event supersedes it. Kimi hooks select identity only, never subagent state.
+    same_completion = (
+        hook is not None and events['state'] == 'finished' and selected is not None and selected[0][0] == 'finished'
+    )
+    if hook is not None and (same_completion or updated is None or hook['updatedAt'] >= updated):
+        if live is not None and hook['state'] in ('working', 'waiting'):
+            # The daemon's idle observation supersedes a pre-submit hook or a
+            # stale hook after an interrupted/failed turn.
+            return result('idle', hook['updatedAt']), None
+        return hook, ('hook', hook['completionId']) if hook['completionId'] else None
+    if selected is None:
+        if events and events.get('error') and running:
+            raise ValueError('Lifecycle integration could not start: ' + events['error'])
+        return result(), None
+    (state, _), point = selected
+    offset = point['offset']
+    if live is not None and state not in ('finished', 'error', 'unknown'):
+        state = live.state
+    if state in ('working', 'waiting') and not running:
+        state = 'idle'
+    if state == 'unknown':
+        raise ValueError('The native transcript records an operation whose current state is unavailable.')
+    with path.open('rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not covered(point, stream, info, offset):
+            raise ValueError('The native transcript changed while reading activity; retrying.')
+        token = hashlib.sha256(json.dumps(point, sort_keys=True).encode()).hexdigest()
+        if state == 'finished':
+            metadata = activity.read()
+            if covered(metadata['baseline'], stream, info, offset) or covered(
+                metadata['checked'], stream, info, offset
+            ):
+                state = 'idle'
+        elif state in ('working', 'waiting') and live is None and not (events and events.get('observed')):
+            if covered(activity.read()['baseline'], stream, info, offset):
+                state = 'idle'
+    return result(state, updated, token if state == 'finished' else None), ('transcript', point)
+
+
+def unavailable(detail):
+    value = result('unknown', detail='Activity unavailable: ' + str(detail)[:4000])
+    value['observation'] = 'unavailable'
+    return value
+
+
+def stale(previous, detail, now=None):
+    now = time.time() if now is None else now
+    if (
+        isinstance(previous, dict)
+        and previous.get('state') in STATES
+        and isinstance(previous.get('observedAt'), str)
+        and previous['state'] != 'unknown'
+    ):
+        try:
+            observed = datetime.datetime.fromisoformat(previous['observedAt'].replace('Z', '+00:00')).timestamp()
+        except (ValueError, TypeError):
+            return unavailable(detail)
+        if 0 <= now - observed <= STALE_SECONDS:
+            return {**previous, 'observation': 'stale', 'detail': 'Activity update delayed: ' + str(detail)[:4000]}
+    return unavailable(detail)
+
+
+def identity(activity, events):
+    return [events['generation'], events['session']] if events else [None, activity.session['cliSessionId']]
+
+
+def observe(activity, running):
+    # A hook may select another conversation while a native API request is in
+    # flight. Never publish (or acknowledge) the previous conversation's result.
+    for _ in range(2):
+        events = activity.events()
+        value, point = inspect(activity, running, events)
+        latest = activity.events()
+        if events == latest:
+            return value, point, identity(activity, events)
+    raise ValueError('The conversation changed while reading activity; retrying.')
+
+
+def describe(activity, running):
+    # Serialize observers separately from acknowledgement and input. A slow
+    # filesystem or native status API never holds the terminal-input lock.
+    path = activity.directory / (activity.session['id'] + '.observation.json')
+    try:
+        with file_lock(activity.directory / (activity.session['id'] + '.observation.lock')):
+            try:
+                value, _, binding = observe(activity, running)
+                value['observedAt'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                write_json(path, {'identity': binding, 'value': value})
+                return value
+            except (OSError, ValueError) as error:
+                try:
+                    previous = read_json(path)
+                except ValueError:
+                    previous = None
+                binding = identity(activity, activity.events())
+                value = (
+                    previous.get('value')
+                    if isinstance(previous, dict) and previous.get('identity') == binding
+                    else None
+                )
+                return stale(value, error)
     except (OSError, ValueError) as error:
         return unavailable(error)
 
 
 def acknowledge(activity, token, running):
-    # Socket I/O must never hold the lock used by the terminal input path.
-    # Even if a new turn starts after this observation, the exact completion
-    # token below can acknowledge only the old notice, never that new turn.
-    live = activity.adapter.live_activity(activity.session, running)
-    if live is not None and live.state != 'idle':
+    value, point, _ = observe(activity, running)
+    if value['state'] != 'finished' or value['completionId'] != token or point is None:
         return
-    with activity.lock():
-        metadata = activity.read()
-        result, point = inspect(activity, running, live, metadata)
-        if result['state'] == 'finished' and result['completionId'] == token:
-            # Pin the displayed completion, never a later file EOF.
-            metadata['checked'] = point
+    if point[0] == 'hook':
+        # Store only this completion identity; a newer event is never cleared.
+        activity.see_event(token)
+    else:
+        with activity.lock():
+            metadata = activity.read()
+            # Re-observation happened outside the input lock. Compare offsets
+            # before saving so an older acknowledgement cannot undo a newer one.
+            old = metadata['checked']
+            if old and old['source'] == point[1]['source'] and old['offset'] > point[1]['offset']:
+                return
+            metadata['checked'] = point[1]
             activity.save(metadata)

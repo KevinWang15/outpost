@@ -4,7 +4,7 @@ import time
 from collections import deque
 from threading import Event, Lock, Thread
 
-from outpost_activity import unavailable
+from outpost_activity import stale, unavailable
 
 INTERVAL = 2
 READ_TIMEOUT = 5
@@ -44,7 +44,7 @@ class ActivityStream:
                 state = self.read()
             except Exception as error:
                 # Optional metadata must never break a live terminal connection.
-                state = unavailable(error)
+                state = stale(self.result, error)
             with self.lock:
                 self.result = state
                 self.results.extend(results)
@@ -87,8 +87,14 @@ class ActivityStream:
         with self.lock:
             state = self.result
             if self.read_started is not None and now - self.read_started >= READ_TIMEOUT:
-                state = unavailable('Reading native activity timed out.')
-        if state is not None and state != self.last:
+                state = stale(self.result, 'Reading native activity timed out.')
+
+        # Freshness timestamps advance on every successful observation. Send
+        # meaningful changes only; a later failure carries the latest timestamp.
+        def signature(value):
+            return {key: item for key, item in value.items() if key != 'observedAt'} if value else None
+
+        if state is not None and signature(state) != signature(self.last):
             self.last = state
             return state
         return None

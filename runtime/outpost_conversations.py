@@ -188,6 +188,11 @@ class CodingSessionStore(ABC):
                 return event, offset
         return None
 
+    def activity_update(self, record, offset, previous, history):
+        """Reduce an appended record; history is a lazy reverse reader at this offset."""
+        event = self.activity_event(record)
+        return (event, offset) if event is not None else previous
+
     def find(self, session_id, environment, cwd=None):
         if not self.adapter.valid_id(session_id):
             raise ValueError('Invalid coding CLI session ID')

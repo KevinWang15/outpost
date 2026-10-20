@@ -112,3 +112,4 @@ class JsonRpcProcess(JsonRpcConnection):
             except ProcessLookupError:
                 pass
             self.process.wait()
+        self.process.stdout.close()

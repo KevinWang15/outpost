@@ -970,6 +970,7 @@ kbd {
     background: var(--accent-soft);
     color: var(--accent-hover);
   }
+  &.waiting,
   &.finished {
     border-color: #fcd34d;
     background: var(--warning-soft);
@@ -980,6 +981,9 @@ kbd {
   }
   &.unavailable {
     color: var(--muted);
+  }
+  &.error {
+    color: var(--danger);
   }
 }
 .row-actions {

@@ -57,7 +57,34 @@ class KimiSessionStore(CodingSessionStore):
         if kind in ('turn.prompt', 'turn.steer'):
             return 'working', record.get('time')
         if kind == 'turn.ended':
-            return ('finished' if record.get('reason') in ('completed', 'blocked') else 'idle'), record.get('time')
+            return {'completed': 'finished', 'blocked': 'waiting', 'failed': 'error', 'cancelled': 'idle'}.get(
+                record.get('reason'), 'unknown'
+            ), record.get('time')
+        if kind == 'interaction.request':
+            return 'waiting', record.get('time')
+        if kind == 'interaction.resolved':
+            return 'working', record.get('time')
         if kind == 'turn.cancel' and record.get('target') != 'queued':
             return 'idle', record.get('time')
         return None
+
+    def activity_marker(self, records):
+        resolved = set()
+        for record, offset in records:
+            if record.get('agentId') != 'main':
+                continue
+            if record.get('type') == 'interaction.resolved':
+                resolved.add(record.get('id'))
+                continue
+            if record.get('type') == 'interaction.request' and record.get('id') in resolved:
+                continue
+            event = self.activity_event(record)
+            if event is not None:
+                return event, offset
+        return None
+
+    def activity_update(self, record, offset, previous, history):
+        if record.get('agentId') == 'main' and record.get('type') == 'interaction.resolved':
+            # Resolving one approval must not clear another outstanding request.
+            return self.activity_marker(history())
+        return super().activity_update(record, offset, previous, history)

@@ -343,12 +343,18 @@ Control on macOS and Windows and work while the terminal or a workspace panel
 has focus.
 
 Tab icons and the session switcher follow the session list's **Activity** field:
-a blue spinner means **Working**, a gray clock means **Idle**, and a ringing
-bell means **Needs you**. They use the coding tool's native turn records and the
-same acknowledgement state, with updates about every two seconds. Unavailable
-activity shows **Unknown**; hover over the icon for details. Connection errors
+a blue spinner means **Working**, a gray clock means **Idle**, and an amber
+bell means **Needs you** (unread completion) or **Waiting for you** (approval/input).
+A red alert means **Error**. Hover over a badge for its specific state.
+They use native lifecycle hooks, status APIs and turn records, with shared
+acknowledgement and updates about every two seconds. Temporary read failures show
+a dimmed, still icon labeled **last known** for up to 15 seconds, then **Unknown**
+with a diagnostic. Connection errors
 take priority, and an unread terminal bell remains highlighted until you return.
 The green check means connected while the first activity reading is pending.
+Lifecycle tracking follows conversation changes within the agent. After updating
+Outpost, restart existing managed agent sessions to install their observers;
+reconnecting a terminal alone keeps its existing agent process.
 
 Activating a tab clears its terminal bell and marks the displayed **Needs you**
 completion as seen. This works with clicks, keyboard tab switching and returning
@@ -363,8 +369,8 @@ app and can be revealed from the terminal context menu. The same xterm.js
 client handles input, selection, image paste and reconnects in both clients.
 WebGL accelerates rendering when available, with a DOM renderer fallback.
 Local panes use the same terminal screen with a native PTY connection and have no
-activity badge. A split tab aggregates its remote panes: connection problems, unread
-bells/completions, then working activity take priority. Pane headers show each remote
+activity badge. A split tab aggregates its remote panes: connection problems,
+attention (bells, completions, approval waits and errors), then working activity take priority. Pane headers show each remote
 session’s own status, and hovering the tab lists all its panes. Focusing one pane
 acknowledges only that session.
 

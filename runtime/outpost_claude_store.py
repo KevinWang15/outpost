@@ -54,8 +54,12 @@ class ClaudeSessionStore(CodingSessionStore):
         # Claude can flush an older prompt after its assistant reply. Use native
         # timestamps within the bounded tail, keeping file order for ties.
         selected, newest = None, None
+        first = None
         try:
             for record, offset in records:
+                first = offset if first is None else first
+                if selected is not None and first - offset > 4 * 1024 * 1024:
+                    break
                 event = self.activity_event(record)
                 if event is None:
                     continue
@@ -71,13 +75,20 @@ class ClaudeSessionStore(CodingSessionStore):
                 raise
         return selected
 
+    def activity_update(self, record, offset, previous, history):
+        candidate = super().activity_update(record, offset, previous, history)
+        if previous is None or candidate is None:
+            return candidate
+        before, after = timestamp(previous[0][1]), timestamp(candidate[0][1])
+        return previous if before and after and after < before else candidate
+
     def activity_event(self, record):
         if record.get('isSidechain'):
             return None
         kind = record.get('type')
         message = record.get('message')
         if record.get('isApiErrorMessage') or (kind == 'system' and record.get('subtype') == 'api_error'):
-            return 'idle', record.get('timestamp')
+            return 'error', record.get('timestamp')
         if not isinstance(message, dict):
             return None
         if kind == 'user':

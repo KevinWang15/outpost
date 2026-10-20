@@ -1,6 +1,7 @@
 import { paneIds } from './layout'
 import type { TabGroup } from './workspace-model'
 import type { PaneSummary, TabSummary, PaneStatus } from './workspace-api'
+import { activityNeedsAttention } from '../../shared/activity'
 
 /** A tab's badge summarizes its members; it never adopts a member's identity,
  * origin, error or connection capability. Titles follow its selected pane. */
@@ -16,7 +17,7 @@ export function summarizeTabs(tabs: readonly TabGroup[], panes: readonly PaneSum
     if (!active || !members.includes(active)) throw new Error(`Invalid active pane in tab ${tab.id}.`)
     const representative =
       members.find(pane => pane.kind === 'remote' && pane.connection !== 'connected') ??
-      members.find(pane => pane.kind === 'remote' && (pane.attention || pane.activity?.state === 'finished')) ??
+      members.find(pane => pane.kind === 'remote' && (pane.attention || activityNeedsAttention(pane.activity))) ??
       members.find(pane => pane.kind === 'remote' && pane.activity?.state === 'working') ??
       (active.kind === 'remote' ? active : members.find(pane => pane.kind === 'remote')) ??
       active

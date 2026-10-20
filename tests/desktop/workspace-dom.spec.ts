@@ -131,6 +131,66 @@ test('pane removal during a drag keeps body capture, and status refreshes retain
     .toEqual([{ name: 'dragEnd', args: [false] }])
 })
 
+test('native activity badges share pane and tab state and retain their SVG on freshness updates', async ({ page }) => {
+  const badge = page.locator('[data-pane="101"] .tab-status')
+  const tab = page.locator('.tab .tab-status').first()
+  for (const state of ['working', 'waiting', 'error', 'finished', 'unknown', 'idle'] as const) {
+    await page.evaluate(
+      state =>
+        window.workspaceFixture.update(101, {
+          activity: {
+            state,
+            updatedAt: null,
+            observedAt: new Date().toISOString(),
+            observation: 'current',
+            completionId: state === 'finished' ? 'a'.repeat(64) : null,
+            detail: null,
+          },
+        }),
+      state,
+    )
+    await expect(badge).toHaveAttribute('data-state', state)
+    if (['working', 'waiting', 'error', 'finished'].includes(state))
+      await expect(tab).toHaveAttribute('data-state', state)
+  }
+  await page.evaluate(() =>
+    window.workspaceFixture.update(101, {
+      activity: {
+        state: 'working',
+        updatedAt: null,
+        observedAt: new Date().toISOString(),
+        observation: 'current',
+        completionId: null,
+        detail: null,
+      },
+    }),
+  )
+  const original = await badge.locator('svg').elementHandle()
+  expect(await badge.locator('svg').evaluate(node => getComputedStyle(node).animationName)).toBe('tab-spin')
+  await page.evaluate(() =>
+    window.workspaceFixture.update(101, {
+      activity: {
+        state: 'working',
+        updatedAt: null,
+        observedAt: new Date().toISOString(),
+        observation: 'stale',
+        completionId: null,
+        detail: 'Activity update delayed',
+      },
+    }),
+  )
+  await expect(badge).toHaveAttribute('data-observation', 'stale')
+  await expect(badge).toHaveAttribute('title', /Working \(last known\).*Activity update delayed/)
+  expect(await badge.locator('svg').evaluate((node, previous) => node === previous, original)).toBe(true)
+  expect(await badge.locator('svg').evaluate(node => getComputedStyle(node).animationName)).toBe('none')
+  await page.evaluate(() => window.workspaceFixture.update(101, { attention: true }))
+  await expect(badge).toHaveAttribute('data-state', 'attention')
+  await expect(badge).toHaveAttribute('data-observation', 'current')
+  expect(await badge.locator('svg').evaluate(node => getComputedStyle(node).animationName)).toBe('tab-bell-ring')
+  await page.evaluate(() => window.workspaceFixture.update(101, { kind: 'local' }))
+  await expect(badge).toBeHidden()
+})
+
 test('pane error actions remain clickable and home documents the shared macOS shortcuts', async ({ page }) => {
   await page.evaluate(() => window.workspaceFixture.update(101, { error: 'Renderer failed', connection: 'closed' }))
   const error = page.locator('.placeholder')

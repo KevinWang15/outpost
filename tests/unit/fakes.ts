@@ -39,7 +39,14 @@ export class FakeSessions implements SessionService {
       createdAt: new Date().toISOString(),
       lastConnectedAt: null,
       status: 'ready',
-      activity: { state: 'idle', updatedAt: null, completionId: null, detail: null },
+      activity: {
+        state: 'idle',
+        updatedAt: null,
+        completionId: null,
+        detail: null,
+        observation: 'current',
+        observedAt: null,
+      },
     }
     this.sessions.set(context.target.id, [...this.all(context), session])
     return session

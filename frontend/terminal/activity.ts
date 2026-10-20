@@ -38,6 +38,10 @@ export class TerminalActivity {
 
   acknowledge() {
     if (!this.active || !this.client.acknowledge) return
+    if (this.state && this.state.observation !== 'current') {
+      this.awaitingObservation = true
+      return
+    }
     this.awaitingObservation = this.state === null
     const token = this.state?.state === 'finished' ? this.state.completionId : null
     if (!token || this.checked.has(token) || this.pending.has(token) || this.pending.size >= 32) return

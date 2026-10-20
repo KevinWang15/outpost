@@ -27,6 +27,12 @@ class ActivityTests(unittest.TestCase):
         self.codex_threads = {}
         self.addCleanup(self.directory.cleanup)
 
+    def assertObservationEqual(self, actual, expected):
+        self.assertEqual(
+            {k: v for k, v in actual.items() if k != 'observedAt'},
+            {k: v for k, v in expected.items() if k != 'observedAt'},
+        )
+
     def fixture(self, tool):
         adapter = adapters()[tool]
         home = self.home / tool
@@ -121,7 +127,7 @@ class ActivityTests(unittest.TestCase):
                 self.assertEqual(first['state'], 'finished')
                 self.assertEqual(observer.describe(False)['state'], 'finished', 'completion survives CLI exit')
                 before = observer.path.read_bytes()
-                self.assertEqual(observer.describe(True), first)
+                self.assertObservationEqual(observer.describe(True), first)
                 self.assertEqual(observer.path.read_bytes(), before, 'polling never marks a turn read')
                 observer.acknowledge(first['completionId'], True)
                 self.assertEqual(observer.describe(True)['state'], 'idle')
@@ -130,7 +136,7 @@ class ActivityTests(unittest.TestCase):
                 second = observer.describe(True)
                 self.assertNotEqual(second['completionId'], first['completionId'])
                 observer.acknowledge(first['completionId'], True)
-                self.assertEqual(observer.describe(True), second, 'another browser cannot clear a newer completion')
+                self.assertObservationEqual(observer.describe(True), second)
                 observer.input()
                 self.assertEqual(observer.describe(True)['state'], 'idle')
                 self.assertNotIn('PRIVATE_TURN_CONTENT', observer.path.read_text())
@@ -205,12 +211,12 @@ class ActivityTests(unittest.TestCase):
         self.assertEqual(
             claude.activity_event({'type': 'user', 'message': {'content': [{'type': 'tool_result'}]}})[0], 'working'
         )
-        self.assertEqual(claude.activity_event({'type': 'system', 'subtype': 'api_error'})[0], 'idle')
+        self.assertEqual(claude.activity_event({'type': 'system', 'subtype': 'api_error'})[0], 'error')
         self.assertEqual(
             claude.activity_event({'type': 'assistant', 'isApiErrorMessage': True, 'message': {'stop_reason': None}})[
                 0
             ],
-            'idle',
+            'error',
         )
 
     def test_claude_delayed_prompts_do_not_hide_newer_completion_or_errors(self):
@@ -229,16 +235,16 @@ class ActivityTests(unittest.TestCase):
         second = observer.describe(False)
         self.assertEqual(second['state'], 'finished')
         observer.acknowledge(first['completionId'], False)
-        self.assertEqual(observer.describe(False), second)
+        self.assertObservationEqual(observer.describe(False), second)
         self.append(path, {'type': 'system', 'subtype': 'api_error', 'timestamp': '2026-10-01T00:00:05Z'})
         self.append(path, {**prompt, 'timestamp': '2026-10-01T00:00:04Z'})
-        self.assertEqual(observer.describe(False)['state'], 'idle', 'delayed prompt must not hide a provider error')
-        self.assertEqual(observer.describe(True)['state'], 'idle')
+        self.assertEqual(observer.describe(False)['state'], 'error', 'delayed prompt must not hide a provider error')
+        self.assertEqual(observer.describe(True)['state'], 'error')
 
-    def test_claude_timestamp_selection_stays_within_the_bounded_tail(self):
+    def test_claude_finds_completion_beyond_the_old_tail_limit(self):
         observer, path = self.fixture('claude')
         self.append(path, {'type': 'attachment', 'payload': 'x' * (4 * 1024 * 1024)})
-        self.assertIsNotNone(observer.describe(False)['detail'])
+        self.assertIsNone(observer.describe(False)['detail'])
         self.append(path, self.event('claude', 'finished'))
         result = observer.describe(False)
         self.assertEqual(result['state'], 'finished')
@@ -256,15 +262,15 @@ class ActivityTests(unittest.TestCase):
         shutil.move(moved, path)
         self.assertEqual(observer.describe(True)['state'], 'idle')
 
-    def test_detection_is_bounded_and_missing_or_corrupt_metadata_is_visible(self):
+    def test_large_records_preserve_completion_and_corrupt_checkpoints_report_staleness(self):
         observer, path = self.fixture('codex')
         self.append(path, self.event('codex', 'finished'))
         self.append(path, {'type': 'response_item', 'payload': 'x' * (4 * 1024 * 1024)})
-        self.assertIsNotNone(observer.describe(True)['detail'])
+        self.assertEqual(observer.describe(True)['state'], 'finished')
         observer.path.write_text('{}')
         self.assertIn('current schema', observer.describe(True)['detail'])
         observer.path.unlink()
-        self.assertIn('Activity unavailable', observer.describe(True)['detail'])
+        self.assertEqual(observer.describe(True)['observation'], 'stale')
 
     def test_symlinks_cannot_read_another_store(self):
         observer, path = self.fixture('codex')

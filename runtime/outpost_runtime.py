@@ -247,7 +247,7 @@ def install_helpers():
         os.replace(temporary, path)
 
 
-def launch_script(session, executable):
+def launch_script(session, executable, activity_generation=None, activity_arguments=()):
     # Environment values and paths are literal; only the argument string is shell text.
     steps = [
         'cd -- ' + shlex.quote(session['rootDir']),
@@ -258,6 +258,12 @@ def launch_script(session, executable):
         + shlex.quote(str(HELPERS / 'outpost-browser')),
     ]
     environment = {**session['env'], **session['cliSessionEnv']}
+    if activity_generation is not None:
+        environment.update(
+            OUTPOST_ACTIVITY_GENERATION=activity_generation,
+            OUTPOST_ACTIVITY_HARNESS=session['tool'],
+            OUTPOST_ACTIVITY_DIRECTORY=str(STATE / 'activity'),
+        )
     if environment:
         steps.append('export -- ' + ' '.join(key + '=' + shlex.quote(value) for key, value in environment.items()))
     adapter = CODING_ADAPTERS[session['tool']]
@@ -272,7 +278,10 @@ def launch_script(session, executable):
         + shlex.quote(executable)
         + ' '
         + flags
-        + ' "$@"\n}'
+        + ' '
+        + ' '.join(shlex.quote(value) for value in activity_arguments)
+        + ' "$@"'
+        + '\n}'
     )
     steps.append('launch_coding_tool ' + session['args'])
     return ' &&\n'.join(steps)
@@ -468,6 +477,7 @@ def terminate_session(session):
 
 
 def start_session(session, cols, rows):
+    session = activity(session).selected_session()
     if not Path(session['rootDir']).is_dir():
         fail('Session root directory no longer exists', 409)
     tool = session['tool']
@@ -488,14 +498,22 @@ def start_session(session, cols, rows):
     (STATE / 'terminals').mkdir(mode=0o700, exist_ok=True)
     Path(socket_name(session)).unlink(missing_ok=True)
     install_helpers()
-    activity(session).initialize()
+    observer = activity(session)
+    observer.initialize()
+    activity_generation, activity_arguments = observer.begin_launch(executable)
     environment = dict(os.environ)
     environment.pop('TMUX', None)
     environment.pop('TMUX_PANE', None)
     environment.update(TERM='xterm-256color', COLORTERM='truecolor')
     configuration = {
         'socket': socket_name(session),
-        'command': terminal.child_command([command_shell, '-c', launch_script(session, executable)]),
+        'command': terminal.child_command(
+            [
+                command_shell,
+                '-c',
+                launch_script(session, executable, activity_generation, activity_arguments),
+            ]
+        ),
         'cwd': session['rootDir'],
         'env': environment,
         'cols': cols,

@@ -184,7 +184,7 @@ class CodexSessionStore(CodingSessionStore):
         if kind == 'task_started':
             return 'working', record.get('timestamp')
         if kind == 'task_complete':
-            return ('idle' if payload.get('error') else 'finished'), record.get('timestamp')
+            return ('error' if payload.get('error') else 'finished'), record.get('timestamp')
         if kind == 'turn_aborted':
             return 'idle', record.get('timestamp')
         item = payload.get('item')

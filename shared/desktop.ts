@@ -1,7 +1,7 @@
 import type { SessionActivity } from './activity'
 
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 6
+export const desktopBridgeVersion = 7
 export interface TerminalPreferences {
   fontSize: number
   sound: boolean

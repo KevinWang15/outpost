@@ -1,5 +1,5 @@
 import type { TerminalPaneState } from '../../shared/desktop'
-import { activityLabels } from '../../shared/activity'
+import { activityLabel } from '../../shared/activity'
 import type { PaneStatus } from './workspace-api'
 
 const connectionLabels = {
@@ -12,7 +12,7 @@ const connectionLabels = {
 export function tabStatusLabel(tab: PaneStatus) {
   const parts = [connectionLabels[tab.connection]]
   if (tab.connection === 'connected') {
-    if (tab.activity) parts.push(activityLabels[tab.activity.state])
+    if (tab.activity) parts.push(activityLabel(tab.activity))
     if (tab.activity?.detail) parts.push(tab.activity.detail)
   }
   if (tab.attention) parts.push('Bell rang — needs attention')
@@ -35,6 +35,8 @@ const icons = {
   working: spinner,
   idle: [circle, 'M12 6v6l4 2'],
   finished: bell,
+  waiting: bell,
+  error: [circle, 'M12 7v6m0 4h.01'],
   unknown: [circle, 'M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3m.1 4h.01'],
 }
 
@@ -57,6 +59,8 @@ export function updateTabStatus(node: HTMLElement, tab: PaneStatus) {
   node.hidden = tab.kind === 'local'
   if (node.hidden) return
   node.title = tabStatusLabel(tab)
+  node.dataset.observation =
+    tab.connection === 'connected' && !tab.attention ? (tab.activity?.observation ?? 'current') : 'current'
   const kind = tabStatusIcon(tab)
   // Metadata updates must not restart a bell's animation or a connection spinner.
   if (node.dataset.state === kind) return

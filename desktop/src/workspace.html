@@ -11,7 +11,10 @@
   <body>
     <header class="chrome">
       <button id="home" class="icon brand" aria-label="Servers, sessions and help" aria-controls="sessions-panel" title="Servers, sessions and help"><img src="outpost.png" alt="" width="20" height="20" /></button>
-      <nav id="tabs" role="tablist" aria-label="Terminal sessions"></nav>
+      <div id="tab-strip">
+        <nav id="tabs" role="tablist" aria-label="Terminal sessions"></nav>
+        <div id="tab-scrollbar" role="scrollbar" aria-label="Scroll terminal tabs" aria-controls="tabs" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0" hidden><div id="tab-scroll-thumb"></div></div>
+      </div>
       <button id="new-tab" class="icon" aria-label="New local terminal" title="New local terminal (right-click for shells or Outpost sessions)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg></button>
       <div class="window-drag" aria-hidden="true"></div>
       <div class="tools">

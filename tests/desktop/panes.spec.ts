@@ -145,6 +145,55 @@ test.afterEach(async () => {
   if (directory) await rm(directory, { recursive: true, force: true })
 })
 
+test('overflowing tabs accept native wheel input and thumb dragging restores terminal focus without resizing it', async () => {
+  for (let i = 0; i < 11; i++) await chrome.evaluate(() => window.outpostWorkspace.newLocal())
+  await expect(chrome.locator('.tab')).toHaveCount(12)
+  await expect(chrome.locator('#tab-scrollbar')).toBeVisible()
+  const active = (await state()).activePaneId!
+  await expect.poll(async () => (await state()).panes.find(pane => pane.id === active)?.connection).toBe('connected')
+  const pane = await terminal(active)
+  const views = await nativePanes(),
+    windowBounds = await bounds()
+  const screen = await pane.locator('.xterm-screen').boundingBox()
+  const tabs = chrome.locator('#tabs'),
+    track = chrome.locator('#tab-scrollbar')
+  const offset = () => tabs.evaluate(node => node.scrollLeft)
+  await tabs.evaluate(node => {
+    node.scrollLeft = 0
+  })
+  const viewport = (await tabs.boundingBox())!
+  await cursor(windowBounds.x + viewport.x + 30, windowBounds.y + viewport.y + 12)
+  await execute('xdotool', ['click', '--repeat', '3', '--delay', '50', '5'])
+  await expect.poll(offset).toBeGreaterThan(0)
+  const forward = await offset()
+  await execute('xdotool', ['click', '4'])
+  await expect.poll(offset).toBeLessThan(forward)
+  await tabs.evaluate(node => {
+    node.scrollLeft = 0
+  })
+  await expect(track).toHaveAttribute('aria-valuenow', '0')
+  const thumb = (await chrome.locator('#tab-scroll-thumb').boundingBox())!
+  const rail = (await track.boundingBox())!
+  await cursor(windowBounds.x + thumb.x + thumb.width / 2, windowBounds.y + thumb.y + thumb.height / 2)
+  await execute('xdotool', ['mousedown', '1'])
+  await expect(track).toHaveClass(/dragging/)
+  await cursor(windowBounds.x + rail.x + rail.width + 20, windowBounds.y + rail.y + rail.height / 2)
+  await drop()
+  await expect(track).not.toHaveClass(/dragging/)
+  await expect(track).toHaveAttribute('aria-valuenow', '100')
+  await expect.poll(() => app.evaluate(({ webContents }) => webContents.getFocusedWebContents()?.id)).toBe(active)
+  await expect(pane.locator('.xterm-helper-textarea')).toBeFocused()
+  expect((await state()).drag).toBeNull()
+  expect((await state()).activePaneId).toBe(active)
+  expect(await nativePanes()).toEqual(views)
+  expect(await bounds()).toEqual(windowBounds)
+  expect(await pane.locator('.xterm-screen').boundingBox()).toEqual(screen)
+  expect(
+    await tabs.evaluate(node => ({ top: node.scrollTop, verticalRange: node.scrollHeight - node.clientHeight })),
+  ).toEqual({ top: 0, verticalRange: 0 })
+  await chrome.screenshot({ path: test.info().outputPath('overflow-tabs.png') })
+})
+
 test('native split accelerators operate once from terminal focus; dimming is click-through and never resizes panes', async () => {
   const original = (await state()).activePaneId!
   await key('ctrl+shift+d')

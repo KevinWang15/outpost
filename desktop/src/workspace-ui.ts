@@ -8,6 +8,7 @@ import { reconcileElements } from './keyed-elements'
 import { paneActionShortcuts, tabActionShortcuts } from './workspace-shortcuts'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 import { serverAccountsControls } from './server-accounts-ui'
+import { tabScroller } from './tab-scroller'
 
 declare global {
   interface Window {
@@ -46,6 +47,9 @@ const tabNodes = new Map<number, HTMLElement>()
 const recentNodes = new Map<string, HTMLElement>()
 const sessionNodes = new Map<number, HTMLElement>()
 const tabs = el('tabs')
+const tabScroll = tabScroller(tabs, el('tab-scrollbar'), el('tab-scroll-thumb'), () => {
+  if (state?.panel === null && state.activePaneId !== null) run(api.activatePane(state.activePaneId))
+})
 const search = el<HTMLInputElement>('session-search')
 workspaceDragging(document.body, api, run)
 const renderPanes = paneControls(el('stage'), api, run)
@@ -56,6 +60,7 @@ const dragSpace = document.querySelector<HTMLElement>('.window-drag')!
 function reportGeometry() {
   cancelAnimationFrame(geometryFrame)
   geometryFrame = requestAnimationFrame(() => {
+    tabScroll.refresh()
     const viewport = tabs.getBoundingClientRect()
     const end = dragSpace.getBoundingClientRect()
     run(
@@ -74,6 +79,8 @@ function reportGeometry() {
 new ResizeObserver(reportGeometry).observe(tabs)
 new ResizeObserver(reportGeometry).observe(dragSpace)
 tabs.addEventListener('scroll', reportGeometry)
+window.visualViewport?.addEventListener('resize', reportGeometry)
+document.fonts.addEventListener('loadingdone', reportGeometry)
 
 function tabNode(id: number) {
   const node = document.createElement('div')
@@ -269,8 +276,10 @@ function render(next: WorkspaceSnapshot) {
   renderRecents()
   renderMatches()
   renderStage()
-  if (previousActive !== next.activeTabId && next.activeTabId !== null)
-    tabNodes.get(next.activeTabId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  if (previousActive !== next.activeTabId && next.activeTabId !== null) {
+    const activeTab = tabNodes.get(next.activeTabId)
+    if (activeTab) tabScroll.reveal(activeTab)
+  }
   const key = JSON.stringify(panel)
   const changedPanel = panelKey !== key
   panelKey = key

@@ -1117,6 +1117,22 @@ header has a window drag region. Its tab scroller and buttons opt out, and a
 flexible spacer always leaves room to drag the window with a full tab strip.
 Window close, minimize, maximize and fullscreen remain native operations.
 
+`tab-scroller.ts` uses the tab viewport's native `scrollLeft` as its only scroll
+state. Both native scrollbar axes are hidden. A three-pixel custom horizontal
+thumb occupies a fixed four-pixel lane within the existing title-bar height,
+with a larger pointer target. Its visibility and position cannot resize the
+viewport or change whether the tabs overflow. Thumb geometry is measured from
+the viewport and content, never from the thumb's previous dimensions.
+Mouse-wheel and trackpad deltas scroll horizontally, with line/page units
+normalized; Ctrl/pinch zoom gestures retain their default handling. Clicking the
+track or dragging the thumb scrolls directly, and keyboard users can use arrows,
+Page Up/Down and Home/End. Completing a pointer gesture restores the active
+terminal's focus; blur/capture cancellation never reactivates the window.
+Tab activation reveals the selected tab by changing only `scrollLeft`, avoiding
+`scrollIntoView()` changing a vertical or ancestor offset. The existing geometry
+report frame updates the thumb after tab changes, scrolling, resizing, font loads
+and viewport zoom; drag autoscroll uses the same viewport and position.
+
 Terminal views and workspace panels fill the remaining height to the bottom of
 the window. Connection state lives in the tabs; there is no persistent status
 bar. Workspace action errors use a native dialog owned by the calling window,

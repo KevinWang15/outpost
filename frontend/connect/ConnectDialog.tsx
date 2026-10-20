@@ -23,7 +23,7 @@ export default function ConnectDialog({
 }) {
   const [remember, setRemember] = useState(() => preferredTerminal() !== null)
 
-  if (phase === 'opening')
+  if (phase === 'desktop-help')
     return (
       <Dialog
         title={`Connect to ${session.name}`}

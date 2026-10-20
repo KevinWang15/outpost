@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, Menu, screen, type IpcMainInvokeEvent, type Point } from 'electron'
+import { app, BrowserWindow, dialog, Menu, screen, shell, type IpcMainInvokeEvent, type Point } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { TerminalCommand, TerminalPreferences } from '../../shared/desktop'
+import { desktopOrigin } from '../../shared/desktopAuth'
 import { paneLayout, paneIds, tabBarHeight, WindowLayout } from './layout'
 import { WorkspaceClose } from './workspace-close'
 import { summarizeTabs } from './workspace-summary'
@@ -136,6 +137,12 @@ export class WorkspaceWindow {
         return this.tabMenu(command.args[0])
       case 'reloadPane':
         return this.reloadPane(command.args[0])
+      case 'openServer': {
+        const origin = desktopOrigin(command.args[0])
+        if (!this.host.serverAccounts().accounts.some(server => server.origin === origin))
+          throw new Error('This server is no longer in your logged-in servers.')
+        return shell.openExternal(origin)
+      }
       case 'loginServer':
         return this.host.loginServer(command.args[0])
       case 'cancelServerLogin':

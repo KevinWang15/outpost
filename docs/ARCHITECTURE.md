@@ -117,18 +117,21 @@ branch on the mode.
 
 ### Connect flow
 
-`frontend/connect/useConnect.ts` owns launching and desktop handoff polling for
-both explicit and remembered choices. `ConnectDialog` renders that state. Web
-popups open synchronously from the user's click, including when skipping the
-chooser; effects only poll an existing launch, so Strict Mode cannot launch
-twice. An installed standalone web app navigates to the terminal in its current
-window, retaining its Home Screen context. Closing, retrying, or changing targets aborts pending requests, and late
-poll results cannot replace a newer attempt.
+`frontend/connect/useConnect.ts` owns launching for both explicit and remembered
+choices. `ConnectDialog` renders the chooser and optional desktop help. Web popups
+and desktop links open synchronously from the user's click; effects only clean up,
+so Strict Mode cannot launch twice. An installed standalone web app navigates to
+the terminal in its current window, retaining its Home Screen context.
 
-Remembered launches skip the dialog. A successful OS handoff ends the browser
-attempt; errors reopen the chooser. Explicit desktop choices show a browser
-handoff with retry/download guidance. No browser polling or terminal credential
-is needed to ask the app to connect.
+Desktop choices dismiss the chooser immediately. `desktopHandoff.ts` observes
+window blur and page visibility before sending the OS intent. Retry/download help
+appears after two seconds only if the browser stays focused and the user has not
+continued working in the web UI. Leaving the browser dismisses any help and ends
+the observer; returning never reopens it. Closing, retrying, choosing another
+terminal, or changing targets cancels the timer and listeners. These signals are
+UX hints, not acknowledgement that the app connected. Remembered launches skip
+help entirely; synchronous launch errors reopen the chooser. No browser polling
+or terminal credential is needed to ask the app to connect.
 
 `preference.ts` stores only an explicitly chosen terminal in browser local
 storage for the current origin. Connect reads it on each click, including changes

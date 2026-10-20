@@ -46,7 +46,11 @@ export function serverAccountsControls(api: WorkspaceBridge, run: (work: Promise
     row.className = 'server-account'
     const info = document.createElement('div')
     info.className = 'row-main'
-    info.append(document.createElement('strong'), document.createElement('small'))
+    const link = document.createElement('a')
+    link.className = 'server-origin'
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
+    info.append(link, document.createElement('small'))
     const status = button('', 'server-status')
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     icon.setAttribute('viewBox', '0 0 24 24')
@@ -58,7 +62,19 @@ export function serverAccountsControls(api: WorkspaceBridge, run: (work: Promise
   }
   function updateAccount(row: HTMLElement, server: ServerAccountSummary, pending: boolean) {
     row.dataset.status = server.status
-    row.querySelector('strong')!.textContent = server.origin
+    const link = row.querySelector<HTMLAnchorElement>('.server-origin')!
+    link.textContent = server.origin
+    link.href = server.origin
+    link.title = `Open ${server.origin} in your browser`
+    link.onclick = event => {
+      event.preventDefault()
+      run(api.openServer(server.origin))
+    }
+    link.onauxclick = event => {
+      if (event.button !== 1) return
+      event.preventDefault()
+      run(api.openServer(server.origin))
+    }
     row.querySelector('small')!.textContent =
       server.error ?? `${server.account.name}${server.account.email ? ' · ' + server.account.email : ''}`
     const status = row.querySelector<HTMLButtonElement>('.server-status')!

@@ -36,6 +36,7 @@ const bridge: WorkspaceBridge = {
   resizeSplit: (id, ratio) => invoke('resizeSplit', id, ratio),
   tabMenu: id => invoke('tabMenu', id),
   reloadPane: id => invoke('reloadPane', id),
+  openServer: origin => invoke('openServer', origin),
   loginServer: origin => invoke('loginServer', origin),
   cancelServerLogin: origin => invoke('cancelServerLogin', origin),
   logoutServer: origin => invoke('logoutServer', origin),

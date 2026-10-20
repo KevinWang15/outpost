@@ -69,6 +69,7 @@ const validators: Record<keyof WorkspaceCommands, (args: unknown[]) => boolean> 
     args.length === 2 && entityId(args[0]) && typeof args[1] === 'number' && Number.isFinite(args[1]),
   tabMenu: entity,
   reloadPane: entity,
+  openServer: identifier,
   loginServer: identifier,
   cancelServerLogin: identifier,
   logoutServer: identifier,

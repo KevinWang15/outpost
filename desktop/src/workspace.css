@@ -679,6 +679,22 @@ dd {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.server-origin {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+}
+.server-origin:hover,
+.server-origin:focus-visible {
+  color: #93c5fd;
+  text-decoration: underline;
+}
 .server-status {
   display: inline-flex;
   align-items: center;

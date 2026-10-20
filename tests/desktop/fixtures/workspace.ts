@@ -133,6 +133,7 @@ const bridge: WorkspaceBridge = {
   tabMenu: async () => {},
   paneMenu: async () => {},
   reloadPane: async () => {},
+  openServer: async () => {},
   loginServer: async () => {},
   cancelServerLogin: async () => {},
   logoutServer: async () => {},

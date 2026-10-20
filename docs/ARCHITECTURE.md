@@ -1059,6 +1059,21 @@ the stable workspace body so removing a header or tab cannot cancel the gesture.
 layout kind and ID; it carries no grants, terminal data or message contents.
 A 32 ms timer resolves screen DIP coordinates against window bounds, measured tab
 bars and shared pane geometry, respecting the temporary native stacking order.
+`WorkspaceWindow.paneDropAt()` reports geometry without excluding the moving
+panes. The drag controller resolves an explicit placement, detachment or
+cancellation before updating either the preview or the drop action:
+
+- A tab-bar destination creates or reorders a tab for either drag handle.
+- A pane outside the dragged selection accepts a split, including across windows.
+- A tab title dropped over its own terminal area detaches the whole tab, preserving
+  its split tree. The rule is the same for one pane or many.
+- A pane header dropped onto itself cancels. Other panes remain split destinations.
+- Outside all windows, either handle detaches. Window controls, workspace pages
+  and other areas with no terminal or tab destination cancel.
+
+The handle determines the payload: a tab title moves its complete layout; a pane
+header moves only that pane. Detecting a self-hit belongs to this policy, so it
+cannot be confused with an area that has no drop target.
 
 `pane-transfer.ts` is the single transfer path for dragging, context menus and the
 session switcher. A small structural window interface keeps the transaction
@@ -1080,11 +1095,12 @@ Menu and launch actions cancel the drag before resolving current ownership.
 Pane-edge hover instead shows a click-through native highlight above terminal views.
 It does not mutate the tree or resize views while hit testing; therefore a stationary
 pointer cannot create a layout/measurement feedback loop. Release commits through
-the same transfer transaction. A self-drop or invalid area inside a workspace cancels;
-outside every workspace it creates a window. Moving all of a lone window's contents
-moves that native window instead. Empty windows close only after a committed move.
+the same transfer transaction. Detachment creates a window, or moves the existing
+native window when the payload contains all of its contents. Empty windows close
+only after a committed move.
 
-`drag-preview.ts` paints the native highlight or an outside-drag title label. Every
+`drag-preview.ts` paints the split highlight or a title label for detachment,
+including detachment over the source terminal area. Every
 update supplies complete bounds from pane geometry or fixed label dimensions,
 never previous popup measurements. Windows resize insets are disabled. Loading
 asynchronously cannot reshow a hidden or destroyed preview. New window bounds are

@@ -1,19 +1,20 @@
-# Outpost Desktop 0.14.0 preview
+# Outpost Desktop 0.15.0 preview
 
-Open your logged-in Outpost servers in the browser and enjoy a quieter website-to-app handoff.
+Move tabs and panes using consistent drag-and-drop rules.
 
 ## What's new
 
-- **Clickable server addresses:** click a logged-in server's address in the Outpost tab to open it in your default browser.
-- **Less launch-dialog clutter:** the website closes the terminal chooser immediately when launching the app. Installation help appears after a short delay only if you stay on the page, and closes when you switch away.
+- **Detach inside the window:** drag a tab title over its own terminal area and release to detach the entire tab, including all its split panes.
+- **Move individual panes:** drag a pane header onto another pane to rearrange the split, onto a tab bar for its own tab, or outside all windows for a separate window. Dropping a pane onto itself cancels.
+- **Clear drop feedback:** a highlighted half indicates a split destination; a floating title indicates detachment. Tab-bar and valid split destinations take priority. The Outpost tab's help now explains these rules.
 
-Use Desktop **0.14.0** for clickable server addresses. The launch-dialog improvement is part of the accompanying Outpost server update. Existing server logins continue to work; no terminal-helper update is required.
+Install Desktop **0.15.0** for these improvements. Existing server logins continue to work. No server or terminal-helper update is required.
 
 ## Install
 
-- **Apple silicon Mac:** download `Outpost-0.14.0-mac-arm64.dmg`.
-- **Intel Mac:** download `Outpost-0.14.0-mac-x64.dmg`.
-- **Windows x64:** download `Outpost-0.14.0-windows-x64.exe`.
+- **Apple silicon Mac:** download `Outpost-0.15.0-mac-arm64.dmg`.
+- **Intel Mac:** download `Outpost-0.15.0-mac-x64.dmg`.
+- **Windows x64:** download `Outpost-0.15.0-windows-x64.exe`.
 
 On macOS, drag Outpost to Applications and open it once. These previews have no Developer ID signature or notarization; after the first launch attempt, use **System Settings → Privacy & Security → Open Anyway** if macOS blocks the app. Windows may show **SmartScreen → More info → Run anyway**. `SHA256SUMS` lists the artifact checksums.
 

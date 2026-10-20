@@ -809,7 +809,8 @@ export class WorkspaceWindow {
       },
     ]).popup({ window: this.window })
   }
-  paneDropAt(point: Point, excluded: number[]) {
+  /** Geometry only; the drag controller decides what each handle may do here. */
+  paneDropAt(point: Point) {
     if (!this.window || this.layout.panel !== null) return null
     const origin = this.window.getContentBounds(),
       x = point.x - origin.x,
@@ -817,7 +818,7 @@ export class WorkspaceWindow {
     const pane = this.paneGeometry().panes.find(
       ({ bounds: b }) => x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height,
     )
-    if (!pane || excluded.includes(pane.id)) return null
+    if (!pane) return null
     const b = pane.bounds
     const distances = {
       left: (x - b.x) / b.width,

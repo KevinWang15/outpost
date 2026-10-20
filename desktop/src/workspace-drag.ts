@@ -23,13 +23,15 @@ interface Host {
   committed(source: WorkspaceWindow, target: WorkspaceWindow, activePaneId: number): void
   failed(error: unknown): void
 }
+type DropDestination =
+  | { kind: 'place'; target: WorkspaceWindow; placement: PanePlacement; highlight: Rectangle | null }
+  | { kind: 'detach' }
+  | { kind: 'cancel' }
 interface Drag {
   source: WorkspaceWindow
   item: WorkspaceItem
   panes: number[]
-  target: WorkspaceWindow | null
-  placement: PanePlacement
-  blocked: boolean
+  destination: DropDestination
   scroll: number
   preview: DragPreview
   transfer: Transfer | null
@@ -49,9 +51,7 @@ export class WorkspaceDrag {
       source,
       item,
       panes: source.selection(item),
-      target: null,
-      placement: { kind: 'tab', before: null },
-      blocked: false,
+      destination: { kind: 'cancel' },
       scroll: 0,
       preview: new DragPreview(title, screen.getCursorScreenPoint()),
       transfer: null,
@@ -71,16 +71,17 @@ export class WorkspaceDrag {
   }
   state(window: WorkspaceWindow): WorkspaceDragState | null {
     const drag = this.drag
-    return drag
-      ? {
-          id: drag.transfer && window === drag.target ? drag.transfer.tabId : drag.item.id,
-          kind: drag.transfer && window === drag.target ? 'tab' : drag.item.kind,
-          source: drag.source === window,
-          target: drag.target === window && drag.placement.kind === 'tab',
-          before: drag.placement.kind === 'tab' ? drag.placement.before : null,
-          scroll: drag.target === window ? drag.scroll : 0,
-        }
-      : null
+    if (!drag) return null
+    const destination = drag.destination.kind === 'place' ? drag.destination : null
+    const target = destination?.target === window
+    return {
+      id: drag.transfer && target ? drag.transfer.tabId : drag.item.id,
+      kind: drag.transfer && target ? 'tab' : drag.item.kind,
+      source: drag.source === window,
+      target: target && destination?.placement.kind === 'tab',
+      before: destination?.placement.kind === 'tab' ? destination.placement.before : null,
+      scroll: target ? drag.scroll : 0,
+    }
   }
   private restoreOpacity(drag: Drag) {
     const window = drag.source.browserWindow
@@ -93,13 +94,34 @@ export class WorkspaceDrag {
     transfer?.restore()
     this.restoreOpacity(drag)
   }
+  private resolveDestination(
+    drag: Drag,
+    candidate: WorkspaceWindow | null,
+    point: Point,
+    before: number | null | undefined,
+  ): DropDestination {
+    if (!candidate) return { kind: 'detach' }
+    // Both handles can create/reorder tabs; a tab-bar destination takes priority.
+    if (before !== undefined)
+      return { kind: 'place', target: candidate, placement: { kind: 'tab', before }, highlight: null }
+    const pane = candidate.paneDropAt(point)
+    if (!pane) return { kind: 'cancel' }
+    if (drag.panes.includes(pane.placement.pane)) {
+      // The tab title moves its whole layout, regardless of pane count.
+      // A pane header dropped back onto itself leaves that layout alone.
+      return { kind: candidate === drag.source && drag.item.kind === 'tab' ? 'detach' : 'cancel' }
+    }
+    return { kind: 'place', target: candidate, placement: pane.placement, highlight: pane.bounds }
+  }
   update(source: WorkspaceWindow) {
     const drag = this.drag
     if (!drag || drag.source !== source) return
     const point = screen.getCursorScreenPoint()
+    const previous = drag.destination
+    const previousTarget = previous.kind === 'place' ? previous.target : null
     let candidate: WorkspaceWindow | null = null
     const windows = this.host.windows()
-    if (drag.transfer && drag.target) windows.unshift(drag.target)
+    if (drag.transfer && previousTarget) windows.unshift(previousTarget)
     for (const item of new Set(windows)) {
       const window = item.browserWindow
       if (!window || !window.isVisible() || window.isMinimized() || (item === source && drag.sourceOpacity !== null))
@@ -112,35 +134,29 @@ export class WorkspaceDrag {
     }
     let before = candidate?.dropAt(point, drag.transfer?.tabId ?? (drag.item.kind === 'tab' ? drag.item.id : undefined))
     // A provisional tab changes flex widths; its own hit region keeps the same anchor.
-    if (before !== undefined && before === drag.transfer?.tabId && drag.placement.kind === 'tab')
-      before = drag.placement.before
-    if (drag.transfer && (candidate !== drag.target || before === undefined)) this.restoreTransfer(drag)
+    if (
+      before !== undefined &&
+      before === drag.transfer?.tabId &&
+      previous.kind === 'place' &&
+      previous.placement.kind === 'tab'
+    )
+      before = previous.placement.before
+    if (drag.transfer && (candidate !== previousTarget || before === undefined)) this.restoreTransfer(drag)
     if (this.drag !== drag) return
-    let target: WorkspaceWindow | null = null
-    let placement: PanePlacement = { kind: 'tab', before: null }
-    let highlight: Rectangle | null = null
-    if (candidate && before !== undefined) {
-      target = candidate
-      placement = { kind: 'tab', before }
-    } else if (candidate) {
-      const drop = candidate.paneDropAt(point, drag.panes)
-      if (drop) {
-        target = candidate
-        placement = drop.placement
-        highlight = drop.bounds
-      }
-    }
-    const scroll = target && placement.kind === 'tab' ? target.scrollAt(point) : 0
+    const destination = this.resolveDestination(drag, candidate, point, before)
+    const scroll =
+      destination.kind === 'place' && destination.placement.kind === 'tab' ? destination.target.scrollAt(point) : 0
     const changed =
-      drag.target !== target ||
-      JSON.stringify(drag.placement) !== JSON.stringify(placement) ||
-      drag.scroll !== scroll ||
-      drag.blocked !== (!!candidate && !target)
-    drag.target = target
-    drag.placement = placement
-    drag.blocked = !!candidate && !target
+      previous.kind !== destination.kind ||
+      (previous.kind === 'place' &&
+        destination.kind === 'place' &&
+        (previous.target !== destination.target ||
+          JSON.stringify(previous.placement) !== JSON.stringify(destination.placement))) ||
+      drag.scroll !== scroll
+    drag.destination = destination
     drag.scroll = scroll
-    if (target && target !== source && placement.kind === 'tab') {
+    if (destination.kind === 'place' && destination.target !== source && destination.placement.kind === 'tab') {
+      const { target, placement } = destination
       if (!drag.transfer) {
         drag.transfer = this.host.preview(source, drag.item, target, placement.before)
         if (!source.hasTabs && source.browserWindow) {
@@ -151,9 +167,9 @@ export class WorkspaceDrag {
         target.browserWindow?.moveTop()
       } else target.placeTab(drag.transfer.tabId, placement.before)
     }
-    if (highlight) drag.preview.highlight(highlight)
-    else if (target || drag.blocked) drag.preview.hide()
-    else drag.preview.show(point)
+    if (destination.kind === 'place' && destination.highlight) drag.preview.highlight(destination.highlight)
+    else if (destination.kind === 'detach') drag.preview.show(point)
+    else drag.preview.hide()
     if (changed) this.host.changed()
   }
   end(source: WorkspaceWindow, cancel: boolean) {
@@ -163,12 +179,15 @@ export class WorkspaceDrag {
     try {
       this.update(source)
       if (this.drag !== drag) return
-      if (drag.blocked) return this.cancel()
+      const destination = drag.destination
+      if (destination.kind === 'cancel') return this.cancel()
       this.drag = null
       clearInterval(this.timer)
       drag.preview.destroy()
-      if (drag.transfer && drag.target) this.host.committed(source, drag.target, drag.transfer.activePaneId)
-      else this.host.drop(source, drag.item, drag.target, drag.placement, screen.getCursorScreenPoint())
+      if (destination.kind === 'place') {
+        if (drag.transfer) this.host.committed(source, destination.target, drag.transfer.activePaneId)
+        else this.host.drop(source, drag.item, destination.target, destination.placement, screen.getCursorScreenPoint())
+      } else this.host.drop(source, drag.item, null, { kind: 'tab', before: null }, screen.getCursorScreenPoint())
     } catch (error) {
       this.drag = null
       clearInterval(this.timer)
@@ -181,7 +200,10 @@ export class WorkspaceDrag {
     }
   }
   cancelWindow(window: WorkspaceWindow) {
-    return this.drag?.source === window || this.drag?.target === window ? this.cancel() : false
+    const drag = this.drag
+    return drag?.source === window || (drag?.destination.kind === 'place' && drag.destination.target === window)
+      ? this.cancel()
+      : false
   }
   cancel() {
     const drag = this.drag

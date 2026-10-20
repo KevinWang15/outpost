@@ -211,7 +211,7 @@ export class SoftwareClient implements SoftwareService {
     const { code, stdout, stderr } = await runCommand(
       transport.management('interactive'),
       inspectionScript(ids, marker, target.kind === 'ssh'),
-      { env: this.env, signal, timeoutMs: 45_000 },
+      { env: this.env, signal, timeoutMs: 45_000, readOnly: true },
     )
     const start = stdout.indexOf(`\0${marker}\0`)
     if (code !== 0 || start < 0)

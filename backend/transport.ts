@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Target } from '../shared/model'
-import type { Command } from './process'
+import type { Command, CommandResult } from './process'
 import { AppError } from './errors'
 import { loginScriptShell, quote, type LoginMode } from './shell'
 
@@ -21,13 +21,36 @@ export interface Transport {
 }
 
 export interface TransportOptions {
-  /** Directory for OpenSSH connection sharing; omit to disable. */
+  /** Directory for OpenSSH connection sharing on supported hosts; omit to disable. */
   multiplex?: string
   /** Distinguishes owners so connection sharing never crosses accounts. */
   scope: string
 }
 
+// The SSH client runs on the backend host, independently of the desktop and
+// target platforms. Native Windows OpenSSH does not support ControlMaster.
+export const supportsSshMultiplexing = () => process.platform !== 'win32'
+
 const expandHome = (value: string) => (value.startsWith('~/') ? join(homedir(), value.slice(2)) : value)
+
+const multiplexDiagnostics = [
+  /^Failed to connect to new control master$/,
+  /^Control master terminated unexpectedly$/,
+  /^mux_client_[a-z_]+: (?:read from master failed|read packet failed|write packet:|send fds failed|master alive request failed)(?::? .*)?$/,
+  /^muxclient: master hello exchange failed$/,
+]
+
+function multiplexFailure({ code, stdout, stderr }: CommandResult): boolean {
+  if (code !== 255 || stdout.length !== 0) return false
+  const diagnostics = stderr
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+  // OpenSSH may already have fallen back after a mux error. Require every
+  // diagnostic to describe a mux failure so a later authentication/configuration
+  // error is preserved. Unknown or mixed diagnostics fail closed in any order.
+  return diagnostics.length > 0 && diagnostics.every(line => multiplexDiagnostics.some(pattern => pattern.test(line)))
+}
 
 export function sshArgs(
   target: Extract<Target, { kind: 'ssh' }>,
@@ -73,7 +96,7 @@ export function sshArgs(
       identity.identityFile,
     )
   } else if (target.identityFile) args.push('-i', expandHome(target.identityFile))
-  if (options.multiplex) {
+  if (options.multiplex && supportsSshMultiplexing()) {
     // Shared masters authenticate once. Scope them by owner and identity so a
     // connection opened with one credential is never reused by another.
     const scope = createHash('sha256')
@@ -88,6 +111,10 @@ export function sshArgs(
       '-o',
       'ControlPersist=120',
     )
+  } else {
+    // ControlMaster=no alone still permits using a configured ControlPath.
+    // Explicitly override all sharing options, including ~/.ssh/config.
+    args.push('-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'ControlPersist=no')
   }
   args.push('-l', 'root', '--', target.host)
   return args
@@ -100,20 +127,26 @@ class SshTransport implements Transport {
     private identity: SshIdentity | null,
     private options: TransportOptions,
   ) {}
-  management(mode: LoginMode): Command {
-    return {
+  private command(operation: string): Command {
+    const command: Command = {
       executable: 'ssh',
-      args: [...sshArgs(this.target, this.identity, this.options), `sh -c ${quote(loginScriptShell(mode))}`],
-      label: 'SSH',
+      args: [...sshArgs(this.target, this.identity, this.options), operation],
+      label: this.label,
     }
+    if (this.options.multiplex && supportsSshMultiplexing()) {
+      command.retry = {
+        args: [...sshArgs(this.target, this.identity, { scope: this.options.scope }), operation],
+        when: multiplexFailure,
+      }
+    }
+    return command
+  }
+  management(mode: LoginMode): Command {
+    return this.command(`sh -c ${quote(loginScriptShell(mode))}`)
   }
   runtime(operation: string): Command {
     const shell = this.target.environment ? quote(this.target.environment.shell) : 'bash'
-    return {
-      executable: 'ssh',
-      args: [...sshArgs(this.target, this.identity, this.options), `${shell} -lic ${quote(operation)}`],
-      label: 'SSH',
-    }
+    return this.command(`${shell} -lic ${quote(operation)}`)
   }
 }
 

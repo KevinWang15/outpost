@@ -457,6 +457,26 @@ and must not initialize interactive shell job control. Their stdout and stderr
 are streamed unchanged; the terminal helper installer reports its download and
 verification stages explicitly.
 
+SSH connection sharing is a backend transport policy. Linux and macOS backends
+use owner/identity-scoped control sockets with a 120-second idle lifetime.
+Windows backends always use independent connections: the transport explicitly
+sets `ControlMaster=no`, `ControlPath=none` and `ControlPersist=no`, overriding
+user SSH configuration. `OUTPOST_SSH_MULTIPLEX=0` applies the same policy on
+other platforms. This depends on the backend host, not the desktop or SSH target.
+
+The transport supplies one alternate invocation without sharing when sharing is
+enabled. The process runner uses it only for explicitly read-only, buffered
+operations: session list/get, conversation search, directory suggestions and
+software inspection. Recovery requires exit 255, no stdout, and stderr containing
+only recognized control-connection failures. Mixed or unknown diagnostics prevent
+retry, including authentication or configuration failures alongside an earlier
+control-connection error. Both attempts share the original deadline,
+cancellation signal, credentials and input bytes. There is no retry for generic
+network/authentication errors or partial responses. Mutations, streamed
+installations and live terminal relays do not opt in; creation recovery remains
+governed by its durable request receipt. Recovery never kills a master or removes
+its socket, so other connected terminals are left alone.
+
 The broker starts the relay through the target's transport exactly like any
 other runtime operation (`ssh -T … "$SHELL -lic …"`, or the login shell
 locally). Login shells may print first; the relay then prints a magic marker

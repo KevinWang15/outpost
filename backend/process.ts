@@ -1,28 +1,54 @@
 import { spawn } from 'node:child_process'
 import { AppError } from './errors'
 
+export interface CommandResult {
+  code: number | null
+  stdout: string
+  stderr: string
+}
+
 export interface Command {
   executable: string
   args: string[]
   label: string
   /** Bytes sent before ordinary stdin (a script, image, or live relay frames). */
   input?: Buffer
+  /** One alternate invocation, available only to explicitly read-only callers.
+   * The executable, input bytes, environment and deadline remain unchanged. */
+  retry?: { args: string[]; when(result: CommandResult): boolean }
 }
 interface CommandOptions {
   signal?: AbortSignal
   env?: NodeJS.ProcessEnv
   timeoutMs?: number
   onOutput?: (text: string) => void
+  /** Allow the transport's single recovery attempt. Mutations default to false. */
+  readOnly?: boolean
 }
 
-export function runCommand(
+export async function runCommand(
   command: Command,
   input: string | Uint8Array,
   options: CommandOptions = {},
-): Promise<{ code: number | null; stdout: string; stderr: string }> {
+): Promise<CommandResult> {
+  const deadline = performance.now() + (options.timeoutMs ?? 30_000)
+  const result = await runCommandOnce(command, input, options)
+  // Streaming output cannot be retracted. Only buffered, explicitly safe reads
+  // can use a transport-provided recovery, and there is never a retry loop.
+  if (!options.readOnly || options.onOutput || !command.retry?.when(result)) return result
+  return runCommandOnce({ ...command, args: command.retry.args }, input, {
+    ...options,
+    timeoutMs: deadline - performance.now(),
+  })
+}
+
+function runCommandOnce(command: Command, input: string | Uint8Array, options: CommandOptions): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const aborted = () => new AppError(`${command.label} operation aborted`, 502)
+    const timedOut = () => new AppError(`${command.label} operation timed out. Check the target and retry.`, 504)
     if (options.signal?.aborted) return reject(aborted())
+    const timeoutMs = options.timeoutMs ?? 30_000
+    if (timeoutMs <= 0) return reject(timedOut())
     // Give short-lived workers their own process group. Terminal services are
     // started independently by the runtime and never belong to these groups.
     const child = spawn(command.executable, command.args, {
@@ -58,10 +84,7 @@ export function runCommand(
       reject(error)
     }
     const cancel = () => fail(aborted())
-    const timer = setTimeout(
-      () => fail(new AppError(`${command.label} operation timed out. Check the target and retry.`, 504)),
-      options.timeoutMs ?? 30_000,
-    )
+    const timer = setTimeout(() => fail(timedOut()), timeoutMs)
     options.signal?.addEventListener('abort', cancel, { once: true })
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')

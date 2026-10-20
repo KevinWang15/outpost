@@ -27,7 +27,7 @@ export interface AppOptions {
   frontendRoot?: string
   logger?: boolean
   trustProxy?: string[]
-  /** OpenSSH connection sharing; on by default. */
+  /** OpenSSH connection sharing; on by default except on Windows. */
   multiplex?: boolean
 }
 

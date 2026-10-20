@@ -74,6 +74,8 @@ export class SessionClient implements SessionService {
     return runProtocol<T>(this.command(context, request), stdin, {
       signal,
       env: this.env,
+      // Explicit allowlist: new operations and all mutations stay non-retryable.
+      readOnly: ['list', 'get', 'directories', 'coding-search'].includes(request.action),
       timeoutMs: ['fork', 'upload-image'].includes(request.action) ? 120_000 : undefined,
     })
   }

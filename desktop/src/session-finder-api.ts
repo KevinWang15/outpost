@@ -7,6 +7,8 @@ export interface SessionFinderState {
   sessions: DesktopSessionChoice[]
   errors: string[]
   loading: boolean
+  busy: 'idle' | 'creating' | 'connecting'
+  actionError: string | null
   focusId?: string
 }
 export interface SessionFinderBridge {
@@ -14,6 +16,7 @@ export interface SessionFinderBridge {
   onState(listener: (state: SessionFinderState) => void): () => void
   choose(id: string): void
   create(): void
+  refresh(): void
   cancel(): void
 }
 

@@ -67,6 +67,19 @@ export interface DesktopSessionChoice extends DesktopSession, DesktopSessionRefe
   id: string
 }
 
+/** Creation and catalogue responses use the same display metadata contract. */
+export function validDesktopSession(value: unknown, targetId: string): value is DesktopSession {
+  if (!value || typeof value !== 'object') return false
+  const session = value as DesktopSession
+  return (
+    validDesktopId(session.sessionId) &&
+    session.targetId === targetId &&
+    text(session.title, 512) &&
+    typeof session.detail === 'string' &&
+    session.detail.length <= 4096
+  )
+}
+
 export function desktopLoginCallback(state: string, code: string) {
   return `outpost://login/${state}/${code}`
 }

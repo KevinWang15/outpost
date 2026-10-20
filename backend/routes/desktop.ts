@@ -1,21 +1,15 @@
 import type { FastifyInstance } from 'fastify'
 import Type from 'typebox'
-import {
-  desktopOrigin,
-  desktopProofPattern,
-  type DesktopSession,
-  type DesktopLaunch,
-  type DesktopTarget,
-} from '../../shared/desktopAuth'
+import { desktopOrigin, desktopProofPattern, type DesktopLaunch, type DesktopTarget } from '../../shared/desktopAuth'
 import { AppError } from '../errors'
 import type { DesktopAccess } from '../desktop-access'
 import { RateLimit } from '../rate-limit'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
-import type { SessionInput } from '../../shared/model'
-import { directoryQuery, sessionInput } from '../../shared/schemas'
+import type { SessionCreationRequest } from '../../shared/sessionCreator'
+import { directoryQuery, desktopSessionCreationInput } from '../../shared/schemas'
 import { sessionCreationOptions } from '../../shared/sessionCreation'
-import { createSession, inspectTargetSoftware } from '../session-actions'
+import { createSession, desktopSession, inspectTargetSoftware } from '../session-actions'
 
 const proof = Type.String({ pattern: desktopProofPattern })
 const strict = { additionalProperties: false }
@@ -108,15 +102,18 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
         return result
       }),
   )
-  app.post<{ Params: TargetParams; Body: SessionInput }>(
+  app.post<{ Params: TargetParams; Body: SessionCreationRequest }>(
     '/api/desktop/targets/:targetId/sessions',
-    { schema: { body: sessionInput } },
+    { schema: { body: desktopSessionCreationInput } },
     async (request, reply) => {
       const owner = access.authorize(request)
-      const session = await createSession(services, owner, request.params.targetId, request.body)
-      // Return identity separately from terminal authorization. Opening belongs
-      // to the caller's original tab/split action, after the dialog resolves.
-      return reply.code(201).send({ sessionId: session.id })
+      const { input, requestId } = request.body
+      const context = await services.resolve(owner, request.params.targetId)
+      const session = await createSession(services, context, input, requestId)
+      if (!access.active(owner)) throw new AppError('App sign-in expired.', 401)
+      // Display metadata makes the confirmed session immediately selectable,
+      // even if the next catalogue request fails. Authorization remains separate.
+      return reply.code(201).send(desktopSession(session, context.target))
     },
   )
   app.get<{ Params: TargetParams }>('/api/desktop/targets/:targetId/sessions', async (request, reply) =>
@@ -125,15 +122,7 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
       const context = await services.resolve(owner, request.params.targetId)
       const result = await sessions.list(context, signal)
       if (!access.active(owner)) throw new AppError('App sign-in expired.', 401)
-      return result.sessions.map(
-        session =>
-          ({
-            sessionId: session.id,
-            targetId: context.target.id,
-            title: `${session.name} · ${context.target.name}`,
-            detail: `${session.tool} · ${session.rootDir} · ${session.status}`,
-          }) satisfies DesktopSession,
-      )
+      return result.sessions.map(session => desktopSession(session, context.target))
     }),
   )
   app.post<{ Params: SessionParams }>(

@@ -2,55 +2,32 @@ import { BrowserWindow, ipcMain, screen, type IpcMainEvent, type IpcMainInvokeEv
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tabBarHeight } from './layout'
-import type { SessionFinderState } from './session-finder-api'
-import { desktopSessionId, type DesktopSessionChoice, type DesktopSessionReference } from '../../shared/desktopAuth'
-
-type Catalogue = Pick<SessionFinderState, 'sessions' | 'errors'>
-type FinderUpdate = Partial<Catalogue> & Pick<SessionFinderState, 'focusId'> & { loading?: boolean }
-type LoadSessions = (signal: AbortSignal, publish: (catalogue: Catalogue) => void) => Promise<void>
-type CreateSession = () => Promise<DesktopSessionReference | null>
+import type { DesktopSessionChoice } from '../../shared/desktopAuth'
+import { SessionFinderFlow, type SessionFinderActions } from './session-finder-flow'
 
 /** One reusable native popover, above terminal views without hiding or resizing them. */
 export class SessionFinder {
   private current: {
     window: BrowserWindow
-    state: SessionFinderState
-    finish(id: string | null, error?: Error): void
-    create: CreateSession
-    refresh(focusId?: string): void
-    creating: boolean
+    flow: SessionFinderFlow
   } | null = null
 
   constructor(private directory: string) {
     ipcMain.handle('session-finder:state', event => {
       const current = this.sender(event)
       if (!current) throw new Error('This action is only available in the session finder.')
-      return current.state
+      return current.flow.state
     })
     ipcMain.on('session-finder:choose', (event, id: unknown) => {
       const current = this.sender(event)
-      if (!current) return
-      if (id === null || (typeof id === 'string' && current.state.sessions.some(session => session.id === id)))
-        current.finish(id)
+      if (id === null) current?.flow.finish()
+      else if (typeof id === 'string') void current?.flow.choose(id)
     })
     ipcMain.on('session-finder:create', event => {
-      const current = this.sender(event)
-      if (!current || current.creating) return
-      current.creating = true
-      current.window.hide()
-      void current
-        .create()
-        .then(reference => {
-          if (this.current !== current) return
-          current.creating = false
-          if (reference) current.refresh(desktopSessionId(reference))
-          if (!current.window.isDestroyed()) {
-            current.window.show()
-            current.window.focus()
-            current.window.webContents.focus()
-          }
-        })
-        .catch(error => current.finish(null, error instanceof Error ? error : new Error(String(error))))
+      void this.sender(event)?.flow.create()
+    })
+    ipcMain.on('session-finder:refresh', event => {
+      void this.sender(event)?.flow.refresh()
     })
   }
 
@@ -69,11 +46,12 @@ export class SessionFinder {
     parent: BrowserWindow,
     title: string,
     anchor: Point,
-    load: LoadSessions,
-    create: CreateSession,
-  ): Promise<DesktopSessionChoice | null> {
-    this.current?.finish(null)
-    if (parent.isDestroyed()) return Promise.resolve(null)
+    actions: Omit<SessionFinderActions, 'create'> & {
+      create(parent: BrowserWindow): Promise<DesktopSessionChoice | null>
+    },
+  ): Promise<void> {
+    this.current?.flow.finish()
+    if (parent.isDestroyed()) return Promise.resolve()
     const area = screen.getDisplayMatching(parent.getBounds()).workArea
     const width = Math.min(460, area.width),
       height = Math.min(416, area.height)
@@ -105,61 +83,35 @@ export class SessionFinder {
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
     return new Promise((resolve, reject) => {
-      let settled = false
-      let abort = new AbortController()
-      let state: SessionFinderState = { title, revision: 0, sessions: [], errors: [], loading: true }
-      const update = (next: FinderUpdate) => {
-        if (settled) return
-        state = { ...state, ...next, revision: state.revision + 1 }
-        if (this.current?.window === window) this.current.state = state
-        if (!window.webContents.isDestroyed()) window.webContents.send('session-finder:state', state)
-      }
-      const refresh = (focusId?: string) => {
-        if (settled) return
-        abort.abort()
-        const controller = new AbortController()
-        abort = controller
-        update({ loading: true, ...(focusId ? { focusId } : {}) })
-        const publish = (catalogue: Catalogue) => {
-          if (abort === controller && !controller.signal.aborted) update(catalogue)
-        }
-        void load(controller.signal, publish)
-          .then(() => {
-            if (abort === controller && !controller.signal.aborted)
-              update({ loading: false, ...(focusId ? { focusId: undefined } : {}) })
-          })
-          .catch(error => {
-            if (abort === controller && !controller.signal.aborted)
-              update({
-                loading: false,
-                errors: [error instanceof Error ? error.message : 'Could not load sessions.'],
-              })
-          })
-      }
-      const finish = (id: string | null, error?: Error) => {
-        if (settled) return
-        settled = true
-        abort.abort()
-        parent.removeListener('closed', cancel)
-        parent.removeListener('hide', cancel)
-        parent.removeListener('minimize', cancel)
-        if (this.current?.window === window) this.current = null
-        if (!window.isDestroyed()) window.close()
-        if (error) reject(error)
-        else resolve(state.sessions.find(session => session.id === id) ?? null)
-      }
-      const cancel = () => finish(null)
-      const current = { window, state, finish, create, refresh, creating: false }
-      this.current = current
+      const flow = new SessionFinderFlow(title, {
+        ...actions,
+        // A modal child of the picker returns native focus to the picker. The
+        // terminal only regains focus when the entire interaction finishes.
+        create: () => actions.create(window),
+        changed: state => {
+          if (!window.webContents.isDestroyed()) window.webContents.send('session-finder:state', state)
+        },
+        finished: error => {
+          parent.removeListener('closed', cancel)
+          parent.removeListener('hide', cancel)
+          parent.removeListener('minimize', cancel)
+          if (this.current?.window === window) this.current = null
+          if (!window.isDestroyed()) window.destroy()
+          if (error) reject(error)
+          else resolve()
+        },
+      })
+      const cancel = () => flow.finish()
+      this.current = { window, flow }
       parent.once('closed', cancel)
       parent.once('hide', cancel)
       parent.once('minimize', cancel)
       window.on('closed', cancel)
       window.on('blur', () => {
-        if (!current.creating) cancel()
+        if (flow.state.busy === 'idle') cancel()
       })
       window.webContents.on('render-process-gone', () =>
-        finish(null, new Error('The session finder stopped responding. Please try again.')),
+        flow.finish(new Error('The session finder stopped responding. Please try again.')),
       )
       window.webContents.on('before-input-event', (event, input) => {
         if (input.type !== 'keyDown' || input.isComposing) return
@@ -169,17 +121,17 @@ export class SessionFinder {
         }
       })
       window.once('ready-to-show', () => {
-        if (settled) return
+        if (this.current?.window !== window) return
         window.show()
         window.focus()
         window.webContents.focus()
       })
-      void window.loadFile(join(this.directory, 'session-finder.html')).catch(error => finish(null, error))
-      refresh()
+      void window.loadFile(join(this.directory, 'session-finder.html')).catch(error => flow.finish(error))
+      void flow.refresh()
     })
   }
   cancel() {
-    this.current?.finish(null)
+    this.current?.flow.finish()
   }
   edit(action: 'copy' | 'paste' | 'select-all') {
     const window = this.current?.window

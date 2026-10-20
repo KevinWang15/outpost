@@ -56,6 +56,13 @@ button:hover {
   background: #22324b;
   color: #fff;
 }
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+li[aria-disabled='true'] {
+  cursor: wait;
+}
 input {
   flex-shrink: 0;
   min-width: 0;

@@ -68,8 +68,8 @@ export const sessionInput = Type.Object(
       if: { properties: { tool: { const: harness.id } } },
       then: {
         properties: {
-          cliSessionId: { pattern: harness.nativeId },
-          cliSessionEnv: { propertyNames: { const: harness.storageKey } },
+          cliSessionId: { type: 'string', pattern: harness.nativeId },
+          cliSessionEnv: { type: 'object', propertyNames: { const: harness.storageKey } },
         },
       },
     })),
@@ -77,6 +77,14 @@ export const sessionInput = Type.Object(
 )
 
 export const sessionForkInput = Type.Object({ branch: text(256), rootDir: session.rootDir }, strict)
+
+export const desktopSessionCreationInput = Type.Object(
+  {
+    requestId: Type.String({ pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' }),
+    input: sessionInput,
+  },
+  strict,
+)
 
 export const acknowledgeInput = Type.Object({ completionId: Type.String({ pattern: '^[0-9a-f]{64}$' }) }, strict)
 export const conversationSearch = Type.Object(

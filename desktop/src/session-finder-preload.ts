@@ -10,6 +10,7 @@ const bridge: SessionFinderBridge = {
   },
   choose: id => ipcRenderer.send('session-finder:choose', id),
   create: () => ipcRenderer.send('session-finder:create'),
+  refresh: () => ipcRenderer.send('session-finder:refresh'),
   cancel: () => ipcRenderer.send('session-finder:choose', null),
 }
 contextBridge.exposeInMainWorld('outpostSessionFinder', Object.freeze(bridge))

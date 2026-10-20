@@ -1,6 +1,8 @@
 import type { DesktopAccount, DesktopTarget } from './desktopAuth'
 import type { DirectorySuggestions, SessionInput } from './model'
 import type { SessionCreationOptions } from './sessionCreation'
+import type { Static } from 'typebox'
+import type { desktopSessionCreationInput } from './schemas'
 
 export interface SessionCreatorServerSummary {
   origin: string
@@ -10,6 +12,7 @@ export interface SessionCreationSelection {
   server: string
   targetId: string
 }
+export type SessionCreationRequest = Static<typeof desktopSessionCreationInput>
 export interface SessionCreatorSetup {
   servers: SessionCreatorServerSummary[]
   defaults: { server?: string; targetId?: string }

@@ -8,16 +8,29 @@ const list = document.querySelector<HTMLElement>('#results')!
 const status = document.querySelector<HTMLElement>('#status')!
 const empty = document.querySelector<HTMLElement>('#empty')!
 const rows = new Map<string, HTMLElement>()
-let state: SessionFinderState = { revision: -1, title: '', sessions: [], errors: [], loading: true }
+let state: SessionFinderState = {
+  revision: -1,
+  title: '',
+  sessions: [],
+  errors: [],
+  loading: true,
+  busy: 'idle',
+  actionError: null,
+}
 let matches: DesktopSessionChoice[] = [],
   selected = 0,
-  resolved = false
+  submitting = false
 function choose(id: string) {
-  if (resolved) return
-  resolved = true
+  if (submitting || state.busy !== 'idle') return
+  submitting = true
+  selected = Math.max(
+    0,
+    matches.findIndex(session => session.id === id),
+  )
+  render()
   api.choose(id)
 }
-function render(preserve = true) {
+function render(preserve = true, focusId?: string) {
   const previous = preserve ? matches[selected]?.id : undefined
   const terms = input.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   const filtered = state.sessions.filter(session =>
@@ -25,7 +38,7 @@ function render(preserve = true) {
   )
   // Search the entire catalogue, but keep a bounded list of visible rows.
   matches = filtered.slice(0, 200)
-  const preferred = state.focusId ? matches.findIndex(session => session.id === state.focusId) : -1
+  const preferred = focusId ? matches.findIndex(session => session.id === focusId) : -1
   const retained = preferred >= 0 ? preferred : matches.findIndex(session => session.id === previous)
   selected = retained >= 0 ? retained : Math.max(0, Math.min(selected, matches.length - 1))
   reconcileElements(
@@ -46,6 +59,7 @@ function render(preserve = true) {
     (row, session, index) => {
       row.id = `result-${index}`
       row.setAttribute('aria-selected', String(index === selected))
+      row.setAttribute('aria-disabled', String(state.busy !== 'idle' || submitting))
       row.querySelector('strong')!.textContent = session.title
       row.querySelector('span')!.textContent = session.server
       row.title = `${session.title}\n${session.server}\n${session.detail}`
@@ -57,16 +71,28 @@ function render(preserve = true) {
   empty.hidden = state.loading || matches.length > 0
   empty.textContent = state.sessions.length
     ? 'No matching sessions.'
-    : 'No sessions available. Sign in to your Outpost servers from the Outpost tab.'
+    : state.errors.length
+      ? 'Could not refresh sessions. Retry when your connection is available.'
+      : 'No sessions available. Sign in to your Outpost servers from the Outpost tab.'
   const count =
     filtered.length > matches.length
       ? `Showing ${matches.length} of ${filtered.length} matches. Type to narrow the search.`
       : `${filtered.length} ${filtered.length === 1 ? 'session' : 'sessions'}`
-  status.hidden = !state.loading && matches.length === 0
-  status.textContent = state.loading ? `Loading sessions…${matches.length ? ' ' + count : ''}` : count
+  status.hidden = state.busy === 'idle' && !state.loading && matches.length === 0
+  status.textContent =
+    state.busy === 'connecting'
+      ? 'Connecting…'
+      : state.loading
+        ? `Loading sessions…${matches.length ? ' ' + count : ''}`
+        : count
   const errors = document.querySelector<HTMLElement>('#errors')!
-  errors.textContent = state.errors.join('\n')
-  errors.hidden = state.errors.length === 0
+  const messages = [state.actionError, ...state.errors].filter(Boolean)
+  errors.textContent = messages.join('\n')
+  errors.hidden = messages.length === 0
+  input.disabled = state.busy !== 'idle'
+  create.disabled = state.busy !== 'idle' || submitting
+  refresh.disabled = state.busy !== 'idle' || state.loading || submitting
+  refresh.textContent = state.errors.length ? 'Retry' : 'Refresh'
   list.children[selected]?.scrollIntoView({ block: 'nearest' })
 }
 input.oninput = () => {
@@ -88,6 +114,9 @@ document.querySelector<HTMLButtonElement>('#cancel')!.onclick = () => api.cancel
 const create = document.querySelector<HTMLButtonElement>('#create')!
 create.onpointerdown = event => event.preventDefault()
 create.onclick = () => api.create()
+const refresh = document.querySelector<HTMLButtonElement>('#refresh')!
+refresh.onpointerdown = event => event.preventDefault()
+refresh.onclick = () => api.refresh()
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !event.isComposing) {
     event.preventDefault()
@@ -96,24 +125,27 @@ window.addEventListener('keydown', event => {
 })
 window.addEventListener('focus', () => input.focus())
 function accept(next: SessionFinderState) {
-  if (next.revision <= state.revision || resolved) return
-  if (next.focusId && input.value) {
+  if (next.revision <= state.revision) return
+  const focusId = next.focusId !== state.focusId ? next.focusId : undefined
+  const wasBusy = state.busy !== 'idle'
+  if (focusId && input.value) {
     // A newly created session should remain selectable even when the old query
     // would have filtered it out.
     input.value = ''
     selected = 0
   }
+  submitting = false
   state = next
   document.querySelector<HTMLElement>('#title')!.textContent = next.title
-  render()
+  render(true, focusId)
+  if (wasBusy && next.busy === 'idle' && document.hasFocus()) input.focus()
 }
 api.onState(accept)
 void api
   .state()
   .then(next => {
     accept(next)
-    input.disabled = false
-    input.focus()
+    if (!input.disabled) input.focus()
   })
   .catch(() => {
     status.hidden = true

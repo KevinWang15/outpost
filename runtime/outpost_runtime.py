@@ -4,6 +4,7 @@ import base64
 import datetime
 import errno
 import fcntl
+import hashlib
 import heapq
 import json
 import os
@@ -136,11 +137,28 @@ def save(data):
 def validate(data):
     if (
         not isinstance(data, dict)
-        or set(data) != {'version', 'sessions'}
+        or not {'version', 'sessions'} <= set(data) <= {'version', 'sessions', 'creations'}
         or data['version'] != 2
         or not isinstance(data['sessions'], list)
     ):
         raise ValueError()
+    # Only retryable creates allocate receipts. Retain receipts after deletion:
+    # replaying an old request must never resurrect a deliberately removed session.
+    creations = data.get('creations', {})
+    if not isinstance(creations, dict):
+        raise ValueError()
+    for key, receipt in creations.items():
+        if (
+            not isinstance(key, str)
+            or not re.fullmatch(r'[0-9a-f]{64}', key)
+            or not isinstance(receipt, dict)
+            or set(receipt) != {'fingerprint', 'sessionId'}
+            or not isinstance(receipt['fingerprint'], str)
+            or not re.fullmatch(r'[0-9a-f]{64}', receipt['fingerprint'])
+            or not text(receipt['sessionId'], 36)
+            or str(uuid.UUID(receipt['sessionId'])) != receipt['sessionId']
+        ):
+            raise ValueError()
     ids, names, conversations = set(), set(), set()
     for entry in data['sessions']:
         if not isinstance(entry, dict) or set(entry) != FIELDS:
@@ -555,10 +573,27 @@ def create_session(request):
     The process-owned lock is released on failure, with no stale reservations.
     """
     action = request['action']
+    creation_key = request.get('creationKey')
+    if creation_key is not None and (
+        action != 'create' or not isinstance(creation_key, str) or not re.fullmatch(r'[0-9a-f]{64}', creation_key)
+    ):
+        fail('Invalid creation request identity.')
+    fingerprint = hashlib.sha256(
+        json.dumps({k: v for k, v in request.items() if k != 'creationKey'}, sort_keys=True).encode()
+    ).hexdigest()
     with open(STATE / 'creation.lock', 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         with registry_lock():
-            sessions = read_registry()['sessions']
+            data = read_registry()
+            sessions = data['sessions']
+            receipt = data.get('creations', {}).get(creation_key)
+            if receipt:
+                if receipt['fingerprint'] != fingerprint:
+                    fail('This creation request was already used with different session settings.', 409)
+                session = next((s for s in sessions if s['id'] == receipt['sessionId']), None)
+                if session is None:
+                    fail('The session from this creation request has been deleted.', 410)
+                return describe(session)
         if action == 'fork':
             source = next((s for s in sessions if s['id'] == request.get('id')), None)
             if source is None:
@@ -663,6 +698,11 @@ def create_session(request):
                 fail('This conversation already has an Outpost session on this target.', 409)
             activity(session).initialize()
             sessions.append(session)
+            if creation_key:
+                data.setdefault('creations', {})[creation_key] = {
+                    'fingerprint': fingerprint,
+                    'sessionId': session['id'],
+                }
             save(data)
         return describe(session)
 

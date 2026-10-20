@@ -3,6 +3,7 @@ import {
   validDesktopLogin,
   type DesktopEntry,
   type DesktopSessionReference,
+  type DesktopSessionChoice,
 } from '../../shared/desktopAuth'
 import type { ServerTrust } from './server-trust'
 import type { ServerAccountsSnapshot, ServerConnection } from './server-accounts-api'
@@ -222,7 +223,7 @@ export class ServerAccounts {
       })
     return this.refreshWork
   }
-  sessions(signal: AbortSignal, publish: (catalogue: SessionCatalogue) => void) {
+  sessions(signal: AbortSignal, publish: (catalogue: SessionCatalogue) => void, previous: DesktopSessionChoice[] = []) {
     signal = AbortSignal.any([signal, this.lifetime.signal])
     return loadSessionCatalogue(
       this.store.list().map(entry => ({
@@ -233,6 +234,7 @@ export class ServerAccounts {
       })),
       signal,
       publish,
+      previous,
     )
   }
   creationServers() {
@@ -245,7 +247,7 @@ export class ServerAccounts {
         ),
       )
   }
-  async launch(session: DesktopSessionReference) {
+  async launch(session: DesktopSessionReference, signal?: AbortSignal) {
     const entry = this.store.get(session.server)
     if (!entry || entry.account.id !== session.accountId)
       throw new Error('Sign in to the server account that owns this session.')
@@ -253,7 +255,7 @@ export class ServerAccounts {
       await this.request(
         entry,
         `/targets/${encodeURIComponent(session.targetId)}/sessions/${encodeURIComponent(session.sessionId)}/connect`,
-        { method: 'POST' },
+        { method: 'POST', signal },
       ),
     )
     if (

@@ -15,6 +15,15 @@ import type { RecentSession } from '../../desktop/src/recent-sessions'
 import type { View } from 'electron'
 
 let app: ElectronApplication, chrome: Page, server: Server, directory: string, origin: string, recents: RecentSession[]
+let catalogueFailure = false,
+  connectFailure = false,
+  loseCreateReply = false,
+  creations = 0
+let createdSessions: { sessionId: string; title: string }[] = []
+let creationRequests: string[] = []
+let receipts = new Map<string, { sessionId: string; title: string }>()
+let holdConnect = false
+let releaseConnect: (() => void) | null = null
 let menus: JSHandle<{ labels(): string[]; choose(label: string): void; errors: string[] }>
 const state = (page = chrome): Promise<WorkspaceSnapshot> => page.evaluate(() => window.outpostWorkspace.state())
 const workspaces = () => app.windows().filter(page => page.url().endsWith('/workspace.html'))
@@ -57,6 +66,13 @@ async function bounds() {
 }
 
 test.beforeEach(async () => {
+  catalogueFailure = connectFailure = loseCreateReply = false
+  creations = 0
+  createdSessions = []
+  creationRequests = []
+  receipts = new Map()
+  holdConnect = false
+  releaseConnect = null
   directory = await mkdtemp(join(tmpdir(), 'outpost-finder-'))
   const userData = join(directory, 'profile')
   const credential = {
@@ -72,39 +88,81 @@ test.beforeEach(async () => {
         return
       }
       const path = request.url.slice('/api/desktop'.length)
+      if (path === '/targets/target/session-options') {
+        response.end(JSON.stringify({ tools: ['codex'], missing: [] }))
+        return
+      }
+      if (path.startsWith('/targets/target/directories')) {
+        response.end(JSON.stringify({ directories: [], truncated: false }))
+        return
+      }
+      if (path === '/targets/target/sessions' && request.method === 'POST') {
+        let body = ''
+        request.on('data', chunk => {
+          body += chunk
+        })
+        request.on('end', () => {
+          const { requestId, input } = JSON.parse(body)
+          creationRequests.push(requestId)
+          let session = receipts.get(requestId)
+          if (!session) {
+            session = { sessionId: `created-${++creations}`, title: `${input.name} · Target` }
+            createdSessions.push(session)
+            receipts.set(requestId, session)
+          }
+          if (loseCreateReply) response.destroy()
+          else
+            response.writeHead(201).end(JSON.stringify({ ...session, targetId: 'target', detail: 'Created fixture' }))
+        })
+        return
+      }
+      if (path === '/targets/target/sessions' && catalogueFailure) {
+        response.writeHead(503).end(JSON.stringify({ message: 'Temporary catalogue outage' }))
+        return
+      }
+      if (path.endsWith('/connect') && connectFailure) {
+        response.writeHead(503).end(JSON.stringify({ message: 'Temporary connect outage' }))
+        return
+      }
       if (path === '/account') response.end(JSON.stringify(credential))
       else if (path === '/targets') response.end(JSON.stringify([{ id: 'target', name: 'Target' }]))
       else if (path === '/targets/target/sessions')
         response.end(
-          JSON.stringify(
-            recents.map((entry, index) => ({
+          JSON.stringify([
+            ...recents.map((entry, index) => ({
               sessionId: index ? 'b' : 'a',
               targetId: 'target',
               title: entry.title,
               detail: 'Fixture',
             })),
-          ),
+            ...createdSessions.map(entry => ({ ...entry, targetId: 'target', detail: 'Created fixture' })),
+          ]),
         )
       else {
-        const key = path.includes('/sessions/a/') ? 'a' : 'b'
-        response.end(
-          JSON.stringify({
-            server: origin,
-            accountId: 'fixture',
-            targetId: 'target',
-            sessionId: key,
-            loginId: 'desktop:' + '0'.repeat(36),
-            token: `${key}.signature`,
-            title: key === 'a' ? 'Alpha project' : 'Beta review',
-          }),
-        )
+        const key = path.split('/sessions/')[1]?.split('/')[0] ?? 'a'
+        const send = () =>
+          response.end(
+            JSON.stringify({
+              server: origin,
+              accountId: 'fixture',
+              targetId: 'target',
+              sessionId: key,
+              loginId: 'desktop:' + '0'.repeat(36),
+              token: `${key}.signature`,
+              title:
+                createdSessions.find(entry => entry.sessionId === key)?.title ??
+                (key === 'a' ? 'Alpha project' : 'Beta review'),
+            }),
+          )
+        if (holdConnect) releaseConnect = send
+        else send()
       }
       return
     }
     response.setHeader('Content-Type', 'text/html')
     response.end(`<body><textarea id="draft" aria-label="Draft"></textarea><script>
       window.outpostDesktop.ticket().then(token => {
-        const title = token.startsWith('a.') ? 'Alpha project' : 'Beta review';
+        const title = token.startsWith('created-') ? 'New project · Target' : token.startsWith('a.') ? 'Alpha project' : 'Beta review';
         window.outpostDesktop.reportState({ title, connection: 'connected', activity: null, attention: false, hasDraft: false });
       });
     </script></body>`)
@@ -250,8 +308,140 @@ test('a destination closed during the finder cannot redirect the split or create
   const page = await splitFinder(destination)
   await chrome.evaluate(id => window.outpostWorkspace.closeTab(id), destination)
   await page.getByRole('option').filter({ hasText: 'Alpha project' }).click()
-  await expect.poll(() => menus.evaluate(menu => menu.errors.length)).toBe(1)
+  await expect(page.getByRole('alert')).toContainText('moved or closed')
   expect((await state()).panes.map(pane => pane.id)).toEqual([survivor])
   expect(remotePages()).toHaveLength(0)
-  expect(await menus.evaluate(menu => menu.errors[0])).toContain('moved or closed')
+  expect(page.isClosed()).toBe(false)
+})
+
+async function createInFinder(page: Page) {
+  await page.getByRole('button', { name: 'New session', exact: true }).click()
+  await expect.poll(() => app.windows().some(page => page.url().includes('/session-creator/index.html'))).toBe(true)
+  const modal = app.windows().find(page => page.url().includes('/session-creator/index.html'))!
+  await modal.getByRole('textbox', { name: 'Name', exact: true }).fill('New project')
+  await modal.locator('input[name="rootDir"]').fill('/tmp/project')
+  await submitCreation(modal)
+  return modal
+}
+async function submitCreation(modal: Page) {
+  await modal
+    .getByRole('button', { name: 'Create session', exact: true })
+    .click()
+    .catch(error => {
+      if (!modal.isClosed()) throw error
+    })
+}
+async function expectPickerFocus(page: Page) {
+  await expect(page.getByRole('combobox')).toBeFocused()
+  const window = await app.browserWindow(page)
+  await expect.poll(() => window.evaluate(window => window.isFocused())).toBe(true)
+}
+
+for (const placement of ['tab', 'split'] as const) {
+  test(`creation returns to the picker, then selection opens the new session in the captured ${placement}`, async () => {
+    const before = await state(),
+      rectangles = await bounds()
+    const page = placement === 'tab' ? await newTabFinder() : await splitFinder(before.activeTabId!)
+    await page.getByRole('combobox').fill('old unmatched query')
+    const modal = await createInFinder(page)
+    await expect.poll(() => modal.isClosed()).toBe(true)
+    await expectPickerFocus(page)
+    await expect(page.getByRole('combobox')).toHaveValue('')
+    await expect(page.getByRole('option', { selected: true })).toContainText('New project')
+    expect((await state()).tabs.length).toBe(before.tabs.length)
+    expect(await bounds()).toEqual(rectangles)
+    await dismissWithKey(page, 'Enter')
+    await expect.poll(async () => (await state()).panes.some(pane => pane.title === 'New project · Target')).toBe(true)
+    const after = await state()
+    expect(after.tabs.length).toBe(before.tabs.length + (placement === 'tab' ? 1 : 0))
+    if (placement === 'split') {
+      expect(after.activeTabId).toBe(before.activeTabId)
+      expect(after.tabs[0].panes).toHaveLength(2)
+    }
+    expect(creations).toBe(1)
+  })
+}
+
+test('a failed refresh preserves old rows and the confirmed create; retry works in the same picker', async () => {
+  const page = await newTabFinder()
+  await expect(page.getByRole('option')).toHaveCount(2)
+  catalogueFailure = true
+  const modal = await createInFinder(page)
+  await expect.poll(() => modal.isClosed()).toBe(true)
+  await expectPickerFocus(page)
+  await expect(page.getByRole('alert')).toContainText('Temporary catalogue outage')
+  await expect(page.getByRole('option')).toHaveCount(3)
+  await expect(page.getByRole('option', { selected: true })).toContainText('New project')
+  catalogueFailure = false
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(page.getByRole('alert')).toBeHidden()
+  await expect(page.getByRole('option')).toHaveCount(3)
+  await dismissWithKey(page, 'Enter')
+  await expect.poll(async () => (await state()).panes.some(pane => pane.title === 'New project · Target')).toBe(true)
+})
+
+test('connect failure preserves query and selection, and retry opens exactly one tab', async () => {
+  const page = await newTabFinder()
+  await page.getByRole('combobox').fill('beta')
+  connectFailure = true
+  await page.getByRole('combobox').press('Enter')
+  await expect(page.getByRole('alert')).toContainText('Temporary connect outage')
+  await expectPickerFocus(page)
+  await expect(page.getByRole('combobox')).toHaveValue('beta')
+  await expect(page.getByRole('option', { selected: true })).toContainText('Beta review')
+  expect((await state()).tabs).toHaveLength(1)
+  connectFailure = false
+  await dismissWithKey(page, 'Enter')
+  await expect.poll(async () => (await state()).tabs.length).toBe(2)
+})
+
+test('lost create reply can be retried with the same request identity without duplicating the session', async () => {
+  const page = await newTabFinder()
+  loseCreateReply = true
+  const modal = await createInFinder(page)
+  await expect(modal.getByRole('alert')).toContainText('Try again with the same settings')
+  expect(createdSessions).toHaveLength(1)
+  loseCreateReply = false
+  await submitCreation(modal)
+  await expect.poll(() => modal.isClosed()).toBe(true)
+  await expectPickerFocus(page)
+  await expect(page.getByRole('option', { selected: true })).toContainText('New project')
+  expect(creationRequests).toHaveLength(2)
+  expect(new Set(creationRequests).size).toBe(1)
+  expect(creations).toBe(1)
+  await dismissWithKey(page, 'Enter')
+  await expect.poll(async () => (await state()).tabs.length).toBe(2)
+})
+
+test('cancelling after an uncertain creation refreshes the picker without opening a tab', async () => {
+  const page = await newTabFinder()
+  await expect(page.getByRole('option')).toHaveCount(2)
+  loseCreateReply = true
+  const modal = await createInFinder(page)
+  await expect(modal.getByRole('alert')).toBeVisible()
+  await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expectPickerFocus(page)
+  await expect(page.getByRole('option').filter({ hasText: 'New project' })).toHaveCount(1)
+  expect((await state()).tabs).toHaveLength(1)
+  await dismissWithKey(page, 'Escape')
+  expect(creations).toBe(1)
+})
+
+test('Escape cancels a pending connection and a late response cannot create a tab', async () => {
+  const page = await newTabFinder()
+  await expect(page.getByRole('option')).toHaveCount(2)
+  holdConnect = true
+  await page.getByRole('combobox').press('Enter')
+  await expect.poll(() => releaseConnect !== null).toBe(true)
+  await page.keyboard.press('Escape').catch(error => {
+    if (!page.isClosed()) throw error
+  })
+  await expect.poll(() => page.isClosed()).toBe(true)
+  releaseConnect!()
+  holdConnect = false
+  // A round trip through another picker ensures the late reply has been handled.
+  const reopened = await newTabFinder()
+  await expect(reopened.getByRole('option')).toHaveCount(2)
+  expect((await state()).tabs).toHaveLength(1)
+  expect(remotePages()).toHaveLength(0)
 })

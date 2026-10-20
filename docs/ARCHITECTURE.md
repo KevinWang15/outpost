@@ -598,6 +598,15 @@ allocation lock automatically, with no persistent reservations to recover.
 Forking uses a snapshot of the source settings, so deleting the source record
 during allocation does not cancel an already-started fork.
 
+Retryable creates carry a request key scoped by the server to its deployment,
+account and target. The runtime hashes the creation input and commits a receipt
+(`creation key → input fingerprint + session ID`) in the registry's `creations`
+map in the same atomic write as the session. Replays under the creation lock
+return the existing session; different input with the same key is rejected.
+Receipts survive session deletion so a stale retry reports deletion instead of
+recreating the session. Operations without a retry key allocate no receipt.
+These small receipts contain hashes and IDs, not a second copy of session settings.
+
 The runtime creates a new branch from the source directory’s `HEAD` with
 `git worktree add -b`, then allocates a fresh harness conversation and saves
 its session. It inherits the source tool and launch settings. Git receives
@@ -842,10 +851,15 @@ Credentials stay in the main process; replacing or signing out a login
 invalidates its captured capability. App bearers resolve the same owner and
 target context as browser creation. `backend/session-actions.ts` shares the
 creation policy and software inspection between both route families. Reads are
-cancellable; an explicit Create starts a durable mutation with no automatic
-retry. App shutdown drains submissions before disposing account capabilities.
+cancellable; an explicit Create starts a durable mutation. The native creator
+assigns a request UUID to each distinct server/target/form submission and retains
+it while the dialog is open. Retrying unchanged settings after an uncertain
+response sends the same UUID; the target's durable receipt recovers that session.
+App shutdown drains submissions before disposing account capabilities.
 
-The modal returns only the created session identity. `DesktopWorkspace`
+The creation endpoint requires `{ requestId, input }` and returns the same
+validated display metadata as a catalogue row. No terminal credential is issued
+by creation. The modal returns that confirmed row. `DesktopWorkspace`
 captures the original `SessionTarget` and validates it before creating and
 again after authorization, then uses the same placement path as the existing
 session finder. Cancellation never opens a pane. A moved/closed destination
@@ -854,11 +868,26 @@ created session cannot open, it remains discoverable through the catalogue.
 Creation does not issue or store an independent terminal credential; opening
 uses `ServerAccounts.launch` like every other remote session entry point.
 
-The session finder owns the complete choose-or-create interaction. Its native
-window hides while the creator modal is active, then reloads the same catalogue
-and focuses the returned session identity. Cancelling creation returns to the
-finder without changing the layout; cancelling the finder resolves the whole
-operation with no pane change.
+`SessionFinderFlow` owns the complete create/select/connect interaction, its
+busy state, error state and cancellation lifetime; `SessionFinder` owns only
+the native window and authorized IPC boundary. The creator is a modal child of
+the still-visible picker, so closing it returns native focus to the picker.
+Only the outer workspace flow restores terminal focus when the interaction ends.
+
+Confirmed new rows are inserted and selected immediately, ahead of the bounded
+visible result list, and pinned for that picker invocation while a background
+refresh runs. Discovery retains previous rows for failed targets, replaces
+successful scopes (including empty/deleted scopes), and excludes invalid
+accounts. Refresh/Retry never discards the user's query or selection.
+Cancelling creation also refreshes discovery, since a response may have been
+lost after a successful create. These snapshots live only as long as the picker.
+
+Selecting a row keeps the picker open during authorization. Failed connections
+show an inline error and allow selecting again; success closes the picker.
+Duplicate submissions are blocked in the native flow as well as the renderer.
+Escape, closing the parent, or replacing the picker aborts pending discovery and
+authorization; late responses cannot open a pane. Each discovery pass also has
+its own cancellation generation so old results cannot replace a newer list.
 
 ### Recent remote sessions
 

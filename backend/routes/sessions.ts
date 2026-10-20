@@ -22,8 +22,8 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
     ),
   )
   app.post<{ Params: Params; Body: SessionInput }>(base, { schema: { body: sessionInput } }, async (request, reply) => {
-    const owner = services.deployment.owner(request)
-    return reply.code(201).send(await createSession(services, owner, request.params.targetId, request.body))
+    const context = await services.context(request, request.params.targetId)
+    return reply.code(201).send(await createSession(services, context, request.body))
   })
   app.get<{ Params: Params }>(`${base}/:sessionId`, async (request, reply) =>
     withRequestSignal(reply, async signal =>

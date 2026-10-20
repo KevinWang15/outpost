@@ -1,5 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, type Point } from 'electron'
-import { desktopSessionId, type DesktopLaunch, type DesktopSessionReference } from '../../shared/desktopAuth'
+import {
+  desktopSessionId,
+  type DesktopLaunch,
+  type DesktopSessionReference,
+  type DesktopSessionChoice,
+} from '../../shared/desktopAuth'
 import { Preferences } from './preferences'
 import { TerminalPanes, type TerminalPane } from './terminals'
 import { RecentSessions } from './recent-sessions'
@@ -264,20 +269,25 @@ export class DesktopWorkspace {
     const anchorPane = target.kind === 'split' ? this.terminals.panes.get(target.paneId) : undefined
     const excluded = anchorPane?.connection.kind === 'remote' ? desktopSessionId(anchorPane.connection.reference) : null
     try {
-      const selected = await this.finder.pick(
+      await this.finder.pick(
         window,
         target.kind === 'split' ? 'Split with Outpost terminal' : 'Open Outpost terminal',
         anchor,
-        (signal, publish) =>
-          this.accounts.sessions(signal, ({ sessions, errors }) =>
-            publish({
-              sessions: sessions.filter(session => desktopSessionId(session) !== excluded),
-              errors,
-            }),
-          ),
-        () => this.createSession(source, target, server),
+        {
+          load: (signal, publish, previous) =>
+            this.accounts.sessions(
+              signal,
+              ({ sessions, errors }) =>
+                publish({
+                  sessions: sessions.filter(session => desktopSessionId(session) !== excluded),
+                  errors,
+                }),
+              previous,
+            ),
+          create: parent => this.createSession(source, target, parent, server),
+          open: (session, signal) => this.openSessionAt(source, target, session, signal),
+        },
       )
-      if (selected !== null) await this.openSessionAt(source, target, selected)
     } finally {
       source.restoreFocus()
     }
@@ -286,28 +296,24 @@ export class DesktopWorkspace {
   private async createSession(
     source: WorkspaceWindow,
     target: SessionTarget,
+    parent: BrowserWindow,
     server?: string,
-  ): Promise<DesktopSessionReference | null> {
+  ): Promise<DesktopSessionChoice | null> {
     this.drag.cancel()
     const window = source.browserWindow
     if (!window || window.isDestroyed() || this.stopping) return null
     const anchor = target.kind === 'split' ? this.terminals.panes.get(target.paneId) : undefined
     const reference = anchor?.connection.kind === 'remote' ? anchor.connection.reference : undefined
-    try {
-      const servers = this.accounts.creationServers()
-      const defaultServer = server ?? reference?.server
-      if (defaultServer && !servers.some(item => item.summary.origin === defaultServer))
-        throw new Error('Sign in to this server from the Outpost tab before creating a session.')
-      const selected = await this.creator.pick(
-        window,
-        servers,
-        { server: defaultServer, targetId: server ? undefined : reference?.targetId },
-        () => this.sessionPlacement(source, target),
-      )
-      return selected
-    } finally {
-      source.restoreFocus()
-    }
+    const servers = this.accounts.creationServers()
+    const defaultServer = server ?? reference?.server
+    if (defaultServer && !servers.some(item => item.summary.origin === defaultServer))
+      throw new Error('Sign in to this server from the Outpost tab before creating a session.')
+    return this.creator.pick(
+      parent,
+      servers,
+      { server: defaultServer, targetId: server ? undefined : reference?.targetId },
+      () => this.sessionPlacement(source, target),
+    )
   }
 
   /** Resolve the captured destination, never the tab selected after an async dialog. */
@@ -322,10 +328,17 @@ export class DesktopWorkspace {
       : { kind: 'tab', before: null }
   }
 
-  private async openSessionAt(source: WorkspaceWindow, target: SessionTarget, session: DesktopSessionReference) {
+  private async openSessionAt(
+    source: WorkspaceWindow,
+    target: SessionTarget,
+    session: DesktopSessionReference,
+    signal: AbortSignal,
+  ) {
+    signal.throwIfAborted()
     if (this.stopping || !source.browserWindow || source.browserWindow.isDestroyed()) return
     this.sessionPlacement(source, target)
-    const launch = await this.accounts.launch(session)
+    const launch = await this.accounts.launch(session, signal)
+    signal.throwIfAborted()
     if (this.stopping || !source.browserWindow || source.browserWindow.isDestroyed()) return
     this.drag.cancel()
     const placement = this.sessionPlacement(source, target)

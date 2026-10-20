@@ -30,7 +30,7 @@ type Request =
   | { action: 'list' }
   | ({ action: 'coding-search' } & ConversationSearch)
   | { action: 'directories'; path: string }
-  | ({ action: 'create' } & SessionInput & SessionLaunchOptions)
+  | ({ action: 'create'; creationKey?: string } & SessionInput & SessionLaunchOptions)
   | ({ action: 'fork'; id: string } & SessionForkInput)
   | { action: 'get' | 'terminate' | 'delete'; id: string }
   | { action: 'acknowledge'; id: string; completionId: string }
@@ -46,7 +46,7 @@ export function launchOptions(input: SessionInput): SessionLaunchOptions {
 export interface SessionService {
   list(context: TargetContext, signal?: AbortSignal): Promise<SessionList>
   get(context: TargetContext, id: string, signal?: AbortSignal): Promise<Session>
-  create(context: TargetContext, input: SessionInput): Promise<Session>
+  create(context: TargetContext, input: SessionInput, creationKey?: string): Promise<Session>
   fork(context: TargetContext, id: string, input: SessionForkInput): Promise<Session>
   acknowledge(context: TargetContext, id: string, completionId: string): Promise<Session>
   terminate(context: TargetContext, id: string): Promise<Session>
@@ -83,8 +83,8 @@ export class SessionClient implements SessionService {
   get(context: TargetContext, id: string, signal?: AbortSignal) {
     return this.run<Session>(context, { action: 'get', id }, signal)
   }
-  create(context: TargetContext, input: SessionInput) {
-    return this.run<Session>(context, { action: 'create', ...input, ...launchOptions(input) })
+  create(context: TargetContext, input: SessionInput, creationKey?: string) {
+    return this.run<Session>(context, { action: 'create', ...input, ...launchOptions(input), creationKey })
   }
   fork(context: TargetContext, id: string, input: SessionForkInput) {
     return this.run<Session>(context, { action: 'fork', id, ...input })

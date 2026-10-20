@@ -80,6 +80,79 @@ class RuntimeTest(unittest.TestCase):
             {'action': 'create', 'name': name, 'rootDir': str(self.project), 'tool': tool, 'env': {}, 'args': ''}
         )
 
+    def test_creation_receipt_survives_processes_rejects_changed_inputs_and_never_resurrects_deletions(self):
+        request = {
+            'action': 'create',
+            'name': 'Retryable',
+            'tool': 'claude',
+            'rootDir': str(self.project),
+            'env': {'A': '1', 'B': '2'},
+            'args': '',
+            'creationKey': 'a' * 64,
+        }
+        first = self.call(request)
+        # Every call is a new runtime process, as with a fresh SSH connection.
+        recovered = self.call({**request, 'env': {'B': '2', 'A': '1'}})
+        self.assertEqual(first['id'], recovered['id'])
+        self.assertEqual(first['cliSessionId'], recovered['cliSessionId'])
+        self.assertEqual(len(self.call({'action': 'list'})['sessions']), 1)
+        error = self.call({**request, 'name': 'Changed'}, expect_ok=False)
+        self.assertEqual(error['status'], 409)
+        self.assertIn('different session settings', error['message'])
+        self.call({'action': 'delete', 'id': first['id']})
+        deleted = self.call(request, expect_ok=False)
+        self.assertEqual(deleted['status'], 410)
+        self.assertEqual(self.call({'action': 'list'})['sessions'], [])
+        registry = json.loads((self.home / '.outpost' / 'registry.json').read_text())
+        self.assertEqual(registry['creations'][request['creationKey']]['sessionId'], first['id'])
+
+    def test_concurrent_replays_commit_exactly_one_session(self):
+        request = {
+            'action': 'create',
+            'name': 'Concurrent retry',
+            'tool': 'claude',
+            'rootDir': str(self.project),
+            'env': {},
+            'args': '',
+            'creationKey': 'b' * 64,
+        }
+        processes = [
+            subprocess.Popen(self.command(request), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for _ in range(3)
+        ]
+        ids = []
+        try:
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=30)
+                self.assertEqual(process.returncode, 0, stderr.decode())
+                line = next(line for line in stdout.decode().splitlines() if line.startswith('OUTPOST_RESULT:'))
+                envelope = json.loads(line[len('OUTPOST_RESULT:') :])
+                self.assertTrue(envelope['ok'], envelope)
+                ids.append(envelope['data']['id'])
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate()
+        self.assertEqual(len(set(ids)), 1)
+        self.assertEqual(len(self.call({'action': 'list'})['sessions']), 1)
+
+    def test_failed_creation_does_not_consume_the_request_identity(self):
+        root = self.project / 'not-yet-created'
+        request = {
+            'action': 'create',
+            'name': 'Retry after fixing directory',
+            'tool': 'claude',
+            'rootDir': str(root),
+            'env': {},
+            'args': '',
+            'creationKey': 'c' * 64,
+        }
+        self.assertEqual(self.call(request, expect_ok=False)['status'], 400)
+        root.mkdir()
+        first = self.call(request)
+        self.assertEqual(self.call(request)['id'], first['id'])
+
     def git(self, *arguments, cwd=None):
         return subprocess.run(
             ['git', '-C', str(cwd or self.project), *arguments],

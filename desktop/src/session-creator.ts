@@ -1,10 +1,11 @@
 import { BrowserWindow, ipcMain, screen, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { Ajv } from 'ajv'
 import { directoryQuery, sessionInput } from '../../shared/schemas'
 import type { SessionInput } from '../../shared/model'
-import { validDesktopId, type DesktopSessionReference } from '../../shared/desktopAuth'
+import { validDesktopId, type DesktopSessionChoice } from '../../shared/desktopAuth'
 import type { SessionCreationSelection, SessionCreatorSetup } from '../../shared/sessionCreator'
 import type { SessionCreationServer } from './server-session-creation'
 
@@ -16,13 +17,14 @@ interface Creation {
   setup: SessionCreatorSetup
   servers: Map<string, SessionCreationServer>
   reads: Map<string, AbortController>
+  requests: Map<string, string>
   submitting: boolean
   validateDestination(): void
-  finish(result: DesktopSessionReference | null, error?: Error): void
+  finish(result: DesktopSessionChoice | null, error?: Error): void
 }
 
-/** A shared native modal returns a session identity; its caller owns placement.
- * Read work is cancellable. An explicit Create is one durable, non-retried mutation. */
+/** The caller owns placement. Reads are cancellable; each distinct submission
+ * retains its retry identity until the modal closes, including after a lost reply. */
 export class SessionCreator {
   private current: Creation | null = null
   private submissions = new Set<Promise<void>>()
@@ -57,8 +59,15 @@ export class SessionCreator {
       current.validateDestination()
       current.submitting = true
       this.abortReads(current)
+      const submission = JSON.stringify([
+        server.summary.origin,
+        targetId,
+        { ...input, env: Object.fromEntries(Object.entries(input.env ?? {}).sort(([a], [b]) => a.localeCompare(b))) },
+      ])
+      const requestId = current.requests.get(submission) ?? randomUUID()
+      current.requests.set(submission, requestId)
       const work = server
-        .create(targetId, input)
+        .create(targetId, input, requestId)
         .then(session => {
           if (this.current === current) current.finish(session)
         })
@@ -157,9 +166,9 @@ export class SessionCreator {
     window.setMenu(null)
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
-    return new Promise<DesktopSessionReference | null>((resolve, reject) => {
+    return new Promise<DesktopSessionChoice | null>((resolve, reject) => {
       let settled = false
-      const finish = (result: DesktopSessionReference | null, error?: Error) => {
+      const finish = (result: DesktopSessionChoice | null, error?: Error) => {
         if (settled) return
         settled = true
         this.abortReads(current)
@@ -174,6 +183,7 @@ export class SessionCreator {
         setup: { servers: servers.map(server => server.summary), defaults },
         servers: new Map(servers.map(server => [server.summary.origin, server])),
         reads: new Map(),
+        requests: new Map(),
         submitting: false,
         validateDestination,
         finish,

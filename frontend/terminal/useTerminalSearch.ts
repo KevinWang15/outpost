@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
-import { SearchAddon, type ISearchResultChangeEvent } from '@xterm/addon-search'
+import type { SearchAddon, ISearchResultChangeEvent } from '@xterm/addon-search'
 import type { Terminal } from '@xterm/xterm'
+import { liveSearchAddon } from './searchAddon'
 
 export const searchHighlightLimit = 1000
 const decorations = {
@@ -14,7 +15,7 @@ const decorations = {
 
 /** Search only xterm's current buffer. No transport, PTY input or geometry changes. */
 export function useTerminalSearch(restoreFocus: () => void) {
-  const current = useRef<{ term: Terminal; addon: SearchAddon; dispose(): void } | null>(null)
+  const current = useRef<{ term: Terminal; addon: SearchAddon; refresh(): void; dispose(): void } | null>(null)
   const criteria = useRef({ query: '', caseSensitive: false, visible: false })
   const input = useRef<HTMLInputElement>(null)
   const [visible, setVisible] = useState(false)
@@ -50,8 +51,7 @@ export function useTerminalSearch(restoreFocus: () => void) {
   }, [restoreFocus])
 
   const create = useCallback((term: Terminal) => {
-    const addon = new SearchAddon({ highlightLimit: searchHighlightLimit })
-    term.loadAddon(addon)
+    const { addon, refresh, dispose } = liveSearchAddon(term, searchHighlightLimit)
     const subscription = addon.onDidChangeResults(next => {
       setResults(previous =>
         previous.resultIndex === next.resultIndex && previous.resultCount === next.resultCount ? previous : next,
@@ -60,23 +60,18 @@ export function useTerminalSearch(restoreFocus: () => void) {
     return {
       term,
       addon,
+      refresh,
       dispose: () => {
         subscription.dispose()
-        addon.dispose()
+        dispose()
       },
     }
   }, [])
 
-  const screenCleared = useCallback(() => {
-    const previous = current.current
-    if (!previous) return
-    // SearchAddon caches line contents until cursor movement or resize. Clear
-    // changes the buffer directly; recreate the addon through its public API.
-    previous.dispose()
-    current.current = create(previous.term)
-    setResults({ resultIndex: -1, resultCount: 0 })
-    if (criteria.current.visible) find(false, true)
-  }, [create, find])
+  const bufferChanged = useCallback(() => {
+    // Checkpoints and clear replace cells directly, without onWriteParsed.
+    current.current?.refresh()
+  }, [])
 
   const attach = useCallback(
     (term: Terminal, container: HTMLElement) => {
@@ -134,6 +129,6 @@ export function useTerminalSearch(restoreFocus: () => void) {
     find,
     changeQuery,
     toggleCase,
-    screenCleared,
+    bufferChanged,
   }
 }

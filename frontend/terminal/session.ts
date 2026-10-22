@@ -40,7 +40,7 @@ interface SessionOptions {
   focusRecovery(): boolean
   attachSearch(term: Terminal, container: HTMLElement): () => void
   openSearch(): void
-  screenCleared(): void
+  bufferChanged(): void
   resume(token: string, title: string): void | Promise<void>
 }
 
@@ -83,7 +83,7 @@ export class TerminalSession {
         term,
         message => this.connection.fail(message),
         local,
-        options.screenCleared,
+        options.bufferChanged,
       )
       this.own(() => rendering.dispose())
       term.loadAddon(new Unicode11Addon())

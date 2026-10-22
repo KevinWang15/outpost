@@ -743,8 +743,22 @@ without paid model calls or modifying the user's native stores.
 lifetime. `TerminalSearch` is an absolute overlay within `terminal-body`, so
 search never changes terminal dimensions, sends PTY input, or fetches remote
 history. It searches only xterm's active buffer, including retained scrollback.
-The addon refreshes highlights after output and resizes; highlights are capped
-at 1,000 and the UI reports that bound rather than a misleading exact total.
+`searchAddon.ts` adapts the pinned search addon 0.16.0: its stock 200 ms trailing
+debounce can starve highlights during continuous TUI output, and its line cache
+misses redraws that restore the cursor. The adapter invalidates cached text and
+refreshes matches synchronously on xterm's coalesced `onWriteParsed` event and
+resize. It retains cached immutable history and invalidates the mutable screen,
+including a wrapped logical line starting in history. A history marker detects
+trimming even when the 10,000-line limit leaves `baseY` unchanged; trimming,
+reflow, buffer switches and direct replacement invalidate the cache completely.
+Synchronized output spanning packets retains highlights with the painted frame
+until xterm releases it, including its missing-end-sequence safety timeout.
+It retains xterm's matching, Unicode handling, decorations and native
+scrollback markers. Refresh uses the addon's no-scroll path, so background output
+does not move the user's viewport. The narrow private addon surface is guarded
+at initialization and covered by frame-level DOM/WebGL tests; replace this adapter
+when upstream provides a public synchronous invalidate/refresh API.
+Highlights are capped at 1,000 and the UI reports that bound rather than a misleading exact total.
 Closing search clears decorations and restores terminal (or recovery) focus.
 The query stays with its tab until that view is destroyed.
 
@@ -771,8 +785,10 @@ For remote sessions the request reaches the authoritative Linux service, which
 clears its buffer and broadcasts `clear` to all attached viewers. Checkpoints
 therefore cannot restore discarded history. Local shells apply the same operation
 directly in their renderer's ordered queue. Clear is a barrier between output
-batches, so output written afterward is retained. The search addon is recreated
-afterward to invalidate cached lines and decorations without private API access.
+batches, so output written afterward is retained. `TerminalRenderer` reports
+direct buffer changes after clear, local reset and completed remote checkpoint
+restoration. Search invalidates cached lines and decorations at those barriers
+too, without waiting for a later PTY write or scrolling to a result.
 
 The current clear and health-check contract uses terminal service protocol 4 and client protocol 13.
 Install the updated helper and explicitly restart existing service processes;

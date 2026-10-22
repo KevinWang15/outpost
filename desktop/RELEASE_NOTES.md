@@ -1,28 +1,27 @@
-# Outpost Desktop 0.16.0 preview
+# Outpost Desktop 0.16.1 preview
 
-More reliable activity badges for Codex, Claude Code, and Kimi across desktop and web terminals.
+Find highlights stay aligned with terminal text while scrolling and during application redraws.
 
 ## What's new
 
-- **Follow the active conversation:** native lifecycle hooks track conversation changes inside the coding agent, so activity does not stay attached to the original conversation.
-- **Clear activity states:** desktop tabs and the web session list share Working, Waiting for you, Idle, completion, and error states. Permission prompts and failed turns are no longer reported as ordinary idle activity.
-- **Long conversation support:** incremental transcript tracking preserves activity detection through large outputs without repeatedly rescanning the full conversation.
-- **Resilient updates:** brief observation failures show the last known state for up to 15 seconds, with a visible stale indication, before reporting that activity is unavailable.
-- **Reliable alerts:** delayed events and acknowledgements cannot clear newer completions or recreate an alert that was already acknowledged.
+- **Responsive Find:** highlights update with text, without the previous 200 ms delay during TUI redraws, in local and remote terminals.
+- **Correct scrolling:** native scrollback and applications that redraw their own scrolling views keep highlights aligned without moving your scroll position.
+- **Reliable reconnection:** restoring a remote terminal or clearing its screen refreshes search results immediately.
+- **Efficient history search:** unchanged scrollback remains cached, including correct invalidation when the 10,000-line history limit trims older lines.
+
+Find searches the current terminal buffer and its scrollback. History retained only inside an application becomes searchable when that application displays it.
 
 ## Update together
 
-Install Desktop **0.16.0** and update your Outpost server to the matching release code. This release changes the desktop bridge contract; an older desktop app will ask you to update when connecting to the new server. Reload existing web terminal pages after deployment.
+Install Desktop **0.16.1** for local terminals and update your Outpost server for remote terminals and the web client. Reload existing web terminal pages after deployment, or reopen their desktop tabs. No agent-session restart or terminal-helper update is required for these search fixes. Server deployment leaves remote agent processes running.
 
-After finishing or saving current work, restart each existing managed agent session once to load the new lifecycle hooks. Reconnecting a client alone does not install hooks into an already-running agent. New sessions load the hooks automatically. Server deployment leaves remote agent processes running.
-
-If you run a local Outpost backend, update and restart it too; the desktop installer does not update that backend. No terminal-helper update is required.
+If you run a local Outpost backend, update and restart it too; the desktop installer does not update that backend.
 
 ## Install
 
-- **Apple silicon Mac:** download `Outpost-0.16.0-mac-arm64.dmg`.
-- **Intel Mac:** download `Outpost-0.16.0-mac-x64.dmg`.
-- **Windows x64:** download `Outpost-0.16.0-windows-x64.exe`.
+- **Apple silicon Mac:** download `Outpost-0.16.1-mac-arm64.dmg`.
+- **Intel Mac:** download `Outpost-0.16.1-mac-x64.dmg`.
+- **Windows x64:** download `Outpost-0.16.1-windows-x64.exe`.
 
 On macOS, drag Outpost to Applications and open it once. These previews have no Developer ID signature or notarization; after the first launch attempt, use **System Settings → Privacy & Security → Open Anyway** if macOS blocks the app. Windows may show **SmartScreen → More info → Run anyway**. `SHA256SUMS` lists the artifact checksums.
 

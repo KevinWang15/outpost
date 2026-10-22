@@ -174,6 +174,9 @@ available from the terminal toolbar and right-click menu, and **Edit → Find in
 terminal** in the desktop app. Web, remote desktop, and local shell tabs share
 this feature. It searches the screen and scrollback currently held by xterm,
 not files or output that has already left the buffer.
+Highlights update with terminal output, including applications that redraw their
+screen to scroll their own history. That history is searchable as the application
+displays it; Outpost cannot search content the application has not sent to xterm.
 
 Text selection is local to the terminal and copies when you release the mouse.
 It does not pause the remote display. Applications that

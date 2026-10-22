@@ -105,7 +105,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
     if (!focusRecovery()) session.current?.terminal.focus()
   }, [focusRecovery])
   const search = useTerminalSearch(restoreTerminalFocus)
-  const { attach: attachSearch, open: openSearch, screenCleared } = search
+  const { attach: attachSearch, open: openSearch, bufferChanged } = search
 
   useLayoutEffect(() => {
     if (state.kind !== 'closed' || !document.hasFocus() || (desktop && session.current && !session.current.focused))
@@ -164,7 +164,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         focusRecovery,
         attachSearch,
         openSearch,
-        screenCleared,
+        bufferChanged,
         resume: (token, title) => lifecycle.current.onResume?.(token, title),
       })
     } catch (error) {
@@ -185,7 +185,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
       session.current = null
       current.dispose()
     }
-  }, [token, local, mountAttempt, notify, focusRecovery, attachSearch, openSearch, screenCleared])
+  }, [token, local, mountAttempt, notify, focusRecovery, attachSearch, openSearch, bufferChanged])
 
   const send = async (text: string) => {
     if (!session.current) throw new Error('The terminal is not available. Your draft is kept.')

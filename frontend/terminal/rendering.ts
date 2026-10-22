@@ -36,7 +36,7 @@ export class TerminalRenderer implements TerminalRendering {
     private terminal: Terminal,
     private failed: (message: string) => void,
     private local = false,
-    private screenCleared: () => void = () => {},
+    private bufferChanged: () => void = () => {},
   ) {
     this.checkpoints = new CheckpointReader(terminal)
     if (!local) remoteTerminalReplies(terminal)
@@ -54,7 +54,10 @@ export class TerminalRenderer implements TerminalRendering {
     this.checkpoints = new CheckpointReader(this.terminal)
     if (this.local)
       this.enqueue(
-        () => this.terminal.reset(),
+        () => {
+          this.terminal.reset()
+          this.bufferChanged()
+        },
         () => {},
       )
   }
@@ -100,7 +103,7 @@ export class TerminalRenderer implements TerminalRendering {
         if (this.phase !== 'live') throw new Error('Clear arrived before restoration finished')
         this.terminal.clearSelection()
         clearTerminal(this.terminal)
-        this.screenCleared()
+        this.bufferChanged()
       } else if (message.type === 'geometry') {
         if (this.phase !== 'live' || !terminalSize(message.cols, message.rows))
           throw new Error('Invalid terminal geometry')
@@ -112,7 +115,10 @@ export class TerminalRenderer implements TerminalRendering {
           this.phase = 'restoring'
         } else if (!this.restoring) throw new Error('Missing terminal checkpoint header')
         this.checkpoints.accept(message.checkpoint)
-        if (message.checkpoint.part === 'end') this.phase = 'live'
+        if (message.checkpoint.part === 'end') {
+          this.phase = 'live'
+          this.bufferChanged()
+        }
       }
     }, rendered)
   }

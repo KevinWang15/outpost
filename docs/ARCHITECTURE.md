@@ -1302,9 +1302,10 @@ Window close, minimize, maximize and fullscreen remain native operations.
 
 `tab-scroller.ts` uses the tab viewport's native `scrollLeft` as its only scroll
 state. Both native scrollbar axes are hidden. A three-pixel custom horizontal
-thumb occupies a fixed four-pixel lane within the existing title-bar height,
-with a larger pointer target. Its visibility and position cannot resize the
-viewport or change whether the tabs overflow. Thumb geometry is measured from
+thumb overlays the tabs just above their active underline, with a larger pointer
+target. Tabs extend to the title-bar bottom border, without a reserved scrollbar
+lane. Its visibility and position cannot resize the viewport or change whether
+the tabs overflow. Thumb geometry is measured from
 the viewport and content, never from the thumb's previous dimensions.
 Mouse-wheel and trackpad deltas scroll horizontally, with line/page units
 normalized; Ctrl/pinch zoom gestures retain their default handling. Clicking the

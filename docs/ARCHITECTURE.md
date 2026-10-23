@@ -804,6 +804,57 @@ and passes it to the client on that connection, which opens the link on your
 computer. Delivery is at most once. With no attached terminal, the helper
 fails with a clear message.
 
+### Published session files
+
+`outpost_files.py` owns immutable attachment snapshots in
+`~/.outpost/files/<session>/<file-id>/`. Publication copies a regular file to a
+private temporary directory, checks its size and that the source did not change,
+then publishes content and metadata together by atomic rename. Per-session
+locks serialize quota checks and removal without holding the session registry
+lock through file transfer. Limits are 32 MiB per file and 100 files / 256 MiB
+per managed session. File IDs are random identifiers; clients never provide
+remote filesystem paths for download or removal. Removing an attachment leaves
+its source alone; deleting a managed session removes its attachment store.
+
+`outpost_mcp_install.py` atomically installs a self-contained Python zipapp
+containing `outpost_mcp.py` and the file store. The stdio server exposes only
+`publish_file(path, name?)`, using MCP 2025-06-18 initialization and tools calls,
+the lifecycle used by Codex's default stdio client. It also supports a direct
+`publish FILE` shell command for any managed harness. Codex receives invocation-only
+MCP overrides alongside its activity hooks. `OUTPOST_SESSION_ID` and
+`OUTPOST_STATE_DIRECTORY` are launcher-owned values explicitly forwarded through
+`env_vars`; the destination cannot be selected in a tool call. No user-wide
+Codex configuration is rewritten. Existing agent processes need one explicit
+restart to acquire the integration. Python is already required on all targets;
+no additional interpreter, HTTP listener or terminal-helper release is needed.
+
+The auth boundary is unchanged: the helper trusts the remote OS account; file
+HTTP requests require an active resume grant scoped to owner, target and session.
+`SessionFileClient` reaches the target over the same management transport. Its
+binary reads reuse command cancellation, bounded output and safe SSH recovery;
+bytes are never base64-encoded into the model context or mixed with PTY output.
+Downloads are capped at two per owner and four globally, with slots retained
+until the HTTP response closes. Grants are not placed in download URLs.
+
+After committing a file, the helper sends `files.changed` as a best-effort hint.
+The broker validates it and broadcasts to every viewer of that owner's target
+and managed session. The receipt means **stored**, not delivered to a viewer.
+The files themselves are durable; they can be published with no attached client.
+Clients load the list on connection, refresh on hints and visibility changes,
+and reconcile every 30 seconds while connected to recover lost hints. Removal
+also broadcasts a refresh. Late HTTP responses are cancelled when the token,
+connection or mounted session changes.
+
+`TerminalFiles` owns the dropdown; `SessionFilePreview` owns image fetching,
+thumbnail generation and object-URL cleanup. Both are overlays outside xterm's
+layout and input surface. Thumbnail reads are lazy and serialized, and retain
+only small raster thumbnails. Only signature-detected PNG/JPEG/GIF/WebP files
+are previewed in an image element; all other formats are download-only. Desktop
+bridge version 8 adds a gesture-gated download operation: the main process uses
+the pane's own origin and credential, streams to a temporary file after a native
+Save dialog, validates the byte count, and atomically replaces the chosen path.
+Redirects, unsolicited browser downloads and generic filesystem IPC remain disabled.
+
 ## Desktop shell and OS integration
 
 `desktop/` is a separate npm package, so server builds never download Electron.
@@ -1295,6 +1346,7 @@ conversation.
 | Terminal service sockets | `~/.outpost/terminals/<session>.sock` |
 | Activity checkpoints | `~/.outpost/activity/<session>.json` |
 | Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
+| Published files | `~/.outpost/files/<session>/<file-id>/` |
 | Signal helpers and sockets | `~/.outpost/bin/`, `~/.outpost/run/` |
 
 Registry writes take `flock` and replace the file atomically. Records are

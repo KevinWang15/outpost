@@ -218,6 +218,36 @@ you return to it.
 
 ![The web terminal](docs/images/web-terminal.png)
 
+### Session files
+
+Managed Codex sessions receive an **Outpost MCP** tool named `publish_file`.
+Ask the agent to publish a generated image or document to your Outpost session;
+the tool takes an absolute `path` and an optional download `name`. Other coding
+tools can use the same helper from their shell:
+
+```sh
+outpost-mcp publish /absolute/path/to/report.pdf
+```
+
+When a session has files, its web or desktop terminal shows a **Files** badge
+at the top right. Open it for thumbnails, filenames, dates and sizes, with
+download and remove actions. Click an image to preview it inside Outpost.
+Windows and macOS downloads use the native Save dialog; web terminals use the
+browser's download handling. The panel and preview do not resize the terminal.
+
+Files are snapshots stored on the target, survive client disconnects, and
+appear again after reconnection. Removing an attachment leaves the original
+file alone. Deleting the managed session also deletes its attachments. Limits
+are **32 MiB per file**, **100 files**, and **256 MiB total per session**.
+PNG, JPEG, GIF and WebP have previews; other formats are available to download.
+Local shell tabs do not have this session file list.
+
+The helper is installed automatically when Outpost starts a managed agent.
+After updating Outpost, finish or save current work and restart an existing
+agent session once to load its MCP integration. This does not require a new
+Outpost Terminal binary. Update the server and desktop app together for native
+file downloads.
+
 ### Outpost Desktop
 
 Open **Download Outpost Desktop** in the Connect dialog, or visit `/desktop`

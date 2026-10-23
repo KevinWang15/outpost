@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 import { AppError } from './errors'
 
 export interface CommandResult {
@@ -24,6 +25,7 @@ interface CommandOptions {
   onOutput?: (text: string) => void
   /** Allow the transport's single recovery attempt. Mutations default to false. */
   readOnly?: boolean
+  maxOutputBytes?: number
 }
 
 export async function runCommand(
@@ -31,18 +33,38 @@ export async function runCommand(
   input: string | Uint8Array,
   options: CommandOptions = {},
 ): Promise<CommandResult> {
+  const result = await runCommandBytes(command, input, options)
+  return { ...result, stdout: result.stdout.toString('utf8') }
+}
+
+/** Bounded binary reads share command deadlines, cancellation and SSH recovery. */
+export async function runCommandBytes(
+  command: Command,
+  input: string | Uint8Array,
+  options: CommandOptions = {},
+): Promise<Omit<CommandResult, 'stdout'> & { stdout: Buffer }> {
   const deadline = performance.now() + (options.timeoutMs ?? 30_000)
   const result = await runCommandOnce(command, input, options)
   // Streaming output cannot be retracted. Only buffered, explicitly safe reads
   // can use a transport-provided recovery, and there is never a retry loop.
-  if (!options.readOnly || options.onOutput || !command.retry?.when(result)) return result
+  if (
+    !options.readOnly ||
+    result.stdout.length !== 0 ||
+    options.onOutput ||
+    !command.retry?.when({ ...result, stdout: result.stdout.toString('utf8') })
+  )
+    return result
   return runCommandOnce({ ...command, args: command.retry.args }, input, {
     ...options,
     timeoutMs: deadline - performance.now(),
   })
 }
 
-function runCommandOnce(command: Command, input: string | Uint8Array, options: CommandOptions): Promise<CommandResult> {
+function runCommandOnce(
+  command: Command,
+  input: string | Uint8Array,
+  options: CommandOptions,
+): Promise<Omit<CommandResult, 'stdout'> & { stdout: Buffer }> {
   return new Promise((resolve, reject) => {
     const aborted = () => new AppError(`${command.label} operation aborted`, 502)
     const timedOut = () => new AppError(`${command.label} operation timed out. Check the target and retry.`, 504)
@@ -56,7 +78,9 @@ function runCommandOnce(command: Command, input: string | Uint8Array, options: C
       detached: true,
       env: options.env,
     })
-    let stdout = '',
+    const stdout: Buffer[] = []
+    const decoder = new StringDecoder('utf8')
+    let size = 0,
       stderr = '',
       settled = false
     const cleanup = () => {
@@ -86,14 +110,15 @@ function runCommandOnce(command: Command, input: string | Uint8Array, options: C
     const cancel = () => fail(aborted())
     const timer = setTimeout(() => fail(timedOut()), timeoutMs)
     options.signal?.addEventListener('abort', cancel, { once: true })
-    child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', chunk => {
       if (settled) return
-      if (options.onOutput) options.onOutput(chunk)
+      if (options.onOutput) options.onOutput(decoder.write(chunk))
       else {
-        stdout += chunk
-        if (stdout.length > 4_000_000) fail(new AppError('Target response exceeded the size limit', 502))
+        size += chunk.length
+        if (size > (options.maxOutputBytes ?? 4_000_000))
+          fail(new AppError('Target response exceeded the size limit', 502))
+        else stdout.push(chunk)
       }
     })
     child.stderr.on('data', chunk => {
@@ -107,7 +132,8 @@ function runCommandOnce(command: Command, input: string | Uint8Array, options: C
       if (settled) return
       settled = true
       cleanup()
-      resolve({ code, stdout, stderr })
+      if (options.onOutput) options.onOutput(decoder.end())
+      resolve({ code, stdout: Buffer.concat(stdout), stderr })
     })
     if (command.input) child.stdin.write(command.input)
     child.stdin.end(input)

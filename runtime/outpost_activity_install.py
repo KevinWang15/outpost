@@ -9,6 +9,7 @@ import tempfile
 
 import outpost_activity_events as events
 from outpost_activity_events import file_lock, read_json, write_json
+from outpost_config import toml
 from outpost_rpc import JsonRpcProcess
 
 COMMON_EVENTS = (
@@ -61,21 +62,6 @@ def claude(directory, session, generation, executable):
     )
     settings = {'hooks': {name: [{'hooks': [{'type': 'command', 'command': command, 'timeout': 2}]}] for name in names}}
     return ['--settings', json.dumps(settings, separators=(',', ':'))]
-
-
-def toml(value):
-    """Serialize the small JSON-shaped subset used by native CLI overrides."""
-    if isinstance(value, str):
-        return json.dumps(value)
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, list):
-        return '[' + ','.join(map(toml, value)) + ']'
-    if isinstance(value, dict):
-        return '{' + ','.join(toml(k) + '=' + toml(v) for k, v in value.items()) + '}'
-    raise ValueError('Unsupported activity hook configuration value')
 
 
 def codex(directory, session, generation, executable):

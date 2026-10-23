@@ -227,7 +227,10 @@ class Connection {
       const reply = (ok: boolean, text?: string) =>
         this.relay({ type: 'signal-result', id: message.id, ok, ...(text ? { message: text } : {}) })
       const signal = message.signal as { type?: unknown; payload?: unknown } | undefined
-      const validate = typeof signal?.type === 'string' ? signalValidators[signal.type] : undefined
+      const validate =
+        typeof signal?.type === 'string' && Object.hasOwn(signalValidators, signal.type)
+          ? signalValidators[signal.type]
+          : undefined
       if (!validate) return reply(false, 'Outpost does not handle this signal type.')
       const now = Date.now()
       if (this.signals.until <= now) this.signals = { count: 0, until: now + 60_000 }
@@ -239,7 +242,8 @@ class Connection {
         return reply(false, (error as Error).message)
       }
       if (this.socket.readyState !== WebSocket.OPEN) return reply(false, 'The Outpost terminal disconnected.')
-      this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
+      if (signal!.type === 'files.changed') this.broker.filesChanged(this.grant)
+      else this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
       reply(true)
     } else if (message.type === 'exit' && message.reason === 'ended') {
       // The terminal service owns the coding process. A relay/SSH process may
@@ -462,6 +466,19 @@ export class TerminalBroker {
     } catch (error) {
       const failure = terminalFailure(error)
       connection.close(failure.reason, failure.message)
+    }
+  }
+
+  /** Availability hints reach every authorized viewer of this managed session. */
+  filesChanged(grant: Grant) {
+    for (const connection of this.connections) {
+      const other = connection.grant
+      if (
+        other.owner.userId === grant.owner.userId &&
+        other.targetId === grant.targetId &&
+        other.sessionId === grant.sessionId
+      )
+        connection.send({ type: 'signal', signal: { type: 'files.changed', payload: {} } })
     }
   }
 

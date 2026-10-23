@@ -20,5 +20,10 @@ export function browserUrl(payload: unknown): string {
 }
 
 export const signalValidators: Record<string, (payload: unknown) => unknown> = {
+  'files.changed': payload => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || Object.keys(payload).length)
+      throw new Error('Expected an empty file-change signal.')
+    return {}
+  },
   'browser.open': payload => ({ url: browserUrl(payload) }),
 }

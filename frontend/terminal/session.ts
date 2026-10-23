@@ -36,6 +36,7 @@ interface SessionOptions {
   modifiersChanged(value: TerminalModifiers): void
   notice(message: string, sticky?: boolean): void
   blockedLink(url: string): void
+  filesChanged(): void
   showComposer(): void
   focusRecovery(): boolean
   attachSearch(term: Terminal, container: HTMLElement): () => void
@@ -128,6 +129,10 @@ export class TerminalSession {
                 if (!this.disposed) this.activity.update(value)
               },
               signal: ({ signal }) => {
+                if (signal.type === 'files.changed') {
+                  if (!this.disposed) options.filesChanged()
+                  return
+                }
                 if (signal.type !== 'browser.open') return
                 let url: string
                 try {

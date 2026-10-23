@@ -25,6 +25,7 @@ import KeyBar from './KeyBar'
 import TerminalContextMenu from './TerminalContextMenu'
 import TerminalTextDialog from './TerminalTextDialog'
 import TerminalSearch from './TerminalSearch'
+import TerminalFiles from './TerminalFiles'
 import { useTerminalSearch } from './useTerminalSearch'
 import { touchInput as touch } from '../browser'
 import { useTerminalViewport } from './viewport'
@@ -71,6 +72,8 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
   const [name, setName] = useState(title)
   const [bellRinging, setBellRinging] = useState(false)
   const [status, setStatus] = useState('')
+  const [fileAccess, setFileAccess] = useState<{ launch: string; resume: string } | null>(null)
+  const [filesRevision, setFilesRevision] = useState(0)
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
   const [keysShown, setKeysShown] = useState(touch)
   const [composerShown, setComposerShown] = useState(touch)
@@ -160,12 +163,16 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         modifiersChanged: setModifiers,
         notice: notify,
         blockedLink: setBlockedLink,
+        filesChanged: () => setFilesRevision(value => value + 1),
         showComposer: () => setComposerShown(true),
         focusRecovery,
         attachSearch,
         openSearch,
         bufferChanged,
-        resume: (token, title) => lifecycle.current.onResume?.(token, title),
+        resume: (resume, title) => {
+          setFileAccess({ launch: token!, resume })
+          return lifecycle.current.onResume?.(resume, title)
+        },
       })
     } catch (error) {
       // A discarded StrictMode mount must not publish a stale initialization failure.
@@ -332,6 +339,15 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         >
           <div className="terminal-surface" ref={surface} inert={state.kind === 'closed'} />
         </TerminalContextMenu>
+        {!local && fileAccess?.launch === token && (
+          <TerminalFiles
+            key={token}
+            token={fileAccess!.resume}
+            connected={connected}
+            revision={filesRevision}
+            restoreFocus={restoreTerminalFocus}
+          />
+        )}
         {search.visible && state.kind !== 'closed' && <TerminalSearch search={search} />}
         {/* Notices float over the screen; they must never change PTY geometry. */}
         <div className={`terminal-notices${!toolbarShown && !desktop ? ' toolbar-hidden' : ''}`}>

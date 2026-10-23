@@ -53,6 +53,8 @@ const bridge: DesktopBridge = {
   },
   reportState: state => ipcRenderer.invoke('terminal:state', state),
   openExternal: (url: string) => ipcRenderer.invoke('terminal:open-external', url),
+  downloadFile: file =>
+    navigator.userActivation.isActive ? ipcRenderer.invoke('terminal:download-file', file) : Promise.resolve(false),
   // This check runs in the isolated preload world, outside renderer scripts.
   pasteClipboard: () =>
     navigator.userActivation.isActive ? ipcRenderer.invoke('terminal:paste') : Promise.resolve(false),

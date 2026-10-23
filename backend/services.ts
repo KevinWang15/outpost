@@ -4,6 +4,7 @@ import type { FastifyRequest } from 'fastify'
 import type { Deployment, Owner } from './deployment'
 import type { Installations } from './installations'
 import type { SessionService, TargetContext } from './sessions'
+import type { SessionFileClient } from './sessionFiles'
 import type { SoftwareService } from './software'
 import type { TerminalBroker } from './terminal/broker'
 import type { ConnectTokens } from './terminal/tokens'
@@ -13,6 +14,7 @@ import { supportsSshMultiplexing, transportFor } from './transport'
 export interface Services {
   deployment: Deployment
   sessions: SessionService
+  files: SessionFileClient
   software: SoftwareService
   installations: Installations
   tokens: ConnectTokens

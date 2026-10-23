@@ -1,7 +1,8 @@
 import type { SessionActivity } from './activity'
+import type { SessionFile } from './sessionFiles'
 
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 7
+export const desktopBridgeVersion = 8
 export interface TerminalPreferences {
   fontSize: number
   sound: boolean
@@ -26,6 +27,7 @@ export interface DesktopBridge {
   /** Called only after the server accepts a connection and issues a resume grant. */
   saveResume(token: string, title: string): Promise<void>
   openExternal(url: string): Promise<boolean>
+  downloadFile(file: SessionFile): Promise<boolean>
   onCommand(listener: (command: TerminalCommand) => void): () => void
   onLaunch(listener: (token: string) => void): () => void
   launchHandled(token: string): Promise<void>

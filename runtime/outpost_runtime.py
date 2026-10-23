@@ -21,6 +21,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+import outpost_files
+import outpost_mcp_install
 import outpost_terminal as terminal
 from outpost_activity_state import Activity
 from outpost_harness import adapters
@@ -71,7 +73,7 @@ def main():
     body = json.dumps(request).encode() + b'\n'
     if len(body) > 32 * 1024:
         raise ValueError('Signals must fit within 32 KiB.')
-    os.chdir(os.path.expanduser('~/.outpost'))
+    os.chdir(os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[0]))))
     connection = socket.socket(socket.AF_UNIX)
     connection.settimeout(15)
     try:
@@ -234,6 +236,7 @@ def valid_launch_options(environment, arguments):
 
 def install_helpers():
     HELPERS.mkdir(mode=0o700, exist_ok=True)
+    outpost_mcp_install.install(HELPERS)
     for name in ('outpost-browser', 'outpost-signal'):
         path = HELPERS / name
         try:
@@ -252,10 +255,7 @@ def launch_script(session, executable, activity_generation=None, activity_argume
     steps = [
         'cd -- ' + shlex.quote(session['rootDir']),
         'export PATH=' + shlex.quote(str(HELPERS)) + ':"$PATH"',
-        'export -- COLORTERM=truecolor OUTPOST_SESSION_ID='
-        + shlex.quote(session['id'])
-        + ' BROWSER='
-        + shlex.quote(str(HELPERS / 'outpost-browser')),
+        'export -- COLORTERM=truecolor BROWSER=' + shlex.quote(str(HELPERS / 'outpost-browser')),
     ]
     environment = {**session['env'], **session['cliSessionEnv']}
     if activity_generation is not None:
@@ -266,6 +266,14 @@ def launch_script(session, executable, activity_generation=None, activity_argume
         )
     if environment:
         steps.append('export -- ' + ' '.join(key + '=' + shlex.quote(value) for key, value in environment.items()))
+    # Session routing is launcher-owned even when the user supplies other environment settings.
+    steps.append(
+        'export OUTPOST_SESSION_ID='
+        + shlex.quote(session['id'])
+        + ' OUTPOST_STATE_DIRECTORY='
+        + shlex.quote(str(STATE))
+    )
+    integration_arguments = outpost_mcp_install.arguments(session['tool'], HELPERS / 'outpost-mcp')
     adapter = CODING_ADAPTERS[session['tool']]
     flags = ' '.join(shlex.quote(value) for value in adapter.arguments(session))
     # Bash expands the call's arguments once. The function checks that exact
@@ -279,7 +287,7 @@ def launch_script(session, executable, activity_generation=None, activity_argume
         + ' '
         + flags
         + ' '
-        + ' '.join(shlex.quote(value) for value in activity_arguments)
+        + ' '.join(shlex.quote(value) for value in [*activity_arguments, *integration_arguments])
         + ' "$@"'
         + '\n}'
     )
@@ -769,6 +777,27 @@ def main():
     if action in ('create', 'fork'):
         respond(create_session(request))
         return
+    if action in ('files-list', 'files-remove', 'files-read'):
+        if not any(s['id'] == request.get('id') for s in read_registry()['sessions']):
+            fail('Session not found', 404)
+        try:
+            if action == 'files-list':
+                respond(outpost_files.list_files(request['id']))
+            elif action == 'files-remove':
+                outpost_files.remove(request['id'], request.get('fileId'))
+                respond({'ok': True})
+            else:
+                metadata, stream = outpost_files.read_file(request['id'], request.get('fileId'))
+                with stream:
+                    sys.stdout.flush()
+                    sys.stdout.buffer.write(b'OUTPOST_FILE:' + json.dumps(metadata).encode() + b'\n')
+                    shutil.copyfileobj(stream, sys.stdout.buffer, 65536)
+                    sys.stdout.buffer.flush()
+        except FileNotFoundError:
+            fail('Session file not found', 404)
+        except ValueError as error:
+            fail(str(error))
+        return
     if action == 'upload-image':
         # Registry writes are atomic. Never hold its lock during file transfer.
         session = next((s for s in read_registry()['sessions'] if s['id'] == request.get('id')), None)
@@ -803,6 +832,7 @@ def main():
                 Path(socket_name(session)).unlink(missing_ok=True)
                 (STATE / 'logs' / (session['id'] + '.log')).unlink(missing_ok=True)
                 activity(session).remove()
+                outpost_files.remove_session(session['id'])
                 result = {'ok': True}
             elif action == 'attach':
                 cols, rows = terminal_size(request)

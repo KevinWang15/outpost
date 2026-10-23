@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { LocalTerminal } from './local-terminal'
+import { saveSessionFile } from './session-files'
 import type { ShellProfile } from './shell-profiles'
 import {
   Menu,
@@ -78,6 +79,7 @@ export class TerminalPanes {
     return this.live
   }
   private sessions = new WeakSet<Electron.Session>()
+  private fileTransfers = new Set<number>()
   private sessionPanes = new Map<string, number>()
   private hostStates = new WeakMap<WebContents, TerminalHostState>()
   private cleanup = new Set<Promise<void>>()
@@ -133,6 +135,23 @@ export class TerminalPanes {
       pane.interfaceReady = true
       pane.error = null
       this.host.changed(pane.id)
+    })
+    ipcMain.handle('terminal:download-file', async (event, value: unknown) => {
+      const pane = this.sender(event)
+      const window = this.host.window(pane.id)
+      if (
+        !window ||
+        !this.host.focused(pane.id) ||
+        pane.connection.kind !== 'remote' ||
+        this.fileTransfers.has(pane.id)
+      )
+        return false
+      this.fileTransfers.add(pane.id)
+      try {
+        return await saveSessionFile(window, pane.view.webContents, pane.origin, pane.connection.token, value)
+      } finally {
+        this.fileTransfers.delete(pane.id)
+      }
     })
     ipcMain.handle('terminal:open-external', async (event, value: unknown) => {
       const pane = this.sender(event)

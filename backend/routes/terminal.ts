@@ -5,8 +5,11 @@ import { withRequestSignal } from '../request'
 import type { Services } from '../services'
 import type { TerminalQuery } from '../terminal/broker'
 import type { Grant } from '../terminal/tokens'
+import { terminalGrant } from '../terminal/authorization'
+import { sessionFileRoutes } from './sessionFiles'
 
 export function terminalRoutes(app: FastifyInstance, services: Services) {
+  sessionFileRoutes(app, services)
   // Both clients authenticate with the same scoped terminal grant.
   app.get<{ Querystring: TerminalQuery }>('/api/terminal', { websocket: true }, (socket, request) => {
     void services.broker.accept(socket, request.query)
@@ -25,10 +28,7 @@ export function terminalRoutes(app: FastifyInstance, services: Services) {
       {
         bodyLimit: maxImageBytes,
         onRequest: async request => {
-          const authorization = request.headers.authorization
-          const grant = authorization?.startsWith('Bearer ') ? services.tokens.authorize(authorization.slice(7)) : null
-          if (!grant || !services.active(grant.owner))
-            throw new AppError('This terminal authorization expired. Connect again from Outpost.', 401)
+          const grant = terminalGrant(services, request)
           grants.set(request, grant)
         },
       },

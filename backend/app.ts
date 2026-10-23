@@ -7,6 +7,7 @@ import websocket from '@fastify/websocket'
 import type { Deployment, Owner } from './deployment'
 import { Installations } from './installations'
 import { SessionClient, type SessionService } from './sessions'
+import { SessionFileClient } from './sessionFiles'
 import { SoftwareClient, type SoftwareService } from './software'
 import { targetResolver, type Services } from './services'
 import { TerminalBroker } from './terminal/broker'
@@ -55,6 +56,7 @@ export async function createApp(options: AppOptions) {
   const services: Services = {
     deployment,
     sessions,
+    files: new SessionFileClient(options.env),
     software,
     tokens,
     broker,

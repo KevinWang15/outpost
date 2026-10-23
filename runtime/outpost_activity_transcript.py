@@ -10,6 +10,7 @@ import os
 
 from outpost_activity_events import STATES, file_lock, read_json, write_json
 from outpost_activity_state import checkpoint, covered
+from outpost_harness import NativeActivity
 
 BLOCK = 64 * 1024
 MAX_RECORD = 16 * 1024 * 1024
@@ -91,13 +92,16 @@ def read_cache(path):
         isinstance(selected, list)
         and len(selected) == 2
         and isinstance(selected[0], list)
-        and len(selected[0]) == 2
+        and len(selected[0]) == 3
         and selected[0][0] in STATES
         and type(selected[1]) is int
         and 0 <= selected[1] <= cache['size']
         and (selected[0][1] is None or isinstance(selected[0][1], (str, int, float)))
+        and (selected[0][2] is None or isinstance(selected[0][2], str) and 0 < len(selected[0][2]) <= 160)
     ):
         return None
+    if selected is not None:
+        cache['marker'] = (NativeActivity(*selected[0]), selected[1])
     return cache
 
 

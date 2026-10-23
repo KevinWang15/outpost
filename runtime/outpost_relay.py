@@ -134,9 +134,10 @@ class SignalServer:
 class Relay:
     """Disposable socket adapter. The service owns the PTY and its lifetime."""
 
-    def __init__(self, path, cols, rows, hooks, signal_path=None):
+    def __init__(self, path, cols, rows, hooks, signal_path=None, activity_path=None):
         self.path, self.cols, self.rows = path, cols, rows
         self.hooks, self.signal_path = hooks, signal_path
+        self.activity_path = activity_path
         self.outgoing = bytearray()
         self.incoming = bytearray()
         self.stopped = False
@@ -187,7 +188,7 @@ class Relay:
         service.connect(self.path)
         service.setblocking(False)
         self.incoming += control({'type': 'attach', 'protocol': PROTOCOL, 'cols': self.cols, 'rows': self.rows})
-        self.activity = ActivityStream(self.hooks.activity, self.hooks.acknowledge)
+        self.activity = ActivityStream(self.hooks.activity, self.hooks.acknowledge, self.activity_path)
         self.signals = None
         if self.signal_path:
             try:

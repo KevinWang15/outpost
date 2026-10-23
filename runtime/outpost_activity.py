@@ -6,7 +6,7 @@ import json
 import os
 import time
 
-from outpost_activity_events import STATES, file_lock, read_json, write_json
+from outpost_activity_events import STATES, event_token, file_lock, read_json, write_json
 from outpost_activity_state import covered, latest_file
 from outpost_activity_transcript import marker, timestamp
 from outpost_harness import LiveStatusUnavailable
@@ -25,12 +25,6 @@ def result(state='idle', updated=None, completion=None, detail=None):
     }
 
 
-def event_token(events):
-    return hashlib.sha256(
-        json.dumps([events['generation'], events['session'], events['received']]).encode()
-    ).hexdigest()
-
-
 def hook_observation(activity, events, running):
     if not events or not events.get('observed') or events.get('state') is None:
         return None
@@ -43,40 +37,65 @@ def hook_observation(activity, events, running):
     return result(state, timestamp(events['received'] / 1_000_000), token)
 
 
-def inspect(activity, running, events):
+def transcript(activity, session, path=None):
+    if path is None:
+        found = latest_file(activity.adapter, session)
+        path = found[0] if found else None
+    selected = marker(activity.directory, session['id'], activity.adapter, path) if path else None
+    return path, selected
+
+
+def inspect(activity, running, events, reconcile=True):
     adapter = activity.adapter
     session = {**activity.session, 'cliSessionId': events['session']} if events else activity.session
     hook = hook_observation(activity, events, running)
+    if hook is not None:
+        # The current launch's native hooks own live state. No daemon request is
+        # allowed to replace them: the shared daemon may not own this process.
+        if reconcile and running and events['state'] in ('working', 'waiting'):
+            try:
+                path, selected = transcript(activity, session)
+                native = selected[0] if selected else None
+                updated = timestamp(native.timestamp) if native else None
+                if (
+                    native is not None
+                    and native.state in ('idle', 'finished', 'error')
+                    and updated is not None
+                    and updated > hook['updatedAt']
+                    and (events.get('turn') is None or native.turn == events['turn'])
+                ):
+                    # Recover a missed completion/interruption only from an
+                    # explicit, newer native terminal event. Output, silence,
+                    # daemon Idle and incomplete transcript entries aren't proof.
+                    activity.recover(events, native.state, updated, path, selected[1])
+                    # observe() rereads the lifecycle snapshot before publishing.
+            except (OSError, ValueError):
+                # Recovery is optional; failure doesn't invalidate a live hook.
+                pass
+        return hook, ('hook', hook['completionId']) if hook['completionId'] else None
+
+    # Without lifecycle state (including Kimi's identity-only hooks), native
+    # status/transcript evidence remains the primary observation source.
+    live_error = None
     try:
         live = adapter.live_activity(session, running)
-    except LiveStatusUnavailable:
-        # Embedded Codex instances have no shared-daemon status. Launch-scoped
-        # hooks still identify the conversation and report native lifecycle.
-        if hook is None and (events is None or events.get('error')):
-            raise
-        live = None
+    except (OSError, ValueError) as error:
+        live, live_error = None, error
     if live is not None and live.state != 'idle':
         return result(live.state, detail=live.detail), None
-    found = latest_file(adapter, session) if live is None else None
-    path = found[0] if found else live.path if live is not None else None
-    selected = marker(activity.directory, session['id'], adapter, path) if path else None
-    updated = timestamp(selected[0][1]) if selected else None
-    # A hook can arrive before its transcript flush. A subsequent transcript
-    # event supersedes it. Kimi hooks select identity only, never subagent state.
-    same_completion = (
-        hook is not None and events['state'] == 'finished' and selected is not None and selected[0][0] == 'finished'
-    )
-    if hook is not None and (same_completion or updated is None or hook['updatedAt'] >= updated):
-        if live is not None and hook['state'] in ('working', 'waiting'):
-            # The daemon's idle observation supersedes a pre-submit hook or a
-            # stale hook after an interrupted/failed turn.
-            return result('idle', hook['updatedAt']), None
-        return hook, ('hook', hook['completionId']) if hook['completionId'] else None
+    path, selected = transcript(activity, session, live.path if live is not None else None)
     if selected is None:
         if events and events.get('error') and running:
             raise ValueError('Lifecycle integration could not start: ' + events['error'])
+        if live_error is not None and (not isinstance(live_error, LiveStatusUnavailable) or events is None):
+            raise live_error
         return result(), None
-    (state, _), point = selected
+    return transcript_observation(activity, path, selected, running, events, live)
+
+
+def transcript_observation(activity, path, selected, running, events, live=None):
+    native, point = selected
+    state, updated = native.state, timestamp(native.timestamp)
     offset = point['offset']
     if live is not None and state not in ('finished', 'error', 'unknown'):
         state = live.state
@@ -90,10 +109,7 @@ def inspect(activity, running, events):
             raise ValueError('The native transcript changed while reading activity; retrying.')
         token = hashlib.sha256(json.dumps(point, sort_keys=True).encode()).hexdigest()
         if state == 'finished':
-            metadata = activity.read()
-            if covered(metadata['baseline'], stream, info, offset) or covered(
-                metadata['checked'], stream, info, offset
-            ):
+            if activity.transcript_seen(stream, info, offset):
                 state = 'idle'
         elif state in ('working', 'waiting') and live is None and not (events and events.get('observed')):
             if covered(activity.read()['baseline'], stream, info, offset):
@@ -128,26 +144,26 @@ def identity(activity, events):
     return [events['generation'], events['session']] if events else [None, activity.session['cliSessionId']]
 
 
-def observe(activity, running):
+def observe(activity, running, reconcile=True):
     # A hook may select another conversation while a native API request is in
     # flight. Never publish (or acknowledge) the previous conversation's result.
     for _ in range(2):
         events = activity.events()
-        value, point = inspect(activity, running, events)
+        value, point = inspect(activity, running, events, reconcile)
         latest = activity.events()
         if events == latest:
             return value, point, identity(activity, events)
     raise ValueError('The conversation changed while reading activity; retrying.')
 
 
-def describe(activity, running):
-    # Serialize observers separately from acknowledgement and input. A slow
-    # filesystem or native status API never holds the terminal-input lock.
+def describe(activity, running, reconcile=True):
+    # Bulk transcript/native API reads use a separate lock. Only the short
+    # recovery/checkpoint commit synchronizes with acknowledgement and input.
     path = activity.directory / (activity.session['id'] + '.observation.json')
     try:
         with file_lock(activity.directory / (activity.session['id'] + '.observation.lock')):
             try:
-                value, _, binding = observe(activity, running)
+                value, _, binding = observe(activity, running, reconcile)
                 value['observedAt'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 write_json(path, {'identity': binding, 'value': value})
                 return value

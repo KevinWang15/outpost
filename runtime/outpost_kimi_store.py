@@ -1,6 +1,8 @@
 """Current Kimi Code session discovery and ACP allocation."""
 
+from outpost_activity_events import turn_id
 from outpost_conversations import CodingSession, CodingSessionStore, clean, store_paths, strings, timestamp
+from outpost_harness import NativeActivity
 from outpost_rpc import JsonRpcProcess
 
 
@@ -54,18 +56,23 @@ class KimiSessionStore(CodingSessionStore):
         if record.get('agentId') != 'main':
             return None
         kind = record.get('type')
+        turn = turn_id(record.get('turnId'))
         if kind in ('turn.prompt', 'turn.steer'):
-            return 'working', record.get('time')
+            return NativeActivity('working', record.get('time'), turn)
         if kind == 'turn.ended':
-            return {'completed': 'finished', 'blocked': 'waiting', 'failed': 'error', 'cancelled': 'idle'}.get(
-                record.get('reason'), 'unknown'
-            ), record.get('time')
+            return NativeActivity(
+                {'completed': 'finished', 'blocked': 'waiting', 'failed': 'error', 'cancelled': 'idle'}.get(
+                    record.get('reason'), 'unknown'
+                ),
+                record.get('time'),
+                turn,
+            )
         if kind == 'interaction.request':
-            return 'waiting', record.get('time')
+            return NativeActivity('waiting', record.get('time'), turn)
         if kind == 'interaction.resolved':
-            return 'working', record.get('time')
+            return NativeActivity('working', record.get('time'), turn)
         if kind == 'turn.cancel' and record.get('target') != 'queued':
-            return 'idle', record.get('time')
+            return NativeActivity('idle', record.get('time'), turn)
         return None
 
     def activity_marker(self, records):

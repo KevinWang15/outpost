@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
@@ -17,9 +18,9 @@ from outpost_activity import STALE_SECONDS, stale
 from outpost_activity_events import read_json, record, write_json
 from outpost_activity_state import Activity
 from outpost_activity_stream import READ_TIMEOUT, ActivityStream
-from outpost_activity_transcript import marker, reverse_records
+from outpost_activity_transcript import marker, reverse_records, timestamp
 from outpost_codex_state import observe as observe_codex
-from outpost_harness import LiveStatusUnavailable, adapters
+from outpost_harness import LiveActivity, LiveStatusUnavailable, NativeActivity, adapters
 
 ID = '12345678-1234-4123-8123-123456789012'
 OTHER = '12345678-1234-4123-8123-123456789013'
@@ -105,24 +106,24 @@ class ObserverTests(unittest.TestCase):
         self.hook('SessionStart', native=ID, source='fork')
         self.assertEqual(self.activity.selected_session()['cliSessionId'], ID)
 
-    def test_observation_retries_if_conversation_changes_during_native_read(self):
+    def test_observation_retries_if_conversation_changes_during_recovery_read(self):
         self.hook('UserPromptSubmit')
         calls = []
 
-        def live(session, running):
+        def files(session):
             calls.append(session['cliSessionId'])
             if len(calls) == 1:
                 self.hook('SessionStart', native=OTHER, source='resume')
-            return None
+            return []
 
-        with patch.object(self.adapter, 'live_activity', side_effect=live):
+        with patch.object(self.adapter, 'activity_files', side_effect=files):
             self.assertEqual(self.activity.describe(True)['state'], 'idle')
-        self.assertEqual(calls, [ID, OTHER])
+        self.assertEqual(calls, [ID])  # The new Idle hook needs no recovery read.
 
     def test_transient_failures_preserve_last_known_state_then_expire_and_recover(self):
-        self.hook('UserPromptSubmit')
+        self.append(self.transcript(), {'type': 'user', 'message': {'content': 'prompt'}})
         first = self.activity.describe(True)
-        with patch.object(self.adapter, 'live_activity', side_effect=ValueError('temporary read failure')):
+        with patch.object(self.adapter, 'activity_files', side_effect=ValueError('temporary read failure')):
             failed = self.activity.describe(True)
         self.assertEqual(failed['state'], 'working')
         self.assertEqual(failed['observation'], 'stale')
@@ -136,12 +137,14 @@ class ObserverTests(unittest.TestCase):
         self.hook('UserPromptSubmit')
         self.activity.describe(True)
         self.hook('SessionStart', native=OTHER, source='resume')
+        value = read_json(self.events)
+        write_json(self.events, {**value, 'state': None, 'observed': False})
         with patch.object(self.adapter, 'live_activity', side_effect=ValueError('unavailable')):
             self.assertEqual(self.activity.describe(True)['state'], 'unknown')
         self.hook('UserPromptSubmit', native=OTHER)
         self.activity.describe(True)
         value = read_json(self.events)
-        write_json(self.events, {**value, 'generation': 'next-launch'})
+        write_json(self.events, {**value, 'generation': 'next-launch', 'state': None, 'observed': False})
         with patch.object(self.adapter, 'live_activity', side_effect=ValueError('unavailable')):
             self.assertEqual(self.activity.describe(True)['state'], 'unknown')
 
@@ -153,6 +156,134 @@ class ObserverTests(unittest.TestCase):
             self.assertEqual(self.activity.describe(True)['state'], 'working')
             self.events.unlink()
             self.assertEqual(self.activity.describe(True)['state'], 'unknown')
+
+    def test_hooks_remain_current_when_secondary_sources_disagree_or_fail(self):
+        for event, expected in [('UserPromptSubmit', 'working'), ('PermissionRequest', 'waiting')]:
+            self.hook(event)
+            with (
+                patch.object(self.adapter, 'live_activity', return_value=LiveActivity('idle')) as live,
+                patch.object(self.adapter, 'activity_files', side_effect=OSError('store unavailable')),
+            ):
+                value = self.activity.describe(True)
+                self.assertEqual((value['state'], value['observation']), (expected, 'current'))
+                live.assert_not_called()
+
+    def completion_record(self):
+        return {
+            'type': 'assistant',
+            'timestamp': timestamp((self.sequence + 1_000_000) / 1_000_000),
+            'message': {'stop_reason': 'end_turn'},
+        }
+
+    def test_recovered_completion_is_durable_and_late_stop_keeps_its_acknowledgement(self):
+        self.hook('UserPromptSubmit')
+        self.append(self.transcript(), self.completion_record())
+        completed = self.activity.describe(True)
+        self.assertEqual(completed['state'], 'finished')
+        self.assertEqual(read_json(self.events)['event'], 'Transcript')
+        self.activity.acknowledge(completed['completionId'], True)
+        with patch.object(self.adapter, 'activity_files', side_effect=OSError('store unavailable')):
+            self.assertEqual(self.activity.describe(True, reconcile=False)['state'], 'idle')
+            self.assertEqual(self.activity.describe(True)['state'], 'idle')
+        self.sequence += 10_000_000
+        self.hook('Stop')
+        self.assertEqual(self.activity.describe(True)['state'], 'idle')
+        self.hook('UserPromptSubmit')
+        self.hook('Stop')
+        self.assertNotEqual(self.activity.describe(True)['completionId'], completed['completionId'])
+
+    def test_recovery_rejects_a_different_native_turn(self):
+        self.hook('UserPromptSubmit', turn_id='current')
+        record = self.completion_record()
+        self.append(self.transcript(), record)
+        with patch.object(
+            self.adapter.sessions, 'activity_event', return_value=NativeActivity('finished', record['timestamp'], 'old')
+        ):
+            self.assertEqual(self.activity.describe(True)['state'], 'working')
+        self.assertEqual(read_json(self.events)['event'], 'UserPromptSubmit')
+
+    def test_recovery_cannot_overwrite_a_hook_arriving_during_its_read(self):
+        self.hook('UserPromptSubmit')
+        self.append(self.transcript(), self.completion_record())
+        recover = self.activity.recover
+
+        def switched(*args):
+            self.sequence += 10_000_000
+            self.hook('UserPromptSubmit', turn_id='new')
+            return recover(*args)
+
+        with patch.object(self.activity, 'recover', side_effect=switched):
+            self.assertEqual(self.activity.describe(True)['state'], 'working')
+        self.assertEqual(read_json(self.events)['turn'], 'new')
+
+    def test_input_while_recovery_is_pending_acknowledges_the_completion(self):
+        self.hook('UserPromptSubmit')
+        self.append(self.transcript(), self.completion_record())
+        recover = self.activity.recover
+
+        def checked(*args):
+            self.activity.input()
+            return recover(*args)
+
+        with patch.object(self.activity, 'recover', side_effect=checked):
+            self.assertEqual(self.activity.describe(True)['state'], 'idle')
+        self.sequence += 10_000_000
+        self.hook('Stop')
+        self.assertEqual(self.activity.describe(True)['state'], 'idle')
+
+    def test_input_rechecks_completion_after_acquiring_the_checkpoint_lock(self):
+        self.hook('UserPromptSubmit')
+        self.append(self.transcript(), self.completion_record())
+        lock = self.activity.lock
+
+        @contextmanager
+        def completed_before_lock():
+            with patch.object(self.activity, 'lock', lock):
+                self.assertEqual(self.activity.describe(True)['state'], 'finished')
+            with lock():
+                yield
+
+        with patch.object(self.activity, 'lock', completed_before_lock):
+            self.activity.input()
+        self.assertEqual(self.activity.describe(True)['state'], 'idle')
+
+    def test_cancelled_tool_is_idle_but_an_ordinary_failure_keeps_working(self):
+        for interrupted, state in [(True, 'idle'), (False, 'working')]:
+            self.hook('UserPromptSubmit')
+            self.hook('PostToolUseFailure', is_interrupt=interrupted)
+            self.assertEqual(self.activity.describe(True)['state'], state)
+
+    def test_stream_wakes_for_hooks_and_shared_acknowledgements_without_polling(self):
+        self.hook('UserPromptSubmit')
+        reads = []
+
+        def read(reconcile):
+            reads.append(reconcile)
+            return self.activity.describe(True, reconcile)
+
+        def wait_state(stream, expected):
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                value = stream.poll()
+                if value and value['state'] == expected:
+                    return value
+                time.sleep(0.01)
+            self.fail('Stream did not report ' + expected)
+
+        with patch('outpost_activity_stream.INTERVAL', 60):
+            stream = ActivityStream(read, lambda token: self.activity.acknowledge(token, True), self.activity.path)
+            try:
+                wait_state(stream, 'working')
+                self.hook('Stop')
+                completed = wait_state(stream, 'finished')
+                self.activity.acknowledge(completed['completionId'], True)
+                wait_state(stream, 'idle')
+                self.assertTrue(reads)
+                self.assertFalse(any(reads), 'A wakeup should not wait for or perform recovery reads')
+            finally:
+                stream.close()
+                if stream.worker:
+                    stream.worker.join(timeout=2)
 
     def test_late_transcript_flush_does_not_generate_a_second_completion(self):
         self.hook('UserPromptSubmit')
@@ -313,7 +444,7 @@ class ObserverTests(unittest.TestCase):
     def test_stream_deduplicates_timestamp_refreshes_and_stalled_reads_expire(self):
         self.hook('UserPromptSubmit')
         value = self.activity.describe(True)
-        stream = ActivityStream(lambda: value, lambda token: None)
+        stream = ActivityStream(lambda reconcile: value, lambda token: None)
         stream.worker = object()  # Drive the worker's latest-result slot deterministically.
         stream.result = value
         self.assertEqual(stream.poll()['state'], 'working')
@@ -330,11 +461,11 @@ class ObserverTests(unittest.TestCase):
         started, release = Event(), Event()
         calls = []
 
-        def read():
+        def read(reconcile):
             calls.append(True)
             started.set()
             release.wait(2)
-            return self.activity.describe(True)
+            return self.activity.describe(True, reconcile)
 
         stream = ActivityStream(read, lambda token: None)
         try:

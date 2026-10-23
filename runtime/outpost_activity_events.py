@@ -1,6 +1,7 @@
 """Small, durable lifecycle observations. Hooks never store prompts or tool output."""
 
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -12,6 +13,12 @@ from pathlib import Path
 
 STATES = ('working', 'waiting', 'idle', 'finished', 'error', 'unknown')
 ID = re.compile(r'(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|session_[A-Za-z0-9_-]{1,120})')
+
+
+def event_token(events):
+    return hashlib.sha256(
+        json.dumps([events['generation'], events['session'], events['received']]).encode()
+    ).hexdigest()
 
 
 def read_json(path, limit=32768):
@@ -53,10 +60,13 @@ def event_state(event, payload):
         'UserPromptSubmit',
         'PreToolUse',
         'PostToolUse',
-        'PostToolUseFailure',
         'ElicitationResult',
     ):
         return 'working'
+    if event == 'PostToolUseFailure':
+        # Claude distinguishes a cancelled tool from an ordinary tool failure.
+        # The latter can be handled by the agent within the same working turn.
+        return 'idle' if payload.get('is_interrupt') is True else 'working'
     if event in ('PermissionRequest', 'Elicitation'):
         return 'waiting'
     if event == 'Notification':
@@ -67,6 +77,12 @@ def event_state(event, payload):
         return 'finished'
     if event in ('Interrupt', 'SessionEnd'):
         return 'idle'
+    return None
+
+
+def turn_id(value):
+    if isinstance(value, (str, int)) and not isinstance(value, bool):
+        return str(value)[:160] or None
     return None
 
 
@@ -104,17 +120,18 @@ def record(directory, session_id, generation, payload, received=None, identity_o
             return  # Unrelated notifications cannot mint a new completion ID.
         if event == 'SessionEnd' and current.get('state') in ('finished', 'error'):
             return  # Exiting must not discard an unread completion or failure.
+        if state == 'finished' and current.get('state') == 'finished':
+            # A late Stop may confirm a completion recovered from the transcript.
+            # Keep its identity (and acknowledgement) until another turn starts.
+            return
         changed = native != current['session']
         if changed or event == 'SessionStart':
             current.update(session=native, state=None if identity_only else 'idle', turn=None)
         elif event == 'UserPromptSubmit':
             current['turn'] = None
-        turn = payload.get('turn_id')
-        if isinstance(turn, (str, int)) and not isinstance(turn, bool):
-            turn = str(turn)[:160]
+        turn = turn_id(payload.get('turn_id'))
+        if turn is not None:
             if state in ('finished', 'idle', 'error') and current.get('turn') not in (None, turn):
-                return
-            if state == 'finished' and current.get('state') == state and current.get('turn') == turn:
                 return
             current['turn'] = turn
         if state is not None:

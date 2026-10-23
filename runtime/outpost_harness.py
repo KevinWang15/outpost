@@ -11,7 +11,7 @@ import shlex
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional, Union
 
 
 class LiveStatusUnavailable(ValueError):
@@ -29,11 +29,19 @@ def storage_home(environment, key, default, cwd=None):
 
 @dataclass(frozen=True)
 class LiveActivity:
-    """Authoritative current state and selected transcript, independent of seen completions."""
+    """Native API state when lifecycle hooks are unavailable, independent of seen completions."""
 
     state: str
     path: Optional[Path] = None
     detail: Optional[str] = None
+
+
+class NativeActivity(NamedTuple):
+    """A main-agent lifecycle record; contains no prompt or tool content."""
+
+    state: str
+    timestamp: Optional[Union[str, int, float]]
+    turn: Optional[str] = None
 
 
 class CodingSessionAdapter(ABC):
@@ -121,7 +129,7 @@ class CodingSessionAdapter(ABC):
         """Native main-agent event logs for this exact conversation and store."""
 
     def activity_event(self, record):
-        """Return (native state, timestamp), or None for non-turn events."""
+        """Return NativeActivity, or None for non-turn events."""
         return self.sessions.activity_event(record)
 
     def activity_marker(self, records):

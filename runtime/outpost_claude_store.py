@@ -3,6 +3,7 @@
 import uuid
 
 from outpost_conversations import CodingSession, CodingSessionStore, clean, store_paths, strings, timestamp
+from outpost_harness import NativeActivity
 
 
 class ClaudeSessionStore(CodingSessionStore):
@@ -63,7 +64,7 @@ class ClaudeSessionStore(CodingSessionStore):
                 event = self.activity_event(record)
                 if event is None:
                     continue
-                created = timestamp(event[1])
+                created = timestamp(event.timestamp)
                 if selected is None:
                     selected, newest = (event, offset), created
                     if created is None:
@@ -79,7 +80,7 @@ class ClaudeSessionStore(CodingSessionStore):
         candidate = super().activity_update(record, offset, previous, history)
         if previous is None or candidate is None:
             return candidate
-        before, after = timestamp(previous[0][1]), timestamp(candidate[0][1])
+        before, after = timestamp(previous[0].timestamp), timestamp(candidate[0].timestamp)
         return previous if before and after and after < before else candidate
 
     def activity_event(self, record):
@@ -88,7 +89,7 @@ class ClaudeSessionStore(CodingSessionStore):
         kind = record.get('type')
         message = record.get('message')
         if record.get('isApiErrorMessage') or (kind == 'system' and record.get('subtype') == 'api_error'):
-            return 'error', record.get('timestamp')
+            return NativeActivity('error', record.get('timestamp'))
         if not isinstance(message, dict):
             return None
         if kind == 'user':
@@ -100,11 +101,12 @@ class ClaudeSessionStore(CodingSessionStore):
                 and part.get('text') in ('[Request interrupted by user]', '[Request interrupted by user for tool use]')
                 for part in content
             ):
-                return 'idle', record.get('timestamp')
-            return 'working', record.get('timestamp')
+                return NativeActivity('idle', record.get('timestamp'))
+            return NativeActivity('working', record.get('timestamp'))
         if kind == 'assistant':
             reason = message.get('stop_reason')
-            return (
-                'finished' if reason in ('end_turn', 'stop_sequence', 'max_tokens', 'refusal') else 'working'
-            ), record.get('timestamp')
+            return NativeActivity(
+                'finished' if reason in ('end_turn', 'stop_sequence', 'max_tokens', 'refusal') else 'working',
+                record.get('timestamp'),
+            )
         return None

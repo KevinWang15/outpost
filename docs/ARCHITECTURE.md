@@ -660,15 +660,15 @@ its command; the framework dispatches through the adapter registry:
 - Codex uses invocation-only `-c` hooks. A short-lived app-server reads `hooks/list`
   to obtain the native identities and hashes, then the launch trusts exactly these
   generated commands. It does not change config.toml, grant blanket hook trust,
-  start a thread, or invoke a model. Live status reads `thread/read` from the
-  existing `app-server-control` Unix socket. Active waiting flags become Waiting;
-  system errors become Error. When that daemon does not own the thread, the
-  launch's native hooks provide lifecycle state. A confirmed daemon Idle takes
-  precedence over an obsolete Working hook. Codex can select its embedded
-  app-server for launches with hook overrides; both native modes are supported.
+  start a thread, or invoke a model. The launch's native hooks own live state;
+  the shared daemon is never queried once a lifecycle snapshot is available.
+  Without a hook observation, `thread/read` on the existing `app-server-control`
+  socket can provide state and the selected rollout. Its Idle response cannot
+  overwrite Working or Waiting from an embedded CLI's hooks.
 - Claude uses invocation-only `--settings` hooks for selection, submission, tools,
-  permission/elicitation waits, completion and failure. Native transcript markers
-  provide persisted state and account for delayed/out-of-order prompt writes.
+  permission/elicitation waits, completion and failure. An interrupted tool means
+  Idle; an ordinary tool failure leaves the turn Working. Recovery reads explicit
+  transcript completions/interruptions and respects native timestamp ordering.
 - Kimi uses an additive local plugin in its installed-plugin registry, preserving
   other entries and leaving config.toml alone. Its hooks only select the main
   conversation; they are inert outside an Outpost launch. Main-agent wire records
@@ -688,27 +688,46 @@ cannot update its activity. Hook commands emit no output or decisions, and failu
 in optional activity setup do not prevent the terminal starting. Existing agent processes need a
 managed-session restart to install hooks; reconnecting a client does not restart
 its agent. Native formats and hook configuration are owned by harness adapters.
+Status hooks use no model calls, additional context, prompts or status MCP tools.
+
+**Source precedence and recovery.** A valid lifecycle snapshot is sufficient to
+report current state, including an unread completion. Auxiliary daemon, index or
+transcript failures cannot erase it. A Working/Waiting snapshot is periodically
+reconciled against explicit, strictly newer completion/interruption/failure records
+from that conversation's native transcript. When the hook provides a turn ID,
+the record must match it too. Only terminal transitions can recover hook state;
+transcript output and daemon Idle cannot infer them. Recovery commits
+to the same durable lifecycle snapshot under its writer lock, only if no new hook
+has arrived. Reads recheck the snapshot before publishing. This prevents a later
+read failure from resurrecting the old active state. A late Stop confirms an
+already recovered completion without minting another notification. Process exit
+clears Working/Waiting while preserving unread completion and error state.
+Recovery checks the transcript watermark and commits under the same lock as
+input acknowledgement, so typing while recovery is pending cannot revive an
+already seen completion. Lock order is checkpoint, lifecycle, then seen IDs.
 
 **Transcript indexing.** `outpost_activity_transcript.py` stores only a state,
-timestamp and integrity checkpoints. A cold read walks backwards to a native
-marker with bounded record memory; there is no 4 MiB distance cutoff that loses
+timestamp, optional native turn ID and integrity checkpoints. A cold read walks
+backwards to a native marker with bounded record memory; there is no 4 MiB distance cutoff that loses
 a long-running turn. Subsequent reads incrementally consume appended records in
 4 MiB batches. Partial JSON lines wait for completion; malformed records are
 skipped. Individual records are limited to 16 MiB. Corrupt derived indexes are
 rebuilt. File identity, offsets, anchors and rewrite metadata invalidate an index
 on replacement/truncation. Claude owns timestamp ordering; Kimi owns unresolved
 interaction reduction. Warm polls with no appended data do not rescan transcripts.
+Harnesses return the shared `NativeActivity` record; fields are named in the
+observer and validated/reconstructed when loading the derived JSON index.
 
-For Codex, the live API supplies its selected rollout. Read-only bounded queries
-of `state_5.sqlite` select it when no live service owns the thread and for input
-checkpoints. Reverts can retain obsolete rollout files, so globs/mtime are never
+For Codex, read-only bounded queries of `state_5.sqlite` select the rollout for
+recovery and input checkpoints; the fallback live API also supplies its selected
+rollout. Reverts can retain obsolete rollout files, so globs/mtime are never
 a substitute. Paths remain inside the pinned native store. Unresolved native
 review state remains Unknown until the CLI supplies an authoritative transition.
 
 **Freshness and completion.** Observation health is independent of agent state:
 `current`, `stale`, or `unavailable`, with an `observedAt` timestamp. A transient
-failure retains the last observation for at most 15 seconds, visibly labeled
-“last known” with animation stopped. Further failures never extend that deadline.
+failure of the primary source retains the last observation for at most 15 seconds,
+visibly labeled “last known” with animation stopped. Further failures never extend that deadline.
 Then it becomes Unknown with a diagnostic. Cached observations cannot cross launch
 or conversation identities. There is no fabricated Idle during a read failure.
 
@@ -725,8 +744,15 @@ restores the notice, and connection generations discard old replies. Activation
 before fresh metadata waits for a current observation. Stale completions are not
 automatically acknowledged. Later completions require a new interaction.
 
-`outpost_activity_stream.py` samples immediately and every two seconds, with one
-reader independent of terminal I/O. Slow reads show stale/unavailable metadata;
+`outpost_activity_stream.py` reads lifecycle state immediately and reconciles every
+two seconds, with one reader independent of terminal I/O. Each attachment watches
+atomic lifecycle/acknowledgement updates with Linux inotify; a change wakes its
+reader without waiting for the reconciliation interval. Watches target the parent
+directory and filter out derived caches and lock files, avoiding feedback loops.
+Every connected client gets its own wakeups. Notifications carry no state and
+don't need a network listener; reconnects reread durable metadata. Queue overflow
+requests a reread, and periodic reads remain available when watches cannot be
+installed or the directory disappears. Slow reads show stale/unavailable metadata;
 they never start replacement workers or block terminal shutdown. The latest result
 slot and a 32-request acknowledgement bound prevent backpressure from accumulating
 work. Meaningful metadata changes use the existing relay/WebSocket, without another

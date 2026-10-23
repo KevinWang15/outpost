@@ -1,5 +1,6 @@
 """Target-owned acknowledgement checkpoints; never persist terminal input or transcripts."""
 
+import datetime
 import fcntl
 import hashlib
 import json
@@ -10,7 +11,7 @@ import time
 import uuid
 from contextlib import contextmanager
 
-from outpost_activity_events import STATES, file_lock, read_json, write_json
+from outpost_activity_events import STATES, event_token, file_lock, read_json, write_json
 
 MAX_PATHS = 4096
 
@@ -95,6 +96,32 @@ class Activity:
         events = self.events()
         return {**self.session, 'cliSessionId': events['session']} if events else self.session
 
+    def recover(self, events, state, updated, path, point):
+        """Commit terminal evidence only if no hook arrived during its read.
+
+        Recovery shares the durable lifecycle snapshot, so the next read cannot
+        resurrect the old Working/Waiting hook if a transcript becomes unavailable.
+        Native timestamps order it against subsequent hooks; no new identity is
+        selected and no prompt/tool data is retained.
+        """
+        received = int(datetime.datetime.fromisoformat(updated).timestamp() * 1_000_000_000)
+        # Lock order: input/checkpoint -> lifecycle -> seen completions. Reading
+        # the watermark and publishing recovery must be atomic with user input.
+        with self.lock(), file_lock(self.directory / (self.session['id'] + '.events.lock')):
+            if self.events() == events and received > events['received']:
+                with path.open('rb') as stream:
+                    info = os.fstat(stream.fileno())
+                    if not covered(point, stream, info, point['offset']):
+                        raise ValueError('The native transcript changed during activity recovery.')
+                    seen = state == 'finished' and self.transcript_seen(stream, info, point['offset'])
+                recovered = {**events, 'state': state, 'received': received, 'event': 'Transcript'}
+                if seen:
+                    self.see_event(event_token(recovered))
+                write_json(
+                    self.directory / (self.session['id'] + '.events.json'),
+                    recovered,
+                )
+
     def begin_launch(self, executable):
         generation = uuid.uuid4().hex
         path = self.directory / (self.session['id'] + '.events.json')
@@ -152,6 +179,9 @@ class Activity:
                 raise ValueError('Invalid activity acknowledgement.')
         return data
 
+    def transcript_seen(self, stream, info, offset):
+        return any(covered(point, stream, info, offset) for point in self.read().values())
+
     @contextmanager
     def lock(self):
         self.directory.mkdir(mode=0o700, exist_ok=True)
@@ -191,10 +221,10 @@ class Activity:
         for suffix in ('observation.json', 'transcript.json'):
             (self.directory / (self.session['id'] + '.' + suffix)).unlink(missing_ok=True)
 
-    def describe(self, running):
+    def describe(self, running, reconcile=True):
         from outpost_activity import describe
 
-        return describe(self, running)
+        return describe(self, running, reconcile)
 
     def acknowledge(self, token, running):
         from outpost_activity import acknowledge
@@ -203,12 +233,10 @@ class Activity:
 
     def input(self):
         # Only an offset and checksum are saved. Keystrokes never enter metadata.
-        from outpost_activity import event_token
-
-        events = self.events()
-        if events and events.get('state') == 'finished':
-            self.see_event(event_token(events))
         with self.lock():
+            events = self.events()
+            if events and events.get('state') == 'finished':
+                self.see_event(event_token(events))
             # Capture the watermark under the same lock as browser checks and
             # other terminals, so an older input cannot undo a newer check.
             point = self.snapshot()

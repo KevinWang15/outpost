@@ -559,8 +559,8 @@ class AttachHooks:
     def on_input(self):
         self.observer.input()
 
-    def activity(self):
-        return self.observer.describe(alive(self.session))
+    def activity(self, reconcile=True):
+        return self.observer.describe(alive(self.session), reconcile)
 
     def acknowledge(self, completion_id):
         self.observer.acknowledge(completion_id, alive(self.session))
@@ -576,7 +576,15 @@ def attach_session(session, cols, rows):
             'in Required Software, then Terminate and Connect this session to restart it.',
             409,
         )
-    return Relay(socket_name(session), cols, rows, AttachHooks(session), 'run/' + session['id'] + '.sock').run()
+    hooks = AttachHooks(session)
+    return Relay(
+        socket_name(session),
+        cols,
+        rows,
+        hooks,
+        signal_path='run/' + session['id'] + '.sock',
+        activity_path=hooks.observer.path,
+    ).run()
 
 
 def terminal_size(request):

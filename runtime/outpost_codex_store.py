@@ -5,6 +5,7 @@ import json
 import os
 import uuid
 
+from outpost_activity_events import turn_id
 from outpost_conversations import (
     CodingSession,
     CodingSessionStore,
@@ -15,6 +16,7 @@ from outpost_conversations import (
     strings,
     timestamp,
 )
+from outpost_harness import NativeActivity
 from outpost_rpc import JsonRpcProcess
 
 
@@ -181,19 +183,20 @@ class CodexSessionStore(CodingSessionStore):
         if record.get('type') != 'event_msg' or not isinstance(payload, dict):
             return None
         kind = payload.get('type')
+        turn = turn_id(payload.get('turn_id'))
         if kind == 'task_started':
-            return 'working', record.get('timestamp')
+            return NativeActivity('working', record.get('timestamp'), turn)
         if kind == 'task_complete':
-            return ('error' if payload.get('error') else 'finished'), record.get('timestamp')
+            return NativeActivity('error' if payload.get('error') else 'finished', record.get('timestamp'), turn)
         if kind == 'turn_aborted':
-            return 'idle', record.get('timestamp')
+            return NativeActivity('idle', record.get('timestamp'), turn)
         item = payload.get('item')
         item_type = item.get('type') if kind == 'item_completed' and isinstance(item, dict) else None
         if kind == 'entered_review_mode' or item_type == 'EnteredReviewMode':
             # Codex 0.162.1 does not emit a parent TurnStarted for /review;
             # even daemon status can remain Idle until delegated work starts.
             # Do not mistake that gap (or an interrupted review) for known Idle.
-            return 'unknown', record.get('timestamp')
+            return NativeActivity('unknown', record.get('timestamp'), turn)
         if kind == 'exited_review_mode' or item_type == 'ExitedReviewMode':
-            return 'idle', record.get('timestamp')
+            return NativeActivity('idle', record.get('timestamp'), turn)
         return None

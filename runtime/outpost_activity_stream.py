@@ -5,13 +5,14 @@ from collections import deque
 from threading import Event, Lock, Thread
 
 from outpost_activity import stale, unavailable
+from outpost_activity_watch import ActivityWatch
 
 INTERVAL = 2
 READ_TIMEOUT = 5
 
 
 class ActivityStream:
-    def __init__(self, read, acknowledge):
+    def __init__(self, read, acknowledge, path=None):
         self.read = read
         self.acknowledge = acknowledge
         self.worker = None
@@ -25,8 +26,10 @@ class ActivityStream:
         self.result = None
         self.retry_at = 0
         self.last = None
+        self.watch = ActivityWatch(path) if path is not None else None
 
     def observe(self):
+        reconcile_at = time.monotonic() + INTERVAL
         while not self.stopped.is_set():
             self.wakeup.clear()
             with self.lock:
@@ -41,15 +44,19 @@ class ActivityStream:
                 except Exception as error:
                     results.append({'type': 'result', 'id': identifier, 'ok': False, 'message': str(error)[:4000]})
             try:
-                state = self.read()
+                reconcile = time.monotonic() >= reconcile_at
+                state = self.read(reconcile=reconcile)
+                if reconcile:
+                    reconcile_at = time.monotonic() + INTERVAL
             except Exception as error:
                 # Optional metadata must never break a live terminal connection.
                 state = stale(self.result, error)
+                reconcile_at = time.monotonic() + INTERVAL
             with self.lock:
                 self.result = state
                 self.results.extend(results)
                 self.read_started = None
-            self.wakeup.wait(INTERVAL)
+            self.wakeup.wait(max(0, reconcile_at - time.monotonic()))
 
     def request_acknowledgement(self, identifier, completion_id):
         # Include in-flight and undelivered requests in the bound. A stalled
@@ -73,6 +80,8 @@ class ActivityStream:
         """One reader and one latest-result slot, even while output is backed up."""
         if self.stopped.is_set():
             return None
+        if self.watch is not None and self.watch.changed():
+            self.wakeup.set()
         now = time.monotonic()
         if self.worker is None and now >= self.retry_at:
             try:
@@ -102,3 +111,5 @@ class ActivityStream:
     def close(self):
         self.stopped.set()
         self.wakeup.set()
+        if self.watch is not None:
+            self.watch.close()

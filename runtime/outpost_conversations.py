@@ -179,7 +179,7 @@ class CodingSessionStore(ABC):
 
     @abstractmethod
     def activity_event(self, record):
-        """Decode main-agent turn markers without returning conversation content."""
+        """Return NativeActivity for a main-agent lifecycle record, otherwise None."""
 
     def activity_marker(self, records):
         for record, offset in records:

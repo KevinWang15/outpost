@@ -220,10 +220,10 @@ you return to it.
 
 ### Session files
 
-Managed Codex sessions receive an **Outpost MCP** tool named `publish_file`.
+Managed Codex, Claude Code and Kimi Code sessions receive an **Outpost MCP** tool named `publish_file`.
 Ask the agent to publish a generated image or document to your Outpost session;
-the tool takes an absolute `path` and an optional download `name`. Other coding
-tools can use the same helper from their shell:
+the tool takes an absolute `path` and an optional download `name`. Any managed
+coding tool can also use the same helper from its shell:
 
 ```sh
 outpost-mcp publish /absolute/path/to/report.pdf
@@ -243,6 +243,12 @@ PNG, JPEG, GIF and WebP have previews; other formats are available to download.
 Local shell tabs do not have this session file list.
 
 The helper is installed automatically when Outpost starts a managed agent.
+Codex and Claude receive launch-specific MCP configuration. Kimi uses its native
+Outpost plugin, which also reports activity. Its MCP helper inherits the current
+process's session identity; ordinary Kimi launches outside Outpost expose no
+Outpost tools. No manual MCP setup is required, and existing user MCP servers
+remain configured.
+
 After updating Outpost, finish or save current work and restart an existing
 agent session once to load its MCP integration. This does not require a new
 Outpost Terminal binary. Update the server and desktop app together for native

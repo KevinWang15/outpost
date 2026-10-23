@@ -1,4 +1,4 @@
-"""Install one atomic Python zipapp; inject Codex MCP configuration per launch."""
+"""Package the shared MCP server; each harness owns its native configuration."""
 
 import io
 import os
@@ -8,7 +8,6 @@ import zipfile
 
 import outpost_files
 import outpost_mcp
-from outpost_config import toml
 
 
 def install(directory):
@@ -37,17 +36,6 @@ def install(directory):
     return path
 
 
-def arguments(tool, executable):
-    if tool == 'codex':
-        return [
-            '-c',
-            'mcp_servers.outpost='
-            + toml(
-                {
-                    'command': sys.executable,
-                    'args': ['-I', str(executable)],
-                    'env_vars': ['OUTPOST_SESSION_ID', 'OUTPOST_STATE_DIRECTORY'],
-                }
-            ),
-        ]
-    return []
+def stdio_server(executable):
+    """Transport description without a harness's flags or session identity."""
+    return {'command': sys.executable, 'args': ['-I', str(executable)]}

@@ -1,6 +1,6 @@
 """Coding harness adapter contract, shared by management and terminal attachment.
 
-Add a harness: an adapter module (identity, launch arguments, activity files),
+Add a harness: an adapter module (identity, launch arguments, MCP, activity),
 a store module (discovery, search text, allocation, turn markers), an entry in
 adapters() below, and an entry in shared/harnesses.ts.
 """
@@ -135,11 +135,23 @@ class CodingSessionAdapter(ABC):
         """Return LiveActivity when the harness owns a live status API; otherwise use turn markers."""
         return None
 
+    @abstractmethod
     def prepare_activity(self, directory, session, generation, executable):
-        """Install native lifecycle reporting for this terminal launch."""
-        import outpost_activity_install
+        """Return optional activity setup after prepare_launch has succeeded.
 
-        return getattr(outpost_activity_install, self.tool)(directory, session, generation, executable)
+        A harness whose shared plugin already provides hooks can return no
+        arguments. Failures are recorded without preventing the agent launch.
+        """
+
+    @abstractmethod
+    def prepare_launch(self, directory, session):
+        """Prepare required native integration once and return launch arguments.
+
+        directory is Outpost's state directory; shared helpers are installed.
+        Configure MCP and any shared native plugin here. Persisted configuration
+        must never contain a managed session's identity or credentials. Returned
+        options precede arguments(session) and then user arguments.
+        """
 
     @abstractmethod
     def arguments(self, session):

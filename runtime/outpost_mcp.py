@@ -52,6 +52,9 @@ def publish(session, arguments):
 
 
 def serve(session):
+    # A user-level plugin can also be loaded by an ordinary, unmanaged CLI.
+    # It can initialize normally, but has no capabilities to act on a session.
+    available_tools = [TOOL] if session is not None else []
     initialized = False
     while True:
         line = sys.stdin.buffer.readline(65537)
@@ -83,17 +86,23 @@ def serve(session):
                     'protocolVersion': '2025-06-18',
                     'capabilities': {'tools': {}},
                     'serverInfo': {'name': 'outpost', 'version': '1.0.0'},
-                    'instructions': 'Use publish_file to deliver generated files and images to the user in this Outpost session.',
+                    'instructions': (
+                        'Use publish_file to deliver generated files and images to the user in this Outpost session.'
+                        if session is not None
+                        else 'No Outpost session is attached. No tools are available.'
+                    ),
                 }
             elif method == 'ping':
                 result = {}
             elif not initialized:
                 raise ValueError('Initialize the MCP connection first')
             elif method == 'tools/list':
-                result = {'tools': [TOOL]}
+                result = {'tools': available_tools}
             elif method == 'tools/call':
                 params = request.get('params', {})
                 try:
+                    if session is None:
+                        raise ValueError('This process is not attached to an Outpost session')
                     if not isinstance(params, dict) or params.get('name') != TOOL['name']:
                         raise ValueError('Unknown Outpost tool')
                     receipt = publish(session, params.get('arguments', {}))
@@ -118,18 +127,22 @@ def serve(session):
 
 def main():
     os.umask(0o077)
-    directory = os.environ.get('OUTPOST_STATE_DIRECTORY', '')
-    if not os.path.isabs(directory):
+    arguments = sys.argv[1:]
+    if arguments not in ([], ['--optional-session']) and not (len(arguments) == 2 and arguments[0] == 'publish'):
+        raise ValueError('Usage: outpost-mcp [--optional-session | publish FILE]')
+    directory = os.environ.get('OUTPOST_STATE_DIRECTORY')
+    session = os.environ.get('OUTPOST_SESSION_ID')
+    if arguments == ['--optional-session'] and directory is None and session is None:
+        serve(None)
+        return
+    if directory is None or not os.path.isabs(directory):
         raise ValueError('Run this helper inside an Outpost session')
     files.STATE = Path(directory)
-    session = os.environ.get('OUTPOST_SESSION_ID', '')
     files.require_session(session)
-    if len(sys.argv) == 3 and sys.argv[1] == 'publish':
-        print(json.dumps(publish(session, {'path': sys.argv[2]})))
-    elif len(sys.argv) == 1:
-        serve(session)
+    if arguments and arguments[0] == 'publish':
+        print(json.dumps(publish(session, {'path': arguments[1]})))
     else:
-        raise ValueError('Usage: outpost-mcp [publish FILE]')
+        serve(session)
 
 
 if __name__ == '__main__':

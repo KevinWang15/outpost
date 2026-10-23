@@ -22,9 +22,10 @@ from threading import Event, Thread
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'runtime'))
 
 from outpost_activity_events import read_json, write_json
-from outpost_activity_install import claude, codex, kimi, toml
 from outpost_activity_state import Activity
+from outpost_config import toml
 from outpost_harness import adapters
+from outpost_mcp_install import install as install_mcp
 from outpost_rpc import JsonRpcProcess
 
 ID = '12345678-1234-4123-8123-123456789012'
@@ -176,7 +177,7 @@ class NativeActivityTests(unittest.TestCase):
         return value
 
     def codex_options(self, directory, session, executable, provider):
-        options = codex(directory, session, 'test', executable)
+        options = adapters()['codex'].prepare_activity(directory, session, 'test', executable)
         options.extend(
             [
                 '-c',
@@ -209,11 +210,16 @@ class NativeActivityTests(unittest.TestCase):
         write_json(
             path, {'generation': 'test', 'session': ID, 'state': None, 'turn': None, 'received': 0, 'observed': False}
         )
+        write_json(activity.parent / 'registry.json', {'sessions': [{'id': ID}]})
+        helpers = activity.parent / 'bin'
+        helpers.mkdir()
+        install_mcp(helpers)
         environment = {
             **os.environ,
             **session['cliSessionEnv'],
             'HOME': str(root),
             'OUTPOST_SESSION_ID': ID,
+            'OUTPOST_STATE_DIRECTORY': str(activity.parent),
             'OUTPOST_ACTIVITY_GENERATION': 'test',
             'OUTPOST_ACTIVITY_HARNESS': tool,
             'OUTPOST_ACTIVITY_DIRECTORY': str(activity),
@@ -360,8 +366,8 @@ class NativeActivityTests(unittest.TestCase):
         alternate.mkdir()
         env['HOME'] = str(alternate)
         provider = self.provider()
-        kimi(directory, session, 'test', executable)
-        kimi(directory, session, 'test', executable)
+        adapters()['kimi'].prepare_launch(directory.parent, session)
+        adapters()['kimi'].prepare_launch(directory.parent, session)
         Path(env['KIMI_CODE_HOME'], 'config.toml').write_text(
             'defaultModel="fake"\n[models.fake]\nname="fake"\nprotocol="openai"\n'
             'baseUrl="' + provider.url + '"\napiKey="test-token"\nmaxContextSize=8192\n'
@@ -422,7 +428,7 @@ class NativeActivityTests(unittest.TestCase):
             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1',
             API_TIMEOUT_MS='1000',
         )
-        options = claude(directory, session, 'test', executable)
+        options = adapters()['claude'].prepare_activity(directory, session, 'test', executable)
         observer = self.observer('claude', directory, session, ID)
         process = subprocess.Popen(
             [executable, '--print', '--session-id', ID, *options, 'hook test'],

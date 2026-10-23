@@ -250,7 +250,7 @@ def install_helpers():
         os.replace(temporary, path)
 
 
-def launch_script(session, executable, activity_generation=None, activity_arguments=()):
+def launch_script(session, executable, activity_generation=None, launch_arguments=()):
     # Environment values and paths are literal; only the argument string is shell text.
     steps = [
         'cd -- ' + shlex.quote(session['rootDir']),
@@ -273,9 +273,10 @@ def launch_script(session, executable, activity_generation=None, activity_argume
         + ' OUTPOST_STATE_DIRECTORY='
         + shlex.quote(str(STATE))
     )
-    integration_arguments = outpost_mcp_install.arguments(session['tool'], HELPERS / 'outpost-mcp')
     adapter = CODING_ADAPTERS[session['tool']]
-    flags = ' '.join(shlex.quote(value) for value in adapter.arguments(session))
+    # Integration options precede the adapter's native conversation selector;
+    # user arguments remain a separate, guarded suffix.
+    flags = ' '.join(shlex.quote(value) for value in [*launch_arguments, *adapter.arguments(session)])
     # Bash expands the call's arguments once. The function checks that exact
     # argv and execs the CLI, preserving exec's behavior for shell operators.
     steps.append(
@@ -286,8 +287,6 @@ def launch_script(session, executable, activity_generation=None, activity_argume
         + shlex.quote(executable)
         + ' '
         + flags
-        + ' '
-        + ' '.join(shlex.quote(value) for value in [*activity_arguments, *integration_arguments])
         + ' "$@"'
         + '\n}'
     )
@@ -506,6 +505,7 @@ def start_session(session, cols, rows):
     (STATE / 'terminals').mkdir(mode=0o700, exist_ok=True)
     Path(socket_name(session)).unlink(missing_ok=True)
     install_helpers()
+    integration_arguments = CODING_ADAPTERS[tool].prepare_launch(STATE, session)
     observer = activity(session)
     observer.initialize()
     activity_generation, activity_arguments = observer.begin_launch(executable)
@@ -519,7 +519,7 @@ def start_session(session, cols, rows):
             [
                 command_shell,
                 '-c',
-                launch_script(session, executable, activity_generation, activity_arguments),
+                launch_script(session, executable, activity_generation, [*activity_arguments, *integration_arguments]),
             ]
         ),
         'cwd': session['rootDir'],

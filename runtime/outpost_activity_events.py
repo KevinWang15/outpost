@@ -126,11 +126,14 @@ def record(directory, session_id, generation, payload, received=None, identity_o
 
 def main():
     received = time.time_ns()
-    # Kimi's local plugin is shared by the native store, but inert outside an
-    # Outpost launch. Claude/Codex use explicit arguments, also across daemons.
     args = sys.argv[1:]
-    if args == ['kimi']:
-        if os.environ.get('OUTPOST_ACTIVITY_HARNESS') != 'kimi':
+    identity_only = args[:1] == ['--identity-only']
+    if identity_only:
+        args = args[1:]
+    # Shared native plugins bind through the launching process's environment;
+    # explicit arguments also support clients that report hooks through daemons.
+    if len(args) == 2 and args[0] == '--environment':
+        if os.environ.get('OUTPOST_ACTIVITY_HARNESS') != args[1]:
             return
         session_id = os.environ.get('OUTPOST_SESSION_ID', '')
         generation = os.environ.get('OUTPOST_ACTIVITY_GENERATION', '')
@@ -148,7 +151,7 @@ def main():
     raw = sys.stdin.buffer.read(16 * 1024 * 1024 + 1)
     if len(raw) > 16 * 1024 * 1024:
         return
-    record(directory, session_id, generation, json.loads(raw), received, identity_only=args == ['kimi'])
+    record(directory, session_id, generation, json.loads(raw), received, identity_only=identity_only)
 
 
 if __name__ == '__main__':

@@ -651,7 +651,11 @@ Codex defers SessionStart until the first turn. Restarts resume the last observe
 conversation. The native store remains pinned; neither terminal text nor another
 conversation's modification time can select an identity.
 
-`outpost_activity_install.py` owns harness setup:
+Each harness adapter owns its native hook events and configuration. Shared native
+plugins are installed once in `prepare_launch`; invocation-only activity setup
+runs through `prepare_activity` after the launch generation is allocated.
+`outpost_activity_install.py` only packages the shared event writer and builds
+its command; the framework dispatches through the adapter registry:
 
 - Codex uses invocation-only `-c` hooks. A short-lived app-server reads `hooks/list`
   to obtain the native identities and hashes, then the launch trusts exactly these
@@ -677,8 +681,11 @@ and timestamps in `~/.outpost/activity/<id>.events.json`. Atomic replacement and
 separate locks serialize writers. Old-launch events, subagents, late completions
 from another conversation and identifiable old-turn completions cannot overwrite
 the current turn. A read checks its identity again before publishing or checking
-completion. Hook commands emit no output or decisions, and optional integration
-failures do not prevent the terminal starting. Existing agent processes need a
+completion. The helper accepts explicit launch arguments or `--environment HARNESS`
+with an optional `--identity-only` flag; adapter configuration chooses the mode.
+Environment binding checks the launching harness, so an unrelated coding tool
+cannot update its activity. Hook commands emit no output or decisions, and failures
+in optional activity setup do not prevent the terminal starting. Existing agent processes need a
 managed-session restart to install hooks; reconnecting a client does not restart
 its agent. Native formats and hook configuration are owned by harness adapters.
 
@@ -818,15 +825,44 @@ its source alone; deleting a managed session removes its attachment store.
 
 `outpost_mcp_install.py` atomically installs a self-contained Python zipapp
 containing `outpost_mcp.py` and the file store. The stdio server exposes only
-`publish_file(path, name?)`, using MCP 2025-06-18 initialization and tools calls,
-the lifecycle used by Codex's default stdio client. It also supports a direct
-`publish FILE` shell command for any managed harness. Codex receives invocation-only
-MCP overrides alongside its activity hooks. `OUTPOST_SESSION_ID` and
-`OUTPOST_STATE_DIRECTORY` are launcher-owned values explicitly forwarded through
-`env_vars`; the destination cannot be selected in a tool call. No user-wide
-Codex configuration is rewritten. Existing agent processes need one explicit
-restart to acquire the integration. Python is already required on all targets;
-no additional interpreter, HTTP listener or terminal-helper release is needed.
+`publish_file(path, name?)`, using MCP 2025-06-18 initialization and tools calls.
+It also supports a direct `publish FILE` shell command for any managed harness.
+`OUTPOST_SESSION_ID` and `OUTPOST_STATE_DIRECTORY` are launcher-owned values;
+the destination cannot be selected in a tool call.
+
+The runtime installs the shared helpers, then calls the adapter's `prepare_launch`
+once for required integration. Optional per-launch activity setup follows through
+`prepare_activity`. Native MCP configuration is owned by the adapters:
+
+- **Codex:** invocation-only `-c mcp_servers.outpost=...`, explicitly forwarding
+  the two context variables through `env_vars`.
+- **Claude:** invocation-only `--mcp-config` JSON with an explicit stdio server
+  and the launch's context variables in `env`. The native conversation selector
+  follows integration options so the variadic MCP flag cannot consume a prompt.
+- **Kimi Code:** one Outpost plugin declares both activity hooks and
+  the MCP server. Kimi has no invocation-only MCP flag. Installation is atomic,
+  idempotent, and preserves plugin order, unrelated records and per-server preferences.
+  Only a missing registry is initialized; malformed registry data is rejected.
+  The manifest contains no session IDs: each MCP child inherits its own Kimi
+  process's environment. Plugin command restrictions are handled by the Kimi
+  adapter, using `env` to execute the exact target Python interpreter.
+
+Native configuration references: [Claude MCP](https://code.claude.com/docs/en/mcp)
+and [Kimi plugin MCP servers](https://moonshotai.github.io/kimi-code/en/customization/plugins.html#mcp-servers-in-plugins).
+
+The Kimi plugin uses the helper's `--optional-session` mode. When both context
+variables are absent, it initializes with an empty tool list and rejects all
+tool calls without reading session storage. Partial or invalid bindings still
+fail closed. This lets ordinary Kimi launches load the installed plugin without
+exposing Outpost tools or reporting a missing-session connection failure.
+
+MCP configuration is additive; Codex/Claude user configuration and Kimi's
+`config.toml` and `mcp.json` are not rewritten. Harness-specific flags, plugin
+formats and lifecycle setup live in `outpost_codex.py`, `outpost_claude.py` and
+`outpost_kimi.py`; shared installers contain no harness dispatch. Existing agent
+processes need one explicit restart to acquire the integration. Python is already
+required on all targets; no additional interpreter, HTTP listener or terminal-helper
+release is needed.
 
 The auth boundary is unchanged: the helper trusts the remote OS account; file
 HTTP requests require an active resume grant scoped to owner, target and session.
@@ -1333,7 +1369,7 @@ background updater for these previews. See [desktop development](../CONTRIBUTING
 `shared/harnesses.ts` lists harnesses for the UI and validation (id, label,
 command, installer, native ID pattern, storage variable).
 `runtime/outpost_harness.py` defines the adapter contract; each harness has an
-adapter (identity, launch arguments, activity files) and a store (discovery,
+adapter (identity, launch arguments, MCP and activity configuration) and a store (discovery,
 search text, allocation, turn markers). Session records pin the native
 conversation ID and storage directory, so a session always resumes the same
 conversation.
@@ -1377,7 +1413,9 @@ broker, authentication scheme or desktop copy of `TerminalView`.
 
 **Add a coding harness.** Add an entry to `shared/harnesses.ts`, then
 `runtime/outpost_<id>.py` (adapter) and `runtime/outpost_<id>_store.py`
-(store), and register the adapter in `outpost_harness.py`.
+(store), and register the adapter in `outpost_harness.py`. Implement the adapter's
+`prepare_launch` and `prepare_activity` methods using that harness's native interfaces;
+the runtime and shared helper installers must not branch on harness names.
 
 **Add a signal type.** Define a validator in `shared/signals.ts`, allow it in
 the broker, and handle it in the shared client, delegating native actions through the bridge.

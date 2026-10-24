@@ -1,63 +1,80 @@
-import { maxSessionFileBytes, maxSessionFiles, parseSessionFile, type SessionFile } from '../../shared/sessionFiles'
+import { SessionFileCache } from '../../shared/sessionFileCache'
+import { fileRequest, listSessionFiles, sessionFileBlob } from '../../shared/sessionFileRequests'
+import type { SessionFile, SessionFileBridge } from '../../shared/sessionFiles'
 
-/** Attachment requests never expose the resume credential in a URL. */
-export async function fileRequest(token: string, path: string, signal: AbortSignal, method = 'GET') {
-  const request = () =>
-    fetch('/api/terminal/files' + path, {
-      method,
-      signal,
-      redirect: 'error',
-      cache: 'no-store',
-      headers: { Authorization: `Bearer ${token}`, 'X-Outpost-Request': '1' },
-    })
-  let response = await request()
-  for (let attempt = 0; method === 'GET' && response.status === 429 && attempt < 3; attempt++) {
-    await response.body?.cancel()
-    await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)))
-    signal.throwIfAborted()
-    response = await request()
-  }
-  if (!response.ok) {
-    const error = await response.json().catch(() => null)
-    throw new Error(error?.message || `File request failed (${response.status}).`)
-  }
-  return response
-}
+export { fileSize } from '../../shared/sessionFileRequests'
 
-export async function listSessionFiles(token: string, signal: AbortSignal): Promise<SessionFile[]> {
-  const value = await (await fileRequest(token, '', signal)).json()
-  if (!Array.isArray(value) || value.length > maxSessionFiles) throw new Error('Invalid session file list.')
-  return value.map(parseSessionFile)
-}
-
-export async function sessionFileBlob(
-  token: string,
-  file: Pick<SessionFile, 'id' | 'size' | 'mediaType'>,
-  signal: AbortSignal,
-) {
-  const response = await fileRequest(token, '/' + file.id, signal)
-  const reader = response.body?.getReader()
-  if (!reader) throw new Error('File response is empty.')
-  const chunks: Uint8Array<ArrayBuffer>[] = []
-  let size = 0
-  try {
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      size += value.length
-      if (size > file.size || size > maxSessionFileBytes) throw new Error('File exceeds its declared size.')
-      chunks.push(value)
+/** One owner for browser bytes, thumbnail decoding and native file capabilities.
+ * Native originals live in the main process so a window-wide viewer and Save
+ * dialog share the same cache as the terminal's thumbnail list. */
+export class SessionFiles {
+  private originals: SessionFileCache | null
+  readonly thumbnails: SessionFileCache
+  constructor(
+    token: string,
+    readonly native?: SessionFileBridge,
+  ) {
+    const auth = { origin: '', token }
+    this.originals = native ? null : new SessionFileCache((file, signal) => sessionFileBlob(auth, file, signal))
+    this.list = signal => (native ? native.list() : listSessionFiles(auth, signal))
+    this.remove = async (id, signal) => {
+      if (native) await native.remove(id)
+      else await fileRequest(auth, '/' + id, signal, 'DELETE')
+      this.originals?.remove(id)
+      this.thumbnails.remove(id)
     }
-    if (size !== file.size) throw new Error('File transfer was incomplete. Try again.')
-    return new Blob(chunks, { type: file.mediaType })
-  } finally {
-    await reader.cancel().catch(() => {})
-    reader.releaseLock()
+    this.thumbnails = new SessionFileCache(
+      async (file, signal) => {
+        const blob = await this.read(file)
+        signal.throwIfAborted()
+        const bitmap = await createImageBitmap(blob)
+        try {
+          const scale = Math.min(1, 88 / Math.max(bitmap.width, bitmap.height))
+          const canvas = document.createElement('canvas')
+          canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+          canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+          const context = canvas.getContext('2d')
+          if (!context) throw new Error('Image preview is unavailable.')
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+          return await new Promise<Blob>((resolve, reject) =>
+            canvas.toBlob(
+              value => (value ? resolve(value) : reject(new Error('Could not create a thumbnail.'))),
+              'image/png',
+            ),
+          )
+        } finally {
+          bitmap.close()
+        }
+      },
+      4 * 1024 * 1024,
+    )
   }
-}
-
-export function fileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+  list: (signal: AbortSignal) => Promise<SessionFile[]>
+  remove: (id: string, signal: AbortSignal) => Promise<void>
+  async read(file: SessionFile) {
+    return this.originals
+      ? this.originals.read(file)
+      : new Blob([await this.native!.read(file)], { type: file.mediaType })
+  }
+  async download(file: SessionFile) {
+    if (this.native) return this.native.download(file)
+    const blob = await this.read(file)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = file.name
+    document.body.append(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    return true
+  }
+  retain(files: SessionFile[]) {
+    this.originals?.retain(files)
+    this.thumbnails.retain(files)
+  }
+  clear() {
+    this.originals?.clear()
+    this.thumbnails.clear()
+  }
 }

@@ -231,9 +231,16 @@ outpost-mcp publish /absolute/path/to/report.pdf
 
 When a session has files, its web or desktop terminal shows a **Files** badge
 at the top right. Open it for thumbnails, filenames, dates and sizes, with
-download and remove actions. Click an image to preview it inside Outpost.
+download and remove actions. Click any file to open the full-window viewer.
+Use its left/right buttons or **← / →** keys to cycle through files, and **Esc**
+to close. The viewer keeps filename, date, size, download and remove actions
+visible; unsupported formats show **Preview not supported**. In the desktop app
+the viewer covers the whole window, including split panes.
 Windows and macOS downloads use the native Save dialog; web terminals use the
-browser's download handling. The panel and preview do not resize the terminal.
+browser's download handling. The panel and viewer do not resize the terminal.
+Thumbnails, previews and downloads share a bounded session cache, avoiding repeat
+transfers while the file remains cached. Closing the file panel keeps the cache;
+closing the session clears it.
 
 Files are snapshots stored on the target, survive client disconnects, and
 appear again after reconnection. Removing an attachment leaves the original

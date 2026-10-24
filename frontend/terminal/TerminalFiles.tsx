@@ -1,11 +1,13 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { Download, Files, LoaderCircle, RefreshCw, Trash2, X } from 'lucide-react'
-import { previewImage, type SessionFile } from '../../shared/sessionFiles'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Files, RefreshCw, X } from 'lucide-react'
 import { desktop } from '../desktop'
-import { FilePreview, FileThumbnail } from './SessionFilePreview'
-import { fileRequest, fileSize, listSessionFiles, sessionFileBlob } from './sessionFiles'
+import { FileThumbnail } from './FileThumbnail'
+import { FileViewer } from './FileViewer'
+import { FileActions } from './FileActions'
+import { fileSize, SessionFiles } from './sessionFiles'
+import { useSessionFiles } from './useSessionFiles'
 
-/** Overlay UI: list and preview never participate in xterm's geometry. */
+/** Overlay UI: list and viewer never participate in xterm's geometry. */
 export default function TerminalFiles({
   token,
   connected,
@@ -17,50 +19,15 @@ export default function TerminalFiles({
   revision: number
   restoreFocus(): void
 }) {
-  const [files, setFiles] = useState<SessionFile[]>([])
+  const access = useMemo(() => new SessionFiles(token, desktop?.files), [token])
+  const [nativeViewing, setNativeViewing] = useState(false)
+  const state = useSessionFiles(access, connected && !nativeViewing, revision)
+  const { files, error } = state
   const [open, setOpen] = useState(false)
-  const [preview, setPreview] = useState<SessionFile | null>(null)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState<string | null>(null)
-  const [refresh, setRefresh] = useState(0)
+  const [preview, setPreview] = useState<string | null>(null)
   const container = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
-  const transfer = useRef<AbortController | null>(null)
   const id = useId()
-  useEffect(() => {
-    if (!connected) return
-    const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let loading = false
-    const load = async () => {
-      if (loading || controller.signal.aborted) return
-      clearTimeout(timer)
-      loading = true
-      try {
-        const next = await listSessionFiles(token, AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]))
-        if (!controller.signal.aborted) {
-          setFiles(previous => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next))
-          setError('')
-        }
-      } catch (error) {
-        if (!controller.signal.aborted) setError((error as Error).message)
-      } finally {
-        loading = false
-        if (!controller.signal.aborted) timer = setTimeout(() => void load(), 30_000)
-      }
-    }
-    const visible = () => {
-      if (document.visibilityState === 'visible') void load()
-    }
-    document.addEventListener('visibilitychange', visible)
-    void load()
-    return () => {
-      controller.abort()
-      clearTimeout(timer)
-      document.removeEventListener('visibilitychange', visible)
-    }
-  }, [token, connected, revision, refresh])
-  useEffect(() => () => transfer.current?.abort(), [])
   useEffect(() => {
     if (!open || preview) return
     const outside = (event: PointerEvent) => {
@@ -70,45 +37,21 @@ export default function TerminalFiles({
     return () => document.removeEventListener('pointerdown', outside)
   }, [open, preview])
 
-  const act = async (file: SessionFile, remove: boolean) => {
-    if (transfer.current) return
-    const controller = new AbortController()
-    transfer.current = controller
-    setBusy(file.id)
-    setError('')
-    try {
-      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)])
-      if (remove) {
-        await fileRequest(token, '/' + file.id, signal, 'DELETE')
-        if (!controller.signal.aborted) {
-          setFiles(previous => previous.filter(item => item.id !== file.id))
-          setRefresh(value => value + 1)
+  const view = (id: string) => {
+    if (desktop) {
+      if (nativeViewing) return
+      setNativeViewing(true)
+      void desktop
+        .viewFiles(id)
+        .then(() => {
+          state.refresh()
           trigger.current?.focus()
-        }
-      } else if (desktop) {
-        await desktop.downloadFile(file)
-      } else {
-        const blob = await sessionFileBlob(token, file, signal)
-        if (controller.signal.aborted) return
-        const url = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = file.name
-        document.body.append(link)
-        link.click()
-        link.remove()
-        // Retain until the browser has started the download.
-        setTimeout(() => URL.revokeObjectURL(url), 30_000)
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) setError((error as Error).message)
-    } finally {
-      if (!controller.signal.aborted) setBusy(null)
-      if (transfer.current === controller) transfer.current = null
-    }
+        })
+        .catch(error => state.setError((error as Error).message))
+        .finally(() => setNativeViewing(false))
+    } else setPreview(id)
   }
-
-  if (!files.length && !open) return null
+  if (!files.length && !open && !preview) return null
   return (
     <div
       ref={container}
@@ -134,18 +77,13 @@ export default function TerminalFiles({
         <Files size={18} />
         <span>{files.length}</span>
       </button>
-      {open && (
+      {open && !nativeViewing && (
         <section id={id} className="terminal-files-panel" aria-label="Session files">
           <header>
             <strong>
               Session files <small>{files.length}</small>
             </strong>
-            <button
-              className="icon-button"
-              aria-label="Refresh files"
-              disabled={!connected}
-              onClick={() => setRefresh(value => value + 1)}
-            >
+            <button className="icon-button" aria-label="Refresh files" disabled={!connected} onClick={state.refresh}>
               <RefreshCw size={15} />
             </button>
             <button
@@ -168,13 +106,8 @@ export default function TerminalFiles({
           <ul>
             {files.map(file => (
               <li key={file.id}>
-                <button
-                  className="terminal-file-details"
-                  disabled={!previewImage(file)}
-                  title={previewImage(file) ? `Preview ${file.name}` : file.name}
-                  onClick={() => setPreview(file)}
-                >
-                  <FileThumbnail file={file} token={token} />
+                <button className="terminal-file-details" title={`View ${file.name}`} onClick={() => view(file.id)}>
+                  <FileThumbnail file={file} access={access} />
                   <span className="terminal-file-description">
                     <strong>{file.name}</strong>
                     <span>
@@ -185,24 +118,7 @@ export default function TerminalFiles({
                     </span>
                   </span>
                 </button>
-                <button
-                  className="icon-button"
-                  aria-label={`Remove ${file.name}`}
-                  title="Remove from session (keeps the original file)"
-                  disabled={!!busy}
-                  onClick={() => void act(file, true)}
-                >
-                  <Trash2 size={16} />
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label={`Download ${file.name}`}
-                  title="Download"
-                  disabled={!!busy}
-                  onClick={() => void act(file, false)}
-                >
-                  {busy === file.id ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}
-                </button>
+                <FileActions file={file} state={state} />
               </li>
             ))}
           </ul>
@@ -210,10 +126,10 @@ export default function TerminalFiles({
         </section>
       )}
       {preview && (
-        <FilePreview
-          key={preview.id}
-          file={preview}
-          token={token}
+        <FileViewer
+          selected={preview}
+          access={access}
+          state={state}
           close={() => {
             setPreview(null)
             trigger.current?.focus()

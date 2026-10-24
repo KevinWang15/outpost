@@ -907,15 +907,47 @@ and reconcile every 30 seconds while connected to recover lost hints. Removal
 also broadcasts a refresh. Late HTTP responses are cancelled when the token,
 connection or mounted session changes.
 
-`TerminalFiles` owns the dropdown; `SessionFilePreview` owns image fetching,
-thumbnail generation and object-URL cleanup. Both are overlays outside xterm's
-layout and input surface. Thumbnail reads are lazy and serialized, and retain
-only small raster thumbnails. Only signature-detected PNG/JPEG/GIF/WebP files
-are previewed in an image element; all other formats are download-only. Desktop
-bridge version 8 adds a gesture-gated download operation: the main process uses
-the pane's own origin and credential, streams to a temporary file after a native
-Save dialog, validates the byte count, and atomically replaces the chosen path.
-Redirects, unsolicited browser downloads and generic filesystem IPC remain disabled.
+`TerminalFiles` owns the dropdown. `useSessionFiles` reconciles metadata and owns
+download/removal actions for both the dropdown and the native viewer. `FileViewer`
+is shared UI: a window-filling modal with filename, timestamp and size, download
+and remove actions, previous/next buttons, arrow-key cycling and Escape to close.
+It follows file identity across refreshes; removing the selected file advances
+to its neighbor. Only signature-detected PNG/JPEG/GIF/WebP files are rendered in
+an image element. Other formats show an unsupported-preview message with the
+same actions. No file content is interpreted as HTML or executable code.
+
+`SessionFileCache` is a session-scoped LRU with a 64 MiB original-byte budget.
+Pending reads are deduplicated and serialized; errors are evicted for retry.
+The dropdown's lazy thumbnails, full previews and downloads reuse those bytes.
+`SessionFiles` retains generated thumbnails separately, bounded to 4 MiB; image
+decoding is serialized and each bitmap is closed. `useFileImage` owns only the
+displayed object URL and revokes it on replacement/unmount. Closing the dropdown
+or viewer keeps cached bytes, so reopening normally needs no content transfer.
+Metadata refreshes do not invalidate immutable file content. Removal and list
+reconciliation evict missing files; leaving the session clears its cache. LRU
+eviction or a new client/session scope can require another download. Budgets cover
+cached blobs; actively displayed images and in-flight transfers also use memory.
+HTTP responses remain `no-store`, and authorization never enters a download URL.
+
+Browser caches live with the mounted terminal. In desktop, `NativeSessionFiles`
+owns the cache in the main process, bound to the pane's server, account and
+session; it shares bytes across terminal thumbnails, the viewer and native saves.
+Bridge version 9 exposes only session-file list/read/remove/save and a
+gesture-gated open-viewer operation. The host supplies the pane's credential;
+callers cannot select another origin, session or filesystem path. Native saves
+use a Save dialog, validate the byte count and atomically replace the selected
+path through a temporary file. Pane navigation, destruction or renderer failure
+disposes its cache and outstanding requests.
+
+`SessionFileViewer` owns a sandboxed, frameless native modal sized to its parent
+window, covering all split panes. It explicitly disables/re-enables its parent
+instead of using Electron's macOS sheet placement, so it retains the same
+window-sized bounds across platforms. Its local page reuses `FileViewer` through a
+narrow file-only preload; it has no server credential or network access. Closing,
+reloading or losing its originating pane closes the viewer. Browser dialogs and
+native viewer windows remain outside xterm's layout and input surface: opening
+either never changes terminal bounds or PTY dimensions. Redirects, unsolicited
+browser downloads and generic filesystem IPC remain disabled.
 
 ## Desktop shell and OS integration
 

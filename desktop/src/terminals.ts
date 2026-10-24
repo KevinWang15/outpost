@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { LocalTerminal } from './local-terminal'
-import { saveSessionFile } from './session-files'
+import { NativeSessionFiles } from './session-files'
+import { SessionFileViewer } from './file-viewer'
 import type { ShellProfile } from './shell-profiles'
 import {
   Menu,
@@ -79,7 +80,7 @@ export class TerminalPanes {
     return this.live
   }
   private sessions = new WeakSet<Electron.Session>()
-  private fileTransfers = new Set<number>()
+  private files = new Map<number, NativeSessionFiles>()
   private sessionPanes = new Map<string, number>()
   private hostStates = new WeakMap<WebContents, TerminalHostState>()
   private cleanup = new Set<Promise<void>>()
@@ -87,6 +88,7 @@ export class TerminalPanes {
     private directory: string,
     private host: Host,
   ) {
+    const fileViewer = new SessionFileViewer(directory)
     ipcMain.handle('terminal:host-state', event => this.host.state(this.sender(event).id))
     ipcMain.handle('terminal:ticket', event => {
       const connection = this.sender(event).connection
@@ -136,22 +138,26 @@ export class TerminalPanes {
       pane.error = null
       this.host.changed(pane.id)
     })
-    ipcMain.handle('terminal:download-file', async (event, value: unknown) => {
+    ipcMain.handle('terminal:files-list', event => this.sessionFiles(this.sender(event)).list())
+    ipcMain.handle('terminal:files-read', async (event, value: unknown) =>
+      (await this.sessionFiles(this.sender(event)).read(value)).arrayBuffer(),
+    )
+    ipcMain.handle('terminal:files-remove', (event, id: unknown) => {
+      const pane = this.sender(event)
+      if (!this.host.focused(pane.id)) throw new Error('Focus the terminal first.')
+      return this.sessionFiles(pane).remove(id)
+    })
+    ipcMain.handle('terminal:files-view', (event, id: unknown) => {
       const pane = this.sender(event)
       const window = this.host.window(pane.id)
-      if (
-        !window ||
-        !this.host.focused(pane.id) ||
-        pane.connection.kind !== 'remote' ||
-        this.fileTransfers.has(pane.id)
-      )
-        return false
-      this.fileTransfers.add(pane.id)
-      try {
-        return await saveSessionFile(window, pane.view.webContents, pane.origin, pane.connection.token, value)
-      } finally {
-        this.fileTransfers.delete(pane.id)
-      }
+      if (!window || !this.host.focused(pane.id)) return
+      return fileViewer.open(window, pane.view.webContents, this.sessionFiles(pane), id)
+    })
+    ipcMain.handle('terminal:files-download', (event, value: unknown) => {
+      const pane = this.sender(event)
+      const window = this.host.window(pane.id)
+      if (!window || !this.host.focused(pane.id) || pane.connection.kind !== 'remote') return false
+      return this.sessionFiles(pane).save(window, pane.view.webContents, value)
     })
     ipcMain.handle('terminal:open-external', async (event, value: unknown) => {
       const pane = this.sender(event)
@@ -250,6 +256,20 @@ export class TerminalPanes {
     if (connection.kind !== 'local') throw new Error('Local shell access is unavailable to server pages.')
     return connection.terminal
   }
+  private sessionFiles(pane: TerminalPane) {
+    const connection = pane.connection
+    if (connection.kind !== 'remote') throw new Error('Local shells do not have session files.')
+    let files = this.files.get(pane.id)
+    if (!files) {
+      files = new NativeSessionFiles(() => ({ origin: pane.origin, token: connection.token }))
+      this.files.set(pane.id, files)
+    }
+    return files
+  }
+  private clearFiles(id: number) {
+    this.files.get(id)?.dispose()
+    this.files.delete(id)
+  }
 
   dismiss(pane: TerminalPane) {
     const notification = pane.notification
@@ -297,6 +317,7 @@ export class TerminalPanes {
     // A hover transfer must be restored before destroying its native view.
     this.host.removing(id)
     this.dismiss(pane)
+    this.clearFiles(id)
     clearTimeout(pane.interfaceTimer)
     this.live.delete(id)
     if (pane.connection.kind === 'remote') this.sessionPanes.delete(desktopSessionId(pane.connection.reference))
@@ -461,6 +482,7 @@ export class TerminalPanes {
     })
     contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
       if (mainFrame && !inPlace) {
+        this.clearFiles(pane.id)
         if (connection.kind === 'local') connection.terminal.stop()
         this.hostStates.delete(contents)
         clearTimeout(pane.interfaceTimer)
@@ -509,6 +531,7 @@ export class TerminalPanes {
       this.host.changed(pane.id)
     })
     contents.on('render-process-gone', () => {
+      this.clearFiles(pane.id)
       if (connection.kind === 'local') connection.terminal.stop()
       pane.error =
         connection.kind === 'local'

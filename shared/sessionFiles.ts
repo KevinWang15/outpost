@@ -8,6 +8,18 @@ export interface SessionFile {
   size: number
   mediaType: string
 }
+
+/** Narrow native file capability, bound to one terminal session by the host. */
+export interface SessionFileBridge {
+  list(): Promise<SessionFile[]>
+  read(file: SessionFile): Promise<ArrayBuffer>
+  remove(id: string): Promise<void>
+  download(file: SessionFile): Promise<boolean>
+}
+export interface FileViewerBridge extends SessionFileBridge {
+  selection(): Promise<string>
+  close(): void
+}
 export const sessionFileId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{32}$/.test(id)
 export const previewImage = (file: SessionFile) =>
   ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.mediaType)

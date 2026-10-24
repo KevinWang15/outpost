@@ -28,7 +28,13 @@ export async function desktopTerminal(page: Page, token: string) {
       ticket: () => window.outpostTestTicket(),
       saveResume: token => window.outpostTestResume(token),
       openExternal: async () => false,
-      downloadFile: async () => false,
+      files: {
+        list: async () => [],
+        read: async () => new ArrayBuffer(0),
+        remove: async () => {},
+        download: async () => false,
+      },
+      viewFiles: async () => {},
       onCommand: listener => {
         const command = (event: Event) => listener((event as CustomEvent).detail)
         window.addEventListener('outpost-test-command', command)

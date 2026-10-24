@@ -53,8 +53,18 @@ const bridge: DesktopBridge = {
   },
   reportState: state => ipcRenderer.invoke('terminal:state', state),
   openExternal: (url: string) => ipcRenderer.invoke('terminal:open-external', url),
-  downloadFile: file =>
-    navigator.userActivation.isActive ? ipcRenderer.invoke('terminal:download-file', file) : Promise.resolve(false),
+  files: {
+    list: () => ipcRenderer.invoke('terminal:files-list'),
+    read: file => ipcRenderer.invoke('terminal:files-read', file),
+    remove: id =>
+      navigator.userActivation.isActive
+        ? ipcRenderer.invoke('terminal:files-remove', id)
+        : Promise.reject(new Error('Click Remove to delete a file.')),
+    download: file =>
+      navigator.userActivation.isActive ? ipcRenderer.invoke('terminal:files-download', file) : Promise.resolve(false),
+  },
+  viewFiles: id =>
+    navigator.userActivation.isActive ? ipcRenderer.invoke('terminal:files-view', id) : Promise.resolve(),
   // This check runs in the isolated preload world, outside renderer scripts.
   pasteClipboard: () =>
     navigator.userActivation.isActive ? ipcRenderer.invoke('terminal:paste') : Promise.resolve(false),

@@ -18,6 +18,7 @@ await build({
     'desktop/src/workspace-preload.ts',
     'desktop/src/session-finder-preload.ts',
     'desktop/src/session-creator-preload.ts',
+    'desktop/src/file-viewer-preload.ts',
   ],
   outdir: 'desktop/dist',
   outExtension: { '.js': '.cjs' },
@@ -42,7 +43,7 @@ await build({
 for (const file of ['workspace.html', 'workspace.css', 'session-finder.html', 'session-finder.css'])
   await cp(new URL('src/' + file, root), new URL(file, dist))
 // Native screens reuse the web terminal and session form with narrow IPC adapters.
-for (const page of ['local-terminal', 'session-creator'])
+for (const page of ['local-terminal', 'session-creator', 'file-viewer'])
   await buildFrontend({
     configFile: false,
     root: fileURLToPath(new URL(page + '/', root)),

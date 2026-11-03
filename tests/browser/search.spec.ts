@@ -55,6 +55,106 @@ async function assertFrames(page: Page) {
 
 for (const gpu of [false, true]) {
   test.describe(gpu ? 'WebGL search' : 'DOM search', () => {
+    test('terminal Ctrl+C interrupts after search and live refreshes preserve user selections', async ({ page }) => {
+      await mount(page, false, gpu)
+      await output(page, 'needle other text')
+      await find(page)
+      expect(await page.evaluate(() => window.terminalSearchFixture.terminal.hasSelection())).toBe(false)
+      await page.locator('.xterm-helper-textarea').focus()
+      await page.keyboard.press('Control+c')
+      expect(await page.evaluate(() => window.terminalSearchFixture.input)).toEqual(['\x03'])
+      await output(page, '\r\nneedle')
+      await expect(page.getByRole('search')).toBeVisible()
+      expect(await page.evaluate(() => window.terminalSearchFixture.terminal.hasSelection())).toBe(false)
+      await page.keyboard.press('Control+c')
+      expect(await page.evaluate(() => window.terminalSearchFixture.input)).toEqual(['\x03', '\x03'])
+      await page.evaluate(() => window.terminalSearchFixture.terminal.select(7, 0, 5))
+      await output(page, '\r\nmore output')
+      expect(await page.evaluate(() => window.terminalSearchFixture.terminal.getSelection())).toBe('other')
+      await page.keyboard.press('Control+c')
+      expect(await page.evaluate(() => window.terminalSearchFixture.input)).toEqual(['\x03', '\x03'])
+    })
+
+    test('search navigation is independent of focus, user selection and live refreshes', async ({ page }) => {
+      await mount(page, false, gpu)
+      await output(page, 'needle other text\r\nneedle\r\nneedle')
+      await page.evaluate(() => window.terminalSearchFixture.terminal.select(7, 0, 5))
+      const count = page.locator('.terminal-search-count')
+      const selectedText = () => page.evaluate(() => window.terminalSearchFixture.terminal.getSelection())
+      await find(page)
+      await expect(count).toHaveText('1 of 3')
+      expect(await selectedText()).toBe('other')
+      await page.getByRole('textbox', { name: 'Find in terminal' }).press('Enter')
+      await expect(count).toHaveText('2 of 3')
+      await page.locator('.xterm-helper-textarea').focus()
+      await output(page, '\r\nmore output')
+      await expect(count).toHaveText('2 of 3')
+      expect(await selectedText()).toBe('other')
+      await page.keyboard.press('Control+f')
+      await page.getByRole('textbox', { name: 'Find in terminal' }).press('Enter')
+      await expect(count).toHaveText('3 of 3')
+      await page.getByRole('textbox', { name: 'Find in terminal' }).press('Enter')
+      await expect(count).toHaveText('1 of 3')
+      await page.getByRole('textbox', { name: 'Find in terminal' }).press('Shift+Enter')
+      await expect(count).toHaveText('3 of 3')
+      expect(await selectedText()).toBe('other')
+      await page.getByRole('textbox', { name: 'Find in terminal' }).fill('missing')
+      await expect(count).toHaveText('No results')
+      expect(await selectedText()).toBe('other')
+      await page.getByRole('textbox', { name: 'Find in terminal' }).press('Escape')
+      expect(await selectedText()).toBe('other')
+    })
+
+    test('search cursor follows scrollback trimming and restarts after its match is removed', async ({ page }) => {
+      await mount(page, false, gpu)
+      await page.evaluate(() => {
+        window.terminalSearchFixture.terminal.options.scrollback = 3
+      })
+      await output(
+        page,
+        Array.from({ length: 27 }, (_, row) => ([3, 10, 20].includes(row) ? `needle ${row}` : `line ${row}`)).join(
+          '\r\n',
+        ),
+      )
+      await find(page)
+      const input = page.getByRole('textbox', { name: 'Find in terminal' })
+      const count = page.locator('.terminal-search-count')
+      await input.press('Enter')
+      await expect(count).toHaveText('2 of 3')
+      await page.locator('.xterm-helper-textarea').focus()
+      await output(page, '\r\nlast\r\nlast\r\nlast\r\nlast')
+      await expect(count).toHaveText('1 of 2')
+      await page.keyboard.press('Control+f')
+      await input.press('Enter')
+      await expect(count).toHaveText('2 of 2')
+      await output(page, '\r\nlast'.repeat(27) + '\r\nneedle new')
+      await expect(count).toHaveText('1 of 1')
+      await input.press('Enter')
+      await expect(count).toHaveText('1 of 1')
+      expect(await page.evaluate(() => window.terminalSearchFixture.terminal.hasSelection())).toBe(false)
+    })
+
+    test('search navigation handles matches ending at a column boundary and spanning rows', async ({ page }) => {
+      await mount(page, false, gpu)
+      await output(page, 'x'.repeat(74) + 'needle\r\nneedle\r\n' + 'x'.repeat(77) + 'needle')
+      await find(page)
+      const input = page.getByRole('textbox', { name: 'Find in terminal' })
+      const count = page.locator('.terminal-search-count')
+      await expect(count).toHaveText('1 of 3')
+      await input.press('Enter')
+      await expect(count).toHaveText('2 of 3')
+      await input.press('Enter')
+      await expect(count).toHaveText('3 of 3')
+      const active = await page.evaluate(() =>
+        window.terminalSearchFixture.sample().highlights.filter(highlight => highlight.active),
+      )
+      expect(active.map(highlight => highlight.text).join('')).toBe('needle')
+      await input.press('Enter')
+      await expect(count).toHaveText('1 of 3')
+      await input.press('Shift+Enter')
+      await expect(count).toHaveText('3 of 3')
+    })
+
     test('synchronized redraw timeout releases text and highlights together', async ({ page }) => {
       await mount(page, true, gpu)
       await output(page, '\x1b[4;3Hneedle\x1b[H')
@@ -209,7 +309,12 @@ for (const gpu of [false, true]) {
       await mount(page, false, gpu)
       await output(page, 'x'.repeat(77) + '你好needle\r\nNEEDLE\r\nneedle')
       await find(page, '你好needle')
-      expect(await page.evaluate(() => window.terminalSearchFixture.terminal.getSelection())).toBe('你好needle')
+      const active = await page.evaluate(() =>
+        window.terminalSearchFixture.sample().highlights.filter(highlight => highlight.active),
+      )
+      // xterm pads the preceding row when a wide character wraps.
+      expect(active.map(highlight => highlight.text?.trimEnd()).join('')).toBe('你好needle')
+      expect(await page.evaluate(() => window.terminalSearchFixture.terminal.hasSelection())).toBe(false)
       await page.getByRole('textbox', { name: 'Find in terminal' }).fill('needle')
       await expect(page.locator('.terminal-search-count')).toHaveText(/of 3$/)
       await page.getByRole('button', { name: 'Match case' }).click()

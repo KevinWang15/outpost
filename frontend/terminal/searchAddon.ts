@@ -8,6 +8,69 @@ interface LineCache {
   _destroyLinesCache(): void
 }
 
+/** The addon uses three selection methods as its navigation cursor. Give those
+ * methods private, marker-backed state so search never reads or writes the
+ * terminal's user selection. All other operations use the real terminal. */
+function searchTerminal(terminal: Terminal) {
+  let match: { marker: IMarker; column: number; length: number; cols: number } | undefined
+  const clearSelection = () => {
+    match?.marker.dispose()
+    match = undefined
+  }
+  const selection = {
+    clearSelection,
+    select(column: number, row: number, length: number) {
+      clearSelection()
+      const buffer = terminal.buffer.active
+      const marker = terminal.registerMarker(row - buffer.baseY - buffer.cursorY)
+      if (marker) match = { marker, column, length, cols: terminal.cols }
+    },
+    getSelectionPosition() {
+      // A resize can reflow columns; a buffer switch or trimmed marker can
+      // invalidate the old match. Restart navigation rather than use stale cells.
+      if (!match || match.marker.isDisposed || match.cols !== terminal.cols) {
+        clearSelection()
+        return undefined
+      }
+      const { marker, column, length, cols } = match
+      const lastCell = column + length - 1
+      return {
+        start: { x: column, y: marker.line },
+        end: { x: (lastCell % cols) + 1, y: marker.line + Math.floor(lastCell / cols) },
+      }
+    },
+  }
+  const buffer = terminal.buffer.onBufferChange(clearSelection)
+  const view = new Proxy(terminal, {
+    get(target, key) {
+      if (key === 'select' || key === 'clearSelection' || key === 'getSelectionPosition') return selection[key]
+      const value = Reflect.get(target, key, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  return {
+    view,
+    dispose() {
+      buffer.dispose()
+      clearSelection()
+    },
+  }
+}
+
+class BufferSearchAddon extends SearchAddon {
+  private navigation?: ReturnType<typeof searchTerminal>
+
+  override activate(terminal: Terminal) {
+    this.navigation = searchTerminal(terminal)
+    super.activate(this.navigation.view)
+  }
+
+  override dispose() {
+    super.dispose()
+    this.navigation?.dispose()
+  }
+}
+
 /** The narrow adapter surface for @xterm/addon-search 0.16.0. Its public API
  * cannot invalidate cached text or refresh without scrolling. Keep that
  * dependency here until the addon exposes a synchronous refresh API. */
@@ -28,7 +91,7 @@ interface LiveSearch extends SearchAddon {
  * onWriteParsed is already coalesced by xterm; a trailing debounce can starve
  * highlights indefinitely while a TUI is producing output. */
 export function liveSearchAddon(terminal: Terminal, highlightLimit: number) {
-  const addon = new SearchAddon({ highlightLimit })
+  const addon = new BufferSearchAddon({ highlightLimit })
   terminal.loadAddon(addon)
   const live = addon as LiveSearch
   if (

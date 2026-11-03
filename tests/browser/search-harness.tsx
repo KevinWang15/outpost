@@ -6,6 +6,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { TerminalRenderer } from '../../frontend/terminal/rendering'
 import { useTerminalSearch } from '../../frontend/terminal/useTerminalSearch'
 import TerminalSearch from '../../frontend/terminal/TerminalSearch'
+import { attachClipboard } from '../../frontend/terminal/clipboard'
 import type { Checkpoint } from '../../shared/terminalState'
 
 type Sample = ReturnType<typeof sample>
@@ -14,6 +15,7 @@ declare global {
     terminalSearchFixture: {
       terminal: Terminal
       frames: Sample[]
+      input: string[]
       sample(): Sample
       output(text: string): Promise<void>
       restore(parts: Checkpoint[]): Promise<void>
@@ -25,7 +27,7 @@ declare global {
 // Inspect both the buffer and actual decoration positions on every render,
 // rather than waiting for a stale highlight to eventually catch up.
 function sample(term: Terminal) {
-  type Decoration = IDecoration & { options: { x?: number; width?: number } }
+  type Decoration = IDecoration & { options: { x?: number; width?: number; backgroundColor?: string } }
   const core = (term as unknown as { _core: { _decorationService: { decorations: Iterable<Decoration> } } })._core
   const buffer = term.buffer.active
   const screen = term.element!.querySelector('.xterm-screen') as HTMLElement
@@ -49,6 +51,7 @@ function sample(term: Terminal) {
           column,
           width,
           text: buffer.getLine(row)?.translateToString(false, column, column + width),
+          active: decoration.options.backgroundColor === '#89661b',
           visible: !!decoration.element && decoration.element.style.display !== 'none',
           top: decoration.element ? parseFloat(decoration.element.style.top) : null,
           expectedTop: (row - buffer.viewportY) * height,
@@ -72,6 +75,10 @@ function Harness() {
     term.unicode.activeVersion = '11'
     term.open(surface.current!)
     const detach = attach(term, container.current!)
+    const clipboard = attachClipboard(term, { connected: () => true, pasteImage() {}, status() {} })
+    term.attachCustomKeyEventHandler(event => clipboard.handleKey(event))
+    const input: string[] = []
+    const data = term.onData(value => input.push(value))
     if (options.has('gpu')) term.loadAddon(new WebglAddon())
     const renderer = new TerminalRenderer(
       term,
@@ -93,6 +100,7 @@ function Harness() {
     window.terminalSearchFixture = {
       terminal: term,
       frames,
+      input,
       sample: () => sample(term),
       output: text => new Promise(resolve => renderer.output(new TextEncoder().encode(text), resolve)),
       restore: parts =>
@@ -105,6 +113,8 @@ function Harness() {
     }
     return () => {
       rendered.dispose()
+      data.dispose()
+      clipboard.dispose()
       renderer.dispose()
       detach()
       term.dispose()

@@ -1,26 +1,23 @@
-# Outpost Desktop 0.18.1 preview
+# Outpost Desktop 0.18.2 preview
 
-Terminal search keeps its navigation position separate from text selected for copying.
+This preview changes tab spinner rendering to address reported visual wobble.
 
-## What's fixed
+## What's changed
 
-- **Ctrl+C interrupts the terminal:** on Windows, returning focus to the terminal while search is open lets Ctrl+C reach the running program when no text is manually selected. Search highlights no longer turn the shortcut into Copy.
-- **Independent search navigation:** Next/Previous continue from the active match across focus changes and live output. Searching does not replace or clear text you selected to copy.
-- **Live output and scrollback:** the search cursor follows its match as old scrollback is trimmed. If the match is removed, the buffer changes, or resizing changes the column count, navigation restarts from a valid position.
+- **Tab spinners:** connecting and working indicators now rotate their fixed 16×16 HTML wrapper instead of the SVG itself. This aims to make rotation look steadier when tab layout falls between device pixels.
+- Stale activity indicators and reduced-motion settings still stop the animation. Bell animations keep their existing behavior.
 
-These fixes also apply to the web terminal after updating the server and reloading terminal pages.
+The Windows visual result still needs confirmation. Browser geometry tests verify that the icon center remains fixed throughout rotation, including fractional tab positions.
 
 ## Update
 
-Install Desktop **0.18.1** for the fix in local terminals, and update your Outpost server for managed remote terminals. The desktop bridge remains at **version 9**, compatible with Desktop 0.18.0.
-
-No coding-agent restart or Outpost Terminal binary update is required. Server deployment preserves remote terminal processes. If you run a local Outpost backend, update and restart it too; the desktop installer does not update that backend.
+Install Desktop **0.18.2** to try this change. No server deployment, Outpost Terminal binary update, or coding-agent restart is required. The desktop bridge remains at **version 9**.
 
 ## Install
 
-- **Apple silicon Mac:** download `Outpost-0.18.1-mac-arm64.dmg`.
-- **Intel Mac:** download `Outpost-0.18.1-mac-x64.dmg`.
-- **Windows x64:** download `Outpost-0.18.1-windows-x64.exe`.
+- **Apple silicon Mac:** download `Outpost-0.18.2-mac-arm64.dmg`.
+- **Intel Mac:** download `Outpost-0.18.2-mac-x64.dmg`.
+- **Windows x64:** download `Outpost-0.18.2-windows-x64.exe`.
 
 On macOS, drag Outpost to Applications and open it once. These previews have no Developer ID signature or notarization; after the first launch attempt, use **System Settings → Privacy & Security → Open Anyway** if macOS blocks the app. Windows may show **SmartScreen → More info → Run anyway**. `SHA256SUMS` lists the artifact checksums.
 

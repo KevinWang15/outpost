@@ -258,8 +258,8 @@ input::placeholder {
   flex: 0 0 16px;
   line-height: 0;
   color: #94a3b8;
-  /* Align optically with system-font labels. Offset the box so the SVG keeps
-     its own transform origin for spinner and bell animations. */
+  /* Align optically with system-font labels without changing the rotation
+     origin used by spinner and bell animations. */
   translate: 0 1px;
 }
 .tab-status svg {
@@ -274,8 +274,10 @@ input::placeholder {
 .tab-status[data-state='working'] {
   color: #60a5fa;
 }
-.tab-status[data-state='connecting'] svg,
-.tab-status[data-state='working'] svg {
+.tab-status[data-state='connecting'],
+.tab-status[data-state='working'] {
+  /* Rotate the fixed HTML box, keeping SVG rasterization out of the animation
+     path when flex layout places a tab between device pixels. */
   animation: tab-spin 1s linear infinite;
 }
 .tab-status[data-state='attention'],
@@ -295,6 +297,7 @@ input::placeholder {
 .tab-status[data-observation='stale'] {
   opacity: 0.6;
 }
+.tab-status[data-observation='stale'],
 .tab-status[data-observation='stale'] svg {
   animation: none;
 }
@@ -643,6 +646,7 @@ dd {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .tab-status[data-state],
   .tab-status[data-state] svg {
     animation: none;
   }

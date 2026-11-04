@@ -131,6 +131,57 @@ test('pane removal during a drag keeps body capture, and status refreshes retain
     .toEqual([{ name: 'dragEnd', args: [false] }])
 })
 
+test('tab spinners rotate their fixed boxes around the icon center, including fractional tab positions', async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.workspaceFixture.extract(101)
+    for (const id of [101, 102])
+      window.workspaceFixture.update(id, {
+        activity: {
+          state: 'working',
+          updatedAt: null,
+          observedAt: new Date().toISOString(),
+          observation: 'current',
+          completionId: null,
+          detail: null,
+        },
+      })
+  })
+  const badges = page.locator('#tabs .tab-status')
+  await expect(badges).toHaveCount(2)
+  const rotations = await badges.evaluateAll(nodes =>
+    nodes.map(node => {
+      // Exercise a subpixel position even if the current font gives whole-pixel tabs.
+      ;(node as HTMLElement).style.translate = '0.375px 1px'
+      const svg = node.querySelector('svg')!
+      const animation = node.getAnimations()[0]
+      animation.pause()
+      const box = node.getBoundingClientRect()
+      const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+      return {
+        center,
+        svgAnimation: getComputedStyle(svg).animationName,
+        samples: [0, 125, 250, 375, 500, 750].map(time => {
+          animation.currentTime = time
+          const point = new DOMPoint(12, 12).matrixTransform(svg.getScreenCTM()!)
+          return { x: point.x, y: point.y }
+        }),
+      }
+    }),
+  )
+  for (const rotation of rotations) {
+    expect(rotation.svgAnimation).toBe('none')
+    for (const point of rotation.samples) {
+      expect(point.x).toBeCloseTo(rotation.center.x, 5)
+      expect(point.y).toBeCloseTo(rotation.center.y, 5)
+    }
+  }
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  for (const badge of await badges.all())
+    expect(await badge.evaluate(node => getComputedStyle(node).animationName)).toBe('none')
+})
+
 test('native activity badges share pane and tab state and retain their SVG on freshness updates', async ({ page }) => {
   const badge = page.locator('[data-pane="101"] .tab-status')
   const tab = page.locator('.tab .tab-status').first()
@@ -166,7 +217,7 @@ test('native activity badges share pane and tab state and retain their SVG on fr
     }),
   )
   const original = await badge.locator('svg').elementHandle()
-  expect(await badge.locator('svg').evaluate(node => getComputedStyle(node).animationName)).toBe('tab-spin')
+  expect(await badge.evaluate(node => getComputedStyle(node).animationName)).toBe('tab-spin')
   await page.evaluate(() =>
     window.workspaceFixture.update(101, {
       activity: {
@@ -182,6 +233,7 @@ test('native activity badges share pane and tab state and retain their SVG on fr
   await expect(badge).toHaveAttribute('data-observation', 'stale')
   await expect(badge).toHaveAttribute('title', /Working \(last known\).*Activity update delayed/)
   expect(await badge.locator('svg').evaluate((node, previous) => node === previous, original)).toBe(true)
+  expect(await badge.evaluate(node => getComputedStyle(node).animationName)).toBe('none')
   expect(await badge.locator('svg').evaluate(node => getComputedStyle(node).animationName)).toBe('none')
   await page.evaluate(() => window.workspaceFixture.update(101, { attention: true }))
   await expect(badge).toHaveAttribute('data-state', 'attention')

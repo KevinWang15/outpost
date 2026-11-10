@@ -133,42 +133,47 @@ function ComposedPrompt({ turn }: { turn: TurnView }) {
   )
 }
 
-export const Turn = memo(function Turn({ turn, avatar }: { turn: TurnView; avatar: ReactNode }) {
-  const { previews } = useContext(ConversationContext)
-  const composed = turn.label !== null
-  const footer =
-    turn.status === 'running'
-      ? null
-      : turn.status === 'cancelled'
-        ? 'Stopped'
-        : turn.status === 'error'
-          ? turn.error || 'The turn failed.'
-          : null
-  return (
-    <article className={`turn ${turn.status}`}>
-      {composed ? (
-        <ComposedPrompt turn={turn} />
-      ) : turn.prompt.length > 0 ? (
-        <div className="prompt">
-          <PromptText prompt={turn.prompt} previews={previews(turn.key)} />
-        </div>
-      ) : null}
-      {(turn.items.length > 0 || turn.status === 'running') && (
-        <div className="reply">
-          <div className="reply-avatar">{avatar}</div>
-          <div className="reply-body">
-            <Reply turn={turn} />
-            {turn.status === 'running' && !turn.items.length && <p className="thinking">Thinking…</p>}
-            {footer && <p className={`turn-footer ${turn.status}`}>{footer}</p>}
-            {turn.status === 'done' &&
-              turn.startedAt &&
-              turn.endedAt &&
-              new Date(turn.endedAt).getTime() - new Date(turn.startedAt).getTime() >= 2000 && (
-                <p className="turn-meta">{elapsed(turn.startedAt, turn.endedAt)}</p>
-              )}
+/** A turn renders again only when an entry changed it (its revision). */
+export const Turn = memo(
+  function Turn({ turn, avatar }: { turn: TurnView; avatar: ReactNode }) {
+    const { previews } = useContext(ConversationContext)
+    const composed = turn.label !== null
+    const footer =
+      turn.status === 'running'
+        ? null
+        : turn.status === 'cancelled'
+          ? 'Stopped'
+          : turn.status === 'error'
+            ? turn.error || 'The turn failed.'
+            : null
+    return (
+      <article className={`turn ${turn.status}`}>
+        {composed ? (
+          <ComposedPrompt turn={turn} />
+        ) : turn.prompt.length > 0 ? (
+          <div className="prompt">
+            <PromptText prompt={turn.prompt} previews={previews(turn.key)} />
           </div>
-        </div>
-      )}
-    </article>
-  )
-})
+        ) : null}
+        {(turn.items.length > 0 || turn.status === 'running') && (
+          <div className="reply">
+            <div className="reply-avatar">{avatar}</div>
+            <div className="reply-body">
+              <Reply turn={turn} />
+              {turn.status === 'running' && !turn.items.length && <p className="thinking">Thinking…</p>}
+              {footer && <p className={`turn-footer ${turn.status}`}>{footer}</p>}
+              {turn.status === 'done' &&
+                turn.startedAt &&
+                turn.endedAt &&
+                new Date(turn.endedAt).getTime() - new Date(turn.startedAt).getTime() >= 2000 && (
+                  <p className="turn-meta">{elapsed(turn.startedAt, turn.endedAt)}</p>
+                )}
+            </div>
+          </div>
+        )}
+      </article>
+    )
+  },
+  (before, after) =>
+    before.turn.id === after.turn.id && before.turn.revision === after.turn.revision && before.avatar === after.avatar,
+)

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type * as acp from '@agentclientprotocol/sdk'
 import {
   ArrowDown,
@@ -13,7 +13,7 @@ import {
   SquareTerminal,
   Trash2,
 } from 'lucide-react'
-import { sessionKey, type SessionRef } from '../../shared/chatApi'
+import { sessionKey, type ChatSession, type SessionRef } from '../../shared/chatApi'
 import type { ChatInfo } from '../../shared/chatHost'
 import { harnessLabel } from '../../shared/harnesses'
 import { FileViewer } from '../terminal/FileViewer'
@@ -24,10 +24,22 @@ import { Avatar } from './Avatar'
 import { transcriptOf } from './client'
 import Composer from './Composer'
 import { presence, presenceLabel } from './format'
-import { ConversationContext, useChat, type ConversationActions } from './context'
+import { ConversationContext, FilesContext, useChat, type ConversationActions } from './context'
 import { Turn } from './Turn'
 
 const page = 60
+
+/** Turns compare their avatar by identity: one element per session look. */
+const avatars = new Map<string, ReactNode>()
+function avatarFor(session: ChatSession) {
+  const key = `${session.id}\n${session.name}\n${session.tool}`
+  let avatar = avatars.get(key)
+  if (!avatar) {
+    avatar = <Avatar id={session.id} name={session.name} tool={session.tool} />
+    avatars.set(key, avatar)
+  }
+  return avatar
+}
 
 function flatOptions(option: acp.SessionConfigOption) {
   if (option.type !== 'select') return []
@@ -149,11 +161,10 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
         if (!result.ok) throw new Error(result.message ?? 'The message already started.')
       },
       previews: key => (key ? (client.previews.get(key) ?? []) : []),
-      files: { access, state: files, open: setViewing },
     }),
-    [client, target, access, files, setViewing],
+    [client, target],
   )
-
+  const fileContext = useMemo(() => ({ access, state: files, open: setViewing }), [access, files, setViewing])
   if (!session)
     return (
       <section className="conversation">
@@ -168,211 +179,216 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const running = view?.running !== null && view?.running !== undefined
   const turns = (view?.turns ?? []).filter(turn => turn.status !== 'queued' && turn.status !== 'removed')
   const shown = turns.slice(-limit)
-  const avatar = <Avatar id={session.id} name={session.name} tool={session.tool} />
+  const avatar = avatarFor(session)
   const starting = link === 'starting' || info?.state === 'starting' || info?.state === 'identity'
   const stopped = link === 'stopped' || info?.state === 'exited' || info?.state === 'failed'
   const usage = info?.usage
   return (
     <ConversationContext.Provider value={actions}>
-      <section className="conversation">
-        <header className="conversation-header">
-          <button className="icon-button back" aria-label="Back to the list" onClick={onBack}>
-            <ArrowLeft size={18} />
-          </button>
-          <Avatar id={session.id} name={session.name} tool={session.tool} session={session} size={32} />
-          <div className="conversation-title">
-            <h1>{session.name}</h1>
-            <p>
-              <span className={`presence-label ${state}`}>{presenceLabel[state]}</span>
-              {' · '}
-              {harnessLabel(session.tool)} on {session.target} · <code title={session.rootDir}>{session.rootDir}</code>
-            </p>
-          </div>
-          {(files.files.length > 0 || panel) && (
-            <button
-              className="icon-button files-button"
-              aria-label={`Files (${files.files.length})`}
-              aria-pressed={panel}
-              title="Files"
-              onClick={() => setPanel(!panel)}
-            >
-              <Files size={17} />
-              <span>{files.files.length}</span>
+      <FilesContext.Provider value={fileContext}>
+        <section className="conversation">
+          <header className="conversation-header">
+            <button className="icon-button back" aria-label="Back to the list" onClick={onBack}>
+              <ArrowLeft size={18} />
             </button>
-          )}
-          <Settings target={target} info={info} />
-          <Menu
-            label={`Actions for ${session.name}`}
-            items={[
-              {
-                label: 'Open in terminal',
-                icon: <SquareTerminal size={14} />,
-                onSelect: () => open({ kind: 'terminal', ...target }),
-              },
-              {
-                label: session.instructions ? 'Edit instructions' : 'Add instructions',
-                icon: <NotebookPen size={14} />,
-                onSelect: () => open({ kind: 'instructions', ...target }),
-              },
-              {
-                label: 'Schedule a task',
-                icon: <CalendarClock size={14} />,
-                onSelect: () => open({ kind: 'schedule', scheduleId: null, session: target }),
-              },
-              'separator',
-              stopped || terminal
-                ? {
-                    label: 'Start chat',
-                    icon: <Play size={14} />,
-                    disabled: terminal,
-                    onSelect: () => client.restart(target),
-                  }
-                : {
-                    label: 'Stop coding tool',
-                    icon: <Square size={14} />,
-                    danger: true,
-                    onSelect: () => void client.request({ type: 'stop', ...target }),
-                  },
-            ]}
-          />
-        </header>
-        <div
-          className="transcript"
-          ref={scroller}
-          onScroll={event => {
-            const element = event.currentTarget
-            pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80
-            if (pinned.current) setBehind(false)
-          }}
-        >
-          <div className="transcript-inner">
-            {view?.truncated && <p className="transcript-note">Earlier steps of this chat are no longer kept here.</p>}
-            {turns.length > limit && (
-              <button className="button small more" onClick={() => setLimit(limit + page)}>
-                Show earlier messages
+            <Avatar id={session.id} name={session.name} tool={session.tool} session={session} size={32} />
+            <div className="conversation-title">
+              <h1>{session.name}</h1>
+              <p>
+                <span className={`presence-label ${state}`}>{presenceLabel[state]}</span>
+                {' · '}
+                {harnessLabel(session.tool)} on {session.target} ·{' '}
+                <code title={session.rootDir}>{session.rootDir}</code>
+              </p>
+            </div>
+            {(files.files.length > 0 || panel) && (
+              <button
+                className="icon-button files-button"
+                aria-label={`Files (${files.files.length})`}
+                aria-pressed={panel}
+                title="Files"
+                onClick={() => setPanel(!panel)}
+              >
+                <Files size={17} />
+                <span>{files.files.length}</span>
               </button>
             )}
-            {!turns.length && journal && !starting && (
-              <div className="transcript-empty">
-                <Avatar id={session.id} name={session.name} tool={session.tool} size={44} />
-                <h2>{session.name}</h2>
-                <p>
-                  {harnessLabel(session.tool)} in <code>{session.rootDir}</code>. Ask it anything about this project.
-                </p>
-              </div>
-            )}
-            {shown.map(turn => (
-              <Turn key={turn.id} turn={turn} avatar={avatar} />
-            ))}
-            {terminal ? (
-              <div className="status-card">
-                <SquareTerminal size={18} />
-                <div>
-                  <strong>This conversation is open in a terminal.</strong>
-                  <p>To continue here, end the terminal process; the conversation itself stays the same.</p>
-                </div>
-                <button className="button small" onClick={() => open({ kind: 'terminal', ...target })}>
-                  Open terminal
-                </button>
-              </div>
-            ) : link === 'unavailable' ? (
-              <div className="status-card error">
-                <CircleAlert size={18} />
-                <div>
-                  <strong>The chat could not open.</strong>
-                  <p>{conversation?.message ?? 'Check Required Software for this target.'}</p>
-                </div>
-                <button className="button small" onClick={() => client.restart(target)}>
-                  Try again
-                </button>
-              </div>
-            ) : stopped ? (
-              <div className={`status-card ${info?.error ? 'error' : ''}`}>
-                {info?.error ? <CircleAlert size={18} /> : <Square size={16} />}
-                <div>
-                  <strong>{info?.error ? 'The coding tool stopped.' : 'The coding tool is not running.'}</strong>
-                  {(info?.error || conversation?.message) && <p>{info?.error ?? conversation?.message}</p>}
-                </div>
-                <button className="button small primary" onClick={() => client.restart(target)}>
-                  <Play size={14} /> Start
-                </button>
-              </div>
-            ) : starting ? (
-              <p className="transcript-status">
-                <LoaderCircle size={14} className="spin" />
-                {journal ? 'Starting the coding tool…' : 'Opening the conversation…'}
-              </p>
-            ) : null}
-          </div>
-        </div>
-        {behind && (
-          <button
-            className="jump"
-            onClick={() => {
-              const element = scroller.current
-              if (element) element.scrollTop = element.scrollHeight
-              pinned.current = true
-              setBehind(false)
+            <Settings target={target} info={info} />
+            <Menu
+              label={`Actions for ${session.name}`}
+              items={[
+                {
+                  label: 'Open in terminal',
+                  icon: <SquareTerminal size={14} />,
+                  onSelect: () => open({ kind: 'terminal', ...target }),
+                },
+                {
+                  label: session.instructions ? 'Edit instructions' : 'Add instructions',
+                  icon: <NotebookPen size={14} />,
+                  onSelect: () => open({ kind: 'instructions', ...target }),
+                },
+                {
+                  label: 'Schedule a task',
+                  icon: <CalendarClock size={14} />,
+                  onSelect: () => open({ kind: 'schedule', scheduleId: null, session: target }),
+                },
+                'separator',
+                stopped || terminal
+                  ? {
+                      label: 'Start chat',
+                      icon: <Play size={14} />,
+                      disabled: terminal,
+                      onSelect: () => client.restart(target),
+                    }
+                  : {
+                      label: 'Stop coding tool',
+                      icon: <Square size={14} />,
+                      danger: true,
+                      onSelect: () => void client.request({ type: 'stop', ...target }),
+                    },
+              ]}
+            />
+          </header>
+          <div
+            className="transcript"
+            ref={scroller}
+            onScroll={event => {
+              const element = event.currentTarget
+              pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80
+              if (pinned.current) setBehind(false)
             }}
           >
-            <ArrowDown size={14} /> Latest
-          </button>
-        )}
-        {!terminal && (
-          <footer className="conversation-footer">
-            {view && view.queue.length > 0 && (
-              <ul className="queue" aria-label="Queued messages">
-                {view.queue.map(turn => (
-                  <li key={turn.id}>
-                    <span>
-                      {turn.prompt
-                        .map(block => (block.type === 'text' ? block.text : '[image]'))
-                        .join(' ')
-                        .slice(0, 140)}
-                    </span>
-                    <button
-                      className="icon-button"
-                      aria-label="Remove queued message"
-                      onClick={() => void actions.unqueue(turn.id).catch(() => {})}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <Composer
-              draftKey={`session:${key}`}
-              placeholder={`Message ${session.name}`}
-              images={info?.images ?? true}
-              commands={(info?.commands ?? []).map(command => ({ value: command.name, label: command.description }))}
-              running={running}
-              disabled={
-                link === 'unavailable'
-                  ? 'This chat is unavailable.'
-                  : stopped
-                    ? 'Start the coding tool to send messages.'
-                    : null
-              }
-              onSend={async (text, images, key) => {
+            <div className="transcript-inner">
+              {view?.truncated && (
+                <p className="transcript-note">Earlier steps of this chat are no longer kept here.</p>
+              )}
+              {turns.length > limit && (
+                <button className="button small more" onClick={() => setLimit(limit + page)}>
+                  Show earlier messages
+                </button>
+              )}
+              {!turns.length && journal && !starting && (
+                <div className="transcript-empty">
+                  <Avatar id={session.id} name={session.name} tool={session.tool} size={44} />
+                  <h2>{session.name}</h2>
+                  <p>
+                    {harnessLabel(session.tool)} in <code>{session.rootDir}</code>. Ask it anything about this project.
+                  </p>
+                </div>
+              )}
+              {shown.map(turn => (
+                <Turn key={turn.id} turn={turn} avatar={avatar} />
+              ))}
+              {terminal ? (
+                <div className="status-card">
+                  <SquareTerminal size={18} />
+                  <div>
+                    <strong>This conversation is open in a terminal.</strong>
+                    <p>To continue here, end the terminal process; the conversation itself stays the same.</p>
+                  </div>
+                  <button className="button small" onClick={() => open({ kind: 'terminal', ...target })}>
+                    Open terminal
+                  </button>
+                </div>
+              ) : link === 'unavailable' ? (
+                <div className="status-card error">
+                  <CircleAlert size={18} />
+                  <div>
+                    <strong>The chat could not open.</strong>
+                    <p>{conversation?.message ?? 'Check Required Software for this target.'}</p>
+                  </div>
+                  <button className="button small" onClick={() => client.restart(target)}>
+                    Try again
+                  </button>
+                </div>
+              ) : stopped ? (
+                <div className={`status-card ${info?.error ? 'error' : ''}`}>
+                  {info?.error ? <CircleAlert size={18} /> : <Square size={16} />}
+                  <div>
+                    <strong>{info?.error ? 'The coding tool stopped.' : 'The coding tool is not running.'}</strong>
+                    {(info?.error || conversation?.message) && <p>{info?.error ?? conversation?.message}</p>}
+                  </div>
+                  <button className="button small primary" onClick={() => client.restart(target)}>
+                    <Play size={14} /> Start
+                  </button>
+                </div>
+              ) : starting ? (
+                <p className="transcript-status">
+                  <LoaderCircle size={14} className="spin" />
+                  {journal ? 'Starting the coding tool…' : 'Opening the conversation…'}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          {behind && (
+            <button
+              className="jump"
+              onClick={() => {
+                const element = scroller.current
+                if (element) element.scrollTop = element.scrollHeight
                 pinned.current = true
-                await client.prompt(target, text, images, key)
+                setBehind(false)
               }}
-              onStop={() => void client.request({ type: 'cancel', ...target })}
-            />
-            {usage && usage.size > 0 && (
-              <p className="usage">
-                {Math.round((usage.used / usage.size) * 100)}% of {Math.round(usage.size / 1000)}k context
-                {usage.cost &&
-                  usage.cost.amount > 0 &&
-                  ` · ${usage.cost.currency === 'USD' ? '$' : ''}${usage.cost.amount.toFixed(2)}${usage.cost.currency === 'USD' ? '' : ` ${usage.cost.currency}`}`}
-              </p>
-            )}
-          </footer>
-        )}
-      </section>
-      {panel && <FilesPanel access={access} state={files} onOpen={setViewing} onClose={() => setPanel(false)} />}
-      {viewing && <FileViewer selected={viewing} access={access} state={files} close={() => setViewing(null)} />}
+            >
+              <ArrowDown size={14} /> Latest
+            </button>
+          )}
+          {!terminal && (
+            <footer className="conversation-footer">
+              {view && view.queue.length > 0 && (
+                <ul className="queue" aria-label="Queued messages">
+                  {view.queue.map(turn => (
+                    <li key={turn.id}>
+                      <span>
+                        {turn.prompt
+                          .map(block => (block.type === 'text' ? block.text : '[image]'))
+                          .join(' ')
+                          .slice(0, 140)}
+                      </span>
+                      <button
+                        className="icon-button"
+                        aria-label="Remove queued message"
+                        onClick={() => void actions.unqueue(turn.id).catch(() => {})}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Composer
+                draftKey={`session:${key}`}
+                placeholder={`Message ${session.name}`}
+                images={info?.images ?? true}
+                commands={(info?.commands ?? []).map(command => ({ value: command.name, label: command.description }))}
+                running={running}
+                disabled={
+                  link === 'unavailable'
+                    ? 'This chat is unavailable.'
+                    : stopped
+                      ? 'Start the coding tool to send messages.'
+                      : null
+                }
+                onSend={async (text, images, key) => {
+                  pinned.current = true
+                  await client.prompt(target, text, images, key)
+                }}
+                onStop={() => void client.request({ type: 'cancel', ...target })}
+              />
+              {usage && usage.size > 0 && (
+                <p className="usage">
+                  {Math.round((usage.used / usage.size) * 100)}% of {Math.round(usage.size / 1000)}k context
+                  {usage.cost &&
+                    usage.cost.amount > 0 &&
+                    ` · ${usage.cost.currency === 'USD' ? '$' : ''}${usage.cost.amount.toFixed(2)}${usage.cost.currency === 'USD' ? '' : ` ${usage.cost.currency}`}`}
+                </p>
+              )}
+            </footer>
+          )}
+        </section>
+        {panel && <FilesPanel access={access} state={files} onOpen={setViewing} onClose={() => setPanel(false)} />}
+        {viewing && <FileViewer selected={viewing} access={access} state={files} close={() => setViewing(null)} />}
+      </FilesContext.Provider>
     </ConversationContext.Provider>
   )
 }

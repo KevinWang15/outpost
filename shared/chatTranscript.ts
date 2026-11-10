@@ -62,6 +62,8 @@ export interface TurnView {
   queuedAt: string | null
   startedAt: string | null
   endedAt: string | null
+  /** The seq of the last entry that changed this turn: equal revisions render the same. */
+  revision: number
 }
 export interface Transcript {
   truncated: boolean
@@ -201,6 +203,7 @@ const emptyTurn = (id: string, status: TurnStatus, at: string | null = null): Tu
   queuedAt: at,
   startedAt: null,
   endedAt: null,
+  revision: 0,
 })
 
 /** Fold a journal into turns. Pure; callers memoize on the journal version. */
@@ -209,6 +212,8 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
   const byId = new Map<string, TurnView>()
   let historyTurn: TurnView | null = null
   let historyMessage: string | null = null
+  /** The turn the current entry changed; set by `live`, `loose` and new turns. */
+  let touched: TurnView | null
   const live = (id: string, at: string) => {
     let turn = byId.get(id)
     if (!turn) {
@@ -217,15 +222,21 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
       byId.set(id, turn)
       turns.push(turn)
     }
-    return turn
+    return (touched = turn)
   }
   const loose = (at: string) => {
-    if (historyTurn) return historyTurn
-    historyTurn = emptyTurn(`history:${turns.length}`, 'history', at)
-    turns.push(historyTurn)
-    return historyTurn
+    if (!historyTurn) {
+      historyTurn = emptyTurn(`history:${turns.length}`, 'history', at)
+      turns.push(historyTurn)
+    }
+    return (touched = historyTurn)
   }
   for (const entry of entries) {
+    touched = null
+    applyEntry(entry)
+    if (touched) (touched as TurnView).revision = entry.seq
+  }
+  function applyEntry(entry: ChatEntry) {
     switch (entry.kind) {
       case 'queued': {
         const turn = emptyTurn(entry.turn, 'queued', entry.at)
@@ -235,6 +246,7 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
         turn.label = labelOf(entry.origin, entry.prompt)
         byId.set(entry.turn, turn)
         turns.push(turn)
+        touched = turn
         historyTurn = null
         break
       }
@@ -271,6 +283,7 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
             historyTurn = emptyTurn(`history:${turns.length}`, 'history', entry.at)
             turns.push(historyTurn)
           }
+          touched = historyTurn
           historyMessage = id
         }
         applyUpdate(loose(entry.at), update, false, entry.at)

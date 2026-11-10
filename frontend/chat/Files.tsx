@@ -8,7 +8,7 @@ import { FileThumbnail } from '../terminal/FileThumbnail'
 import { FileViewer } from '../terminal/FileViewer'
 import { fileSize, type SessionFiles } from '../terminal/sessionFiles'
 import { useSessionFiles, type SessionFilesState } from '../terminal/useSessionFiles'
-import { ConversationContext } from './context'
+import { FilesContext } from './context'
 
 /** A published file where its turn or channel message shows it. */
 export function FileCard({
@@ -53,7 +53,7 @@ export function FileCard({
 
 /** A file item in a session's transcript. */
 export function TurnFile({ file }: { file: SessionFile }) {
-  const { files } = useContext(ConversationContext)
+  const files = useContext(FilesContext)
   if (!files) return null
   return (
     <FileCard

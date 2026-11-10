@@ -41,8 +41,6 @@ export interface ConversationActions {
   previews(key: string | null): string[]
   /** Read-only views (a channel's member steps) offer no controls. */
   readOnly: boolean
-  /** The session's published files, for file items in its turns. */
-  files?: { access: SessionFiles; state: SessionFilesState; open(id: string): void }
 }
 export const ConversationContext = createContext<ConversationActions>({
   answer: async () => {},
@@ -50,6 +48,15 @@ export const ConversationContext = createContext<ConversationActions>({
   previews: () => [],
   readOnly: true,
 })
+
+/** The session's published files, for file items in its turns. Separate from
+ * the actions so a file list refresh re-renders only file cards. */
+export interface ConversationFiles {
+  access: SessionFiles
+  state: SessionFilesState
+  open(id: string): void
+}
+export const FilesContext = createContext<ConversationFiles | null>(null)
 
 export interface MarkdownOptions {
   /** Handles to highlight as @mentions. */

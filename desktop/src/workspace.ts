@@ -16,6 +16,7 @@ import { transferPanes } from './pane-transfer'
 import type { WorkspaceItem, PanePlacement, SessionTarget } from './workspace-model'
 import { WorkspaceWindow } from './workspace-window'
 import { shellProfiles } from './shell-profiles'
+import { ChatWindows } from './chat-windows'
 
 type OpenDestination =
   { kind: 'activate'; window?: WorkspaceWindow } | { kind: 'place'; window: WorkspaceWindow; placement: PanePlacement }
@@ -30,6 +31,7 @@ export class DesktopWorkspace {
   private drag: WorkspaceDrag
   private finder: SessionFinder
   private creator: SessionCreator
+  readonly chats: ChatWindows
   private lifecycle: 'running' | 'confirming' | 'closing' | 'closed' = 'running'
   get stopping() {
     return this.lifecycle === 'closing' || this.lifecycle === 'closed'
@@ -46,6 +48,16 @@ export class DesktopWorkspace {
   ) {
     this.finder = new SessionFinder(directory)
     this.creator = new SessionCreator(directory)
+    this.chats = new ChatWindows(directory, {
+      ticket: origin => this.accounts.chatTicket(origin),
+      openTerminal: async (origin, targetId, sessionId) => {
+        const accountId = this.accounts.accountId(origin)
+        if (!accountId) throw new Error('Sign in to this server from the Outpost tab.')
+        const launch = await this.accounts.launch({ server: origin, accountId, targetId, sessionId })
+        this.present()
+        await this.open(launch)
+      },
+    })
     this.terminals = new TerminalPanes(directory, {
       window: id => this.owners.get(id)?.browserWindow ?? null,
       focused: id => this.owners.get(id)?.focused(id) ?? false,
@@ -189,9 +201,11 @@ export class DesktopWorkspace {
       findSession: (source, target, anchor, server) => this.findSession(source, target, anchor, server),
       serverAccounts: () => this.accounts.snapshot(),
       loginServer: origin => this.accounts.login(origin),
+      openChat: origin => this.chats.open(origin),
       cancelServerLogin: origin => this.accounts.cancel(origin),
       logoutServer: async origin => {
         if (!(await this.accounts.logout(origin))) return
+        this.chats.close(origin)
         for (const entry of this.recentSessions.list())
           if (entry.server === origin) this.terminals.forgetRecent(entry.id)
         await this.recentSessions.retain(entry => entry.server !== origin)
@@ -393,6 +407,7 @@ export class DesktopWorkspace {
   dispose() {
     this.finder.cancel()
     this.creator.cancel()
+    this.chats.dispose()
     this.accounts.dispose()
     for (const id of [...this.terminals.panes.keys()]) this.terminals.dispose(id)
   }

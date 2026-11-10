@@ -19,6 +19,7 @@ await build({
     'desktop/src/session-finder-preload.ts',
     'desktop/src/session-creator-preload.ts',
     'desktop/src/file-viewer-preload.ts',
+    'desktop/src/chat-preload.ts',
   ],
   outdir: 'desktop/dist',
   outExtension: { '.js': '.cjs' },

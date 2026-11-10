@@ -70,6 +70,7 @@ const validators: Record<keyof WorkspaceCommands, (args: unknown[]) => boolean> 
   tabMenu: entity,
   reloadPane: entity,
   openServer: identifier,
+  openChat: identifier,
   loginServer: identifier,
   cancelServerLogin: identifier,
   logoutServer: identifier,

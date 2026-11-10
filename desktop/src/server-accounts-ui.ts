@@ -57,7 +57,13 @@ export function serverAccountsControls(api: WorkspaceBridge, run: (work: Promise
     icon.setAttribute('aria-hidden', 'true')
     icon.append(document.createElementNS(icon.namespaceURI, 'path'))
     status.append(icon, document.createElement('span'))
-    row.append(info, status, button('New session', 'subtle server-create'), button('Sign out', 'subtle server-signout'))
+    row.append(
+      info,
+      status,
+      button('Chat', 'subtle server-chat'),
+      button('New session', 'subtle server-create'),
+      button('Sign out', 'subtle server-signout'),
+    )
     return row
   }
   function updateAccount(row: HTMLElement, server: ServerAccountSummary, pending: boolean) {
@@ -84,6 +90,10 @@ export function serverAccountsControls(api: WorkspaceBridge, run: (work: Promise
     status.title = server.status === 'expired' ? 'Sign in using your browser' : 'Check server connection'
     status.setAttribute('aria-label', `${status.textContent} · ${server.origin}`)
     status.onclick = () => run(server.status === 'expired' ? api.loginServer(server.origin) : api.refreshServers())
+    const chat = row.querySelector<HTMLButtonElement>('.server-chat')!
+    chat.disabled = pending || server.status === 'expired' || server.status === 'signing-out'
+    chat.onclick = () => run(api.openChat(server.origin))
+    chat.setAttribute('aria-label', `Open chat for ${server.origin}`)
     const create = row.querySelector<HTMLButtonElement>('.server-create')!
     create.disabled = pending || server.status === 'expired' || server.status === 'signing-out'
     create.onclick = () => run(api.openOutpostTerminal(server.origin))

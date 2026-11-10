@@ -570,6 +570,30 @@ export function ScheduleDialog({
   )
 }
 
+/** The browser's terminal chooser (web terminal or Outpost Desktop). It needs the
+ * browser login, so Outpost Desktop's chat window uses its bridge instead. */
+function BrowserConnect({ target, onClose }: { target: SessionRef; onClose: () => void }) {
+  const { client } = useChat()
+  const session = client.session(target)
+  const connector = useConnect({ id: target.targetId, name: session?.target ?? '' }, onClose)
+  const { connect } = connector
+  useEffect(() => {
+    if (session) connect(session)
+    // Connect once, when the chooser opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  if (!session || !connector.connection) return null
+  return (
+    <ConnectDialog
+      target={{ name: session.target }}
+      connection={connector.connection}
+      onChoose={connector.choose}
+      onBack={connector.back}
+      onClose={connector.close}
+    />
+  )
+}
+
 /** Move a conversation to a terminal: end the chat's process, then connect. */
 export function TerminalDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
   const { client, bridge } = useChat()
@@ -579,19 +603,10 @@ export function TerminalDialog({ target: selected, onClose }: { target: SessionR
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [ready, setReady] = useState(session?.driver !== 'chat')
-  const connector = useConnect({ id: target.targetId, name: session?.target ?? '' }, onClose)
+  const [connecting, setConnecting] = useState(false)
   const working = info?.activity.state === 'working' || info?.activity.state === 'waiting'
   if (!session) return null
-  if (connector.connection)
-    return (
-      <ConnectDialog
-        target={{ name: session.target }}
-        connection={connector.connection}
-        onChoose={connector.choose}
-        onBack={connector.back}
-        onClose={connector.close}
-      />
-    )
+  if (connecting) return <BrowserConnect target={target} onClose={onClose} />
   return (
     <Dialog
       title={ready ? `Open ${session.name} in a terminal` : `Continue ${session.name} in a terminal?`}
@@ -611,12 +626,14 @@ export function TerminalDialog({ target: selected, onClose }: { target: SessionR
           {ready ? (
             <button
               className="button primary"
+              disabled={busy}
               onClick={() => {
-                if (bridge) {
-                  void bridge
-                    .openTerminal(target.targetId, target.sessionId)
-                    .then(onClose, problem => setError((problem as Error).message))
-                } else connector.connect(session)
+                if (!bridge) return setConnecting(true)
+                setBusy(true)
+                bridge.openTerminal(target.targetId, target.sessionId).then(onClose, problem => {
+                  setError((problem as Error).message)
+                  setBusy(false)
+                })
               }}
             >
               Open terminal

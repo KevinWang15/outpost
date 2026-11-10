@@ -37,6 +37,7 @@ const bridge: WorkspaceBridge = {
   tabMenu: id => invoke('tabMenu', id),
   reloadPane: id => invoke('reloadPane', id),
   openServer: origin => invoke('openServer', origin),
+  openChat: origin => invoke('openChat', origin),
   loginServer: origin => invoke('loginServer', origin),
   cancelServerLogin: origin => invoke('cancelServerLogin', origin),
   logoutServer: origin => invoke('logoutServer', origin),

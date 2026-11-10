@@ -134,6 +134,7 @@ const bridge: WorkspaceBridge = {
   paneMenu: async () => {},
   reloadPane: async () => {},
   openServer: async () => {},
+  openChat: async () => {},
   loginServer: async () => {},
   cancelServerLogin: async () => {},
   logoutServer: async () => {},

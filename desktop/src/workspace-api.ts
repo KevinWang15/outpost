@@ -78,6 +78,7 @@ export interface WorkspaceBridge {
   tabMenu(id: number): Promise<void>
   reloadPane(id: number): Promise<void>
   openServer(origin: string): Promise<void>
+  openChat(origin: string): Promise<void>
   loginServer(origin: string): Promise<void>
   cancelServerLogin(origin: string): Promise<void>
   logoutServer(origin: string): Promise<void>

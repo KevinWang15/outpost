@@ -34,6 +34,7 @@ export interface WorkspaceHost {
   findSession(source: WorkspaceWindow, target: SessionTarget, anchor: Point, server?: string): Promise<void>
   serverAccounts(): ServerAccountsSnapshot
   loginServer(origin: string): Promise<void>
+  openChat(origin: string): void
   cancelServerLogin(origin: string): void
   logoutServer(origin: string): Promise<void>
   refreshServers(): Promise<void>
@@ -145,6 +146,12 @@ export class WorkspaceWindow {
       }
       case 'loginServer':
         return this.host.loginServer(command.args[0])
+      case 'openChat': {
+        const origin = desktopOrigin(command.args[0])
+        if (!this.host.serverAccounts().accounts.some(server => server.origin === origin))
+          throw new Error('This server is no longer in your logged-in servers.')
+        return this.host.openChat(origin)
+      }
       case 'cancelServerLogin':
         return this.host.cancelServerLogin(command.args[0])
       case 'logoutServer':

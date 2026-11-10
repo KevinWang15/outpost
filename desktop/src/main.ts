@@ -119,6 +119,16 @@ function menus() {
         },
         { label: 'Servers and sessions…', click: () => workspace!.forAction()?.panel('sessions') },
         {
+          label: 'Chat',
+          accelerator: mac ? 'Cmd+Shift+C' : 'Ctrl+Alt+C',
+          click: () => {
+            // One signed-in server opens directly; with several, choose in the Outpost tab.
+            const servers = accounts.snapshot().accounts.filter(server => server.status !== 'expired')
+            if (servers.length === 1) workspace!.chats.open(servers[0].origin)
+            else workspace!.forAction()?.panel('sessions')
+          },
+        },
+        {
           label: 'Switch session…',
           accelerator: shortcut('P'),
           click: () => workspace!.forAction()?.panel('switcher'),

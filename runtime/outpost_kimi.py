@@ -29,6 +29,15 @@ class KimiAdapter(CodingSessionAdapter):
     def arguments(self, session):
         return ['--session', session['cliSessionId']]
 
+    def chat_command(self, directory, executable):
+        return [executable, 'acp'], {}
+
+    def chat_mcp_servers(self, directory, session, server):
+        # The installed Outpost plugin supplies MCP; each Kimi process binds it
+        # through its own environment, so ACP must not add a second server.
+        self.prepare_launch(directory, session)
+        return []
+
     def activity_files(self, session):
         home = self.home(session['cliSessionEnv'], session['rootDir'])
         yield from (home / 'sessions').glob('*/' + session['cliSessionId'] + '/agents/main/wire.jsonl')

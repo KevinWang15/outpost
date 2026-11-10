@@ -1,6 +1,7 @@
 """Claude coding-session adapter; its native store is loaded on demand."""
 
 import json
+import os
 from functools import cached_property
 
 from outpost_activity_install import hook_command
@@ -44,6 +45,18 @@ class ClaudeAdapter(CodingSessionAdapter):
     def activity_files(self, session):
         home = self.home(session['cliSessionEnv'], session['rootDir'])
         yield from (home / 'projects').glob('*/' + session['cliSessionId'] + '.jsonl')
+
+    def chat_command(self, directory, executable):
+        # The official adapter release, installed by Required Software. Its own
+        # bundled CLI is not used: chat runs the target's claude, like terminals.
+        adapter = directory / 'bin' / 'claude-agent-acp'
+        if not os.access(adapter, os.X_OK):
+            raise ValueError('The Claude Code ACP adapter is missing. Open Required Software to install it.')
+        return [str(adapter)], {'CLAUDE_CODE_EXECUTABLE': executable, 'CLAUDE_AGENT_ACP_PROTOCOL': 'v1'}
+
+    def chat_resumable(self, session):
+        # A new conversation has no transcript until its first prompt.
+        return any(path.is_file() for path in self.activity_files(session))
 
     def prepare_launch(self, directory, session):
         # The launch contract places arguments(session) after these options,

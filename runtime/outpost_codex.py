@@ -30,6 +30,13 @@ class CodexAdapter(CodingSessionAdapter):
         server['env_vars'] = ['OUTPOST_SESSION_ID', 'OUTPOST_STATE_DIRECTORY']
         return ['-c', 'mcp_servers.outpost=' + toml(server)]
 
+    def chat_command(self, directory, executable):
+        # The pinned Codex ACP adapter is bundled in Outpost Terminal and drives
+        # the target's codex app-server.
+        import outpost_terminal
+
+        return [outpost_terminal.command(), 'agent', 'codex'], {'CODEX_PATH': executable, 'NO_BROWSER': '1'}
+
     def activity_files(self, session):
         from outpost_codex_state import selected_rollout
 

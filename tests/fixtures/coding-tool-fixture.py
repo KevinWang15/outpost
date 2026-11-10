@@ -47,39 +47,9 @@ if tool == 'codex' and sys.argv[1:] == ['app-server']:
     sys.exit(0)
 
 if tool == 'kimi' and sys.argv[1:] == ['acp']:
-    for line in sys.stdin:
-        request = json.loads(line)
-        if request['method'] == 'initialize':
-            result = {'protocolVersion': 1, 'agentCapabilities': {}}
-        elif request['method'] == 'session/new':
-            session_id = 'session_' + uuid.uuid4().hex
-            home = Path(os.environ['KIMI_CODE_HOME'])
-            directory = home / 'sessions' / 'fixture' / session_id
-            directory.mkdir(parents=True)
-            (directory / 'agents' / 'main').mkdir(parents=True)
-            (directory / 'agents' / 'main' / 'wire.jsonl').touch()
-            state = {
-                'id': session_id,
-                'cwd': request['params']['cwd'],
-                'createdAt': time.time() * 1000,
-                'updatedAt': time.time() * 1000,
-            }
-            (directory / 'state.json').write_text(json.dumps(state))
-            with (home / 'session_index.jsonl').open('a') as stream:
-                stream.write(
-                    json.dumps({'sessionId': session_id, 'sessionDir': str(directory), 'workDir': state['cwd']}) + '\n'
-                )
-            result = {'sessionId': session_id}
-        else:
-            print(
-                json.dumps(
-                    {'jsonrpc': '2.0', 'id': request['id'], 'error': {'code': -32601, 'message': 'Unsupported method'}}
-                ),
-                flush=True,
-            )
-            continue
-        print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
-    sys.exit(0)
+    # Kimi serves ACP itself; the scripted ACP fixture is installed beside this one.
+    agent = Path(sys.argv[0]).resolve().parent / 'acp-agent-fixture'
+    os.execve(sys.executable, [sys.executable, str(agent)], {**os.environ, 'FIXTURE_ACP_VARIANT': 'kimi'})
 
 native_arguments = sys.argv[1:]
 if tool == 'codex' and len(native_arguments) >= 2 and native_arguments[0] == 'resume':

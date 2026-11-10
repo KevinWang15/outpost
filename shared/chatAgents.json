@@ -1,0 +1,14 @@
+{
+  "claude": {
+    "package": "@agentclientprotocol/claude-agent-acp",
+    "version": "0.102.0",
+    "repository": "agentclientprotocol/claude-agent-acp",
+    "license": "Apache-2.0"
+  },
+  "codex": {
+    "package": "@agentclientprotocol/codex-acp",
+    "version": "2.6.0",
+    "integrity": "sha512-/PBsd0H6URy4bhXhAeXqwb7RqctbXfNceRihAh6nDmn5HJ873uzoHvHxF45YmeWfgOKKRrNRLZjYsket2a7EsQ==",
+    "license": "Apache-2.0"
+  }
+}

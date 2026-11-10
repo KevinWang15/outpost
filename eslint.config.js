@@ -16,6 +16,7 @@ export default defineConfig([
     'desktop/dist',
     'desktop/release',
     'desktop/resources',
+    'terminal-service/vendor/*.js',
   ]),
   js.configs.recommended,
   tseslint.configs.recommended,

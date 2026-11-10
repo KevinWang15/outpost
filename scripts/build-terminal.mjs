@@ -12,6 +12,7 @@ const targets = {
 }
 const requested = process.argv[2] ?? `${process.arch}-glibc`
 if (!(requested in targets)) throw new Error(`Unknown build target: ${requested}`)
+await import('./vendor-agents.mjs')
 await mkdir('terminal-service/dist', { recursive: true })
 const output = resolve(`terminal-service/dist/outpost-terminal-linux-${requested}`)
 const result = spawnSync(

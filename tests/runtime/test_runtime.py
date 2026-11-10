@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / 'runtime'
 FIXTURE = ROOT / 'tests' / 'fixtures' / 'coding-tool-fixture.py'
+ACP_FIXTURE = ROOT / 'tests' / 'fixtures' / 'acp-agent-fixture.py'
 sys.path.insert(0, str(RUNTIME))
 from outpost_frames import MAGIC, FrameDecoder, control, encode  # noqa: E402
 
@@ -44,6 +45,9 @@ class RuntimeTest(unittest.TestCase):
             target = self.bin / tool
             shutil.copy(FIXTURE, target)
             target.chmod(0o700)
+        shutil.copy(ACP_FIXTURE, self.bin / 'acp-agent-fixture')
+        shutil.copy(ACP_FIXTURE, service / 'claude-agent-acp')
+        (service / 'claude-agent-acp').chmod(0o700)
         self.project = self.home / 'project'
         self.project.mkdir()
         self.env = {

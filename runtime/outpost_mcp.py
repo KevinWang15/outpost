@@ -7,11 +7,73 @@ The same executable also supports `outpost-mcp publish FILE` for any harness.
 
 import json
 import os
+import socket
+import struct
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import outpost_files as files
+
+# Chat-mode tools: the chat host forwards each call to Outpost, which owns
+# every session of this user across targets (docs/CHAT.md).
+CHAT_TOOLS = [
+    {
+        'name': 'list_sessions',
+        'description': 'List the Outpost coding sessions you can message: their names, coding tools, machines and '
+        'whether they are working. Use it to find a session before message_session.',
+        'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False},
+        'annotations': {'readOnlyHint': True, 'openWorldHint': False},
+    },
+    {
+        'name': 'message_session',
+        'description': 'Send a message to another Outpost coding session, for example to delegate a task or ask '
+        'a question. It returns at once. The other session works on it in its own chat, and its reply arrives '
+        'here later as a new message from that session. Do not wait or poll for the reply.',
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'session': {'type': 'string', 'description': 'The session name or @handle from list_sessions.'},
+                'message': {'type': 'string', 'description': 'What to ask or tell the session.'},
+            },
+            'required': ['session', 'message'],
+            'additionalProperties': False,
+        },
+        'annotations': {'readOnlyHint': False, 'destructiveHint': False, 'openWorldHint': False},
+    },
+]
+HEADER = struct.Struct('>cI')
+
+
+def chat_call(tool, arguments):
+    """One call to this session's chat host, answered by the Outpost server."""
+    path = os.environ.get('OUTPOST_CHAT_SOCKET', '')
+    if not path.startswith('chats/') or '..' in path:
+        raise ValueError('This session is not open in Outpost chat')
+    body = json.dumps({'type': 'call', 'id': uuid.uuid4().hex, 'tool': tool, 'arguments': arguments}).encode()
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(40)
+        connection.connect(path)
+        connection.sendall(HEADER.pack(b'C', len(body)) + body)
+        data = b''
+        while True:
+            chunk = connection.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+            if len(data) > 4 * 1024 * 1024:
+                raise ValueError('Outpost sent too large a reply')
+    if len(data) < HEADER.size:
+        raise ValueError('Outpost did not answer')
+    kind, size = HEADER.unpack(data[: HEADER.size])
+    result = json.loads(data[HEADER.size : HEADER.size + size])
+    if kind != b'C' or not isinstance(result, dict) or result.get('type') != 'result':
+        raise ValueError('Outpost sent an invalid reply')
+    if not result.get('ok'):
+        raise ValueError(result.get('message') or 'Outpost did not accept this request')
+    return result.get('data')
+
 
 TOOL = {
     'name': 'publish_file',
@@ -54,7 +116,8 @@ def publish(session, arguments):
 def serve(session):
     # A user-level plugin can also be loaded by an ordinary, unmanaged CLI.
     # It can initialize normally, but has no capabilities to act on a session.
-    available_tools = [TOOL] if session is not None else []
+    chat = session is not None and bool(os.environ.get('OUTPOST_CHAT_SOCKET'))
+    available_tools = ([TOOL] + (CHAT_TOOLS if chat else [])) if session is not None else []
     initialized = False
     while True:
         line = sys.stdin.buffer.readline(65537)
@@ -88,6 +151,12 @@ def serve(session):
                     'serverInfo': {'name': 'outpost', 'version': '1.0.0'},
                     'instructions': (
                         'Use publish_file to deliver generated files and images to the user in this Outpost session.'
+                        + (
+                            ' Use list_sessions and message_session to work with the user’s other coding '
+                            'sessions; their replies arrive later as new messages.'
+                            if chat
+                            else ''
+                        )
                         if session is not None
                         else 'No Outpost session is attached. No tools are available.'
                     ),
@@ -103,9 +172,18 @@ def serve(session):
                 try:
                     if session is None:
                         raise ValueError('This process is not attached to an Outpost session')
-                    if not isinstance(params, dict) or params.get('name') != TOOL['name']:
+                    name = params.get('name') if isinstance(params, dict) else None
+                    if name not in [tool['name'] for tool in available_tools]:
                         raise ValueError('Unknown Outpost tool')
-                    receipt = publish(session, params.get('arguments', {}))
+                    arguments = params.get('arguments', {})
+                    if name == TOOL['name']:
+                        receipt = publish(session, arguments)
+                    else:
+                        if not isinstance(arguments, dict):
+                            raise ValueError('Expected tool arguments')
+                        receipt = chat_call(name, arguments)
+                    if not isinstance(receipt, dict):
+                        receipt = {'result': receipt}
                     result = {'content': [{'type': 'text', 'text': json.dumps(receipt)}], 'structuredContent': receipt}
                 except (OSError, ValueError) as error:
                     result = {'isError': True, 'content': [{'type': 'text', 'text': str(error)}]}
@@ -142,6 +220,8 @@ def main():
     if arguments and arguments[0] == 'publish':
         print(json.dumps(publish(session, {'path': arguments[1]})))
     else:
+        # Chat sockets are relative to the state directory, within the Unix path limit.
+        os.chdir(directory)
         serve(session)
 
 

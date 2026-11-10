@@ -7,6 +7,7 @@ import { terminalService, terminalSize } from '../shared/terminalService'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { Sequences } from './sequences'
 import { TerminalAttachment } from './attachment'
+import { serveChat } from './chat'
 
 interface Launch {
   socket: string
@@ -276,14 +277,24 @@ async function serve() {
   })
 }
 
-if (process.argv.includes('--version'))
+const [role, harness] = process.argv.slice(2)
+if (role === '--version')
   console.log(`outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`)
-else if (process.argv.includes('serve'))
+else if (role === 'serve')
   await serve().catch(error => {
     console.error(error)
     process.exit(1)
   })
-else {
-  console.error('Usage: outpost-terminal serve | --version')
+else if (role === 'chat-serve')
+  await serveChat().catch(error => {
+    console.error(error)
+    process.exit(1)
+  })
+else if (role === 'agent' && harness === 'codex') {
+  // The bundled adapter reads its own argv; give it none.
+  process.argv.splice(2)
+  await import('./vendor/codex-acp.js')
+} else {
+  console.error('Usage: outpost-terminal serve | chat-serve | agent codex | --version')
   process.exit(2)
 }

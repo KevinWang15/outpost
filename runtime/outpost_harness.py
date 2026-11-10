@@ -169,6 +169,24 @@ class CodingSessionAdapter(ABC):
         """Text pasted into the CLI for an uploaded image; a plain path by default."""
         return path
 
+    @abstractmethod
+    def chat_command(self, directory, executable):
+        """The Agent Client Protocol server for chat mode: (argv, environment additions).
+
+        directory is Outpost's state directory and executable the CLI on the login
+        PATH. The adapter process must use that CLI and its native store, so chat
+        and terminal mode continue the same conversation.
+        """
+
+    def chat_resumable(self, session):
+        """Whether session/load can open the native conversation; otherwise chat
+        starts it with session/new and records the agent's identity first."""
+        return True
+
+    def chat_mcp_servers(self, directory, session, server):
+        """ACP mcpServers for chat mode; server is Outpost's stdio MCP server."""
+        return [server]
+
 
 def adapters():
     from outpost_claude import ClaudeAdapter

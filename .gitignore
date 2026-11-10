@@ -39,6 +39,10 @@ __pycache__/
 /promo-v2/assets/narration/*.mp3
 /promo-v2/assets/music/score.mp3
 
+# Pinned third-party agent adapters, fetched by scripts/vendor-agents.mjs
+/terminal-service/vendor/*
+!/terminal-service/vendor/*.d.ts
+
 # Generated desktop packages and native icon containers
 /desktop/release/
 /desktop/resources/

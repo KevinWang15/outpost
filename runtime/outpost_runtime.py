@@ -21,6 +21,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+import outpost_chat as chat
 import outpost_files
 import outpost_mcp_install
 import outpost_terminal as terminal
@@ -338,15 +339,26 @@ def directory_suggestions(prefix):
 
 
 def alive(session):
+    """Whether the terminal service drives this session."""
     return terminal.status(socket_name(session)) is not None
 
 
 def describe(session):
     status = 'stopped' if session['lastConnectedAt'] else 'ready'
     service = terminal.status(socket_name(session))
-    if service:
-        status = 'attached' if service['clients'] else 'detached'
-    return dict(session, status=status, activity=activity(session).describe(status in ('attached', 'detached')))
+    host = None if service else chat.status(session)
+    driver = 'terminal' if service else 'chat' if host else None
+    if service or host:
+        status = 'attached' if (service or host)['clients'] else 'detached'
+    # A chat host knows its turn state directly; terminals are observed through hooks.
+    state = host['activity'] if host else activity(session).describe(driver == 'terminal')
+    return dict(
+        session,
+        status=status,
+        driver=driver,
+        activity=state,
+        instructions=chat.read_settings(STATE, session)['instructions'],
+    )
 
 
 def activity(session):
@@ -408,14 +420,17 @@ def upload_image(session, request):
 
 
 def terminate_session(session):
-    if not alive(session):
-        Path(socket_name(session)).unlink(missing_ok=True)
-        activity(session).initialize()
-        return describe(session)
-    # The Unix socket's SO_PEERCRED verifies the daemon PID and execution user.
-    # Each daemon owns just this session's process tree.
+    # Either driver: the terminal service or the chat host. The Unix socket's
+    # SO_PEERCRED verifies the daemon PID and execution user. Each daemon owns
+    # just this session's process tree.
     service = terminal.status(socket_name(session))
+    driver = 'terminal'
     if service is None:
+        service, driver = chat.status(session), 'chat'
+    if service is None:
+        Path(socket_name(session)).unlink(missing_ok=True)
+        Path(chat.socket_name(session)).unlink(missing_ok=True)
+        activity(session).initialize()
         return describe(session)
     root = process_info(service['pid'])
     if not root:
@@ -473,10 +488,12 @@ def terminate_session(session):
         deadline = time.monotonic() + 2
         while any(same_process(process) for process in targets) and time.monotonic() < deadline:
             time.sleep(0.05)
-        if any(same_process(process) for process in targets) or alive(session):
+        if any(same_process(process) for process in targets) or alive(session) or chat.status(session):
             fail('Some session processes have not exited yet. Refresh and retry.', 409)
         Path(socket_name(session)).unlink(missing_ok=True)
-        activity(session).initialize()
+        Path(chat.socket_name(session)).unlink(missing_ok=True)
+        if driver == 'terminal':
+            activity(session).initialize()
         return describe(session)
     finally:
         for handle in handles.values():
@@ -585,6 +602,76 @@ def attach_session(session, cols, rows):
         signal_path='run/' + session['id'] + '.sock',
         activity_path=hooks.observer.path,
     ).run()
+
+
+def start_chat(session):
+    if not Path(session['rootDir']).is_dir():
+        fail('Session root directory no longer exists', 409)
+    tool = session['tool']
+    executable = shutil.which(tool, path=session['env'].get('PATH', os.environ.get('PATH')))
+    if not executable:
+        fail(tool + ' is missing on this target. Check Required Software and your login PATH.', 409)
+    install_helpers()
+    environment = dict(os.environ)
+    environment.pop('TMUX', None)
+    environment.pop('TMUX_PANE', None)
+    environment.update(session['env'])
+    environment.update(session['cliSessionEnv'])
+    environment.update(
+        PATH=str(HELPERS) + ':' + environment.get('PATH', ''),
+        OUTPOST_SESSION_ID=session['id'],
+        OUTPOST_STATE_DIRECTORY=str(STATE),
+    )
+    try:
+        chat.start(
+            STATE,
+            session,
+            CODING_ADAPTERS[tool],
+            executable,
+            environment,
+            outpost_mcp_install.stdio_server(HELPERS / 'outpost-mcp'),
+        )
+    except ValueError as error:
+        fail(str(error), 409)
+
+
+def persist_identity(session_id, native_id):
+    """Record the conversation a new chat started, before its first prompt."""
+    with registry_lock():
+        try:
+            data = validate(json.loads(REGISTRY.read_text()))
+        except (OSError, ValueError, TypeError, KeyError):
+            raise ValueError('Invalid session registry. The chat cannot record its conversation.') from None
+        session = next((s for s in data['sessions'] if s['id'] == session_id), None)
+        if session is None:
+            raise ValueError('This session was deleted.')
+        if not CODING_ADAPTERS[session['tool']].valid_id(native_id):
+            raise ValueError('The coding tool returned an invalid conversation ID.')
+        if session['cliSessionId'] == native_id:
+            return
+        if any(
+            s['id'] != session_id
+            and s['tool'] == session['tool']
+            and s['cliSessionId'] == native_id
+            and s['cliSessionEnv'] == session['cliSessionEnv']
+            for s in data['sessions']
+        ):
+            raise ValueError('This conversation already has an Outpost session on this target.')
+        session['cliSessionId'] = native_id
+        save(data)
+
+
+def chat_attach(session):
+    host = chat.status(session)
+    if host and host.get('protocol') != chat.PROTOCOL:
+        fail(
+            'This chat is running an incompatible Outpost Terminal. Stop the session, then open it again.',
+            409,
+        )
+    try:
+        return chat.Relay(STATE, session, lambda native: persist_identity(session['id'], native)).run()
+    except ValueError as error:
+        fail(str(error), 409)
 
 
 def terminal_size(request):
@@ -828,12 +915,15 @@ def main():
                 token = request.get('completionId')
                 if not isinstance(token, str) or not re.fullmatch(r'[0-9a-f]{64}', token):
                     fail('Invalid completion ID')
-                activity(session).acknowledge(token, alive(session))
+                if chat.status(session):
+                    chat.acknowledge(session, token)
+                else:
+                    activity(session).acknowledge(token, alive(session))
                 result = describe(session)
             elif action == 'terminate':
                 result = terminate_session(session)
             elif action == 'delete':
-                if alive(session):
+                if alive(session) or chat.status(session):
                     fail('Terminate the session or exit the coding tool before deleting it.', 409)
                 sessions.remove(session)
                 save(data)
@@ -841,12 +931,15 @@ def main():
                 (STATE / 'logs' / (session['id'] + '.log')).unlink(missing_ok=True)
                 activity(session).remove()
                 outpost_files.remove_session(session['id'])
+                chat.remove(STATE, session)
                 result = {'ok': True}
             elif action == 'attach':
                 cols, rows = terminal_size(request)
                 if not isinstance(request.get('start'), bool):
                     fail('Invalid terminal start intent')
                 terminal.command()
+                if chat.status(session):
+                    fail('This session is open in chat. Stop it there to continue in a terminal.', 409)
                 if not alive(session):
                     if not request['start']:
                         fail('The coding tool exited. Click Reconnect to start it in the same conversation.', 410)
@@ -854,10 +947,31 @@ def main():
                 session['lastConnectedAt'] = now()
                 save(data)
                 result = None
+            elif action == 'chat-attach':
+                if not isinstance(request.get('start'), bool):
+                    fail('Invalid chat start intent')
+                terminal.command()
+                if alive(session):
+                    fail('This session is running in a terminal. Terminate it there to continue in chat.', 409)
+                if chat.status(session) is None:
+                    if not request['start']:
+                        fail('The chat stopped. Open it again to restart the coding tool.', 410)
+                    start_chat(session)
+                session['lastConnectedAt'] = now()
+                save(data)
+                result = None
+            elif action == 'chat-settings':
+                try:
+                    chat.write_settings(STATE, session, request.get('instructions'))
+                except ValueError as error:
+                    fail(str(error))
+                result = describe(session)
             else:
                 fail('Unknown operation')
     if action == 'attach':
         sys.exit(attach_session(session, cols, rows))
+    if action == 'chat-attach':
+        sys.exit(chat_attach(session))
     respond(result)
 
 

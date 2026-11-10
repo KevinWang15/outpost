@@ -47,6 +47,29 @@ To use Outpost running on another machine, forward its port to the **same**
 port locally (`ssh -L 3000:127.0.0.1:3000 that-machine`) and open
 http://127.0.0.1:3000.
 
+## Chat with your sessions
+
+Switch the sidebar to **Chat** for a Slack-like view of the same sessions. Each
+session is a conversation: replies stream in, the steps the agent took fold into
+one line you can open (commands and their output, file edits as diffs), and
+permission requests appear as buttons. Choose the agent's mode and model in the
+header, paste images, and use its slash commands.
+
+- **Channels** bring sessions from any of your machines together. A session
+  replies when you mention it (`@api`, or `@all`); a reply that mentions another
+  member passes the conversation on.
+- **Sessions message each other.** In chat, agents get Outpost tools to list
+  your sessions and ask one of them for help; the answer comes back as a message.
+- **Schedules** send a session a message at set times, e.g. a weekday summary.
+- **Instructions** give a session a role, added to the coding tool's own.
+
+Chat and the terminal continue the same conversation: **Open in terminal** in a
+chat, or **Open in chat** in the session list, moves it between them. Outpost
+Desktop opens chat in its own window (**Chat** next to a signed-in server, or
+**File → Chat**). Chat uses each tool's [Agent Client Protocol](https://agentclientprotocol.com)
+server; Claude Code's is installed from Required Software. See
+[docs/CHAT.md](docs/CHAT.md) for how it works.
+
 ## Fork a session
 
 Choose **Fork** in a session’s **…** menu to create a new Git branch and

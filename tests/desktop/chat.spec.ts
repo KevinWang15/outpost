@@ -26,8 +26,8 @@ test.afterEach(async () => {
   app?.process().kill('SIGKILL')
   server?.server.closeAllConnections()
   await Promise.race([server?.close(), new Promise(resolve => setTimeout(resolve, 5000))])
-  if (home)
-    await Promise.race([removeHome(home.directory, home.home), new Promise(resolve => setTimeout(resolve, 15_000))])
+  // Terminates the sessions it started (including the terminal tab's), then deletes the home.
+  if (home) await removeHome(home.directory, home.home)
 })
 
 test('the chat window signs in with a ticket, chats, and hands a session to a terminal tab', async () => {

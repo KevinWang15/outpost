@@ -22,6 +22,19 @@ licenses. Lucide uses the ISC license and includes Feather-derived icons under
 the MIT license. dotenv uses the BSD 2-Clause license. Other installed packages
 retain the license notices supplied with their distributions in `node_modules`.
 
+## Chat mode
+
+- The [Agent Client Protocol SDK](https://github.com/agentclientprotocol/typescript-sdk)
+  (`@agentclientprotocol/sdk`) is distributed under the Apache License 2.0.
+- Outpost Terminal bundles [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp)
+  (Apache License 2.0), fetched at build time at the version and integrity in
+  `shared/chatAgents.json`; its license is kept beside it in `terminal-service/vendor/`.
+  Codex itself is not bundled.
+- The Claude Code chat adapter, [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp)
+  (Apache License 2.0), depends on Anthropic's Claude Agent SDK, which is
+  subject to Anthropic's terms. Outpost does not redistribute it: Required
+  Software downloads the official release onto your target.
+
 ## Generated promo media
 
 Generated narration, music, and movie files are excluded from Git and are not

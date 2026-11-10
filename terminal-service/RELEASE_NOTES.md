@@ -1,3 +1,16 @@
+# Outpost Terminal 1.3.0
+
+Adds chat mode's target side. Terminal sessions are unchanged (protocol 4).
+
+- `outpost-terminal chat-serve`: the persistent Agent Client Protocol client of
+  one chat session, serving viewers on `~/.outpost/chats/<session>.sock`
+  (chat host protocol 1). See docs/CHAT.md.
+- `outpost-terminal agent codex`: the bundled Codex ACP adapter
+  (`@agentclientprotocol/codex-acp` 2.6.0), run with the target's own `codex`.
+
+Install the matching binary before deploying a server with chat mode. Running
+terminal sessions keep their process; no restart is needed for them.
+
 # Outpost Terminal 1.2.0
 
 Persistent Linux PTY service for Outpost web and desktop terminals.

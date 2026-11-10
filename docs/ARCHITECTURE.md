@@ -1423,6 +1423,14 @@ manual; no build runs on push. `updates.ts` checks GitHub desktop releases only
 when asked and opens a newer release for manual installation. There is no
 background updater for these previews. See [desktop development](../CONTRIBUTING.md).
 
+## Chat mode
+
+Chat drives the same managed sessions through each tool's Agent Client Protocol
+server instead of a PTY. A persistent `outpost-terminal chat-serve` process per
+session is the ACP client on the target; one session has one driver at a time
+(terminal service or chat host). The server keeps one link per chat host and
+routes channels, session messages and schedules. See [CHAT.md](CHAT.md).
+
 ## Coding harnesses
 
 `shared/harnesses.ts` lists harnesses for the UI and validation (id, label,
@@ -1431,7 +1439,8 @@ command, installer, native ID pattern, storage variable).
 adapter (identity, launch arguments, MCP and activity configuration) and a store (discovery,
 search text, allocation, turn markers). Session records pin the native
 conversation ID and storage directory, so a session always resumes the same
-conversation.
+conversation. Adapters also say how the tool serves ACP for chat mode
+(`chat_command`, `chat_resumable`, `chat_mcp_servers`).
 
 ## Target state
 
@@ -1442,6 +1451,8 @@ conversation.
 | Activity checkpoints | `~/.outpost/activity/<session>.json` |
 | Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Published files | `~/.outpost/files/<session>/<file-id>/` |
+| Chat hosts and settings | `~/.outpost/chats/<session>.sock`, `~/.outpost/chats/<session>.json` |
+| Claude Code chat adapter | `~/.outpost/agents/claude-agent-acp-<version>/`, linked from `~/.outpost/bin/` |
 | Signal helpers and sockets | `~/.outpost/bin/`, `~/.outpost/run/` |
 
 Registry writes take `flock` and replace the file atomically. Records are
@@ -1491,6 +1502,7 @@ the broker, and handle it in the shared client, delegating native actions throug
 | Desktop model | `tests/unit/desktop-panes.test.ts` — split-tree invariants, small-window geometry, transfer/rollback and destroyed views, platform shortcuts and dimming races |
 | Workspace DOM | `tests/desktop/workspace-dom.spec.ts` — packaged chrome, real layout model, pane focus/zoom, divider input, drag cancellation, stable DOM identity, error actions and shortcut guide |
 | Native desktop | `tests/desktop/` via `npm run test:desktop` — Linux Electron, real preload/IPC/node-pty, native keyboard/mouse, cross-window pane/tab transfers, hover cancellation, drafts, dimming, PTY resize, close confirmation, wake recovery and image clipboard/cleanup |
+| Chat | `tests/unit/chat-*.test.ts` (journal, transcript, mentions, cron, prompts, desktop policy); `tests/runtime/test_chat.py` (chat host, identity, one driver, MCP bridge, queue); `tests/integration/chat.test.ts` (hub with real chat hosts: channels, floor passing, session messages, schedules); `tests/browser/chat.spec.ts`; `tests/desktop/chat.spec.ts`. A scripted ACP agent (`tests/fixtures/acp-agent-fixture.py`) stands in for the tools; no model is called |
 | Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |
 
 Mobile automation uses real browser engines with emulated device sizes. Android swipes use Chromium's trusted

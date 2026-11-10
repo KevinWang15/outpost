@@ -4,7 +4,10 @@ Adds chat mode's target side. Terminal sessions are unchanged (protocol 4).
 
 - `outpost-terminal chat-serve`: the persistent Agent Client Protocol client of
   one chat session, serving viewers on `~/.outpost/chats/<session>.sock`
-  (chat host protocol 1). See docs/CHAT.md.
+  (chat host protocol 1). It keeps the prompt queue and journal while viewers
+  come and go, holds an agent's Outpost tool calls while the server reconnects,
+  records files the agent publishes, and stops after ten minutes with no
+  viewer and nothing to do. See docs/CHAT.md.
 - `outpost-terminal agent codex`: the bundled Codex ACP adapter
   (`@agentclientprotocol/codex-acp` 2.6.0), run with the target's own `codex`.
 

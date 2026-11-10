@@ -6,6 +6,7 @@ import { elapsed } from './format'
 import { Markdown } from './Markdown'
 import { ConversationContext } from './context'
 import { PermissionCard, PlanView, StepGroup, type StepItem } from './Steps'
+import { TurnFile } from './Files'
 
 type Segment =
   { kind: 'steps'; key: string; items: StepItem[] } | { kind: 'item'; key: string; item: Exclude<TurnItem, StepItem> }
@@ -46,6 +47,8 @@ function Item({ item }: { item: Exclude<TurnItem, StepItem> }) {
           <code>{item.name}</code>
         </p>
       )
+    case 'file':
+      return <TurnFile file={item.file} />
   }
 }
 

@@ -7,7 +7,8 @@ server for session messaging. No model is involved.
 
 Prompt scripts: text containing "permission" asks before its tool call, "wait"
 runs until cancelled, "list sessions" and "message <name>: <text>" call the
-Outpost MCP tools, and "pass the floor" in a channel prompt mentions the next
+Outpost MCP tools, "publish NAME" writes NAME and publishes it with
+publish_file, and "pass the floor" in a channel prompt mentions the next
 member. "slow N" waits N seconds before replying; "crash" exits mid-turn, as a
 failing tool would. Other replies echo the prompt without its @-mentions.
 """
@@ -214,6 +215,13 @@ def run(identifier, params):
         me = re.search(r'You are @([a-z0-9-]+)', text)
         members = re.search(r'Members: ([^\n]+)\.', text)
         last = text.rstrip().split('\n')[-3] if text.count('\n') >= 3 else ''
+        # "publish NAME" writes a file and publishes it with Outpost's MCP tool.
+        published = re.search(r'(?:^|\s)publish ([\w.-]+)', text if direct else last)
+        if published:
+            path = os.path.join(session['cwd'], published.group(1))
+            with open(path, 'w') as output:
+                output.write('Fixture file ' + published.group(1) + '\n')
+            mcp_call(session, 'publish_file', {'path': path})
         if re.search(r'pass(?:ing)? the floor', last, re.I) and me and members:
             others = [name for name in re.findall(r'@([a-z0-9-]+)', members.group(1)) if name != me.group(1)]
             if others:

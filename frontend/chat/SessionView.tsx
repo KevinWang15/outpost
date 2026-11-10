@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CalendarClock,
   CircleAlert,
+  Files,
   LoaderCircle,
   NotebookPen,
   Play,
@@ -15,7 +16,10 @@ import {
 import { sessionKey, type SessionRef } from '../../shared/chatApi'
 import type { ChatInfo } from '../../shared/chatHost'
 import { harnessLabel } from '../../shared/harnesses'
+import { FileViewer } from '../terminal/FileViewer'
+import { useSessionFiles } from '../terminal/useSessionFiles'
 import { Menu } from '../ui/Menu'
+import { FilesPanel } from './Files'
 import { Avatar } from './Avatar'
 import { transcriptOf } from './client'
 import Composer from './Composer'
@@ -126,6 +130,13 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
     else setBehind(true)
   }, [view, info?.state])
 
+  // Published files: listed over HTTP, refreshed when the agent publishes one.
+  const access = useMemo(() => client.files(target), [client, target])
+  const published = journal?.entries.reduce((count, entry) => count + Number(entry.kind === 'file'), 0) ?? 0
+  const files = useSessionFiles(access, client.status === 'live', published)
+  const [panel, setPanel] = useState(false)
+  const [viewing, setViewing] = useState<string | null>(null)
+
   const actions: ConversationActions = useMemo(
     () => ({
       readOnly: false,
@@ -138,8 +149,9 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
         if (!result.ok) throw new Error(result.message ?? 'The message already started.')
       },
       previews: key => (key ? (client.previews.get(key) ?? []) : []),
+      files: { access, state: files, open: setViewing },
     }),
-    [client, target],
+    [client, target, access, files, setViewing],
   )
 
   if (!session)
@@ -176,6 +188,18 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               {harnessLabel(session.tool)} on {session.target} · <code title={session.rootDir}>{session.rootDir}</code>
             </p>
           </div>
+          {(files.files.length > 0 || panel) && (
+            <button
+              className="icon-button files-button"
+              aria-label={`Files (${files.files.length})`}
+              aria-pressed={panel}
+              title="Files"
+              onClick={() => setPanel(!panel)}
+            >
+              <Files size={17} />
+              <span>{files.files.length}</span>
+            </button>
+          )}
           <Settings target={target} info={info} />
           <Menu
             label={`Actions for ${session.name}`}
@@ -347,6 +371,8 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
           </footer>
         )}
       </section>
+      {panel && <FilesPanel access={access} state={files} onOpen={setViewing} onClose={() => setPanel(false)} />}
+      {viewing && <FileViewer selected={viewing} access={access} state={files} close={() => setViewing(null)} />}
     </ConversationContext.Provider>
   )
 }

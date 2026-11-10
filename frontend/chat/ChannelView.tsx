@@ -6,8 +6,10 @@ import {
   type ChannelView as Channel,
   type ChatSession,
   type Delivery,
+  type SessionRef,
 } from '../../shared/chatApi'
 import { Avatar, UserAvatar } from './Avatar'
+import { FileCard, SessionFileViewer } from './Files'
 import { transcriptOf } from './client'
 import Composer from './Composer'
 import { clock, day, elapsed } from './format'
@@ -66,7 +68,17 @@ function Working({ delivery, session }: { delivery: Delivery; session: ChatSessi
   )
 }
 
-function Message({ message, grouped, channel }: { message: ChannelMessage; grouped: boolean; channel: Channel }) {
+function Message({
+  message,
+  grouped,
+  channel,
+  onOpenFile,
+}: {
+  message: ChannelMessage
+  grouped: boolean
+  channel: Channel
+  onOpenFile(ref: SessionRef, id: string): void
+}) {
   const { client, select } = useChat()
   const [steps, setSteps] = useState(false)
   const { author } = message
@@ -110,6 +122,13 @@ function Message({ message, grouped, channel }: { message: ChannelMessage; group
           </div>
         )}
         <Markdown text={message.text} />
+        {author.kind === 'session' && message.files.length > 0 && (
+          <div className="file-cards">
+            {message.files.map(file => (
+              <FileCard key={file.id} file={file} access={client.files(author)} onOpen={id => onOpenFile(author, id)} />
+            ))}
+          </div>
+        )}
         {message.turn && (
           <button className="steps-toggle" aria-expanded={steps} onClick={() => setSteps(!steps)}>
             <ChevronRight size={13} className="chevron" />
@@ -130,6 +149,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
   const pinned = useRef(true)
   const [behind, setBehind] = useState(false)
   const handles = useMemo(() => channel?.members.map(member => member.handle) ?? [], [channel])
+  const [viewing, setViewing] = useState<{ ref: SessionRef; id: string } | null>(null)
 
   useEffect(() => {
     pinned.current = true
@@ -249,7 +269,12 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
               return (
                 <div key={message.id}>
                   {newDay && <div className="day">{day(message.at)}</div>}
-                  <Message message={message} grouped={grouped} channel={channel} />
+                  <Message
+                    message={message}
+                    grouped={grouped}
+                    channel={channel}
+                    onOpenFile={(ref, id) => setViewing({ ref, id })}
+                  />
                 </div>
               )
             })}
@@ -292,6 +317,9 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
           />
         </footer>
       </section>
+      {viewing && (
+        <SessionFileViewer access={client.files(viewing.ref)} selected={viewing.id} onClose={() => setViewing(null)} />
+      )}
     </MarkdownContext.Provider>
   )
 }

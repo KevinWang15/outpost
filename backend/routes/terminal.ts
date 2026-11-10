@@ -6,10 +6,10 @@ import type { Services } from '../services'
 import type { TerminalQuery } from '../terminal/broker'
 import type { Grant } from '../terminal/tokens'
 import { terminalGrant } from '../terminal/authorization'
-import { sessionFileRoutes } from './sessionFiles'
+import { sessionFileRoutes, type SessionFileDownload } from './sessionFiles'
 
-export function terminalRoutes(app: FastifyInstance, services: Services) {
-  sessionFileRoutes(app, services)
+export function terminalRoutes(app: FastifyInstance, services: Services, download: SessionFileDownload) {
+  sessionFileRoutes(app, services, download)
   // Both clients authenticate with the same scoped terminal grant.
   app.get<{ Querystring: TerminalQuery }>('/api/terminal', { websocket: true }, (socket, request) => {
     void services.broker.accept(socket, request.query)

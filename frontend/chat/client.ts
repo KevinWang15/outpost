@@ -17,6 +17,7 @@ import {
 } from '../../shared/chatApi'
 import { ChatJournal, type ChatInfo } from '../../shared/chatHost'
 import { transcript, type Transcript } from '../../shared/chatTranscript'
+import { SessionFiles } from '../terminal/sessionFiles'
 
 export interface Conversation {
   journal: ChatJournal | null
@@ -80,8 +81,22 @@ export class ChatClient {
   /** Changes on every connect/dispose; late callbacks of an older one are ignored. */
   private epoch = 0
   private disposed = false
+  private sessionFiles = new Map<string, SessionFiles>()
 
   constructor(private ticket: (() => Promise<string>) | null) {}
+
+  /** A session's published files, read with this page's chat grant. One per
+   * session, so its panel, cards and channel messages share thumbnails. */
+  files(target: SessionRef) {
+    const key = sessionKey(target)
+    let files = this.sessionFiles.get(key)
+    if (!files) {
+      const base = `/api/chat/files/${encodeURIComponent(target.targetId)}/${target.sessionId}`
+      files = new SessionFiles(() => ({ origin: '', token: this.token, base }))
+      this.sessionFiles.set(key, files)
+    }
+    return files
+  }
 
   // Store -------------------------------------------------------------------------------
 

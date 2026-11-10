@@ -20,6 +20,7 @@ import {
   type ChatOrigin,
 } from '../shared/chatHost'
 import { FrameDecoder, maxTerminalFrame, terminalControl } from '../shared/node/terminalFrames'
+import { parseSessionFile } from '../shared/sessionFiles'
 import { terminalService } from '../shared/terminalService'
 
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -596,6 +597,13 @@ export class ChatHost {
         return
       }
       if (message.type === 'call') return this.bridgeCall(socket, message)
+      if (message.type === 'file') {
+        // Stored on the target already; this only places it in the transcript.
+        const file = parseSessionFile(message.file)
+        this.record({ kind: 'file', turn: this.running?.turn ?? null, file })
+        socket.end()
+        return
+      }
       if (message.type !== 'hello') throw new Error('Say hello first')
       if (message.protocol !== chatHost.protocol)
         throw new Error('Chat host protocol mismatch; install the current Outpost Terminal and restart this chat')

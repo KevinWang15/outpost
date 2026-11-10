@@ -46,10 +46,15 @@ CHAT_TOOLS = [
 HEADER = struct.Struct('>cI')
 
 
+def chat_socket():
+    path = os.environ.get('OUTPOST_CHAT_SOCKET', '')
+    return path if path.startswith('chats/') and '..' not in path else None
+
+
 def chat_call(tool, arguments):
     """One call to this session's chat host, answered by the Outpost server."""
-    path = os.environ.get('OUTPOST_CHAT_SOCKET', '')
-    if not path.startswith('chats/') or '..' in path:
+    path = chat_socket()
+    if not path:
         raise ValueError('This session is not open in Outpost chat')
     body = json.dumps({'type': 'call', 'id': uuid.uuid4().hex, 'tool': tool, 'arguments': arguments}).encode()
     with socket.socket(socket.AF_UNIX) as connection:
@@ -110,6 +115,18 @@ def publish(session, arguments):
         )
     except (OSError, subprocess.TimeoutExpired):
         pass
+    # In chat, the host records the file in the turn that published it.
+    path = chat_socket()
+    if path:
+        body = json.dumps({'type': 'file', 'file': metadata}).encode()
+        try:
+            with socket.socket(socket.AF_UNIX) as connection:
+                connection.settimeout(2)
+                connection.connect(path)
+                connection.sendall(HEADER.pack(b'C', len(body)) + body)
+                connection.recv(1)
+        except OSError:
+            pass
     return {'stored': True, 'file': metadata}
 
 
@@ -217,11 +234,12 @@ def main():
         raise ValueError('Run this helper inside an Outpost session')
     files.STATE = Path(directory)
     files.require_session(session)
+    # Chat sockets are relative to the state directory, within the Unix path limit.
+    # Published paths must be absolute, so the working directory does not matter.
+    os.chdir(directory)
     if arguments and arguments[0] == 'publish':
         print(json.dumps(publish(session, {'path': arguments[1]})))
     else:
-        # Chat sockets are relative to the state directory, within the Unix path limit.
-        os.chdir(directory)
         serve(session)
 
 

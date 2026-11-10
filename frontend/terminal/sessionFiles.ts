@@ -1,5 +1,10 @@
 import { SessionFileCache } from '../../shared/sessionFileCache'
-import { fileRequest, listSessionFiles, sessionFileBlob } from '../../shared/sessionFileRequests'
+import {
+  fileRequest,
+  listSessionFiles,
+  sessionFileBlob,
+  type SessionFileAuthorization,
+} from '../../shared/sessionFileRequests'
 import type { SessionFile, SessionFileBridge } from '../../shared/sessionFiles'
 
 export { fileSize } from '../../shared/sessionFileRequests'
@@ -10,16 +15,17 @@ export { fileSize } from '../../shared/sessionFileRequests'
 export class SessionFiles {
   private originals: SessionFileCache | null
   readonly thumbnails: SessionFileCache
+  /** `token` is a terminal grant, or a function for a credential that is renewed (chat). */
   constructor(
-    token: string,
+    token: string | (() => SessionFileAuthorization),
     readonly native?: SessionFileBridge,
   ) {
-    const auth = { origin: '', token }
-    this.originals = native ? null : new SessionFileCache((file, signal) => sessionFileBlob(auth, file, signal))
-    this.list = signal => (native ? native.list() : listSessionFiles(auth, signal))
+    const auth = typeof token === 'string' ? () => ({ origin: '', token }) : token
+    this.originals = native ? null : new SessionFileCache((file, signal) => sessionFileBlob(auth(), file, signal))
+    this.list = signal => (native ? native.list() : listSessionFiles(auth(), signal))
     this.remove = async (id, signal) => {
       if (native) await native.remove(id)
-      else await fileRequest(auth, '/' + id, signal, 'DELETE')
+      else await fileRequest(auth(), '/' + id, signal, 'DELETE')
       this.originals?.remove(id)
       this.thumbnails.remove(id)
     }

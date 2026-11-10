@@ -3,6 +3,7 @@
 // agent replays a user message, and attributed from Outpost's prompt header.
 import type * as acp from '@agentclientprotocol/sdk'
 import type { ChatEntry, ChatOrigin } from './chatHost'
+import type { SessionFile } from './sessionFiles'
 
 /** Prompts Outpost composes start with this line so a replay can attribute them. */
 export const promptHeaderPattern = /^\[Outpost: ([^\]\n]{1,200})\]\n/
@@ -42,6 +43,7 @@ export type TurnItem =
     }
   | { type: 'notice'; key: string; level: string; text: string }
   | { type: 'compaction'; key: string; status: string; error: string | null }
+  | { type: 'file'; key: string; file: SessionFile }
 
 export type TurnStatus = 'queued' | 'running' | 'done' | 'cancelled' | 'error' | 'removed' | 'history'
 export interface TurnView {
@@ -302,6 +304,13 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
         if (!entry.turn) historyTurn = null
         break
       }
+      case 'file':
+        ;(entry.turn ? live(entry.turn, entry.at) : loose(entry.at)).items.push({
+          type: 'file',
+          key: `file:${entry.file.id}`,
+          file: entry.file,
+        })
+        break
     }
   }
   const pending = turns.flatMap(turn =>
@@ -317,6 +326,10 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
     running: turns.find(turn => turn.status === 'running') ?? null,
   }
 }
+
+/** Files a turn published, for its channel reply. */
+export const turnFiles = (entries: readonly ChatEntry[], turn: string) =>
+  entries.flatMap(entry => (entry.kind === 'file' && entry.turn === turn ? [entry.file] : []))
 
 /** The reply posted to a channel or another session: the turn's final assistant
  * message. Notes written between tool steps stay in the session's own chat. */

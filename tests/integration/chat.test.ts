@@ -119,3 +119,26 @@ test('a chat host with no viewers and nothing to do stops; one with a viewer kee
     await chat.close()
   }
 })
+
+test('a file the agent publishes appears in its turn and in its channel reply', async () => {
+  const chat = await chatHarness(['Coder'])
+  try {
+    const hub = await chat.startHub()
+    const [coder] = chat.sessions
+    const channel = await hub.saveChannel(chat.owner, { name: 'files', topic: '', members: [chat.ref(coder)] })
+    await hub.post(chat.owner, channel.id, 'p1', '@coder publish report.txt')
+    const reply = await until(
+      () => chat.messages().find(message => message.author.kind === 'session'),
+      'the reply with its file',
+    )
+    assert.deepEqual(
+      reply.files.map(file => [file.name, file.size]),
+      [['report.txt', 'Fixture file report.txt\n'.length]],
+    )
+    // The session's own transcript has the file in the turn that published it.
+    const entry = chat.hosts.get(coder.id)!.journal.entries.find(item => item.kind === 'file')
+    assert.ok(entry?.kind === 'file' && entry.turn === reply.turn?.turn && entry.file.id === reply.files[0].id)
+  } finally {
+    await chat.close()
+  }
+})

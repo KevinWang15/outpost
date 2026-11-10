@@ -18,7 +18,8 @@ import {
   type SessionRef,
 } from '../../shared/chatApi'
 import type { ChatHostMessage, ChatOrigin } from '../../shared/chatHost'
-import { replyText } from '../../shared/chatTranscript'
+import { replyText, turnFiles } from '../../shared/chatTranscript'
+import type { SessionFile } from '../../shared/sessionFiles'
 import { handles, mentions } from '../../shared/chatMentions'
 import { cronMatches, parseCron, validTimeZone, zonedParts } from '../../shared/cron'
 import type { Session } from '../../shared/model'
@@ -448,7 +449,8 @@ export class ChatHub {
       await this.update(account, delivery, { state: 'done', error: stop?.error ?? null })
       link.release(delivery.id)
       const { source } = delivery
-      if (source.kind === 'channel') await this.channelReply(account, delivery, source, stop, text)
+      if (source.kind === 'channel')
+        await this.channelReply(account, delivery, source, stop, text, turnFiles(link.journal.entries, delivery.turn))
       else if (source.kind === 'session' && !source.reply)
         await this.sessionReply(account, delivery, source, stop, text)
       else if (source.kind === 'schedule')
@@ -629,6 +631,7 @@ export class ChatHub {
       hop: 0,
       turn: null,
       key: null,
+      files: [],
     }
     await account.store.append(message)
     this.broadcast(account, { type: 'message', message })
@@ -658,6 +661,7 @@ export class ChatHub {
       hop: 0,
       turn: null,
       key,
+      files: [],
     }
     account.posts.set(key, id)
     try {
@@ -752,6 +756,7 @@ export class ChatHub {
     source: Extract<DeliverySource, { kind: 'channel' }>,
     stop: { stopReason: string; error: string | null } | null,
     text: string,
+    files: SessionFile[],
   ) {
     const channel = account.store.channels.channels.find(item => item.id === source.channelId)
     const member = channel?.members.find(item => sessionKey(item) === sessionKey(delivery))
@@ -771,7 +776,7 @@ export class ChatHub {
         `@${member.handle} failed: ${stop.error ?? 'unknown error'}`,
         source.root,
       )
-    else if (!text)
+    else if (!text && !files.length)
       await this.notice(account, channel.id, 'info', `@${member.handle} finished without a reply.`, source.root)
     else {
       const known = channel.members.map(item => item.handle)
@@ -793,6 +798,7 @@ export class ChatHub {
         hop: source.hop + 1,
         turn: { targetId: member.targetId, sessionId: member.sessionId, turn: delivery.turn! },
         key: null,
+        files,
       }
       await account.store.append(message)
       this.broadcast(account, { type: 'message', message })

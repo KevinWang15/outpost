@@ -3,12 +3,14 @@ import { maxSessionFileBytes, maxSessionFiles, parseSessionFile, type SessionFil
 export interface SessionFileAuthorization {
   origin: string
   token: string
+  /** The session's files endpoint; terminal grants name their session themselves. */
+  base?: string
 }
 
 /** Attachment requests never expose the resume credential in a URL. */
 export async function fileRequest(auth: SessionFileAuthorization, path: string, signal: AbortSignal, method = 'GET') {
   const request = () =>
-    fetch(auth.origin + '/api/terminal/files' + path, {
+    fetch(auth.origin + (auth.base ?? '/api/terminal/files') + path, {
       method,
       signal,
       redirect: 'error',

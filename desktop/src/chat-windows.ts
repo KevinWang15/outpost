@@ -72,7 +72,11 @@ export class ChatWindows {
     browserSession.setPermissionRequestHandler((_contents, permission, callback) =>
       callback(permission === 'clipboard-sanitized-write'),
     )
-    browserSession.on('will-download', event => event.preventDefault())
+    // Session files are saved from blobs the page already fetched with its grant;
+    // Electron asks where to save. Nothing else downloads.
+    browserSession.on('will-download', (event, item) => {
+      if (!item.getURL().startsWith(`blob:${origin}/`)) event.preventDefault()
+    })
     const window = new BrowserWindow({
       width: 1180,
       height: 820,

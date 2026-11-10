@@ -5,6 +5,7 @@ import Type, { type Static } from 'typebox'
 import type { ChatEntry, ChatInfo, ChatJournalSnapshot, ChatOrigin } from './chatHost'
 import type { Session } from './model'
 import { sessionInput } from './schemas'
+import type { SessionFile } from './sessionFiles'
 
 export const chatProtocol = 1
 export const chatLimits = {
@@ -60,6 +61,8 @@ export interface ChannelMessage {
   turn: (SessionRef & { turn: string }) | null
   /** The page's key for a user post; a resent draft with it is the same post. */
   key: string | null
+  /** Files the member's turn published; they stay in that session's files. */
+  files: SessionFile[]
 }
 export type DeliverySource =
   | { kind: 'channel'; channelId: string; root: string; hop: number; through: string | null }

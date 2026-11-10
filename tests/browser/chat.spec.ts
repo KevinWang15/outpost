@@ -59,6 +59,22 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
   await request.getByRole('button', { name: 'Allow' }).click()
   await expect(page.locator('.reply .markdown').last()).toContainText('Permission granted.')
 
+  // A file the agent publishes shows in its turn and in the session's Files.
+  await composer.fill('publish report.txt')
+  await composer.press('Enter')
+  const card = page.locator('.reply .file-card').last()
+  await expect(card).toContainText('report.txt')
+  await page.getByRole('button', { name: 'Files (1)' }).click()
+  const files = page.getByRole('complementary', { name: 'Session files' })
+  await expect(files).toContainText('report.txt')
+  await card.getByRole('button', { name: /View report\.txt/ }).click()
+  const viewer = page.getByRole('dialog', { name: 'Session file viewer' })
+  await expect(viewer).toContainText('report.txt')
+  await viewer.getByRole('button', { name: 'Close viewer' }).click()
+  await files.getByRole('button', { name: 'Remove report.txt' }).click()
+  await expect(card).toContainText('Removed')
+  await files.getByRole('button', { name: 'Close files' }).click()
+
   await newSession(page, 'Writer', '~/chat-writer')
   await page.getByRole('button', { name: 'New channel' }).click()
   const channel = page.getByRole('dialog', { name: 'New channel' })

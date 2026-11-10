@@ -167,6 +167,16 @@ final message returns to the sender as a new turn. A thread allows 6 messages.
   a session, and by the key stored with each channel post, also after a server
   restart.
 
+**Files.** An agent shares a file with Outpost's `publish_file` MCP tool (or
+`outpost-mcp publish FILE`), as in terminal mode: the file is copied into the
+session's store on its target (`~/.outpost/files/<session>`, at most 100 files
+and 256 MiB) and stays until removed. In chat, publishing also tells the chat
+host, which records a `file` journal entry in the running turn. The turn shows
+a card for it, the session header's Files panel lists all of the session's
+files, and a channel reply carries the files its turn published. Pages read
+files over HTTP with their chat grant (`/api/chat/files/:target/:session`);
+Outpost Desktop saves them through its save dialog.
+
 **Schedules.** Five-field cron in an IANA time zone (`shared/cron.ts`), fired at
 most once per matching minute while the server runs. A schedule's prompt runs in
 its session's own chat.
@@ -195,5 +205,7 @@ it (`POST /api/chat/images`, 5 MiB, held in memory for ten minutes).
   page says so, and the journal shows whether it was queued. Sending the same
   draft again cannot run it twice unless the chat host also restarted.
 - An agent's Outpost tool call fails if no server connects within 45 s.
+- File cards are journal entries, so turns replayed from the native history
+  after a chat host restart show none; the Files panel still lists the files.
 - ACP v1 has no client-driven steering; a message sent while a turn runs waits
   in the queue.

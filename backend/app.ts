@@ -14,6 +14,7 @@ import { TerminalBroker } from './terminal/broker'
 import { ConnectTokens } from './terminal/tokens'
 import { sessionRoutes } from './routes/sessions'
 import { terminalRoutes } from './routes/terminal'
+import { sessionFileDownloads } from './routes/sessionFiles'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
 import { pageHtml } from '../shared/pageHtml'
@@ -126,8 +127,9 @@ export async function createApp(options: AppOptions) {
   desktopRoutes(app, services, desktop)
   workspaceRoutes(app, services)
   sessionRoutes(app, services)
-  terminalRoutes(app, services)
-  chatRoutes(app, services, chat, desktop)
+  const download = sessionFileDownloads(services)
+  terminalRoutes(app, services, download)
+  chatRoutes(app, services, chat, desktop, download)
 
   if (options.frontendRoot) {
     const html = await readFile(join(options.frontendRoot, 'index.html'), 'utf8')

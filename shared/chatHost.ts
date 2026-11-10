@@ -5,6 +5,7 @@
 // See docs/CHAT.md.
 import type * as acp from '@agentclientprotocol/sdk'
 import type { SessionActivity } from './activity'
+import type { SessionFile } from './sessionFiles'
 
 export const chatHost = {
   protocol: 1,
@@ -58,6 +59,8 @@ export type ChatEntry = EntryBase &
     | { kind: 'resolved'; turn: string; id: string; optionId: string | null }
     | { kind: 'history'; phase: 'begin' | 'end' }
     | { kind: 'notice'; level: 'info' | 'warning' | 'error'; text: string; turn: string | null }
+    /** The agent published a session file (Outpost MCP `publish_file`). */
+    | { kind: 'file'; turn: string | null; file: SessionFile }
   )
 export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 export type ChatEntryInput = DistributiveOmit<ChatEntry, 'seq' | 'at'>
@@ -121,6 +124,8 @@ export type ChatHostRequest =
   | { type: 'mode'; id: string; modeId: string }
   /** Also a one-shot request without hello; it then replies with `status`. */
   | { type: 'seen'; id?: string; completionId: string }
+  /** One-shot from the Outpost MCP server after it stored a published file. */
+  | { type: 'file'; file: SessionFile }
   | { type: 'note'; id: string; level: 'info' | 'warning' | 'error'; text: string }
   | { type: 'identity-saved'; nativeId: string }
   | { type: 'answer'; id: string; ok: boolean; message?: string; data?: unknown }

@@ -4,7 +4,15 @@ import { previewImage, type SessionFile } from '../../shared/sessionFiles'
 import type { SessionFiles } from './sessionFiles'
 import { useFileImage } from './useFileImage'
 
-export function FileThumbnail({ file, access }: { file: SessionFile; access: SessionFiles }) {
+export function FileThumbnail({
+  file,
+  access,
+  className = 'terminal-file-thumbnail',
+}: {
+  file: SessionFile
+  access: SessionFiles
+  className?: string
+}) {
   const element = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
   const { url } = useFileImage(file, access, visible && previewImage(file), true)
@@ -18,7 +26,7 @@ export function FileThumbnail({ file, access }: { file: SessionFile; access: Ses
     return () => observer.disconnect()
   }, [])
   return (
-    <span ref={element} className="terminal-file-thumbnail">
+    <span ref={element} className={className}>
       {url ? <img src={url} alt="" /> : previewImage(file) ? <Image size={23} /> : <File size={23} />}
     </span>
   )

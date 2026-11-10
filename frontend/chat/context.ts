@@ -2,6 +2,8 @@ import { createContext, useContext, useSyncExternalStore } from 'react'
 import type { SessionRef } from '../../shared/chatApi'
 import type { ChatBridge } from '../../shared/chatBridge'
 import type { ChatClient } from './client'
+import type { SessionFiles } from '../terminal/sessionFiles'
+import type { SessionFilesState } from '../terminal/useSessionFiles'
 
 export type Selection = ({ kind: 'session' } & SessionRef) | { kind: 'channel'; channelId: string } | null
 
@@ -39,6 +41,8 @@ export interface ConversationActions {
   previews(key: string | null): string[]
   /** Read-only views (a channel's member steps) offer no controls. */
   readOnly: boolean
+  /** The session's published files, for file items in its turns. */
+  files?: { access: SessionFiles; state: SessionFilesState; open(id: string): void }
 }
 export const ConversationContext = createContext<ConversationActions>({
   answer: async () => {},

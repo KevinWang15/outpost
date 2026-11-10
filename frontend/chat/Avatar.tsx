@@ -1,7 +1,10 @@
+import { Bot, UserRound } from 'lucide-react'
 import type { ChatSession } from '../../shared/chatApi'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
-import { harnessColor, presence, presenceLabel } from './format'
+import { presence, presenceLabel } from './format'
+import { ToolIcon } from '../ui/ToolIcon'
 
+/** A session: its coding tool's mark on a neutral tile, with a presence dot. */
 export function Avatar({
   name,
   tool,
@@ -14,19 +17,15 @@ export function Avatar({
   size?: number
 }) {
   const state = session ? presence(session) : null
+  const icon = Math.round(size * 0.56)
   return (
     <span
       className="chat-avatar"
-      style={{
-        width: size,
-        height: size,
-        fontSize: size * 0.42,
-        background: tool ? harnessColor[tool] : 'var(--accent)',
-      }}
+      style={{ width: size, height: size }}
       title={tool ? `${name} · ${harnessLabel(tool)}${state ? ` · ${presenceLabel[state]}` : ''}` : name}
       aria-hidden="true"
     >
-      {(name.trim()[0] ?? '?').toUpperCase()}
+      {tool ? <ToolIcon tool={tool} size={icon} /> : <Bot size={icon} />}
       {state && <i className={`presence ${state}`} />}
     </span>
   )
@@ -34,8 +33,8 @@ export function Avatar({
 
 export function UserAvatar({ size = 28 }: { size?: number }) {
   return (
-    <span className="chat-avatar user" style={{ width: size, height: size, fontSize: size * 0.42 }} aria-hidden="true">
-      You
+    <span className="chat-avatar user" style={{ width: size, height: size }} aria-hidden="true">
+      <UserRound size={Math.round(size * 0.55)} />
     </span>
   )
 }

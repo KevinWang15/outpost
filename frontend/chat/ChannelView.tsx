@@ -33,7 +33,7 @@ function MemberSteps({ member, turn }: { member: { targetId: string; sessionId: 
   if (!found) return <p className="member-steps muted">These steps are no longer kept in the session’s chat.</p>
   return (
     <div className="member-steps">
-      <Reply turn={found} open />
+      <Reply turn={found} open steps />
     </div>
   )
 }
@@ -111,8 +111,8 @@ function Message({ message, grouped, channel }: { message: ChannelMessage; group
         )}
         <Markdown text={message.text} />
         {message.turn && (
-          <button className="link small" aria-expanded={steps} onClick={() => setSteps(!steps)}>
-            <ChevronRight size={12} className={steps ? 'chevron open' : 'chevron'} />
+          <button className="steps-toggle" aria-expanded={steps} onClick={() => setSteps(!steps)}>
+            <ChevronRight size={13} className="chevron" />
             Steps
           </button>
         )}

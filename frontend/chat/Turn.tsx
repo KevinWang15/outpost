@@ -49,9 +49,12 @@ function Item({ item }: { item: Exclude<TurnItem, StepItem> }) {
   }
 }
 
-/** The agent's part of a turn: notes, steps, plans and requests in order. */
-export function Reply({ turn, open = false }: { turn: TurnView; open?: boolean }) {
-  const parts = segments(turn.items)
+/** The agent's part of a turn: notes, steps, plans and requests in order.
+ * `steps` leaves out its final message, for views that show it already. */
+export function Reply({ turn, open = false, steps = false }: { turn: TurnView; open?: boolean; steps?: boolean }) {
+  const all = segments(turn.items)
+  const last = all.at(-1)
+  const parts = steps && last?.kind === 'item' && last.item.type === 'text' ? all.slice(0, -1) : all
   // The current run of steps is the last one; a permission or plan after it
   // does not end it, but the agent's next note does.
   let current = -1

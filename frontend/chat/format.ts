@@ -1,12 +1,5 @@
 import type { ActivityState } from '../../shared/activity'
 import type { ChatSession } from '../../shared/chatApi'
-import type { HarnessId } from '../../shared/harnesses'
-
-export const harnessColor: Record<HarnessId, string> = {
-  claude: '#c2410c',
-  codex: '#1f2937',
-  kimi: '#6d28d9',
-}
 
 export function clock(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })

@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 import type { ConversationMatch, SessionInput, Target } from '../../shared/model'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
+import { ToolIcon } from '../ui/ToolIcon'
 import { Dialog } from '../ui/Dialog'
 import DirectoryInput, { type DirectorySource } from './DirectoryInput'
 
@@ -116,6 +117,7 @@ export default function SessionDialog({
                         disabled={Boolean(conversation)}
                         onChange={() => setTool(value)}
                       />
+                      <ToolIcon tool={value} size={15} />
                       {harnessLabel(value)}
                     </label>
                   ))}

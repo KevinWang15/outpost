@@ -193,7 +193,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
           ))}
           {!channels.length && !filter && (
             <button className="chat-row hint-row" onClick={() => open({ kind: 'channel', channelId: null })}>
-              Bring sessions together in a channel
+              <Plus size={15} /> Start a channel
             </button>
           )}
         </section>

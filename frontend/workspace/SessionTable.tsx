@@ -13,6 +13,7 @@ import {
 import { pagePaths } from '../../shared/pages'
 import type { Session } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
+import { ToolIcon } from '../ui/ToolIcon'
 import { Menu } from '../ui/Menu'
 import ActivityBadge from './ActivityBadge'
 import { relativeTime } from './labels'
@@ -126,7 +127,10 @@ export default function SessionTable({
                 <div className="session-name" role="cell">
                   <div>
                     <strong>{session.name}</strong>
-                    <span className="chip">{harnessLabel(session.tool)}</span>
+                    <span className="chip">
+                      <ToolIcon tool={session.tool} size={11} />
+                      {harnessLabel(session.tool)}
+                    </span>
                   </div>
                   <code title={session.rootDir}>{session.rootDir}</code>
                 </div>

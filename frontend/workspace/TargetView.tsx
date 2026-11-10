@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { Monitor, Pencil, Plus, Search, Server, Trash2 } from 'lucide-react'
 import type { ConversationMatch, Session, SessionInput, Target, TargetUpdate } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
+import { ToolIcon } from '../ui/ToolIcon'
 import { api } from '../api'
 import ConnectDialog from '../connect/ConnectDialog'
 import { useConnect } from '../connect/useConnect'
@@ -91,6 +92,7 @@ export default function TargetView({
               <code>{address(target)}</code>
               {target.tools.map(tool => (
                 <span key={tool} className="chip">
+                  <ToolIcon tool={tool} size={11} />
                   {harnessLabel(tool)}
                 </span>
               ))}

@@ -10,6 +10,7 @@ import { useConnect } from '../connect/useConnect'
 import { Dialog } from '../ui/Dialog'
 import SessionDialog from '../workspace/SessionDialog'
 import { plainRef } from './client'
+import { Avatar } from './Avatar'
 import { useChat } from './context'
 
 function Footer({
@@ -306,7 +307,7 @@ export function ChannelDialog({ channelId, onClose }: { channelId: string | null
                   {list.map(session => {
                     const key = sessionKey({ targetId: session.targetId, sessionId: session.id })
                     return (
-                      <label key={key} className="check">
+                      <label key={key} className="member-option">
                         <input
                           type="checkbox"
                           checked={members.has(key)}
@@ -317,11 +318,12 @@ export function ChannelDialog({ channelId, onClose }: { channelId: string | null
                             setMembers(next)
                           }}
                         />
+                        <Avatar name={session.name} tool={session.tool} size={26} />
                         <span>
-                          {session.name}{' '}
-                          <span className="muted">
-                            · {harnessLabel(session.tool)} · @{session.handle}
-                          </span>
+                          <strong>{session.name}</strong>
+                          <small>
+                            @{session.handle} · {harnessLabel(session.tool)}
+                          </small>
                         </span>
                       </label>
                     )

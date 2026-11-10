@@ -21,6 +21,8 @@ export interface ToolView {
   locations: acp.ToolCallLocation[]
   /** Streamed command output (`_meta.outpost.output`). */
   terminal: string | null
+  /** When the call first appeared. Merged reports keep this time. */
+  startedAt: string
 }
 export type TurnItem =
   | { type: 'text'; key: string; text: string }
@@ -44,6 +46,8 @@ export type TurnItem =
 export type TurnStatus = 'queued' | 'running' | 'done' | 'cancelled' | 'error' | 'removed' | 'history'
 export interface TurnView {
   id: string
+  /** The sender's message key, for its own image previews. */
+  key: string | null
   /** null for history replayed from the agent's own store. */
   origin: ChatOrigin | null
   /** Display label for an Outpost-composed prompt, live or replayed. */
@@ -79,7 +83,7 @@ function labelOf(origin: ChatOrigin | null, prompt: acp.ContentBlock[]) {
   return match ? match[1] : null
 }
 
-function toolView(update: acp.ToolCall | acp.ToolCallUpdate): ToolView {
+function toolView(update: acp.ToolCall | acp.ToolCallUpdate, at: string): ToolView {
   const meta = record(update._meta) && record(update._meta.outpost) ? update._meta.outpost : null
   return {
     type: 'tool',
@@ -93,11 +97,12 @@ function toolView(update: acp.ToolCall | acp.ToolCallUpdate): ToolView {
     content: update.content ?? [],
     locations: update.locations ?? [],
     terminal: typeof meta?.output === 'string' ? meta.output : null,
+    startedAt: at,
   }
 }
 
-function mergeToolView(view: ToolView, update: acp.ToolCallUpdate): ToolView {
-  const next = toolView({ ...update, title: update.title ?? view.title })
+function mergeToolView(view: ToolView, update: acp.ToolCallUpdate, at: string): ToolView {
+  const next = toolView({ ...update, title: update.title ?? view.title }, at)
   return {
     ...view,
     title: update.title || update.name || view.title,
@@ -133,7 +138,7 @@ function addBlock(turn: TurnView, kind: 'text' | 'thought', messageId: string | 
   }
 }
 
-function applyUpdate(turn: TurnView, update: acp.SessionUpdate, live: boolean) {
+function applyUpdate(turn: TurnView, update: acp.SessionUpdate, live: boolean, at: string) {
   switch (update.sessionUpdate) {
     case 'user_message_chunk':
       // Live turns already hold their prompt; replay rebuilds it from chunks.
@@ -149,8 +154,8 @@ function applyUpdate(turn: TurnView, update: acp.SessionUpdate, live: boolean) {
     case 'tool_call':
     case 'tool_call_update': {
       const index = turn.items.findIndex(item => item.type === 'tool' && item.id === update.toolCallId)
-      if (index >= 0) turn.items[index] = mergeToolView(turn.items[index] as ToolView, update)
-      else turn.items.push(toolView(update))
+      if (index >= 0) turn.items[index] = mergeToolView(turn.items[index] as ToolView, update, at)
+      else turn.items.push(toolView(update, at))
       return
     }
     case 'plan': {
@@ -183,6 +188,7 @@ function applyUpdate(turn: TurnView, update: acp.SessionUpdate, live: boolean) {
 
 const emptyTurn = (id: string, status: TurnStatus, at: string | null = null): TurnView => ({
   id,
+  key: null,
   origin: null,
   label: null,
   prompt: [],
@@ -222,6 +228,7 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
       case 'queued': {
         const turn = emptyTurn(entry.turn, 'queued', entry.at)
         turn.origin = entry.origin
+        turn.key = entry.key
         turn.prompt = entry.prompt
         turn.label = labelOf(entry.origin, entry.prompt)
         byId.set(entry.turn, turn)
@@ -252,7 +259,7 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
         break
       case 'update': {
         if (entry.turn) {
-          applyUpdate(live(entry.turn, entry.at), entry.update, true)
+          applyUpdate(live(entry.turn, entry.at), entry.update, true, entry.at)
           break
         }
         const { update } = entry
@@ -264,7 +271,7 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
           }
           historyMessage = id
         }
-        applyUpdate(loose(entry.at), update, false)
+        applyUpdate(loose(entry.at), update, false, entry.at)
         break
       }
       case 'permission':

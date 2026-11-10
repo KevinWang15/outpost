@@ -65,11 +65,14 @@ export interface DirectorySuggestions {
   truncated: boolean
 }
 
+/** Chat mode runs Claude Code through its official ACP adapter; Codex's is
+ * bundled in Outpost Terminal and Kimi Code serves ACP itself. */
 export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => [
   'bash',
   'python3',
   'outpost-terminal',
   ...target.tools,
+  ...(target.tools.includes('claude') ? (['claude-agent-acp'] as const) : []),
 ]
 export interface SoftwareStatus {
   id: SoftwareId

@@ -128,6 +128,7 @@ export default function TargetView({
       </header>
       <SoftwarePanel targetId={target.id} state={software} onInstalled={() => void refresh()} />
       <SessionTable
+        targetId={target.id}
         sessions={sessions}
         error={error}
         refreshing={refreshing}

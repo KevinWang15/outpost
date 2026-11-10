@@ -15,7 +15,7 @@ export default function ConnectDialog({
   onBack,
   onClose,
 }: {
-  target: Target
+  target: Pick<Target, 'name'>
   connection: ConnectionState
   onChoose: (terminal: TerminalChoice, remember: boolean) => void
   onBack: () => void

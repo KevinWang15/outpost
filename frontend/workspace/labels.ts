@@ -5,6 +5,7 @@ const systemLabels: Record<string, string> = {
   bash: 'Bash',
   python3: 'Python 3',
   'outpost-terminal': 'Outpost Terminal',
+  'claude-agent-acp': 'Claude Code chat adapter',
 }
 export const softwareLabel = (id: SoftwareId) => harnesses.find(harness => harness.id === id)?.label ?? systemLabels[id]
 export const shortVersion = (version: string | null) => version?.match(/\d+(?:\.\d+)+[a-z]?/)?.[0] ?? version ?? ''

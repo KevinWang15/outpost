@@ -1,5 +1,16 @@
 import { useEffect, useReducer, useState } from 'react'
-import { LoaderCircle, LogOut, Monitor, Plus, Server, Settings2, UserRound } from 'lucide-react'
+import {
+  LoaderCircle,
+  LogOut,
+  MessagesSquare,
+  Monitor,
+  Plus,
+  Server,
+  Settings2,
+  SquareTerminal,
+  UserRound,
+} from 'lucide-react'
+import { pagePaths } from '../shared/pages'
 import { useDesktopEntry } from './desktop/useDesktopEntry'
 import type { Target, TargetInput } from '../shared/model'
 import { api } from './api'
@@ -87,6 +98,23 @@ export default function App() {
           <span>Outpost</span>
           <span className="mode">{mode === 'hosted' ? 'Hosted' : 'Local'}</span>
         </a>
+        <nav className="mode-switch workspace-mode" aria-label="Mode">
+          <a
+            href={pagePaths.chat}
+            onClick={() => {
+              try {
+                localStorage.setItem('outpost:mode', 'chat')
+              } catch {
+                /* Storage is optional. */
+              }
+            }}
+          >
+            <MessagesSquare size={14} /> Chat
+          </a>
+          <a href={pagePaths.workspace} aria-current="page">
+            <SquareTerminal size={14} /> Terminal
+          </a>
+        </nav>
         <div className="sidebar-heading">
           <span>Targets</span>
           <button

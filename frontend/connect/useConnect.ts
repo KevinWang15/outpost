@@ -16,7 +16,7 @@ export interface ConnectionState {
 
 /** The chooser launches a browser page or an OS intent. Each destination owns
  * authentication and connection; no network request belongs in this chooser. */
-export function useConnect(target: Target, onClose: () => void) {
+export function useConnect(target: Pick<Target, 'id' | 'name'>, onClose: () => void) {
   const [connection, setConnection] = useState<ConnectionState | null>(null)
   const openDesktop = useDesktopEntry()
   const toast = useToast()

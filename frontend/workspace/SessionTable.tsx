@@ -1,5 +1,16 @@
 import { useState } from 'react'
-import { GitFork, LoaderCircle, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2 } from 'lucide-react'
+import {
+  GitFork,
+  LoaderCircle,
+  MessagesSquare,
+  Plus,
+  RefreshCw,
+  Search,
+  Square,
+  SquareTerminal,
+  Trash2,
+} from 'lucide-react'
+import { pagePaths } from '../../shared/pages'
 import type { Session } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
 import { Menu } from '../ui/Menu'
@@ -14,6 +25,7 @@ const statusLabels: Record<Session['status'], string> = {
 }
 
 export default function SessionTable({
+  targetId,
   sessions,
   error,
   refreshing,
@@ -27,6 +39,7 @@ export default function SessionTable({
   onTerminate,
   onDelete,
 }: {
+  targetId: string
   sessions: Session[] | null
   error: string
   refreshing: boolean
@@ -122,15 +135,25 @@ export default function SessionTable({
                 </span>
                 <span role="cell" className={`status ${session.status}`}>
                   <i />
-                  {statusLabels[session.status]}
+                  {session.driver === 'chat' ? 'In chat' : statusLabels[session.status]}
                 </span>
                 <span role="cell" className="muted">
                   {relativeTime(session.lastConnectedAt)}
                 </span>
                 <div className="row-actions" role="cell">
-                  <button className="button primary small" onClick={() => onConnect(session)}>
-                    Connect
-                  </button>
+                  {session.driver === 'chat' ? (
+                    <a
+                      className="button small"
+                      href={`${pagePaths.chat}?${new URLSearchParams({ target: targetId, session: session.id })}`}
+                    >
+                      <MessagesSquare size={14} />
+                      Open in chat
+                    </a>
+                  ) : (
+                    <button className="button primary small" onClick={() => onConnect(session)}>
+                      Connect
+                    </button>
+                  )}
                   <Menu
                     label={`More actions for ${session.name}`}
                     items={[

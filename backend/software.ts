@@ -13,6 +13,7 @@ import { runCommand } from './process'
 import { quote, supportingPath } from './shell'
 import type { TargetContext } from './sessions'
 import { terminalService } from '../shared/terminalService'
+import chatAgents from '../shared/chatAgents.json' with { type: 'json' }
 
 const versionFlags: Record<string, string> = { bash: '--version', python3: '--version' }
 const minimums: Partial<Record<SoftwareId, { pattern: RegExp; version: [number, number]; label: string }>> = {
@@ -34,8 +35,8 @@ probe() {
   tool=$1
   flag=$2
   path=$(command -v "$tool" || true)
-  if [ "$tool" = outpost-terminal ]; then
-    path="$HOME/.outpost/bin/outpost-terminal"
+  if [ "$tool" = outpost-terminal ] || [ "$tool" = claude-agent-acp ]; then
+    path="$HOME/.outpost/bin/$tool"
     [ -x "$path" ] || path=''
   fi
   if [ -z "$path" ]; then
@@ -79,7 +80,11 @@ function status(id: SoftwareId, path: string, code: number, output: string): Sof
       path: null,
       version: null,
       detail:
-        id === 'outpost-terminal' ? 'Not installed in ~/.outpost/bin.' : 'Not found on the interactive login PATH.',
+        id === 'outpost-terminal'
+          ? 'Not installed in ~/.outpost/bin.'
+          : id === 'claude-agent-acp'
+            ? 'Needed for Claude Code sessions in chat. Not installed in ~/.outpost/bin.'
+            : 'Not found on the interactive login PATH.',
     }
   const version =
     output
@@ -99,6 +104,8 @@ function status(id: SoftwareId, path: string, code: number, output: string): Sof
     version !== `outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`
   )
     detail = `Outpost Terminal ${terminalService.version} is required. Install the matching version.`
+  if (!detail && id === 'claude-agent-acp' && version !== chatAgents.claude.version)
+    detail = `The Claude Code chat adapter ${chatAgents.claude.version} is required. Install the matching version.`
   if (!detail && minimum) {
     const match = version!.match(minimum.pattern)
     const [major, minor] = match ? [Number(match[1]), Number(match[2])] : [0, 0]
@@ -170,6 +177,45 @@ chmod 700 "$work/$asset"
 [ "$("$work/$asset" --version)" = 'outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}' ] || { echo 'Unexpected terminal build version.' >&2; exit 1; }
 mv -f "$work/$asset" "$HOME/.outpost/bin/outpost-terminal"
 echo 'Outpost Terminal ${terminalService.version} installed.'
+`
+  if (id === 'claude-agent-acp')
+    return `#!/bin/sh
+set -eu
+# Install the official Claude Code ACP adapter ${chatAgents.claude.version} (${chatAgents.claude.license}) for chat mode.
+# Outpost runs it with this target's own claude, so its bundled copy is removed.
+${packages}
+command -v curl >/dev/null 2>&1 || install_packages curl ca-certificates
+command -v tar >/dev/null 2>&1 || install_packages tar
+[ "$(uname -s)" = Linux ] || { echo 'The adapter requires Linux.' >&2; exit 1; }
+case "$(uname -m)" in
+  x86_64) arch=x64 ;;
+  aarch64|arm64) arch=arm64 ;;
+  *) echo 'Supported Linux architectures: x86_64 and aarch64.' >&2; exit 1 ;;
+esac
+suffix=''
+if ldd --version 2>&1 | grep -qi musl; then
+  suffix=-musl
+  [ -e /usr/lib/libstdc++.so.6 ] || install_packages libstdc++ libgcc
+fi
+version='${chatAgents.claude.version}'
+asset="claude-agent-acp-linux-$arch$suffix.tar.gz"
+umask 077
+mkdir -p "$HOME/.outpost/bin" "$HOME/.outpost/agents"
+work=$(mktemp -d "$HOME/.outpost/agents/.install.XXXXXX")
+trap 'rm -rf "$work"' EXIT HUP INT TERM
+echo "Downloading the Claude Code ACP adapter $version ($arch$suffix, about 200 MB)..."
+curl --proto '=https' --tlsv1.2 -fSL --connect-timeout 15 --max-time 900 \
+  "https://github.com/${chatAgents.claude.repository}/releases/download/v$version/$asset" -o "$work/$asset"
+mkdir "$work/unpacked"
+tar -xzf "$work/$asset" -C "$work/unpacked"
+rm -f "$work/$asset" "$work/unpacked/claude"
+chmod 700 "$work/unpacked/claude-agent-acp"
+[ "$("$work/unpacked/claude-agent-acp" --version)" = "$version" ] || { echo 'Unexpected adapter version.' >&2; exit 1; }
+rm -rf "$HOME/.outpost/agents/claude-agent-acp-$version"
+mv "$work/unpacked" "$HOME/.outpost/agents/claude-agent-acp-$version"
+ln -sfn "../agents/claude-agent-acp-$version/claude-agent-acp" "$HOME/.outpost/bin/.claude-agent-acp.new"
+mv -f "$HOME/.outpost/bin/.claude-agent-acp.new" "$HOME/.outpost/bin/claude-agent-acp"
+echo "Claude Code ACP adapter $version installed."
 `
   const harness = harnesses.find(harness => harness.id === id)
   if (harness)

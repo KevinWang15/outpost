@@ -12,6 +12,8 @@ export default function SessionDialog({
   conversation,
   directories,
   beforeFields,
+  afterFields,
+  description,
   onSave,
   onClose,
 }: {
@@ -20,6 +22,9 @@ export default function SessionDialog({
   conversation: ConversationMatch | null
   directories: DirectorySource
   beforeFields?: ReactNode
+  /** Shown after the project directory, e.g. chat instructions. */
+  afterFields?: ReactNode
+  description?: string
   onSave: (input: SessionInput) => Promise<void>
   onClose: () => void
 }) {
@@ -68,7 +73,7 @@ export default function SessionDialog({
         conversation
           ? `Resume this ${harnessLabel(conversation.tool)} conversation as an Outpost session.`
           : target
-            ? `On ${target.name}. It starts when you first connect.`
+            ? (description ?? `On ${target.name}. It starts when you first connect.`)
             : 'Choose an Outpost server and execution target.'
       }
       footer={
@@ -135,6 +140,7 @@ export default function SessionDialog({
                   </label>
                 </>
               )}
+              {afterFields}
               <details className="disclosure">
                 <summary>
                   <ChevronRight size={14} />

@@ -100,7 +100,7 @@ export const directoryQuery = Type.Object(
 )
 
 // Software ----------------------------------------------------------------------
-export const softwareIds = ['bash', 'python3', 'outpost-terminal', ...harnessIds] as const
+export const softwareIds = ['bash', 'python3', 'outpost-terminal', ...harnessIds, 'claude-agent-acp'] as const
 export const installationInput = Type.Object(
   {
     softwareId: Type.Enum(softwareIds),

@@ -152,6 +152,7 @@ svg {
   background: var(--surface);
   color: var(--ink);
   font-weight: 500;
+  text-decoration: none;
   white-space: nowrap;
   transition:
     background-color 0.12s,
@@ -469,6 +470,38 @@ kbd {
     font-size: 11px;
     font-weight: 500;
   }
+}
+/* Chat | Terminal, shared by both modes' sidebars. */
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 8px;
+  background: #e8edf4;
+  a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 28px;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    &[aria-current='page'] {
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+    }
+    &:not([aria-current]):hover {
+      color: var(--ink);
+    }
+  }
+}
+.workspace-mode {
+  margin: 0 4px 18px;
 }
 .sidebar-heading {
   display: flex;

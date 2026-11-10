@@ -33,7 +33,7 @@ function SessionRow({ session, active }: { session: ChatSession; active: boolean
       aria-current={active ? 'page' : undefined}
       onClick={() => select({ kind: 'session', targetId: session.targetId, sessionId: session.id })}
     >
-      <Avatar name={session.name} tool={session.tool} session={session} size={26} />
+      <Avatar id={session.id} name={session.name} tool={session.tool} session={session} size={26} />
       <span className="chat-row-text">
         <strong>{session.name}</strong>
         <small className={state}>

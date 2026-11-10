@@ -52,6 +52,7 @@
     "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "https://github.com/KevinWang15/xterm.js/releases/download/outpost-6.0.1/xterm-xterm-6.0.1.tgz",
     "ajv": "8.20.0",
+    "boring-avatars": "2.0.4",
     "codemirror": "^6.0.2",
     "dotenv": "^18.0.4",
     "fastify": "^5.12.5",

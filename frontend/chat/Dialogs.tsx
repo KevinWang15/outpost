@@ -318,7 +318,7 @@ export function ChannelDialog({ channelId, onClose }: { channelId: string | null
                             setMembers(next)
                           }}
                         />
-                        <Avatar name={session.name} tool={session.tool} size={26} />
+                        <Avatar id={session.id} name={session.name} tool={session.tool} size={26} />
                         <span>
                           <strong>{session.name}</strong>
                           <small>

@@ -122,10 +122,6 @@
   }
   &.active {
     background: var(--accent-soft);
-    .chat-avatar {
-      border-color: var(--accent-border);
-      color: var(--accent-hover);
-    }
     .chat-row-text strong {
       color: var(--accent-hover);
     }
@@ -242,15 +238,13 @@
   display: inline-grid;
   flex-shrink: 0;
   place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--ink);
   line-height: 1;
+  > svg {
+    border-radius: 8px;
+  }
   &.user {
     border-radius: 50%;
     background: #eef2f7;
-    border-color: transparent;
     color: var(--text);
   }
   .presence {
@@ -404,7 +398,7 @@
   > * + * {
     margin-left: -6px;
   }
-  .chat-avatar {
+  .chat-avatar > svg {
     box-shadow: 0 0 0 2px var(--surface);
   }
   .presence {

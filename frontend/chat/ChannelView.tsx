@@ -49,7 +49,7 @@ function Working({ delivery, session }: { delivery: Delivery; session: ChatSessi
         onClick={() => setOpen(!open)}
         disabled={!delivery.turn}
       >
-        <Avatar name={name} tool={session?.tool ?? null} session={session} size={22} />
+        <Avatar id={delivery.sessionId} name={name} tool={session?.tool ?? null} session={session} size={22} />
         <span>
           <strong>@{session?.handle ?? 'member'}</strong>{' '}
           {delivery.state === 'pending'
@@ -87,7 +87,7 @@ function Message({ message, grouped, channel }: { message: ChannelMessage; group
         {grouped ? (
           <time dateTime={message.at}>{clock(message.at)}</time>
         ) : author.kind === 'session' ? (
-          <Avatar name={name} tool={session?.tool ?? null} session={session} size={32} />
+          <Avatar id={author.sessionId} name={name} tool={session?.tool ?? null} session={session} size={32} />
         ) : (
           <UserAvatar size={32} />
         )}
@@ -184,6 +184,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
             {members.slice(0, 6).map(({ member, session }) => (
               <Avatar
                 key={sessionKey(member)}
+                id={member.sessionId}
                 name={member.name}
                 tool={session?.tool ?? null}
                 session={session}

@@ -35,6 +35,8 @@ retain the license notices supplied with their distributions in `node_modules`.
   subject to Anthropic's terms. Outpost does not redistribute it: Required
   Software downloads the official release onto your target.
 
+- Session avatars are drawn by [Boring Avatars](https://github.com/boringdesigners/boring-avatars)
+  (`boring-avatars`, MIT License).
 - The Claude Code, Codex and Kimi marks (`frontend/ui/ToolIcon.tsx`) are the
   monochrome icons from [Lobe Icons](https://github.com/lobehub/lobe-icons)
   (MIT License). The marks themselves belong to their owners.

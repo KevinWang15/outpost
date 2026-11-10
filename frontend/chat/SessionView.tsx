@@ -156,7 +156,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const running = view?.running !== null && view?.running !== undefined
   const turns = (view?.turns ?? []).filter(turn => turn.status !== 'queued' && turn.status !== 'removed')
   const shown = turns.slice(-limit)
-  const avatar = <Avatar name={session.name} tool={session.tool} />
+  const avatar = <Avatar id={session.id} name={session.name} tool={session.tool} />
   const starting = link === 'starting' || info?.state === 'starting' || info?.state === 'identity'
   const stopped = link === 'stopped' || info?.state === 'exited' || info?.state === 'failed'
   const usage = info?.usage
@@ -167,7 +167,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
           <button className="icon-button back" aria-label="Back to the list" onClick={onBack}>
             <ArrowLeft size={18} />
           </button>
-          <Avatar name={session.name} tool={session.tool} session={session} size={32} />
+          <Avatar id={session.id} name={session.name} tool={session.tool} session={session} size={32} />
           <div className="conversation-title">
             <h1>{session.name}</h1>
             <p>
@@ -230,7 +230,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
             )}
             {!turns.length && journal && !starting && (
               <div className="transcript-empty">
-                <Avatar name={session.name} tool={session.tool} size={44} />
+                <Avatar id={session.id} name={session.name} tool={session.tool} size={44} />
                 <h2>{session.name}</h2>
                 <p>
                   {harnessLabel(session.tool)} in <code>{session.rootDir}</code>. Ask it anything about this project.

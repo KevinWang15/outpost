@@ -52,6 +52,9 @@ if tool == 'kimi' and sys.argv[1:] == ['acp']:
     os.execve(sys.executable, [sys.executable, str(agent)], {**os.environ, 'FIXTURE_ACP_VARIANT': 'kimi'})
 
 native_arguments = sys.argv[1:]
+# Launches put integration options (MCP, activity hooks) before the conversation selector.
+while len(native_arguments) >= 2 and native_arguments[0] in ('--mcp-config', '--settings', '-c'):
+    native_arguments = native_arguments[2:]
 if tool == 'codex' and len(native_arguments) >= 2 and native_arguments[0] == 'resume':
     cli_session_id = native_arguments[1]
     history = next((Path(os.environ['CODEX_HOME']) / 'sessions').glob('**/*' + cli_session_id + '.jsonl'))

@@ -14,6 +14,7 @@ import { terminalService } from '../../shared/terminalService'
 import { fixtures, terminalBinary, TerminalClient } from './helpers'
 
 const execute = promisify(execFile)
+const acpFixture = join(fixtures, 'acp-agent-fixture.py')
 const docker = await execute('docker', ['info'], { timeout: 20_000 }).then(
   () => true,
   () => false,
@@ -28,6 +29,9 @@ async function container(t: test.TestContext) {
   t.after(() => execute('docker', ['rm', '-f', id]).catch(() => {}))
   await execute('docker', ['exec', id, 'mkdir', '-p', '/root/.outpost/bin'])
   await execute('docker', ['cp', terminalBinary, `${id}:/root/.outpost/bin/outpost-terminal`])
+  // Claude Code's ACP adapter for chat; the scripted ACP agent stands in for it.
+  await execute('docker', ['cp', acpFixture, `${id}:/root/.outpost/bin/claude-agent-acp`])
+  await execute('docker', ['exec', id, 'chmod', '700', '/root/.outpost/bin/claude-agent-acp'])
   const port = Number((await execute('docker', ['port', id, '22/tcp'])).stdout.trim().split(':').pop())
   const authorize = (key: string) =>
     new Promise<void>((resolve, reject) => {

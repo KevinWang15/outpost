@@ -23,6 +23,7 @@ const target = {
   workspace: null,
 }
 const fixtureSource = new URL('../fixtures/coding-tool-fixture.py', import.meta.url)
+const acpFixtureSource = new URL('../fixtures/acp-agent-fixture.py', import.meta.url)
 const jsonl = records => records.map(record => JSON.stringify(record)).join('\n') + '\n'
 async function fixture(t) {
   const home = await mkdtemp(join(tmpdir(), 'outpost-coding-'))
@@ -31,6 +32,8 @@ async function fixture(t) {
   await mkdir(bin)
   await mkdir(root)
   for (const tool of settings.tools) await writeFile(join(bin, tool), await readFile(fixtureSource), { mode: 0o700 })
+  // `kimi acp` runs the scripted ACP agent installed beside the fixture.
+  await writeFile(join(bin, 'acp-agent-fixture'), await readFile(acpFixtureSource), { mode: 0o700 })
   await writeFile(join(home, '.bash_profile'), `export PATH=${quote(bin)}:"$PATH"\n`)
   const env = {
     ...process.env,

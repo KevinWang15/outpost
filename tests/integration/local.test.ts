@@ -46,6 +46,7 @@ test(
         ['claude', 'installed'],
         ['codex', 'installed'],
         ['kimi', 'installed'],
+        ['claude-agent-acp', 'installed'],
       ],
     )
     assert.equal(report.environment.home, home, 'never touches the real home')

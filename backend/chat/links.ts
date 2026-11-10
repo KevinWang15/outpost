@@ -96,10 +96,25 @@ export type LinkEvent =
   | { type: 'info'; info: ChatInfo }
   | { type: 'link'; state: LinkState; message: string | null }
 
-interface Pending {
-  resolve(value: { ok: boolean; message?: string; data?: unknown }): void
-  timer: NodeJS.Timeout
+/** `unknown`: the request reached a host but no answer came back, so it may have
+ * taken effect. Without it, a failed result means the host never acted. */
+export interface LinkResult {
+  ok: boolean
+  message?: string
+  data?: unknown
+  unknown?: boolean
 }
+
+interface Pending {
+  resolve(value: LinkResult): void
+  timer: NodeJS.Timeout
+  request: ChatHostRequest
+  /** The host instance it was sent to; null while it waits for the connection. */
+  sent: string | null
+  onSent?: (instance: string) => void
+}
+
+const unanswered = 'The chat did not confirm this. Check before retrying.'
 
 const idleMs = 60_000
 const retryMs = [1000, 2000, 5000, 10_000, 30_000]
@@ -111,11 +126,12 @@ export class ChatLink {
   info: ChatInfo | null = null
   state: LinkState = 'starting'
   message: string | null = null
+  /** The connected host process, from its welcome. */
+  instance: string | null = null
   private transport: ChatTransport | null = null
   private listeners = new Set<(event: LinkEvent) => void>()
   private holds = new Set<string>()
   private pending = new Map<string, Pending>()
-  private queued: ChatHostRequest[] = []
   private idle: NodeJS.Timeout | null = null
   private retry: NodeJS.Timeout | null = null
   private failures = 0
@@ -160,9 +176,10 @@ export class ChatLink {
         this.failures = 0
         this.journal.load(message.journal)
         this.info = message.info
+        this.instance = message.instance
         this.setState('live', null)
         this.emit({ type: 'journal' })
-        for (const request of this.queued.splice(0)) this.transport?.send(request)
+        for (const pending of this.pending.values()) if (!pending.sent) this.transmit(pending)
         return
       case 'entry':
         if (!this.journal.accept(message.entry)) {
@@ -175,11 +192,7 @@ export class ChatLink {
         this.info = message.info
         return this.emit({ type: 'info', info: message.info })
       case 'result': {
-        const pending = this.pending.get(message.id)
-        if (!pending) return
-        this.pending.delete(message.id)
-        clearTimeout(pending.timer)
-        return pending.resolve({ ok: message.ok, message: message.message, data: message.data })
+        return this.settle(message.id, { ok: message.ok, message: message.message, data: message.data })
       }
       case 'call':
         return this.hooks.call(this, message)
@@ -190,11 +203,9 @@ export class ChatLink {
   }
 
   private closed(message: string, status: number | null) {
-    for (const [id, pending] of this.pending) {
-      clearTimeout(pending.timer)
-      pending.resolve({ ok: false, message: 'The connection to the chat was lost. Check before retrying.' })
-      this.pending.delete(id)
-    }
+    // Requests already sent may have taken effect; unsent ones wait for the reconnect.
+    for (const [id, pending] of this.pending)
+      if (pending.sent) this.settle(id, { ok: false, message: unanswered, unknown: true })
     const ended = this.info?.state === 'exited' || this.info?.state === 'failed'
     if (status === 410 || ended) {
       this.setState('stopped', this.info?.error ?? (status === 410 ? message : null))
@@ -210,6 +221,9 @@ export class ChatLink {
       }, delay)
       this.retry.unref()
     } else this.setState('stopped', null)
+    if (this.state === 'stopped' || this.state === 'unavailable')
+      for (const id of [...this.pending.keys()])
+        this.settle(id, { ok: false, message: this.message ?? 'The chat is not running. Open it to start it.' })
     this.message = null
     this.schedule()
   }
@@ -276,35 +290,58 @@ export class ChatLink {
     const transport = this.transport
     this.transport = null
     transport?.close()
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer)
-      pending.resolve({ ok: false, message: 'The chat closed.' })
-    }
-    this.pending.clear()
+    for (const [id, pending] of this.pending)
+      this.settle(
+        id,
+        pending.sent ? { ok: false, message: unanswered, unknown: true } : { ok: false, message: 'The chat closed.' },
+      )
     this.hooks.disposed(this)
   }
 
   // Requests ---------------------------------------------------------------------------
 
-  /** Send a request; it waits for the connection while the link starts. */
+  /** Send a request; it waits for the connection while the link starts. `onSent`
+   * runs when it is written to a host, with that host's instance. */
   request(
     message: DistributiveOmit<Exclude<ChatHostRequest, { type: 'hello' | 'status' | 'identity-saved' }>, 'id'>,
     timeoutMs = 30_000,
+    onSent?: (instance: string) => void,
   ) {
     const id = randomUUID()
-    const full = { ...message, id } as ChatHostRequest
-    return new Promise<{ ok: boolean; message?: string; data?: unknown }>(resolve => {
+    const request = { ...message, id } as ChatHostRequest
+    return new Promise<LinkResult>(resolve => {
       if (this.disposed || this.state === 'stopped' || this.state === 'unavailable')
         return resolve({ ok: false, message: this.message ?? 'The chat is not running. Open it to start it.' })
       const timer = setTimeout(() => {
-        this.pending.delete(id)
-        resolve({ ok: false, message: 'The chat did not answer in time. Check before retrying.' })
+        const pending = this.pending.get(id)
+        if (pending)
+          this.settle(
+            id,
+            pending.sent
+              ? { ok: false, message: unanswered, unknown: true }
+              : { ok: false, message: 'The chat did not start in time.' },
+          )
       }, timeoutMs)
       timer.unref()
-      this.pending.set(id, { resolve, timer })
-      if (this.state === 'live' && this.transport) this.transport.send(full)
-      else this.queued.push(full)
+      const pending: Pending = { resolve, timer, request, sent: null, onSent }
+      this.pending.set(id, pending)
+      if (this.state === 'live') this.transmit(pending)
     })
+  }
+
+  private transmit(pending: Pending) {
+    if (!this.transport || !this.instance) return
+    pending.sent = this.instance
+    this.transport.send(pending.request)
+    pending.onSent?.(this.instance)
+  }
+
+  private settle(id: string, result: LinkResult) {
+    const pending = this.pending.get(id)
+    if (!pending) return
+    this.pending.delete(id)
+    clearTimeout(pending.timer)
+    pending.resolve(result)
   }
 
   /** Answer an MCP call the host forwarded. */

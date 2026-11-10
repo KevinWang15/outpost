@@ -101,6 +101,7 @@ export interface ChatHostOptions {
 
 export class ChatHost {
   readonly journal = new ChatJournal()
+  readonly instance = randomUUID()
   private info: ChatInfo
   private queue: Queued[] = []
   private keys = new Map<string, string>()
@@ -111,7 +112,11 @@ export class ChatHost {
   private activityAt = new Date().toISOString()
   private permissions = new Map<string, Pending>()
   private clients = new Map<Socket, Client>()
-  private calls = new Map<string, { bridge: Socket; timer: NodeJS.Timeout }>()
+  /** Outpost MCP calls awaiting the server: forwarded to a hub, or held until one connects. */
+  private calls = new Map<
+    string,
+    { bridge: Socket; timer: NodeJS.Timeout; hub: Socket | null; message: ChatHostMessage }
+  >()
   private identityWaiter: ((nativeId: string) => void) | null = null
   private server: Server | null = null
   private child: ChildProcess | null = null
@@ -513,7 +518,16 @@ export class ChatHost {
     socket.on('error', () => {})
     socket.on('close', () => {
       this.clients.delete(socket)
-      for (const [id, call] of this.calls) if (call.bridge === socket) this.calls.delete(id)
+      for (const [id, call] of this.calls) {
+        if (call.bridge === socket) {
+          clearTimeout(call.timer)
+          this.calls.delete(id)
+        } else if (call.hub === socket) {
+          // The server may have acted on it already; it deduplicates by call ID.
+          call.hub = null
+          this.forward(id)
+        }
+      }
     })
     socket.on('data', bytes => {
       try {
@@ -560,10 +574,12 @@ export class ChatHost {
       this.send(socket, {
         type: 'welcome',
         protocol: chatHost.protocol,
+        instance: this.instance,
         info: this.info,
         journal: this.journal.snapshot(),
       })
       if (this.info.state === 'identity') this.send(socket, { type: 'identity', nativeId: this.sessionId })
+      if (client.role === 'hub') for (const [id, call] of this.calls) if (!call.hub) this.forward(id)
       return
     }
     const id = message.id
@@ -682,29 +698,43 @@ export class ChatHost {
     }
   }
 
-  /** An Outpost MCP tool call from the agent, answered by the server's hub. */
+  /** An Outpost MCP tool call from the agent, answered by the server's hub. While no
+   * hub is connected (the server restarting, a lost SSH connection), it waits. */
   private bridgeCall(bridge: Socket, message: Record<string, unknown>) {
     const answer = (ok: boolean, text: string) =>
       bridge.end(terminalControl({ type: 'result', id: String(message.id ?? ''), ok, message: text }))
     if (!identifier(message.id) || typeof message.tool !== 'string' || message.tool.length > 64)
       return answer(false, 'Invalid Outpost tool call.')
-    const hub = this.latestHub()
-    if (!hub) return answer(false, 'Outpost is not connected to this session right now. Try again later.')
+    if (this.calls.has(message.id)) return answer(false, 'This Outpost tool call is already in progress.')
     const id = message.id
     bridge.setTimeout(0)
     const timer = setTimeout(() => {
       this.calls.delete(id)
-      answer(false, 'Outpost did not answer in time.')
+      answer(false, 'Outpost did not answer in time. It may be restarting; try again shortly.')
     }, chatHost.callMs).unref()
-    this.calls.set(id, { bridge, timer })
-    this.send(hub, {
-      type: 'call',
-      id,
-      tool: message.tool,
-      arguments: bounded(message.arguments),
-      turn: this.running?.turn ?? null,
-      origin: this.running?.origin ?? null,
+    this.calls.set(id, {
+      bridge,
+      timer,
+      hub: null,
+      message: {
+        type: 'call',
+        id,
+        tool: message.tool,
+        arguments: bounded(message.arguments),
+        turn: this.running?.turn ?? null,
+        origin: this.running?.origin ?? null,
+      },
     })
+    this.forward(id)
+  }
+
+  /** Send a waiting call to the latest hub, if one is connected. */
+  private forward(id: string) {
+    const call = this.calls.get(id)
+    const hub = this.latestHub()
+    if (!call || !hub) return
+    call.hub = hub
+    this.send(hub, call.message)
   }
 
   // Shutdown ------------------------------------------------------------------------

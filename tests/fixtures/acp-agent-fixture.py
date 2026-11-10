@@ -8,7 +8,8 @@ server for session messaging. No model is involved.
 Prompt scripts: text containing "permission" asks before its tool call, "wait"
 runs until cancelled, "list sessions" and "message <name>: <text>" call the
 Outpost MCP tools, and "pass the floor" in a channel prompt mentions the next
-member. Other replies echo the prompt without its @-mentions.
+member. "slow N" waits N seconds before replying; "crash" exits mid-turn, as a
+failing tool would. Other replies echo the prompt without its @-mentions.
 """
 
 import json
@@ -181,6 +182,12 @@ def run(identifier, params):
         if outcome.get('outcome') == 'cancelled':
             stop = 'cancelled'
         reply = 'Permission ' + ('granted' if allowed else 'denied') + '.'
+    if 'crash' in text:
+        sys.stdout.flush()
+        os._exit(3)
+    slow = re.search(r'\bslow (\d+(?:\.\d+)?)', text)
+    if slow and stop == 'end_turn' and cancelled.wait(float(slow.group(1))):
+        stop = 'cancelled'
     if 'wait' in text and stop == 'end_turn':
         notify(session_id, {'sessionUpdate': 'tool_call_update', 'toolCallId': tool, 'status': 'in_progress'})
         if cancelled.wait(60):
@@ -199,7 +206,7 @@ def run(identifier, params):
         notify(session_id, {'sessionUpdate': 'tool_call_update', 'toolCallId': tool, 'status': 'completed'})
         # Scripts apply to the user's own words; Outpost-composed prompts start with a header.
         direct = not text.startswith('[Outpost: ')
-        match = re.match(r'message ([^:\n]+): (.+)', text) if direct else None
+        match = re.search(r'(?:^|\s)message ([^:\n]+): (.+)', text) if direct else None
         if direct and text.startswith('list sessions'):
             reply = mcp_call(session, 'list_sessions', {})
         elif match:

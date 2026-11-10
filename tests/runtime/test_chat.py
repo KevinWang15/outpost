@@ -215,9 +215,15 @@ class ChatTest(unittest.TestCase):
                 'prompt': [{'type': 'text', 'text': 'list sessions'}],
             }
         )
+        # The plugin's MCP server reaches the chat host, which holds the call until
+        # the server (the hub) connects.
+        chat.expect(lambda m: m['type'] == 'entry' and m['entry']['kind'] == 'started')
+        hub = self.open(session, start=False, role='hub')
+        call = hub.expect(lambda m: m['type'] == 'call')
+        self.assertEqual(call['tool'], 'list_sessions')
+        hub.send({'type': 'answer', 'id': call['id'], 'ok': True, 'data': {'sessions': [{'name': 'Other'}]}})
         ended = chat.expect(lambda m: m['type'] == 'entry' and m['entry']['kind'] == 'ended')
         self.assertEqual(ended['entry']['stopReason'], 'end_turn')
-        # No hub is connected in this test; the plugin's MCP server reports that clearly.
         text = ''.join(
             m['entry']['update']['content']['text']
             for m in chat.messages
@@ -225,7 +231,7 @@ class ChatTest(unittest.TestCase):
             and m['entry']['kind'] == 'update'
             and m['entry']['update']['sessionUpdate'] == 'agent_message_chunk'
         )
-        self.assertIn('Outpost is not connected', text)
+        self.assertIn('Other', text)
 
 
 class ChatConnection:

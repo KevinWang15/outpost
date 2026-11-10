@@ -21,8 +21,9 @@ export const chatHost = {
   maxImages: 8,
   maxImageBytes: 5 * 1024 * 1024,
   maxOrigin: 4096,
-  /** A bridge (MCP) call waits this long for Outpost to answer. */
-  callMs: 30_000,
+  /** A bridge (MCP) call waits this long for Outpost to answer, including
+   * while the server reconnects. */
+  callMs: 45_000,
 } as const
 
 /** Display attribution for a prompt the user did not type in this session. */
@@ -94,7 +95,8 @@ export interface ChatHostStatus {
 
 // Host → client frames (JSON in relay `C` frames).
 export type ChatHostMessage =
-  | { type: 'welcome'; protocol: number; info: ChatInfo; journal: ChatJournalSnapshot }
+  /** `instance` identifies this host process; prompt keys deduplicate only within one. */
+  | { type: 'welcome'; protocol: number; instance: string; info: ChatInfo; journal: ChatJournalSnapshot }
   | { type: 'entry'; entry: ChatEntry }
   | { type: 'info'; info: ChatInfo }
   | { type: 'identity'; nativeId: string }

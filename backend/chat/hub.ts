@@ -57,12 +57,16 @@ interface Dependencies {
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
   list(context: TargetContext, signal?: AbortSignal): Promise<Session[]>
   connect: ChatConnector
+  /** How long a target may take to accept a composed prompt. */
+  promptMs?: number
 }
 
 const pollMs = 15_000
 const staleMs = 60_000
 const notStopped = (delivery: Delivery) => delivery.state !== 'done' && delivery.state !== 'failed'
 const now = () => new Date().toISOString()
+/** The key a delivery's prompt carries; the chat host dedupes by it. */
+const promptKey = (delivery: Delivery) => delivery.id.replace(/-/g, '')
 
 /** Chat across all of an owner's targets: session lists, links to chat hosts,
  * channel routing, session-to-session messages and schedules. */
@@ -70,6 +74,10 @@ export class ChatHub {
   private accounts = new Map<string, Promise<Account>>()
   private links = new Map<string, ChatLink>()
   private finishing = new Set<string>()
+  /** Deliveries with a prompt request in flight. */
+  private sending = new Set<string>()
+  /** Outpost MCP calls by ID: a host forwards a call again after a lost connection. */
+  private calls = new Map<string, Promise<{ ok: boolean; message?: string; data?: unknown }>>()
   private ticker: NodeJS.Timeout | null = null
   private stopped = false
 
@@ -138,6 +146,8 @@ export class ChatHub {
       try {
         const account = await this.account({ userId, loginId: 'background' })
         void this.recover(account)
+        // Agents that were working may call Outpost's tools; reconnect to answer them.
+        void this.refresh(account)
       } catch {
         // A store with an invalid schema stays untouched; its owner sees the error.
       }
@@ -212,6 +222,13 @@ export class ChatHub {
         for (const id of account.sessions.keys()) if (!account.names.has(id)) account.sessions.delete(id)
         account.refreshedAt = Date.now()
         this.rebuild(account)
+        for (const [targetId, sessions] of account.sessions)
+          for (const session of sessions)
+            if (session.driver === 'chat' && ['working', 'waiting'].includes(session.activity.state))
+              void this.link(account.owner, { targetId, sessionId: session.id }).then(
+                link => link.ensure(false),
+                () => {},
+              )
       } finally {
         account.refreshing = null
       }
@@ -286,6 +303,14 @@ export class ChatHub {
   private changed(account: Account, ref: SessionRef, link: ChatLink, event: LinkEvent) {
     if (event.type === 'entry') {
       const { entry } = event
+      if (entry.kind === 'queued' && entry.key) {
+        // The host accepted a prompt; its answer carries the same turn but may be lost.
+        const delivery = account.store.deliveries.deliveries.find(
+          item =>
+            !item.turn && notStopped(item) && promptKey(item) === entry.key && sessionKey(item) === sessionKey(ref),
+        )
+        if (delivery) void this.adopt(account, delivery, link, entry.turn)
+      }
       if (entry.kind === 'started' || entry.kind === 'ended') {
         const delivery = account.store.deliveries.deliveries.find(
           item =>
@@ -310,11 +335,11 @@ export class ChatHub {
 
   // Deliveries ------------------------------------------------------------------------------
 
+  /** Changes apply at once, so journal events that follow see them; saving follows. */
   private async update(account: Account, delivery: Delivery, change: Partial<Delivery>) {
-    await account.store.change(['deliveries'], () => {
-      Object.assign(delivery, change, { updatedAt: now() })
-    })
+    Object.assign(delivery, change, { updatedAt: now() })
     this.broadcast(account, { type: 'delivery', delivery })
+    await account.store.change(['deliveries'], () => {})
   }
 
   private async add(account: Account, delivery: Delivery) {
@@ -339,6 +364,7 @@ export class ChatHub {
       source,
       rerun: null,
       prompt,
+      host: null,
       origin,
       error: null,
       createdAt: at,
@@ -346,31 +372,50 @@ export class ChatHub {
     }
   }
 
-  /** Queue a composed prompt in the member's chat. The delivery id dedupes resends. */
+  /** Queue a composed prompt in the member's chat. The prompt key dedupes resends
+   * to the same host instance, so a resend after a lost answer cannot run twice. */
   private async send(account: Account, delivery: Delivery) {
-    const link = await this.link(account.owner, delivery)
-    link.hold(delivery.id)
-    link.ensure(true)
-    const result = await link.request(
-      {
-        type: 'prompt',
-        key: delivery.id.replace(/-/g, ''),
-        origin: delivery.origin ?? { kind: 'user' },
-        prompt: [{ type: 'text', text: delivery.prompt ?? '' }],
-      },
-      180_000,
-    )
-    if (!result.ok)
-      return this.failDelivery(account, delivery, result.message ?? 'The session did not accept the message.')
-    const turn = (result.data as { turn?: string } | undefined)?.turn ?? null
-    await this.update(account, delivery, { state: 'sent', turn, prompt: null })
+    if (this.stopped || this.sending.has(delivery.id) || !notStopped(delivery)) return
+    this.sending.add(delivery.id)
+    try {
+      const link = await this.link(account.owner, delivery)
+      link.hold(delivery.id)
+      link.ensure(true)
+      const result = await link.request(
+        {
+          type: 'prompt',
+          key: promptKey(delivery),
+          origin: delivery.origin ?? { kind: 'user' },
+          prompt: [{ type: 'text', text: delivery.prompt ?? '' }],
+        },
+        this.dependencies.promptMs ?? 180_000,
+        instance => {
+          if (delivery.host !== instance) void this.update(account, delivery, { state: 'sent', host: instance })
+        },
+      )
+      // Unconfirmed: the journal's `queued` entry or the next reconnect settles it.
+      if (this.stopped || result.unknown) return
+      if (!result.ok)
+        return this.failDelivery(account, delivery, result.message ?? 'The session did not accept the message.')
+      const turn = (result.data as { turn?: string } | undefined)?.turn
+      if (turn) await this.adopt(account, delivery, link, turn)
+    } finally {
+      this.sending.delete(delivery.id)
+    }
+  }
+
+  /** The host accepted the delivery's prompt as `turn`. */
+  private async adopt(account: Account, delivery: Delivery, link: ChatLink, turn: string) {
+    if (!notStopped(delivery) || delivery.turn === turn) return
+    const started = link.journal.entries.some(entry => entry.kind === 'started' && entry.turn === turn)
+    await this.update(account, delivery, { state: started ? 'running' : 'sent', turn, prompt: null })
     // A quick turn may have ended before its id was known.
-    const ended = link.journal.entries.some(entry => entry.kind === 'ended' && entry.turn === turn)
-    if (ended) await this.finished(account, delivery, link)
+    if (link.journal.entries.some(entry => entry.kind === 'ended' && entry.turn === turn))
+      await this.finished(account, delivery, link)
   }
 
   private async failDelivery(account: Account, delivery: Delivery, error: string) {
-    if (!notStopped(delivery)) return
+    if (this.stopped || !notStopped(delivery)) return
     this.links.get(this.linkKey(account.userId, delivery))?.release(delivery.id)
     await this.update(account, delivery, { state: 'failed', error, prompt: null })
     const member = this.find(account, delivery)
@@ -409,18 +454,28 @@ export class ChatHub {
     }
   }
 
-  /** After a reconnect: settle deliveries whose turns ended or vanished. */
+  /** After a (re)connect: settle deliveries whose turns ended or vanished, and
+   * resend unconfirmed prompts to the host that may have them. */
   private async reconcile(account: Account, ref: SessionRef, link: ChatLink) {
     const active = account.store.deliveries.deliveries.filter(
       item =>
-        item.targetId === ref.targetId &&
-        item.sessionId === ref.sessionId &&
+        sessionKey(item) === sessionKey(ref) &&
         (item.state === 'sent' || item.state === 'running') &&
-        item.turn,
+        !this.sending.has(item.id),
     )
     for (const delivery of active) {
       const entries = link.journal.entries
-      if (entries.some(entry => entry.kind === 'ended' && entry.turn === delivery.turn))
+      if (!delivery.turn) {
+        const queued = entries.find(entry => entry.kind === 'queued' && entry.key === promptKey(delivery))
+        if (queued?.kind === 'queued') await this.adopt(account, delivery, link, queued.turn)
+        else if (delivery.host === link.instance) void this.send(account, delivery)
+        else
+          await this.failDelivery(
+            account,
+            delivery,
+            'The session restarted before confirming the message; it may not have run.',
+          )
+      } else if (entries.some(entry => entry.kind === 'ended' && entry.turn === delivery.turn))
         await this.finished(account, delivery, link)
       else if (!link.journal.truncated && !entries.some(entry => 'turn' in entry && entry.turn === delivery.turn))
         await this.failDelivery(account, delivery, 'The session restarted before replying.')
@@ -435,7 +490,7 @@ export class ChatHub {
         (item.state === 'sent' || item.state === 'running'),
     )
     for (const delivery of active) {
-      if (link.journal.entries.some(entry => entry.kind === 'ended' && entry.turn === delivery.turn))
+      if (delivery.turn && link.journal.entries.some(entry => entry.kind === 'ended' && entry.turn === delivery.turn))
         await this.finished(account, delivery, link)
       else await this.failDelivery(account, delivery, message ?? 'The session stopped before replying.')
     }
@@ -777,14 +832,31 @@ export class ChatHub {
     await this.send(account, reply).catch(error => this.failDelivery(account, reply, (error as Error).message))
   }
 
-  /** Outpost MCP tools called by a session's agent (outpost_mcp.py). */
+  /** Outpost MCP tools called by a session's agent (outpost_mcp.py). A call the
+   * host forwards again, after a lost connection, gets the first one's answer. */
   private async call(
     account: Account,
     ref: SessionRef,
     link: ChatLink,
     message: Extract<ChatHostMessage, { type: 'call' }>,
   ) {
-    const answer = (ok: boolean, text?: string, data?: unknown) => link.answer(message.id, ok, text, data)
+    const key = `${account.userId}/${message.id}`
+    let work = this.calls.get(key)
+    if (!work) {
+      work = this.handleCall(account, ref, message)
+      this.calls.set(key, work)
+      if (this.calls.size > 256) this.calls.delete(this.calls.keys().next().value!)
+    }
+    const result = await work
+    link.answer(message.id, result.ok, result.message, result.data)
+  }
+
+  private async handleCall(
+    account: Account,
+    ref: SessionRef,
+    message: Extract<ChatHostMessage, { type: 'call' }>,
+  ): Promise<{ ok: boolean; message?: string; data?: unknown }> {
+    const answer = (ok: boolean, text?: string, data?: unknown) => ({ ok, message: text, data })
     try {
       await this.fresh(account)
       const sender = this.find(account, ref)
@@ -825,6 +897,16 @@ export class ChatHub {
           false,
           `@${recipient.handle} is open in a terminal and cannot receive messages until it is opened in chat.`,
         )
+      // Sent before a restart lost the answer: report it, do not send it again.
+      const earlier = account.store.deliveries.deliveries.find(
+        item => item.source.kind === 'session' && item.source.call === message.id,
+      )
+      if (earlier)
+        return answer(true, undefined, {
+          sent: true,
+          to: `@${recipient.handle}`,
+          note: 'The reply will arrive as a new message in this chat.',
+        })
       const origin = message.origin
       const thread = origin && (origin.kind === 'session' || origin.kind === 'reply') ? origin.threadId : randomUUID()
       const hops = (account.store.threads.threads[thread]?.hops ?? 0) + 1
@@ -841,7 +923,7 @@ export class ChatHub {
       }
       const delivery = this.delivery(
         { targetId: recipient.targetId, sessionId: recipient.id },
-        { kind: 'session', threadId: thread, hop: hops, from, reply: false },
+        { kind: 'session', threadId: thread, hop: hops, from, reply: false, call: message.id },
         sessionPrompt(from.handle, input.message),
         {
           kind: 'session',

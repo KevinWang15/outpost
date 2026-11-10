@@ -136,6 +136,26 @@ again while working gets the newer messages after its turn.
 MCP process → chat host socket → hub. The recipient works in its own chat; its
 final message returns to the sender as a new turn. A thread allows 6 messages.
 
+**Under failures.** A delivery ends in exactly one reply or one visible notice
+(`tests/integration/chat-faults.test.ts` injects the faults below).
+
+- A host welcome carries its `instance` (one per host process). A delivery
+  records the instance its prompt was sent to. Prompt keys deduplicate within one
+  instance, so resending to it is safe and resending to another is not.
+- A request that reached a host but got no answer is *unconfirmed*, not failed.
+  The host's journal `queued` entry carries the key and the turn, so the hub
+  learns the turn even when the answer is lost. After a reconnect, an
+  unconfirmed delivery is resent to the same instance. If the instance changed, it
+  fails with a notice that the message may not have run.
+- A server restart keeps deliveries as they were. On start the hub reconnects to
+  their sessions and to every chat-driven session that is working, so agents'
+  Outpost tool calls get answers.
+- The chat host holds an agent's Outpost tool call while no server is connected
+  (up to 45 s), and forwards it again if the server's connection drops before
+  the answer. The hub answers a repeated call ID with the first answer;
+  `message_session` also records the call ID on its delivery, so a call repeated
+  across a server restart sends one message.
+
 **Schedules.** Five-field cron in an IANA time zone (`shared/cron.ts`), fired at
 most once per matching minute while the server runs. A schedule's prompt runs in
 its session's own chat.
@@ -158,5 +178,10 @@ it (`POST /api/chat/images`, 5 MiB, held in memory for ten minutes).
   until they are opened in chat.
 - Channel images and server-side Web Push are not implemented. Phones use the
   web app; there is no native mobile app.
+- A prompt whose host restarted before confirming it is reported as possibly not
+  run; Outpost cannot tell whether the old process started it. A message typed in
+  a session's chat is never resent automatically: if its confirmation is lost the
+  page says so, and the journal shows whether it was queued.
+- An agent's Outpost tool call fails if no server connects within 45 s.
 - ACP v1 has no client-driven steering; a message sent while a turn runs waits
   in the queue.

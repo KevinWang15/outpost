@@ -53,7 +53,7 @@ def chat_call(tool, arguments):
         raise ValueError('This session is not open in Outpost chat')
     body = json.dumps({'type': 'call', 'id': uuid.uuid4().hex, 'tool': tool, 'arguments': arguments}).encode()
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.settimeout(40)
+        connection.settimeout(55)  # The chat host waits up to 45 s for Outpost.
         connection.connect(path)
         connection.sendall(HEADER.pack(b'C', len(body)) + body)
         data = b''

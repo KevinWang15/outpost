@@ -39,6 +39,8 @@ export class FakeSessions implements SessionService {
       createdAt: new Date().toISOString(),
       lastConnectedAt: null,
       status: 'ready',
+      driver: null,
+      instructions: null,
       activity: {
         state: 'idle',
         updatedAt: null,
@@ -91,6 +93,14 @@ export class FakeSessions implements SessionService {
   attach(context: TargetContext, id: string, cols: number, rows: number) {
     this.attached.push({ targetId: context.target.id, id, cols, rows })
     return { executable: 'python3', args: [relay, `${cols}x${rows}`], label: 'Fake relay' }
+  }
+  chatAttach(): never {
+    throw new AppError('Chat is not available in this test.', 409)
+  }
+  async chatSettings(context: TargetContext, id: string, instructions: string | null) {
+    const session = this.find(context, id)
+    session.instructions = instructions
+    return session
   }
 }
 

@@ -7,7 +7,8 @@ server for session messaging. No model is involved.
 
 Prompt scripts: text containing "permission" asks before its tool call, "wait"
 runs until cancelled, "list sessions" and "message <name>: <text>" call the
-Outpost MCP tools, "@name" in the text is repeated in the reply.
+Outpost MCP tools, and "pass the floor" in a channel prompt mentions the next
+member. Other replies echo the prompt without its @-mentions.
 """
 
 import json
@@ -132,6 +133,15 @@ def mcp_call(session, tool, arguments):
 
 
 def prompt(identifier, params):
+    try:
+        run(identifier, params)
+    except Exception as error:  # Every turn answers, so a fixture bug cannot hang a test.
+        send(
+            {'jsonrpc': '2.0', 'id': identifier, 'error': {'code': -32603, 'message': 'Fixture failed: ' + str(error)}}
+        )
+
+
+def run(identifier, params):
     session_id = params['sessionId']
     session = sessions[session_id]
     text = ' '.join(block.get('text', '') for block in params['prompt'] if block.get('type') == 'text')
@@ -151,7 +161,7 @@ def prompt(identifier, params):
         },
     )
     stop = 'end_turn'
-    reply = 'Fixture reply to: ' + re.sub(r'^\[Outpost: [^\]]*\]\n', '', text).strip()[:200]
+    reply = 'Fixture reply to: ' + re.sub(r'^\[Outpost: [^\]]*\]\n', '', text).strip()[:200].replace('@', '')
     if images:
         reply += ' (' + str(images) + ' image)'
     if 'permission' in text:
@@ -187,14 +197,21 @@ def prompt(identifier, params):
                 },
             )
         notify(session_id, {'sessionUpdate': 'tool_call_update', 'toolCallId': tool, 'status': 'completed'})
-        match = re.search(r'message ([^:]+): (.+)', text)
-        if 'list sessions' in text:
+        # Scripts apply to the user's own words; Outpost-composed prompts start with a header.
+        direct = not text.startswith('[Outpost: ')
+        match = re.match(r'message ([^:\n]+): (.+)', text) if direct else None
+        if direct and text.startswith('list sessions'):
             reply = mcp_call(session, 'list_sessions', {})
         elif match:
             reply = mcp_call(session, 'message_session', {'session': match.group(1), 'message': match.group(2)})
-        mentions = re.findall(r'(?<![\w@])pass to (@[a-z0-9-]+)', text)
-        if mentions:
-            reply += ' ' + ' '.join(mentions)
+        me = re.search(r'You are @([a-z0-9-]+)', text)
+        members = re.search(r'Members: ([^\n]+)\.', text)
+        last = text.rstrip().split('\n')[-3] if text.count('\n') >= 3 else ''
+        if re.search(r'pass(?:ing)? the floor', last, re.I) and me and members:
+            others = [name for name in re.findall(r'@([a-z0-9-]+)', members.group(1)) if name != me.group(1)]
+            if others:
+                reply = 'Passing the floor to @' + others[0] + '.'
+
         message = 'msg-' + uuid.uuid4().hex[:8]
         middle = len(reply) // 2
         for part in (reply[:middle], reply[middle:]):

@@ -54,7 +54,7 @@ export type ChatEntry = EntryBase &
     | { kind: 'history'; phase: 'begin' | 'end' }
     | { kind: 'notice'; level: 'info' | 'warning' | 'error'; text: string; turn: string | null }
   )
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
+export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 export type ChatEntryInput = DistributiveOmit<ChatEntry, 'seq' | 'at'>
 
 /** Latest-value session state. It is replaced, not journaled. */

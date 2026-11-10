@@ -19,6 +19,11 @@ import { pagePaths } from '../shared/pages'
 import { pageHtml } from '../shared/pageHtml'
 import { DesktopAccess } from './desktop-access'
 import { desktopRoutes } from './routes/desktop'
+import { ChatHub } from './chat/hub'
+import { relayConnector, type ChatConnector } from './chat/links'
+import { ChatServer } from './chat/socket'
+import { ChatTokens } from './chat/tokens'
+import { chatRoutes } from './routes/chat'
 
 export interface AppOptions {
   deployment: Deployment
@@ -30,6 +35,8 @@ export interface AppOptions {
   trustProxy?: string[]
   /** OpenSSH connection sharing; on by default except on Windows. */
   multiplex?: boolean
+  /** How the server reaches chat hosts; tests connect to them directly. */
+  chatConnector?: ChatConnector
 }
 
 export async function createApp(options: AppOptions) {
@@ -65,8 +72,18 @@ export async function createApp(options: AppOptions) {
     installations: new Installations(software),
     context: (request, targetId) => resolve(deployment.owner(request), targetId),
   }
+  const hub = new ChatHub({
+    deployment,
+    resolve,
+    list: async (context, signal) => (await sessions.list(context, signal)).sessions,
+    connect: options.chatConnector ?? relayConnector(sessions, options.env),
+  })
+  const chat = new ChatServer(hub, new ChatTokens(deployment.secret), services)
+  await hub.start()
   app.addHook('preClose', async () => {
     broker.close()
+    chat.close()
+    hub.close()
     await services.installations.close()
   })
   app.addHook('onClose', async () => {
@@ -110,6 +127,7 @@ export async function createApp(options: AppOptions) {
   workspaceRoutes(app, services)
   sessionRoutes(app, services)
   terminalRoutes(app, services)
+  chatRoutes(app, services, chat, desktop)
 
   if (options.frontendRoot) {
     const html = await readFile(join(options.frontendRoot, 'index.html'), 'utf8')

@@ -33,7 +33,11 @@ export interface Session extends SessionLaunchOptions {
   createdAt: string
   lastConnectedAt: string | null
   status: SessionStatus
+  /** What drives the native conversation now: a terminal, chat, or nothing. */
+  driver: 'terminal' | 'chat' | null
   activity: SessionActivity
+  /** Chat-mode session instructions, appended to the agent's system prompt. */
+  instructions: string | null
 }
 export interface SessionList {
   sessions: Session[]

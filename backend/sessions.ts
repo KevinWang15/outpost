@@ -27,6 +27,8 @@ export interface TargetContext {
 
 type Request =
   | { action: 'attach'; id: string; cols: number; rows: number; start: boolean }
+  | { action: 'chat-attach'; id: string; start: boolean }
+  | { action: 'chat-settings'; id: string; instructions: string | null }
   | { action: 'list' }
   | ({ action: 'coding-search' } & ConversationSearch)
   | { action: 'directories'; path: string }
@@ -62,6 +64,10 @@ export interface SessionService {
   search(context: TargetContext, input: ConversationSearch, signal?: AbortSignal): Promise<ConversationResults>
   /** The relay command for one terminal connection; see TerminalBroker. */
   attach(context: TargetContext, id: string, cols: number, rows: number, start: boolean): Command
+  /** The relay command for one chat host connection; see ChatLink. */
+  chatAttach(context: TargetContext, id: string, start: boolean): Command
+  /** Session instructions for chat mode; they apply when the chat next starts. */
+  chatSettings(context: TargetContext, id: string, instructions: string | null): Promise<Session>
 }
 
 export class SessionClient implements SessionService {
@@ -123,5 +129,11 @@ export class SessionClient implements SessionService {
   }
   attach(context: TargetContext, id: string, cols: number, rows: number, start: boolean) {
     return this.command(context, { action: 'attach', id, cols, rows, start })
+  }
+  chatAttach(context: TargetContext, id: string, start: boolean) {
+    return this.command(context, { action: 'chat-attach', id, start })
+  }
+  chatSettings(context: TargetContext, id: string, instructions: string | null) {
+    return this.run<Session>(context, { action: 'chat-settings', id, instructions })
   }
 }

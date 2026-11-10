@@ -1,6 +1,8 @@
 // Browser entry points, also used by the production SPA fallback.
 export const pagePaths = {
   workspace: '/',
+  chat: '/chat',
+  desktopChat: '/chat/desktop',
   terminal: '/terminal',
   desktopTerminal: '/terminal/desktop',
   desktop: '/desktop',

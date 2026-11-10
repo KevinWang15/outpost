@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type * as acp from '@agentclientprotocol/sdk'
-import { ChatJournal, journalBlock, type ChatEntryInput } from '../../shared/chatHost'
+import { ChatJournal, journalBlock, utf8Length, type ChatEntryInput } from '../../shared/chatHost'
 import { promptHeader, replyText, transcript } from '../../shared/chatTranscript'
 
 const chunk = (text: string, messageId = 'm1'): acp.SessionUpdate => ({
@@ -84,6 +84,50 @@ test('chat journal: viewers detect gaps, and old entries are dropped like scroll
   assert.equal(small.entries.length, 4)
   assert.equal(small.truncated, true)
   assert.equal(small.entries[0].seq, 7)
+})
+
+test('chat journal: sizes are UTF-8 bytes, so a non-ASCII journal still fits one frame', () => {
+  for (const text of ['ascii', 'é', '你好世界', '🙂 emoji', 'mixed 中文 and \u0000 controls'])
+    assert.equal(utf8Length(text), Buffer.byteLength(text))
+  // Each entry is about 3 KiB of Chinese text: 1 KiB of characters, 3 KiB as bytes.
+  const text = '中'.repeat(1024)
+  const inputs: ChatEntryInput[] = Array.from({ length: 12 }, (_, index) => ({
+    kind: 'notice',
+    level: 'info',
+    turn: null,
+    text: `${index} ${text}`,
+  }))
+  const { host, viewer } = replay(inputs, { entries: 100, bytes: 16 * 1024 })
+  const bytes = Buffer.byteLength(JSON.stringify(host.snapshot().entries))
+  assert.ok(bytes <= 16 * 1024 + 1024, `${bytes} bytes kept`)
+  assert.ok(host.entries.length < 6)
+  assert.deepEqual(viewer.entries, host.entries)
+})
+
+test('chat journal: a long streamed command output keeps an exact enough size', () => {
+  const host = new ChatJournal({ entries: 100, bytes: 4 * 1024 * 1024 })
+  host.record({ kind: 'started', turn: 't1' })
+  host.record({
+    kind: 'update',
+    turn: 't1',
+    update: { sessionUpdate: 'tool_call', toolCallId: 'c1', title: 'Build', kind: 'execute', status: 'in_progress' },
+  })
+  // 2 MiB streamed in small deltas; the report keeps a 256 KiB tail.
+  for (let index = 0; index < 2048; index++)
+    host.record({
+      kind: 'update',
+      turn: 't1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'c1',
+        _meta: { terminal_output_delta: { terminal_id: 'c1', data: `${'x'.repeat(1023)}\n` } },
+      },
+    })
+  // The tool call is still kept, and the journal's count is within 2x of its real size.
+  assert.ok(host.entries.some(entry => entry.kind === 'update' && entry.update.sessionUpdate === 'tool_call'))
+  const real = Buffer.byteLength(JSON.stringify(host.entries))
+  const counted = (host as unknown as { bytes: number }).bytes
+  assert.ok(counted >= real && counted <= 2 * real + 4096, `counted ${counted}, real ${real}`)
 })
 
 test('chat transcript: live turns, permissions, queue and replayed history', () => {

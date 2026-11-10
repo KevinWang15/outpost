@@ -285,9 +285,9 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
               { value: 'all', label: 'Everyone in this channel' },
             ]}
             disabled={channel.members.length ? null : 'Add members in channel settings first.'}
-            onSend={async text => {
+            onSend={async (text, _images, key) => {
               pinned.current = true
-              await client.call({ type: 'channel-post', channelId, key: crypto.randomUUID().replace(/-/g, ''), text })
+              await client.call({ type: 'channel-post', channelId, key, text })
             }}
           />
         </footer>

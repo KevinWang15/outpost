@@ -32,7 +32,7 @@ export async function until<T>(check: () => T | undefined | null | false, label:
 }
 export const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-export async function chatHarness(names: string[]) {
+export async function chatHarness(names: string[], options: { idleMs?: number } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'outpost-chat-hub-')))
   const state = join(directory, 'state')
   await mkdir(join(state, 'chats'), { recursive: true })
@@ -52,6 +52,8 @@ export async function chatHarness(names: string[]) {
   const breakOnAnswer = new Set<string>()
   /** Faults: the connection ends right after carrying a prompt, before any confirmation. */
   const cutAfterPrompt = new Set<string>()
+  /** Faults: the connection stays open but nothing arrives from the host. */
+  const frozen = new Set<string>()
   const sessions = new FakeSessions()
 
   function startHost(session: Session) {
@@ -77,7 +79,7 @@ export async function chatHarness(names: string[]) {
         ],
         instructions: null,
       },
-      { onExit: () => hosts.get(session.id) === host && hosts.delete(session.id) },
+      { onExit: () => hosts.get(session.id) === host && hosts.delete(session.id), idleMs: options.idleMs },
     )
     hosts.set(session.id, host)
     void host.start()
@@ -110,6 +112,8 @@ export async function chatHarness(names: string[]) {
       events.closed('The connection to the chat was lost.', null)
     })
     socket.on('data', bytes => {
+      if (frozen.has(sessionId)) return
+      events.progress()
       for (const frame of decoder.feed(Buffer.from(bytes))) {
         const message = JSON.parse(frame.payload.toString()) as ChatHostMessage
         if (message.type === 'identity') {
@@ -167,8 +171,8 @@ export async function chatHarness(names: string[]) {
 
   const hubs: ChatHub[] = []
   const received: ChatServerMessage[] = []
-  async function startHub(promptMs?: number) {
-    const hub = new ChatHub({ deployment, resolve, list, connect: connector, promptMs })
+  async function startHub(timing: { promptMs?: number; probeMs?: number } = {}) {
+    const hub = new ChatHub({ deployment, resolve, list, connect: connector, ...timing })
     hubs.push(hub)
     await hub.start()
     await hub.attach({ owner, send: message => received.push(message) })
@@ -185,6 +189,7 @@ export async function chatHarness(names: string[]) {
     muted,
     breakOnAnswer,
     cutAfterPrompt,
+    frozen,
     startHub,
     ref: (session: { id: string }) => ({ targetId: target.id, sessionId: session.id }),
     /** Break every connection to a session's chat host; the host keeps running. */

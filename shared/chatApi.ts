@@ -58,11 +58,13 @@ export interface ChannelMessage {
   hop: number
   /** The member turn that produced this reply. */
   turn: (SessionRef & { turn: string }) | null
+  /** The page's key for a user post; a resent draft with it is the same post. */
+  key: string | null
 }
 export type DeliverySource =
   | { kind: 'channel'; channelId: string; root: string; hop: number; through: string | null }
-  /** `call`: the agent's Outpost tool call that sent it. */
-  | { kind: 'session'; threadId: string; hop: number; from: ChannelMember; reply: boolean; call?: string }
+  /** `call`: the agent's Outpost tool call that sent it; null for a reply. */
+  | { kind: 'session'; threadId: string; hop: number; from: ChannelMember; reply: boolean; call: string | null }
   | { kind: 'schedule'; scheduleId: string }
 export interface Delivery extends SessionRef {
   id: string
@@ -74,7 +76,7 @@ export interface Delivery extends SessionRef {
   /** The composed prompt, kept until it is accepted so a restart can resend it. */
   prompt: string | null
   /** The chat host instance the prompt was sent to; a resend is safe only to the same one. */
-  host?: string | null
+  host: string | null
   origin: ChatOrigin | null
   error: string | null
   createdAt: string

@@ -97,6 +97,8 @@ interface Pending {
 export interface ChatHostOptions {
   /** Called once the service has shut down; the executable exits here. */
   onExit?(code: number): void
+  /** Overrides chatHost.idleMs (tests). */
+  idleMs?: number
 }
 
 export class ChatHost {
@@ -125,6 +127,7 @@ export class ChatHost {
   private stderr = ''
   private ended = false
   private infoTimer: NodeJS.Timeout | null = null
+  private idleTimer: NodeJS.Timeout | null = null
   private loading = false
 
   constructor(
@@ -419,6 +422,30 @@ export class ChatHost {
     return { ...base, state: 'idle' }
   }
 
+  /** Nothing to do and nobody watching. An unseen reply keeps the host, so its
+   * badge stays; other results are already recorded in channels and schedules. */
+  private resting() {
+    const state = this.info.activity.state
+    return (
+      this.info.state === 'ready' &&
+      (state === 'idle' || state === 'error') &&
+      !this.calls.size &&
+      ![...this.clients.values()].some(client => client.role)
+    )
+  }
+
+  private scheduleRest() {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+    if (this.ended || !this.resting()) return
+    const idleMs = this.options.idleMs ?? chatHost.idleMs
+    this.idleTimer = setTimeout(() => {
+      if (!this.resting()) return
+      process.stderr.write('outpost chat: stopped while idle with no viewers\n')
+      this.stop()
+    }, idleMs).unref()
+  }
+
   private activityChanged() {
     const next = this.activity()
     const previous = this.info.activity
@@ -427,12 +454,14 @@ export class ChatHost {
     this.activityAt = new Date().toISOString()
     this.info.activity = this.activity()
     this.infoChanged(true)
+    this.scheduleRest()
   }
 
   private setState(state: ChatInfo['state']) {
     this.info.state = state
     this.info.activity = this.activity()
     this.infoChanged(true)
+    this.scheduleRest()
   }
 
   /** Usage and command updates can arrive per token; coalesce their broadcasts.
@@ -528,6 +557,7 @@ export class ChatHost {
           this.forward(id)
         }
       }
+      this.scheduleRest()
     })
     socket.on('data', bytes => {
       try {
@@ -580,6 +610,7 @@ export class ChatHost {
       })
       if (this.info.state === 'identity') this.send(socket, { type: 'identity', nativeId: this.sessionId })
       if (client.role === 'hub') for (const [id, call] of this.calls) if (!call.hub) this.forward(id)
+      this.scheduleRest()
       return
     }
     const id = message.id
@@ -596,6 +627,7 @@ export class ChatHost {
         if (!call) return
         this.calls.delete(id)
         clearTimeout(call.timer)
+        this.scheduleRest()
         call.bridge.end(
           terminalControl({
             type: 'result',
@@ -710,6 +742,7 @@ export class ChatHost {
     bridge.setTimeout(0)
     const timer = setTimeout(() => {
       this.calls.delete(id)
+      this.scheduleRest()
       answer(false, 'Outpost did not answer in time. It may be restarting; try again shortly.')
     }, chatHost.callMs).unref()
     this.calls.set(id, {
@@ -726,6 +759,7 @@ export class ChatHost {
       },
     })
     this.forward(id)
+    this.scheduleRest()
   }
 
   /** Send a waiting call to the latest hub, if one is connected. */
@@ -752,6 +786,7 @@ export class ChatHost {
     if (this.ended) return
     this.ended = true
     if (this.infoTimer) clearTimeout(this.infoTimer)
+    if (this.idleTimer) clearTimeout(this.idleTimer)
     this.broadcast({ type: 'info', info: this.info })
     for (const call of this.calls.values()) clearTimeout(call.timer)
     this.server?.close()

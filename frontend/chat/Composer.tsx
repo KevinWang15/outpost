@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { ArrowUp, ImagePlus, LoaderCircle, Square, X } from 'lucide-react'
 import { chatHost } from '../../shared/chatHost'
+import { newKey } from './client'
 
 export interface Suggestion {
   value: string
@@ -40,7 +41,9 @@ export default function Composer({
   running?: boolean
   /** A reason sending is unavailable, shown instead of sending. */
   disabled?: string | null
-  onSend: (text: string, images: File[]) => Promise<void>
+  /** `key` stays the same when an unchanged draft is sent again, so the
+   * server can tell a resend from a new message. */
+  onSend: (text: string, images: File[], key: string) => Promise<void>
   onStop?: () => void
 }) {
   const [text, setText] = useState(() => drafts.get(draftKey) ?? '')
@@ -52,6 +55,8 @@ export default function Composer({
   const [dismissed, setDismissed] = useState<string | null>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
+  /** The last attempt that was not confirmed: resending it keeps its key. */
+  const attempt = useRef<{ key: string; text: string; files: File[] } | null>(null)
 
   // Each conversation mounts its own composer (keyed views), so this runs per draft.
   useEffect(() => {
@@ -118,11 +123,15 @@ export default function Composer({
     if (!body && !files.length) return
     setBusy(true)
     setError('')
+    const images = files.map(item => item.file)
+    const last = attempt.current
+    const same =
+      last?.text === body && last.files.length === images.length && last.files.every((file, i) => file === images[i])
+    const key = same ? last.key : newKey()
+    attempt.current = { key, text: body, files: images }
     try {
-      await onSend(
-        body,
-        files.map(item => item.file),
-      )
+      await onSend(body, images, key)
+      attempt.current = null
       for (const item of files) URL.revokeObjectURL(item.url)
       setText('')
       setFiles([])

@@ -340,9 +340,9 @@ export class ChatClient {
     return ((await response.json()) as { id: string }).id
   }
 
-  async prompt(target: SessionRef, text: string, images: File[]) {
+  /** Send a prompt; resending it with the same key cannot run it twice. */
+  async prompt(target: SessionRef, text: string, images: File[], key: string) {
     const ref = plainRef(target)
-    const key = newKey()
     const ids: string[] = []
     for (const file of images) ids.push(await this.upload(file))
     if (images.length)
@@ -352,7 +352,6 @@ export class ChatClient {
       )
     const result = await this.request({ type: 'prompt', ...ref, key, text, images: ids })
     if (!result.ok) throw new Error(result.message ?? 'The message was not sent.')
-    return key
   }
 
   // Channels -------------------------------------------------------------------------------

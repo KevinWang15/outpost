@@ -210,7 +210,9 @@ class Connection implements ChatClient {
           180_000,
         )
         if (result.ok) images.commit()
-        return result
+        return result.unknown
+          ? { ok: false, message: 'The chat did not confirm this message. If it does not appear above, send it again.' }
+          : result
       }
       case 'cancel':
         return (await this.existing(ref!)).request({ type: 'cancel' })

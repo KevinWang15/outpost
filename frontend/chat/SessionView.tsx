@@ -330,9 +330,9 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                     ? 'Start the coding tool to send messages.'
                     : null
               }
-              onSend={async (text, images) => {
+              onSend={async (text, images, key) => {
                 pinned.current = true
-                await client.prompt(target, text, images)
+                await client.prompt(target, text, images, key)
               }}
               onStop={() => void client.request({ type: 'cancel', ...target })}
             />

@@ -8,7 +8,8 @@ import type { SessionActivity } from './activity'
 
 export const chatHost = {
   protocol: 1,
-  /** Journal bounds; older entries are dropped like terminal scrollback. */
+  /** Journal bounds; older entries are dropped like terminal scrollback. Bytes
+   * are UTF-8 JSON, so a welcome snapshot always fits one relay frame. */
   maxEntries: 20_000,
   maxBytes: 16 * 1024 * 1024,
   /** A merged text chunk grows to this size before the next one starts. */
@@ -24,6 +25,9 @@ export const chatHost = {
   /** A bridge (MCP) call waits this long for Outpost to answer, including
    * while the server reconnects. */
   callMs: 45_000,
+  /** A host with no viewers and nothing to do stops after this; opening the
+   * chat starts it again in the same conversation. */
+  idleMs: 10 * 60_000,
 } as const
 
 /** Display attribution for a prompt the user did not type in this session. */
@@ -166,7 +170,18 @@ export function journalBlock(block: acp.ContentBlock): acp.ContentBlock {
 const chunkKinds = new Set(['agent_message_chunk', 'agent_thought_chunk', 'user_message_chunk'])
 const toolKinds = new Set(['tool_call', 'tool_call_update'])
 const toolMergeWindow = 2000
-const maxToolEstimate = 6 * chatHost.maxField + chatHost.maxOutput
+
+/** UTF-8 length of a string, as it is sent in a frame. */
+export function utf8Length(text: string) {
+  let bytes = text.length
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index)
+    if (code >= 0xd800 && code <= 0xdbff) index++ // A surrogate pair: 4 bytes for 2 units.
+    if (code >= 0x80) bytes += code >= 0x800 ? 2 : 1
+  }
+  return bytes
+}
+const measure = (value: unknown) => utf8Length(JSON.stringify(value))
 
 type UpdateEntry = Extract<ChatEntry, { kind: 'update' }>
 type Meta = Record<string, unknown>
@@ -226,6 +241,8 @@ export class ChatJournal {
   version = 0
   private sizes: number[] = []
   private bytes = 0
+  /** Tool reports' last exact size, by entry seq. */
+  private measured = new Map<number, number>()
 
   constructor(
     private limits: { entries: number; bytes: number } = { entries: chatHost.maxEntries, bytes: chatHost.maxBytes },
@@ -249,6 +266,7 @@ export class ChatJournal {
     this.entries = []
     this.sizes = []
     this.bytes = 0
+    this.measured.clear()
     this.lastSeq = snapshot.lastSeq
     this.truncated = snapshot.truncated
     for (const entry of snapshot.entries) this.keep(entry)
@@ -259,7 +277,7 @@ export class ChatJournal {
     return { lastSeq: this.lastSeq, truncated: this.truncated, entries: this.entries }
   }
 
-  private keep(entry: ChatEntry, size = JSON.stringify(entry).length) {
+  private keep(entry: ChatEntry, size = measure(entry)) {
     this.entries.push(entry)
     this.sizes.push(size)
     this.bytes += size
@@ -280,7 +298,7 @@ export class ChatJournal {
       if (!this.merge(normalized)) this.keep(normalized)
     } else this.keep(entry)
     while ((this.entries.length > this.limits.entries || this.bytes > this.limits.bytes) && this.entries.length > 1) {
-      this.entries.shift()
+      this.measured.delete(this.entries.shift()!.seq)
       this.bytes -= this.sizes.shift()!
       this.truncated = true
     }
@@ -303,7 +321,7 @@ export class ChatJournal {
       this.replace(
         index,
         { ...last, update: { ...last.update, content } as acp.SessionUpdate },
-        this.sizes[index] + added.length,
+        this.sizes[index] + measure(added) - 2,
       )
       return true
     }
@@ -318,8 +336,14 @@ export class ChatJournal {
           toolKinds.has(candidate.update.sessionUpdate) &&
           (candidate.update as acp.ToolCall).toolCallId === id
         ) {
-          const size = Math.min(this.sizes[index] + JSON.stringify(update).length, maxToolEstimate)
-          this.replace(index, { ...candidate, update: mergeTool(candidate.update, update) }, size)
+          // A streamed command's report keeps a bounded output tail, so adding each
+          // update overestimates it; measure again once the estimate doubles.
+          const merged = { ...candidate, update: mergeTool(candidate.update, update) }
+          const estimate = this.sizes[index] + measure(update)
+          const measured = this.measured.get(merged.seq) ?? this.sizes[index]
+          const size = estimate > 2 * measured ? measure(merged) : estimate
+          if (size !== estimate) this.measured.set(merged.seq, size)
+          this.replace(index, merged, size)
           return true
         }
       }
@@ -336,7 +360,8 @@ export class ChatJournal {
             : candidate.update.sessionUpdate === 'compaction_update' &&
               candidate.update.compactionId === (update as acp.CompactionUpdate).compactionId
         if (same) {
-          this.replace(index, { ...candidate, update }, JSON.stringify(update).length + 64)
+          const next = { ...candidate, update }
+          this.replace(index, next, measure(next))
           return true
         }
       }

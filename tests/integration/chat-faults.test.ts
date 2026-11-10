@@ -7,7 +7,7 @@ import { chatHarness, pause, until } from './chat-harness'
 test('a lost answer to a delivery does not orphan its turn', async () => {
   const chat = await chatHarness(['Coder'])
   try {
-    const hub = await chat.startHub(1500)
+    const hub = await chat.startHub({ promptMs: 1500 })
     const [coder] = chat.sessions
     const channel = await hub.saveChannel(chat.owner, { name: 'lost', topic: '', members: [chat.ref(coder)] })
     const link = await hub.link(chat.owner, chat.ref(coder))
@@ -57,7 +57,7 @@ test('a server restart while a member works still posts its reply', async () => 
 test('a server restart before a prompt is confirmed settles it without running it twice', async () => {
   const chat = await chatHarness(['Coder'])
   try {
-    const first = await chat.startHub(60_000)
+    const first = await chat.startHub({ promptMs: 60_000 })
     const [coder] = chat.sessions
     const channel = await first.saveChannel(chat.owner, { name: 'unconfirmed', topic: '', members: [chat.ref(coder)] })
     const link = await first.link(chat.owner, chat.ref(coder))
@@ -194,7 +194,7 @@ test('a prompt whose connection ends before it is confirmed runs once', async ()
 test('a chat host that stops while a prompt is unconfirmed settles it with a notice', async () => {
   const chat = await chatHarness(['Coder'])
   try {
-    const hub = await chat.startHub(60_000)
+    const hub = await chat.startHub({ promptMs: 60_000 })
     const [coder] = chat.sessions
     const channel = await hub.saveChannel(chat.owner, { name: 'stopped', topic: '', members: [chat.ref(coder)] })
     const link = await hub.link(chat.owner, chat.ref(coder))
@@ -208,6 +208,45 @@ test('a chat host that stops while a prompt is unconfirmed settles it with a not
     const notice = await until(() => chat.messages().find(message => message.author.kind === 'outpost'), 'a notice')
     assert.match(notice.text, /@coder stopped without replying/)
     assert.equal(chat.deliveries()[0].state, 'done')
+  } finally {
+    await chat.close()
+  }
+})
+
+test('a connection that goes silent is replaced; the chat host keeps running', async () => {
+  const chat = await chatHarness(['Coder'])
+  try {
+    const hub = await chat.startHub({ probeMs: 600 })
+    const [coder] = chat.sessions
+    const link = await hub.link(chat.owner, chat.ref(coder))
+    link.subscribe(() => {}) // A viewer, so the link reconnects.
+    link.ensure(true)
+    await until(() => link.state === 'live' && link.info?.state === 'ready', 'a ready chat')
+    const instance = link.instance
+    // The stream stops carrying anything, as with a hung SSH connection.
+    chat.frozen.add(coder.id)
+    await until(() => link.state !== 'live', 'the silent link to be replaced', 5000)
+    chat.frozen.delete(coder.id)
+    await until(() => link.state === 'live', 'the new connection', 10_000)
+    assert.equal(link.instance, instance)
+  } finally {
+    await chat.close()
+  }
+})
+
+test('a channel post resent after a server restart is posted once', async () => {
+  const chat = await chatHarness(['Coder'])
+  try {
+    const first = await chat.startHub()
+    const [coder] = chat.sessions
+    const channel = await first.saveChannel(chat.owner, { name: 'resend', topic: '', members: [chat.ref(coder)] })
+    const posted = await first.post(chat.owner, channel.id, 'draft1', 'hello, nobody mentioned')
+    first.close()
+    const second = await chat.startHub()
+    const again = await second.post(chat.owner, channel.id, 'draft1', 'hello, nobody mentioned')
+    assert.deepEqual(again, { messageId: posted.messageId, duplicate: true })
+    const { messages } = await second.history(chat.owner, channel.id, null)
+    assert.equal(messages.filter(message => message.author.kind === 'user').length, 1)
   } finally {
     await chat.close()
   }

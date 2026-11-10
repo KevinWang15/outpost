@@ -29,7 +29,7 @@ function SessionRow({ session, active }: { session: ChatSession; active: boolean
       : presenceLabel[state]
   return (
     <button
-      className={`chat-row ${active ? 'active' : ''} ${needsYou(session) ? 'attention' : ''}`}
+      className={`chat-row ${active ? 'active' : ''}`}
       aria-current={active ? 'page' : undefined}
       onClick={() => select({ kind: 'session', targetId: session.targetId, sessionId: session.id })}
     >
@@ -61,7 +61,7 @@ function ChannelRow({ channel, active }: { channel: ChannelView; active: boolean
       aria-current={active ? 'page' : undefined}
       onClick={() => select({ kind: 'channel', channelId: channel.id })}
     >
-      <Hash size={15} className="channel-hash" />
+      <Hash size={15} />
       <span className="chat-row-text">
         <strong>{channel.name}</strong>
       </span>
@@ -211,7 +211,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
           </h2>
           {!client.sessionsLoaded && <LoaderCircle className="spin muted" size={16} />}
           {byTarget.map(({ target, sessions: list }) => (
-            <div key={target.id} className="target-group">
+            <div key={target.id}>
               {client.targets.length > 1 && (
                 <h3 className="target-heading" title={target.error ?? undefined}>
                   {target.name}
@@ -253,7 +253,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
               return (
                 <button
                   key={schedule.id}
-                  className={`chat-row schedule-row ${schedule.enabled ? '' : 'disabled'}`}
+                  className={`chat-row ${schedule.enabled ? '' : 'disabled'}`}
                   onClick={() => open({ kind: 'schedule', scheduleId: schedule.id, session: null })}
                 >
                   <CalendarClock size={15} />

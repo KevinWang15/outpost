@@ -87,21 +87,25 @@ then the host accepts prompts. A restart therefore always finds the conversation
 ## The chat host
 
 `outpost-terminal chat-serve` reads its launch configuration on stdin, listens on
-`~/.outpost/chats/<session>.sock` (owner-only), and outlives its viewers. The
-target runtime's `status` (SO_PEERCRED-checked, like the terminal service)
-reports its state and the same `SessionActivity` as terminal sessions, so lists
-and badges work in both modes. Terminate ends either driver.
+`~/.outpost/chats/<session>.sock` (owner-only), and outlives its viewers. After
+ten minutes with no viewer, no turn, no request waiting for approval and no
+unseen reply, it stops; opening the chat starts it again in the same
+conversation. The target runtime's `status` (SO_PEERCRED-checked, like the
+terminal service) reports its state and the same `SessionActivity` as terminal
+sessions, so lists and badges work in both modes. Terminate ends either driver.
 
 Requests (`shared/chatHost.ts`): `hello` (viewer or hub), `prompt` (with a key:
 a retried key is the same turn), `cancel`, `unqueue`, `permission`, `config`,
-`mode`, `seen`, `note`, `answer`; one-shot `status` and `seen` without hello.
+`mode`, `seen`, `note`, `answer`, `ping`; one-shot `status` and `seen` without
+hello.
 
 **Journal.** Entries are `queued`, `started`, `ended`, `update` (an ACP
 `SessionUpdate`), `permission`/`resolved`, `history` markers and `notice`. The
 host assigns sequence numbers; a viewer applies the same entries in order with
 the same `ChatJournal`, so streamed text chunks and tool reports coalesce
 identically on both ends. A gap means resubscribe. The journal keeps 20,000
-entries or 16 MiB, dropping the oldest like terminal scrollback; the native
+entries or 16 MiB of UTF-8 JSON, so a snapshot always fits one 32 MiB relay
+frame, dropping the oldest like terminal scrollback; the native
 store still has the whole conversation. Tool reports and other agent data are
 bounded per field; prompt images are not journaled (only their metadata).
 Latest-value state (mode, config, commands, usage, title, activity) is `ChatInfo`,
@@ -116,7 +120,10 @@ a reply nobody has seen (channel replies are read in their channel instead).
 `ChatLink` is the server's one connection to a session's chat host, shared by
 every viewer and by routing. It mirrors the journal, reconnects without
 restarting a stopped tool, and closes a minute after nothing needs it (no
-viewer, no delivery in flight, no running turn).
+viewer, no delivery in flight, no running turn). Like a terminal connection, it
+pings a host that has sent nothing for 15 s and replaces a connection silent
+for 30 s (60 s before the host's welcome); any byte counts, so a large
+snapshot on a slow link is not mistaken for silence.
 
 `ChatHub` keeps, per owner, the session list across targets (polled every 15 s
 while a page is open, with live chat activity merged in), handles, channels,
@@ -155,6 +162,10 @@ final message returns to the sender as a new turn. A thread allows 6 messages.
   the answer. The hub answers a repeated call ID with the first answer;
   `message_session` also records the call ID on its delivery, so a call repeated
   across a server restart sends one message.
+- The composer keeps one key for a draft until the server accepts it, so
+  sending the same draft again is recognized: by the chat host's prompt keys in
+  a session, and by the key stored with each channel post, also after a server
+  restart.
 
 **Schedules.** Five-field cron in an IANA time zone (`shared/cron.ts`), fired at
 most once per matching minute while the server runs. A schedule's prompt runs in
@@ -181,7 +192,8 @@ it (`POST /api/chat/images`, 5 MiB, held in memory for ten minutes).
 - A prompt whose host restarted before confirming it is reported as possibly not
   run; Outpost cannot tell whether the old process started it. A message typed in
   a session's chat is never resent automatically: if its confirmation is lost the
-  page says so, and the journal shows whether it was queued.
+  page says so, and the journal shows whether it was queued. Sending the same
+  draft again cannot run it twice unless the chat host also restarted.
 - An agent's Outpost tool call fails if no server connects within 45 s.
 - ACP v1 has no client-driven steering; a message sent while a turn runs waits
   in the queue.

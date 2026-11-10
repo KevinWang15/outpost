@@ -49,6 +49,7 @@ interface Account {
   refreshing: Promise<void> | null
   viewKey: string
   poller: NodeJS.Timeout | null
+  /** Posts being written, by key; stored posts carry their key. */
   posts: Map<string, string>
 }
 
@@ -59,6 +60,8 @@ interface Dependencies {
   connect: ChatConnector
   /** How long a target may take to accept a composed prompt. */
   promptMs?: number
+  /** How long a connected chat may stay silent (tests). */
+  probeMs?: number
 }
 
 const pollMs = 15_000
@@ -295,6 +298,7 @@ export class ChatHub {
           if (this.links.get(key) === from) this.links.delete(key)
         },
       },
+      this.dependencies.probeMs,
     )
     this.links.set(key, link)
     return link
@@ -624,22 +628,25 @@ export class ChatHub {
       root,
       hop: 0,
       turn: null,
+      key: null,
     }
     await account.store.append(message)
     this.broadcast(account, { type: 'message', message })
   }
 
+  /** Post the user's message. A draft resent with the same key, also after a
+   * restart, returns the first post. */
   async post(owner: Owner, channelId: string, key: string, text: string) {
     const account = await this.account(owner)
-    const previous = account.posts.get(key)
-    if (previous) return { messageId: previous, duplicate: true }
     const channel = account.store.channels.channels.find(item => item.id === channelId)
     if (!channel) throw new AppError('Channel not found.', 404)
     const body = text.trim()
     if (!body) throw new AppError('Write a message first.', 400)
+    const writing = account.posts.get(key)
+    if (writing) return { messageId: writing, duplicate: true }
+    const id = randomUUID()
     const known = channel.members.map(member => member.handle)
     const found = mentions(body, known)
-    const id = randomUUID()
     const message: ChannelMessage = {
       id,
       channelId,
@@ -650,10 +657,16 @@ export class ChatHub {
       root: id,
       hop: 0,
       turn: null,
+      key,
     }
     account.posts.set(key, id)
-    if (account.posts.size > 500) account.posts.delete(account.posts.keys().next().value!)
-    await account.store.append(message)
+    try {
+      const stored = (await account.store.recent(channelId)).find(item => item.key === key)
+      if (stored) return { messageId: stored.id, duplicate: true }
+      await account.store.append(message)
+    } finally {
+      account.posts.delete(key)
+    }
     this.broadcast(account, { type: 'message', message })
     await this.markRead(owner, channelId)
     await this.route(account, channel, message, null)
@@ -779,6 +792,7 @@ export class ChatHub {
         root: source.root,
         hop: source.hop + 1,
         turn: { targetId: member.targetId, sessionId: member.sessionId, turn: delivery.turn! },
+        key: null,
       }
       await account.store.append(message)
       this.broadcast(account, { type: 'message', message })
@@ -817,8 +831,9 @@ export class ChatHub {
         kind: 'session',
         threadId: source.threadId,
         hop: source.hop,
-        from: { ...delivery, name: member?.name ?? handle, handle },
+        from: { targetId: delivery.targetId, sessionId: delivery.sessionId, name: member?.name ?? handle, handle },
         reply: true,
+        call: null,
       },
       replyPrompt(handle, body),
       {

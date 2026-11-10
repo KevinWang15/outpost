@@ -5,16 +5,18 @@ import { chatHost, ChatJournal } from '../../shared/chatHost'
 import type { LinkState } from '../../shared/chatApi'
 import { BoundedWriter } from '../../shared/node/boundedWriter'
 import { FrameDecoder, relayMagic, terminalControl } from '../../shared/node/terminalFrames'
-import { AppError } from '../errors'
+import { terminalConnectionPolicy } from '../../shared/protocol'
 import { protocolResult } from '../process'
 import type { SessionService, TargetContext } from '../sessions'
 
 /** A framed byte stream to one chat host. */
 export interface ChatTransport {
   send(message: ChatHostRequest): void
-  close(): void
+  close(reason?: string): void
 }
 export interface ChatTransportEvents {
+  /** Bytes arrived; a large frame can take a while on a slow link. */
+  progress(): void
   message(message: ChatHostMessage): void
   /** `status` is the runtime's failure status before the stream started, if any. */
   closed(message: string, status: number | null): void
@@ -56,6 +58,7 @@ export function relayConnector(sessions: SessionService, env?: NodeJS.ProcessEnv
     child.on('error', error => finish(`Could not reach the target: ${error.message}`, null))
     child.stdout.on('data', (chunk: Buffer) => {
       if (finished) return
+      events.progress()
       if (!started) {
         prelude = Buffer.concat([prelude, chunk]).subarray(-64 * 1024)
         const at = prelude.indexOf(relayMagic)
@@ -85,7 +88,7 @@ export function relayConnector(sessions: SessionService, env?: NodeJS.ProcessEnv
     })
     return {
       send: message => void writer.write(terminalControl(message)),
-      close: () => finish('Closed.', null),
+      close: (reason = 'Closed.') => finish(reason, null),
     }
   }
 }
@@ -136,6 +139,10 @@ export class ChatLink {
   private retry: NodeJS.Timeout | null = null
   private failures = 0
   private disposed = false
+  /** Liveness, as for terminals: when bytes last arrived, and an unanswered ping. */
+  private heard = 0
+  private probe: string | null = null
+  private watch: NodeJS.Timeout | null = null
 
   constructor(
     readonly key: string,
@@ -147,6 +154,7 @@ export class ChatLink {
       changed(link: ChatLink, event: LinkEvent): void
       disposed(link: ChatLink): void
     },
+    private probeMs: number = terminalConnectionPolicy.probeMs,
   ) {}
 
   /** Connect if needed. `start` restarts a stopped coding tool. */
@@ -156,9 +164,18 @@ export class ChatLink {
     if (this.retry) clearTimeout(this.retry)
     this.retry = null
     this.setState('starting', null)
+    this.heard = Date.now()
+    this.probe = null
+    this.watch ??= setInterval(() => this.check(), this.probeMs / 6)
+    this.watch.unref()
     const transport = this.open(start, {
+      progress: () => {
+        if (this.transport === transport) this.heard = Date.now()
+      },
       message: message => {
-        if (this.transport === transport) this.receive(message)
+        if (this.transport !== transport) return
+        if (message.type === 'result' && message.id === this.probe) this.probe = null
+        else this.receive(message)
       },
       closed: (message, status) => {
         if (this.transport !== transport) return
@@ -168,6 +185,21 @@ export class ChatLink {
     })
     this.transport = transport
     transport.send({ type: 'hello', protocol: chatHost.protocol, role: 'hub' })
+  }
+
+  /** A quiet connection gets a ping; one that stays silent is replaced. Before
+   * the welcome, the target has the attach time to start the chat. */
+  private check() {
+    const transport = this.transport
+    if (!transport) return
+    const quiet = Date.now() - this.heard
+    if (this.state !== 'live') {
+      if (quiet > 2 * this.probeMs) transport.close('The chat did not start in time.')
+    } else if (quiet > this.probeMs) transport.close('The chat stopped responding.')
+    else if (quiet > this.probeMs / 2 && !this.probe) {
+      this.probe = randomUUID()
+      transport.send({ type: 'ping', id: this.probe })
+    }
   }
 
   private receive(message: ChatHostMessage) {
@@ -287,6 +319,7 @@ export class ChatLink {
     this.disposed = true
     if (this.idle) clearTimeout(this.idle)
     if (this.retry) clearTimeout(this.retry)
+    if (this.watch) clearInterval(this.watch)
     const transport = this.transport
     this.transport = null
     transport?.close()
@@ -354,12 +387,4 @@ export class ChatLink {
       ...(data !== undefined ? { data } : {}),
     })
   }
-
-  /** One-way requests (seen). */
-  notify(message: ChatHostRequest) {
-    if (this.state === 'live') this.transport?.send(message)
-  }
 }
-
-export const linkFailure = (state: LinkState, message: string | null) =>
-  new AppError(message ?? (state === 'stopped' ? 'The chat is not running.' : 'The chat is unavailable.'), 409)

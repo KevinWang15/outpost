@@ -49,7 +49,7 @@ test(
         id,
         kind: 'local',
         name: id === 'alpha' ? 'Build machine' : 'Development laptop',
-        tools: ['claude', 'codex', 'kimi'],
+        tools: ['claude', 'codex', 'kimi', 'deepseek'],
         createdAt: new Date().toISOString(),
       })
       const codex = randomUUID(),
@@ -82,6 +82,19 @@ test(
       await put(join(home, '.kimi-code/sessions/project/session_example/agents/main/wire.jsonl'), [
         { type: 'context.append_message', message: { role: 'assistant', content: 'Kimi examined 缓存失效 on ' + id } },
       ])
+      await put(join(home, '.dsh/sessions/project/native-deepseek/session.v4.jsonl'), [
+        { type: 'session', version: 4, id: 'native-deepseek', cwd: '/work/outpost', createdAt: 1794380400000 },
+        {
+          type: 'user/message',
+          time: 1794380400001,
+          data: { role: 'user', content: 'A feline needs a quiet place on ' + id },
+        },
+        {
+          type: 'assistant/message',
+          time: 1794380400002,
+          data: { message: { role: 'assistant', content: 'DeepSeek found a kitten on ' + id } },
+        },
+      ])
     }
     const resolve = async (owner: Owner, id: string): Promise<TargetContext> => {
       const home = homes.get(id)!
@@ -92,6 +105,7 @@ test(
           `CODEX_HOME=${home}/.codex`,
           `CLAUDE_CONFIG_DIR=${home}/.claude`,
           `KIMI_CODE_HOME=${home}/.kimi-code`,
+          `DSH_HOME=${home}/.dsh`,
           `PATH=${home}/bin:${process.env.PATH}`,
           'bash',
           '-c',
@@ -197,6 +211,16 @@ test(
       results: { tool: string }[]
     }
     assert.equal(semantic.results[0].tool, 'claude')
+    for (const mode of ['keyword', 'semantic', 'mixed']) {
+      const deepseek = (await call('search_history', { query: 'feline', mode, tool: 'deepseek' })) as {
+        results: { tool: string; machine: { id: string }; cursor: string }[]
+      }
+      assert.equal(deepseek.results.length, 2)
+      assert.deepEqual(new Set(deepseek.results.map(row => row.machine.id)), new Set(['alpha', 'beta']))
+      assert.ok(deepseek.results.every(row => row.tool === 'deepseek'))
+      const context = await call('read_context', { cursor: deepseek.results[0].cursor })
+      assert.equal((context.messages as unknown[]).length, 2)
+    }
     const file = join(home, 'report.txt')
     await writeFile(file, 'A generated deployment report')
     const published = await call('publish_file', { path: file })

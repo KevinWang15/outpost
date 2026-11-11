@@ -111,7 +111,9 @@ class ActivityTests(unittest.TestCase):
         }
 
     def test_lifecycle_checks_are_shared_and_new_completions_survive_stale_checks(self):
-        for tool in adapters():
+        for tool, adapter in adapters().items():
+            if not adapter.terminal_supported:
+                continue
             with self.subTest(tool=tool):
                 observer, path = self.fixture(tool)
                 self.assertEqual(observer.describe(True)['state'], 'idle')
@@ -142,7 +144,9 @@ class ActivityTests(unittest.TestCase):
                 self.assertNotIn('PRIVATE_TURN_CONTENT', observer.path.read_text())
 
     def test_input_while_working_does_not_ack_a_future_finish_even_with_identical_timestamps(self):
-        for tool in adapters():
+        for tool, adapter in adapters().items():
+            if not adapter.terminal_supported:
+                continue
             observer, path = self.fixture(tool)
             self.append(path, self.event(tool, 'working'))
             observer.input()
@@ -157,7 +161,9 @@ class ActivityTests(unittest.TestCase):
             self.assertEqual(observer.describe(True)['state'], 'finished')
 
     def test_input_checkpoints_cannot_move_backwards_across_terminals(self):
-        for tool in adapters():
+        for tool, adapter in adapters().items():
+            if not adapter.terminal_supported:
+                continue
             with self.subTest(tool=tool):
                 observer, path = self.fixture(tool)
                 other = Activity(observer.directory, observer.adapter, observer.session)
@@ -180,7 +186,9 @@ class ActivityTests(unittest.TestCase):
                 )
 
     def test_restarting_and_importing_dont_replay_old_turns(self):
-        for tool in adapters():
+        for tool, adapter in adapters().items():
+            if not adapter.terminal_supported:
+                continue
             observer, path = self.fixture(tool)
             for state in ('finished', 'working'):
                 self.append(path, self.event(tool, state))
@@ -192,7 +200,9 @@ class ActivityTests(unittest.TestCase):
             self.assertEqual(observer.describe(True)['state'], 'working')
 
     def test_interrupts_errors_tools_and_subagents_are_not_main_turn_completion(self):
-        for tool in adapters():
+        for tool, adapter in adapters().items():
+            if not adapter.terminal_supported:
+                continue
             observer, path = self.fixture(tool)
             self.append(path, self.event(tool, 'working'))
             ignored = {

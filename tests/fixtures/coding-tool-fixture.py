@@ -51,6 +51,10 @@ if tool == 'kimi' and sys.argv[1:] == ['acp']:
     agent = Path(sys.argv[0]).resolve().parent / 'acp-agent-fixture'
     os.execve(sys.executable, [sys.executable, str(agent)], {**os.environ, 'FIXTURE_ACP_VARIANT': 'kimi'})
 
+if tool == 'dsh' and sys.argv[1:] == ['--profile', 'acp']:
+    agent = Path(sys.argv[0]).resolve().parent / 'acp-agent-fixture'
+    os.execve(sys.executable, [sys.executable, str(agent)], {**os.environ, 'FIXTURE_ACP_VARIANT': 'deepseek'})
+
 native_arguments = sys.argv[1:]
 # Launches put integration options (MCP, activity hooks) before the conversation selector.
 while len(native_arguments) >= 2 and native_arguments[0] in ('--mcp-config', '--settings', '-c'):

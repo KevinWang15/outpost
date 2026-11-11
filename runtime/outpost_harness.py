@@ -48,6 +48,8 @@ class CodingSessionAdapter(ABC):
     """Own native identity, creation, discovery, text decoding, and exact-ID attachment for one CLI."""
 
     tool = ''
+    command = ''
+    terminal_supported = True
     id_pattern = r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
     storage_key = ''
     storage_directory = ''
@@ -191,6 +193,7 @@ class CodingSessionAdapter(ABC):
 def adapters():
     from outpost_claude import ClaudeAdapter
     from outpost_codex import CodexAdapter
+    from outpost_deepseek import DeepSeekAdapter
     from outpost_kimi import KimiAdapter
 
-    return {adapter.tool: adapter for adapter in (CodexAdapter(), ClaudeAdapter(), KimiAdapter())}
+    return {adapter.tool: adapter for adapter in (CodexAdapter(), ClaudeAdapter(), KimiAdapter(), DeepSeekAdapter())}

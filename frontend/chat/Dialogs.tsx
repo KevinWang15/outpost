@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LoaderCircle, Play, Trash2 } from 'lucide-react'
 import type { DirectorySuggestions, SessionInput } from '../../shared/model'
-import { harnessLabel } from '../../shared/harnesses'
+import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { describeCron, nextRun, parseCron } from '../../shared/cron'
 import { sessionKey, type ChannelView, type SessionRef } from '../../shared/chatApi'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
@@ -73,7 +73,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
       tools={options?.tools ?? []}
       conversation={null}
       directories={directories}
-      description={target ? `On ${target.name}. Opens in chat; you can continue it in a terminal any time.` : undefined}
+      description={target ? `On ${target.name}. Opens in chat.` : undefined}
       beforeFields={
         <>
           <label className="field">
@@ -608,6 +608,18 @@ export function TerminalDialog({ target: selected, onClose }: { target: SessionR
   const [connecting, setConnecting] = useState(false)
   const working = info?.activity.state === 'working' || info?.activity.state === 'waiting'
   if (!session) return null
+  if (!supportsTerminal(session.tool))
+    return (
+      <Dialog
+        title={harnessLabel(session.tool)}
+        description="This harness runs in Outpost Chat and has no bundled terminal interface."
+        onClose={onClose}
+      >
+        <button className="button" onClick={onClose}>
+          Close
+        </button>
+      </Dialog>
+    )
   if (connecting) return <BrowserConnect target={target} onClose={onClose} />
   return (
     <Dialog

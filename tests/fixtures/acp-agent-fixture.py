@@ -50,6 +50,8 @@ def request(method, params):
 
 
 def store(session_id):
+    if variant == 'deepseek':
+        return Path(os.environ['DSH_HOME']) / 'sessions' / 'fixture' / session_id / 'session.v4.jsonl'
     if variant == 'kimi':
         home = Path(os.environ['KIMI_CODE_HOME'])
         return home / 'sessions' / 'fixture' / session_id / 'conversation.jsonl'
@@ -63,6 +65,12 @@ def history(session_id):
     records = []
     for line in path.read_text().splitlines():
         record = json.loads(line)
+        if variant == 'deepseek':
+            kind = {'user/message': 'user', 'assistant/message': 'assistant'}.get(record.get('type'))
+            data = record.get('data', {})
+            if kind:
+                records.append((kind, data.get('message', data).get('content', '')))
+            continue
         message = record.get('message')
         if record.get('type') in ('user', 'assistant') and isinstance(message, dict):
             records.append((record['type'], message.get('content', '')))
@@ -74,6 +82,13 @@ def append(session_id, kind, text, cwd):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a') as stream:
         record = {'type': kind, 'sessionId': session_id, 'cwd': cwd, 'message': {'role': kind, 'content': text}}
+        if variant == 'deepseek':
+            message = {'role': kind, 'content': text}
+            record = {
+                'type': kind + '/message',
+                'time': time.time() * 1000,
+                'data': message if kind == 'user' else {'message': message},
+            }
         stream.write(json.dumps(record) + '\n')
 
 
@@ -265,6 +280,9 @@ def handle(message):
         capabilities = {'loadSession': True, 'promptCapabilities': {'image': True}, 'sessionCapabilities': {}}
         if variant == 'claude':
             capabilities['sessionCapabilities']['systemPrompt'] = {}
+        if variant == 'deepseek':
+            capabilities.pop('loadSession')
+            capabilities['sessionCapabilities']['resume'] = {}
         result = {
             'protocolVersion': 1,
             'agentCapabilities': capabilities,
@@ -275,9 +293,24 @@ def handle(message):
         session_id = ('session_' + uuid.uuid4().hex) if variant == 'kimi' else str(uuid.uuid4())
         if variant == 'kimi':
             create_kimi(session_id, params['cwd'])
+        if variant == 'deepseek':
+            path = store(session_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        'type': 'session',
+                        'version': 4,
+                        'id': session_id,
+                        'cwd': params['cwd'],
+                        'createdAt': time.time() * 1000,
+                    }
+                )
+                + '\n'
+            )
         session = open_session(params, session_id)
         result = {'sessionId': session_id, 'configOptions': config(session)}
-    elif method == 'session/load':
+    elif method == ('session/resume' if variant == 'deepseek' else 'session/load'):
         records = history(params['sessionId'])
         if records is None and variant == 'kimi':
             records = [] if store(params['sessionId']).parent.exists() else None
@@ -295,6 +328,9 @@ def handle(message):
                 },
             )
         result = {'configOptions': config(session)}
+    elif method == 'session/close':
+        sessions.pop(params['sessionId'], None)
+        result = {}
     elif method == 'session/set_config_option':
         session = sessions[params['sessionId']]
         session['mode'] = params['value']

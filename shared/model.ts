@@ -66,7 +66,7 @@ export interface DirectorySuggestions {
 }
 
 /** Chat mode runs Claude Code through its official ACP adapter; Codex's is
- * bundled in Outpost Terminal and Kimi Code serves ACP itself. */
+ * bundled in Outpost Terminal; Kimi Code and DeepSeek Harness serve ACP themselves. */
 export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => [
   'bash',
   'python3',

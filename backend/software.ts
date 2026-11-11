@@ -33,8 +33,9 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 probe() {
   tool=$1
-  flag=$2
-  path=$(command -v "$tool" || true)
+  command=$2
+  flag=$3
+  path=$(command -v "$command" || true)
   if [ "$tool" = outpost-terminal ] || [ "$tool" = claude-agent-acp ]; then
     path="$HOME/.outpost/bin/$tool"
     [ -x "$path" ] || path=''
@@ -67,7 +68,7 @@ probe() {
   if [ -f "$work/timedout" ]; then code=124; output='Version check timed out after 4 seconds'; rm "$work/timedout"; fi
   printf '%s\\000%s\\000%s\\000%s\\000' "$tool" "$path" "$code" "$output"
 }
-${ids.map(id => `probe ${quote(id)} ${quote(versionFlags[id] ?? '--version')}`).join('\n')}
+${ids.map(id => `probe ${quote(id)} ${quote(harnesses.find(h => h.id === id)?.command ?? id)} ${quote(versionFlags[id] ?? '--version')}`).join('\n')}
 printf 'END\\000'
 `
 }
@@ -218,7 +219,16 @@ mv -f "$HOME/.outpost/bin/.claude-agent-acp.new" "$HOME/.outpost/bin/claude-agen
 echo "Claude Code ACP adapter $version installed."
 `
   const harness = harnesses.find(harness => harness.id === id)
-  if (harness)
+  if (harness && 'npm' in harness.installer)
+    return `#!/bin/sh
+set -eu
+# Install the official DeepSeek Harness CLI as the execution user.
+command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Install Node.js 24.9 or newer and npm first.' >&2; exit 1; }
+node -e 'const [major,minor]=process.versions.node.split(".").map(Number);if(major<24||(major===24&&minor<9))process.exit(1)' || { echo 'Node.js 24.9 or newer is required.' >&2; exit 1; }
+npm install --global --prefix "$HOME/.local" '${harness.installer.npm}'
+echo '${harness.label} installed. Configure its DeepSeek credentials before opening a chat.'
+`
+  if (harness && 'url' in harness.installer)
     return `#!/bin/sh
 set -eu
 # Install ${harness.label} using its official installer, as the execution user.

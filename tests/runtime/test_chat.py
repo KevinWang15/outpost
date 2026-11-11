@@ -27,6 +27,35 @@ class ChatTest(unittest.TestCase):
     call = test_runtime.RuntimeTest.call
     create = test_runtime.RuntimeTest.create
 
+    def test_deepseek_chat_resumes_exact_session_with_default_mcp_and_no_terminal_driver(self):
+        session = self.create(name='DeepSeek named session', tool='deepseek')
+        self.assertEqual(session['tool'], 'deepseek')
+        native = session['cliSessionId']
+        chat = self.open(session)
+        ready = self.ready(chat)
+        self.assertEqual(ready['info']['nativeId'], native)
+        chat.send(
+            {
+                'type': 'prompt',
+                'id': 'd1',
+                'key': None,
+                'origin': {'kind': 'user'},
+                'prompt': [{'type': 'text', 'text': 'publish deepseek-result.txt'}],
+            }
+        )
+        ended = chat.expect(lambda m: m['type'] == 'entry' and m['entry']['kind'] == 'ended')
+        self.assertEqual(ended['entry']['stopReason'], 'end_turn')
+        self.assertTrue((self.project / 'deepseek-result.txt').is_file())
+        self.call({'action': 'terminate', 'id': session['id']})
+        reopened = self.open(session)
+        self.assertEqual(self.ready(reopened)['info']['nativeId'], native)
+        self.call({'action': 'terminate', 'id': session['id']})
+        blocked = self.call(
+            {'action': 'attach', 'id': session['id'], 'cols': 80, 'rows': 24, 'start': True}, expect_ok=False
+        )
+        self.assertEqual(blocked['status'], 409)
+        self.assertIn('Outpost Chat', blocked['message'])
+
     def ready(self, chat):
         return chat.expect(
             lambda m: (

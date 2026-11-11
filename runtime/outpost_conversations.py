@@ -6,6 +6,7 @@ import os
 import re
 import time
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from outpost_harness import adapters
@@ -166,6 +167,15 @@ class CodingSessionStore(ABC):
     def __init__(self, adapter):
         self.adapter = adapter
 
+    @contextmanager
+    def history_stream(self, path):
+        """A seekable logical JSONL stream and its source revision."""
+        with path.open('rb') as stream:
+            yield stream, os.fstat(stream.fileno())
+
+    def records(self, path, scan):
+        yield from scan.records(path)
+
     @abstractmethod
     def history_paths(self, home):
         """Yield canonical native transcript paths, without reading their contents."""
@@ -261,7 +271,7 @@ def search(query, tool=None, environments=None):
                     seen.add(key)
                     excerpt = None
                     for path in session.history:
-                        for record in scan.records(path):
+                        for record in adapter.sessions.records(path, scan):
                             for text in adapter.text(record):
                                 folded = text.casefold()
                                 if query in folded:

@@ -152,15 +152,18 @@ def read_batch(sessions, sources):
             offset = previous.get('offset', 0)
             if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
                 raise ValueError('Invalid history checkpoint')
-            with path.open('rb') as stream:
-                stat = os.fstat(stream.fileno())
+            with adapter.sessions.history_stream(path) as (stream, stat):
                 size = stat.st_size
                 source.update(size=size, modified=str(stat.st_mtime_ns))
                 reset = not previous or offset > size
                 if previous and not reset:
                     prefix, prefix_size, tail, tail_size = fingerprint(stream, offset)
                     reset = prefix != previous.get('prefix') or tail != previous.get('tail')
-                    if size == previous.get('size') and source['modified'] != previous.get('modified'):
+                    if (
+                        size == previous.get('size')
+                        and source['modified'] != previous.get('modified')
+                        and not getattr(stat, 'incomplete', False)
+                    ):
                         reset = True
                 if reset:
                     offset = 0
@@ -240,7 +243,7 @@ def read_message(sessions, request):
         or not 1 <= limit <= 20000
     ):
         raise ValueError('Invalid history message page')
-    with path.open('rb') as stream:
+    with adapter.sessions.history_stream(path) as (stream, _stat):
         stream.seek(position)
         line = stream.readline(MAX_LINE + 1)
     if len(line) > MAX_LINE:

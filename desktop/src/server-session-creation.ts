@@ -5,7 +5,7 @@ import {
   type DesktopSessionChoice,
 } from '../../shared/desktopAuth'
 import type { DirectorySuggestions, SessionInput } from '../../shared/model'
-import { harnessIds } from '../../shared/harnesses'
+import { harnessIds, supportsTerminal } from '../../shared/harnesses'
 import { softwareIds } from '../../shared/schemas'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
 import type { SessionCreatorServerSummary } from '../../shared/sessionCreator'
@@ -39,7 +39,7 @@ export function sessionCreationServer(summary: SessionCreatorServerSummary, requ
         !result.missing.every(id => softwareIds.includes(id))
       )
         throw new Error('Invalid session creation options.')
-      return { tools: result.tools, missing: result.missing }
+      return { tools: result.tools.filter(supportsTerminal), missing: result.missing }
     },
     async directories(targetId: string, value: string, signal: AbortSignal): Promise<DirectorySuggestions> {
       const result = (await request(`${path(targetId)}/directories?path=${encodeURIComponent(value)}`, {

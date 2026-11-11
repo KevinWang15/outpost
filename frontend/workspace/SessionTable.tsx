@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { pagePaths } from '../../shared/pages'
 import type { Session } from '../../shared/model'
-import { harnessLabel } from '../../shared/harnesses'
+import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import { Menu } from '../ui/Menu'
 import ActivityBadge from './ActivityBadge'
@@ -145,7 +145,7 @@ export default function SessionTable({
                   {relativeTime(session.lastConnectedAt)}
                 </span>
                 <div className="row-actions" role="cell">
-                  {session.driver === 'chat' ? (
+                  {session.driver === 'chat' || !supportsTerminal(session.tool) ? (
                     <a
                       className="button small"
                       href={`${pagePaths.chat}?${new URLSearchParams({ target: targetId, session: session.id })}`}

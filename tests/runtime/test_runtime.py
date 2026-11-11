@@ -41,7 +41,7 @@ class RuntimeTest(unittest.TestCase):
         service = self.home / '.outpost' / 'bin'
         service.mkdir(parents=True)
         shutil.copy(BINARY, service / 'outpost-terminal')
-        for tool in ('claude', 'codex', 'kimi'):
+        for tool in ('claude', 'codex', 'kimi', 'dsh'):
             target = self.bin / tool
             shutil.copy(FIXTURE, target)
             target.chmod(0o700)
@@ -56,6 +56,7 @@ class RuntimeTest(unittest.TestCase):
             'CODEX_HOME': str(self.home / '.codex'),
             'CLAUDE_CONFIG_DIR': str(self.home / '.claude'),
             'KIMI_CODE_HOME': str(self.home / '.kimi-code'),
+            'DSH_HOME': str(self.home / '.dsh'),
             'PATH': str(self.bin) + ':' + os.environ['PATH'],
             'PYTHONPATH': str(RUNTIME),
         }

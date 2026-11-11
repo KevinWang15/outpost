@@ -510,7 +510,10 @@ def start_session(session, cols, rows):
     if not Path(session['rootDir']).is_dir():
         fail('Session root directory no longer exists', 409)
     tool = session['tool']
-    executable = shutil.which(tool, path=session['env'].get('PATH', os.environ.get('PATH')))
+    adapter = CODING_ADAPTERS[tool]
+    if not adapter.terminal_supported:
+        fail('This harness has no bundled terminal UI. Open this session in Outpost Chat.', 409)
+    executable = shutil.which(adapter.command or tool, path=session['env'].get('PATH', os.environ.get('PATH')))
     if not executable:
         fail(
             tool
@@ -613,7 +616,9 @@ def start_chat(session):
     if not Path(session['rootDir']).is_dir():
         fail('Session root directory no longer exists', 409)
     tool = session['tool']
-    executable = shutil.which(tool, path=session['env'].get('PATH', os.environ.get('PATH')))
+    executable = shutil.which(
+        CODING_ADAPTERS[tool].command or tool, path=session['env'].get('PATH', os.environ.get('PATH'))
+    )
     if not executable:
         fail(tool + ' is missing on this target. Check Required Software and your login PATH.', 409)
     install_helpers()
@@ -760,7 +765,7 @@ def create_session(request):
         launch_environment = dict(os.environ, **environment)
         if action == 'fork':
             launch_environment.update(source['cliSessionEnv'])
-        executable = shutil.which(tool, path=launch_environment.get('PATH'))
+        executable = shutil.which(CODING_ADAPTERS[tool].command or tool, path=launch_environment.get('PATH'))
         if not executable:
             fail(tool + ' is missing on this target. Check Required Software and your login PATH.', 409)
         # CLI identity is owned by the adapter, rather than by optional

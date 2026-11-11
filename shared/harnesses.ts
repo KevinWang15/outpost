@@ -27,8 +27,21 @@ export const harnesses = [
     nativeId: '^session_[A-Za-z0-9_-]{1,120}$',
     storageKey: 'KIMI_CODE_HOME',
   },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek Harness',
+    command: 'dsh',
+    installer: { npm: '@deepseek-ai/dsh@0.2.2-rc.1' },
+    nativeId: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$',
+    storageKey: 'DSH_HOME',
+    terminal: false,
+  },
 ] as const
 
 export type HarnessId = (typeof harnesses)[number]['id']
 export const harnessIds = harnesses.map(harness => harness.id) as HarnessId[]
 export const harnessLabel = (id: HarnessId) => harnesses.find(harness => harness.id === id)!.label
+export const supportsTerminal = (id: HarnessId) => {
+  const harness = harnesses.find(harness => harness.id === id)!
+  return !('terminal' in harness && harness.terminal === false)
+}

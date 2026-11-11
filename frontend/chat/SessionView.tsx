@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { sessionKey, type ChatSession, type SessionRef } from '../../shared/chatApi'
 import type { ChatInfo } from '../../shared/chatHost'
-import { harnessLabel } from '../../shared/harnesses'
+import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { FileViewer } from '../terminal/FileViewer'
 import { useSessionFiles } from '../terminal/useSessionFiles'
 import { Menu } from '../ui/Menu'
@@ -219,6 +219,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               items={[
                 {
                   label: 'Open in terminal',
+                  disabled: !supportsTerminal(session.tool),
                   icon: <SquareTerminal size={14} />,
                   onSelect: () => open({ kind: 'terminal', ...target }),
                 },

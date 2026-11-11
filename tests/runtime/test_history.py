@@ -27,6 +27,7 @@ class HistoryTest(unittest.TestCase):
             'CODEX_HOME': str(self.home / '.codex'),
             'CLAUDE_CONFIG_DIR': str(self.home / '.claude'),
             'KIMI_CODE_HOME': str(self.home / '.kimi-code'),
+            'DSH_HOME': str(self.home / '.dsh'),
         }
         self.patch = patch.dict(os.environ, self.environment)
         self.patch.start()

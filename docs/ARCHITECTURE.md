@@ -1534,6 +1534,23 @@ broker, authentication scheme or desktop copy of `TerminalView`.
 `prepare_launch` and `prepare_activity` methods using that harness's native interfaces;
 the runtime and shared helper installers must not branch on harness names.
 
+The DeepSeek adapter uses `command: dsh` independently of its `deepseek` harness
+ID, with `DSH_HOME` pinned per session. Its official package exposes ACP rather
+than a bundled terminal UI, so registry capability metadata routes connections
+to Chat and excludes it from the desktop terminal creator. The runtime also
+refuses a terminal driver before launching a process. A small target-side ACP
+transport maps the advertised `session/resume` capability to `session/load` for
+the existing chat host, forwarding all other requests, permissions, updates and
+invocation-scoped MCP descriptors. It requires no terminal-service release and
+does not add replay or system-prompt capabilities the native server lacks.
+
+Native DeepSeek session stores select the highest JSONL generation per session,
+including `.jsonl.zstd`. The store's `history_stream` supplies a seekable logical
+stream and the original physical revision. Complete Zstandard frame boundaries
+are checked before Node's built-in decoder runs; truncated tails are retried on
+append. Checkpoints use decoded byte positions, so added frames retain cursors.
+The default stores use ordinary native file handles through the same interface.
+
 **Add a signal type.** Define a validator in `shared/signals.ts`, allow it in
 the broker, and handle it in the shared client, delegating native actions through the bridge.
 

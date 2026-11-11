@@ -33,7 +33,7 @@ test(
     const target = await request<Target>(
       'POST',
       '/targets',
-      { kind: 'local', name: 'This computer', tools: ['claude', 'codex', 'kimi'] },
+      { kind: 'local', name: 'This computer', tools: ['claude', 'codex', 'kimi', 'deepseek'] },
       201,
     )
     const report = await request<SoftwareReport>('GET', `/targets/${target.id}/software`)
@@ -46,6 +46,7 @@ test(
         ['claude', 'installed'],
         ['codex', 'installed'],
         ['kimi', 'installed'],
+        ['deepseek', 'installed'],
         ['claude-agent-acp', 'installed'],
       ],
     )
@@ -59,6 +60,19 @@ test(
       201,
     )
     assert.equal(session.status, 'ready')
+    const deepseek = await request<Session>(
+      'POST',
+      `/targets/${target.id}/sessions`,
+      {
+        name: 'DeepSeek session',
+        rootDir: '~/project',
+        tool: 'deepseek',
+      },
+      201,
+    )
+    assert.equal(deepseek.tool, 'deepseek')
+    assert.equal(deepseek.name, 'DeepSeek session')
+    assert.equal(deepseek.cliSessionEnv.DSH_HOME, join(home, '.dsh'))
     await writeFile(join(project, 'capture-input'), '')
 
     const connect = async () => {

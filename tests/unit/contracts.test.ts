@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
-import { harnesses } from '../../shared/harnesses'
+import { harnesses, supportsTerminal } from '../../shared/harnesses'
+import historyTools from '../../runtime/history-tools.json'
 import { terminalService } from '../../shared/terminalService'
 import { FrameDecoder, terminalFrame, terminalControl, relayMagic } from '../../shared/node/terminalFrames'
 
@@ -27,13 +28,23 @@ print(json.dumps({'version': t.VERSION, 'protocol': t.PROTOCOL, 'maxCols': t.MAX
 test('coding harnesses: shared/harnesses.ts matches the runtime adapters', () => {
   const adapters = json(
     `from outpost_harness import adapters
-print(json.dumps({tool: {'storage': a.storage_key, 'id': a.id_pattern} for tool, a in adapters().items()}))`,
+print(json.dumps({tool: {'storage': a.storage_key, 'id': a.id_pattern, 'command': a.command or a.tool, 'terminal': a.terminal_supported} for tool, a in adapters().items()}))`,
   )
   assert.deepEqual(Object.keys(adapters).sort(), harnesses.map(harness => harness.id).sort())
   for (const harness of harnesses) {
     assert.equal(adapters[harness.id].storage, harness.storageKey, harness.id)
     assert.equal(`^${adapters[harness.id].id}$`, harness.nativeId, harness.id)
+    assert.equal(adapters[harness.id].command, harness.command, harness.id)
+    assert.equal(adapters[harness.id].terminal, supportsTerminal(harness.id), harness.id)
   }
+})
+
+test('history MCP advertises every registered coding harness', () => {
+  const search = historyTools.find(tool => tool.name === 'search_history')!
+  assert.deepEqual(
+    search.inputSchema.properties.tool!.enum,
+    harnesses.map(harness => harness.id),
+  )
 })
 
 test('relay protocol: broker and relay agree on the marker and frames', () => {

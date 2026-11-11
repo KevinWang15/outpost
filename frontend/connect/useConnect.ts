@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Session, Target } from '../../shared/model'
+import { supportsTerminal } from '../../shared/harnesses'
 import { pagePaths } from '../../shared/pages'
 import type { TerminalChoice } from '../../shared/terminals'
 import { standaloneBrowser } from '../browser'
@@ -68,6 +69,10 @@ export function useConnect(target: Pick<Target, 'id' | 'name'>, onClose: () => v
   }
   function connect(session: Session) {
     cancelHandoff()
+    if (!supportsTerminal(session.tool)) {
+      window.location.assign(`${pagePaths.chat}?${new URLSearchParams({ target: target.id, session: session.id })}`)
+      return
+    }
     const terminal = preferredTerminal()
     if (terminal) launch(session, terminal, false)
     else setConnection({ session, phase: 'choose', error: '' })

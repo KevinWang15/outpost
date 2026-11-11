@@ -7,6 +7,9 @@ on your Linux machines, and lets you come back to them from your browser or
 Outpost Desktop — with paste, copy, Shift+Enter and links working as if
 the agent ran on your computer.
 
+**DeepSeek Harness** also runs in Outpost Chat, with named persistent sessions,
+default Outpost MCP tools and cross-machine history search.
+
 - **One Connect button.** Choose the web terminal or Outpost Desktop for macOS and Windows. Both share the terminal UI and connection path.
 - **Feels native.** Paste screenshots with your normal paste shortcut and the agent receives the image. Shift+Enter inserts a newline. Text the agent copies lands on your clipboard. Links it opens open in your browser.
 - **Managed sessions outlive connections.** Close the tab or lose Wi-Fi; the agent keeps working. Reconnect from any computer or your phone, to the same process.
@@ -14,7 +17,7 @@ the agent ran on your computer.
 - **Local tool or hosted service.** Run it on your own computer with your SSH config, or host it for a team with accounts and per-user SSH keys.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
 - **Find any conversation.** Search the history on a target, including conversations started outside Outpost, and resume them as sessions.
-- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, and Kimi Code histories across all configured targets using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
+- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code and DeepSeek Harness histories across all configured targets using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
 
 ![The Outpost workspace: a target with three sessions and their activity](docs/images/workspace.png)
 
@@ -70,6 +73,23 @@ Desktop opens chat in its own window (**Chat** next to a signed-in server, or
 **File → Chat**). Chat uses each tool's [Agent Client Protocol](https://agentclientprotocol.com)
 server; Claude Code's is installed from Required Software. See
 [docs/CHAT.md](docs/CHAT.md) for how it works.
+
+### DeepSeek Harness
+
+Enable **DeepSeek Harness** on a target and use **Required Software** to install
+the official `dsh` CLI (`@deepseek-ai/dsh@0.2.2-rc.1`). It requires Node.js 24.9+
+and npm on that target. Configure its normal DeepSeek credentials, or provide
+`DEEPSEEK_API_KEY` in the session environment, then create a named session in
+**Chat**. Outpost uses `dsh --profile acp`, preserves its native session ID and
+`DSH_HOME` (default `~/.dsh`), and resumes the conversation after reconnecting.
+Its Outpost MCP includes file publishing, history search and chat messaging by
+default. User profile and home configuration remain intact.
+
+The official package has no bundled terminal interface, so Outpost opens these
+sessions in Chat. The terminal picker excludes them. DeepSeek's ACP interface
+does not apply custom session instructions or replay imported native messages;
+Outpost retains messages from its own Chat journal, and earlier native messages
+remain accessible through history MCP. See the [official ACP contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md).
 
 ## Fork a session
 
@@ -244,7 +264,7 @@ you return to it.
 
 ### Session files
 
-Managed Codex, Claude Code and Kimi Code sessions receive an **Outpost MCP** tool named `publish_file`.
+Managed Codex, Claude Code, Kimi Code and DeepSeek Harness sessions receive an **Outpost MCP** tool named `publish_file`.
 Ask the agent to publish a generated image or document to your Outpost session;
 the tool takes an absolute `path` and an optional download `name`. Any managed
 coding tool can also use the same helper from its shell:
@@ -287,7 +307,7 @@ file downloads.
 
 ### Cross-machine history MCP
 
-Managed Claude Code, Codex and Kimi Code sessions receive five history tools in
+Managed Claude Code, Codex, Kimi Code and DeepSeek Harness sessions receive five history tools in
 the same **Outpost MCP** as `publish_file`, with no additional registration:
 
 | Tool | Purpose |
@@ -332,6 +352,13 @@ demand, rather than all being kept in the index. Native JSONL records above
 files; native fork or revert files remain individually inspectable through
 `get_session`. Historical messages are data, not instructions for the current
 agent.
+
+DeepSeek history reads `$DSH_HOME/sessions` on each target, including root and
+subagent logs in formats v0–v4, raw JSONL and concatenated Zstandard frames.
+Only the highest retained generation is scanned. Native files remain unchanged;
+compressed input is decoded locally with the target's Node runtime into a
+temporary seekable stream, capped at 256 MiB per file. An incomplete final frame
+is retried after the native log changes. Use `tool: "deepseek"` to filter it.
 
 Existing coding-tool processes need their MCP connection reloaded or the coding
 tool restarted once to discover the newly registered tools. New sessions have

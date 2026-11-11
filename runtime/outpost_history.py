@@ -211,6 +211,7 @@ def read_batch(sessions, sources):
                 checkpoint = {
                     'offset': offset,
                     'size': size,
+                    'sourceSize': getattr(stat, 'source_size', size),
                     'modified': source['modified'],
                     'generation': generation,
                     'prefix': prefix,

@@ -23,6 +23,8 @@ export interface HistorySource {
 export interface HistoryCheckpoint {
   offset: number
   size: number
+  /** Physical source size when positions refer to a decoded stream. */
+  sourceSize?: number
   modified: string
   generation: string
   prefix: string

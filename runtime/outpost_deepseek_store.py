@@ -92,7 +92,10 @@ class DeepSeekSessionStore(CodingSessionStore):
             yield (
                 stream,
                 SimpleNamespace(
-                    st_size=os.fstat(stream.fileno()).st_size, st_mtime_ns=revision.st_mtime_ns, incomplete=incomplete
+                    st_size=os.fstat(stream.fileno()).st_size,
+                    st_mtime_ns=revision.st_mtime_ns,
+                    incomplete=incomplete,
+                    source_size=revision.st_size,
                 ),
             )
 

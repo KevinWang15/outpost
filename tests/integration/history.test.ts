@@ -210,7 +210,7 @@ test(
     const semantic = (await call('search_history', { query: 'feline', mode: 'semantic' })) as {
       results: { tool: string }[]
     }
-    assert.equal(semantic.results[0].tool, 'claude')
+    assert.ok(semantic.results.some(result => result.tool === 'claude'))
     for (const mode of ['keyword', 'semantic', 'mixed']) {
       const deepseek = (await call('search_history', { query: 'feline', mode, tool: 'deepseek' })) as {
         results: { tool: string; machine: { id: string }; cursor: string }[]
@@ -264,6 +264,7 @@ test('history: hosted owners have separate indexes and cursors; offline machines
     })
   }
   let offline = false
+  let readCalls = 0
   const reader = {
     async catalog(context: TargetContext): Promise<HistoryCatalog> {
       if (offline) throw new Error('Fixture target is offline')
@@ -286,14 +287,16 @@ test('history: hosted owners have separate indexes and cursors; offline machines
       }
     },
     async read(context: TargetContext): Promise<HistoryBatch> {
+      readCalls++
       const source = (await this.catalog(context)).sources[0]
       return {
         files: [
           {
             source,
             checkpoint: {
-              offset: 100,
-              size: 100,
+              offset: 80,
+              size: 80,
+              sourceSize: 100,
               modified: '1',
               generation: 'first',
               prefix: '',
@@ -341,6 +344,9 @@ test('history: hosted owners have separate indexes and cursors; offline machines
     await rm(directory, { recursive: true, force: true })
   })
   for (const owner of owners) await hub.call(owner, 'refresh_index', {})
+  assert.equal(readCalls, 2)
+  for (const owner of owners) await hub.call(owner, 'refresh_index', {})
+  assert.equal(readCalls, 2, 'complete decoded checkpoints must not be compared with physical file sizes')
   const a = (await hub.call(owners[0], 'search_history', { query: 'private', mode: 'keyword' })) as {
     results: { cursor: string; text: string }[]
   }

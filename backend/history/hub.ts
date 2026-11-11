@@ -170,7 +170,12 @@ export class HistoryHub {
         state.warnings = catalog.warnings
         for (const source of catalog.sources) {
           const checkpoint = account.index.checkpoint(machine.id, source)
-          if (!checkpoint || checkpoint.modified !== source.modified || checkpoint.offset < source.size)
+          if (
+            !checkpoint ||
+            checkpoint.modified !== source.modified ||
+            checkpoint.offset < checkpoint.size ||
+            (checkpoint.sourceSize ?? checkpoint.size) !== source.size
+          )
             state.pending.set(source.id, source)
           else
             account.index.ingest(machine, {

@@ -224,3 +224,23 @@ test('history: a partial ingestion never checkpoints past missing messages and s
   index.ingest(machines[0], { files: [{ ...file, reset: false }], warnings: [] })
   assert.equal(index.db.prepare('SELECT count(*) n FROM messages').get()!.n, 2)
 })
+
+test('history: initial semantic indexing reaches another machine before a long transcript tail', async t => {
+  const index = setup(t)
+  const long = Array.from(
+    { length: 60 },
+    (_, i) => `Distinct section ${i}: ` + 'long deployment details '.repeat(70),
+  ).join('\n')
+  index.ingest(machines[0], batch(source('long-first'), [long]))
+  index.ingest(machines[1], batch(source('short-second'), ['A kitten sleeps on the laptop']))
+  assert.equal(await index.embedPending(ids, 2), 2)
+  const reached = index.db
+    .prepare(
+      `SELECT DISTINCT s.machine_id FROM sources s JOIN messages m ON m.source_id=s.id JOIN document_chunks dc ON dc.document_id=m.document_id JOIN embeddings e ON e.chunk_id=dc.chunk_id ORDER BY s.machine_id`,
+    )
+    .all()
+  assert.deepEqual(
+    reached.map(row => row.machine_id),
+    ids,
+  )
+})

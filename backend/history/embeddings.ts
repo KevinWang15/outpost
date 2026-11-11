@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const embeddingModel = 'Xenova/multilingual-e5-small'
@@ -19,10 +19,14 @@ export function localEmbeddings(directory: string): Embed {
           const cache = join(directory, 'history-models')
           mkdirSync(cache, { recursive: true, mode: 0o700 })
           env.cacheDir = cache
-          env.allowLocalModels = false
+          env.allowLocalModels = true
+          const snapshot = join(cache, embeddingModel, embeddingRevision)
+          const cached = ['config.json', 'tokenizer.json', 'tokenizer_config.json', 'onnx/model_quantized.onnx'].every(
+            file => existsSync(join(snapshot, file)),
+          )
           if (env.backends.onnx.wasm) env.backends.onnx.wasm.numThreads = 2
-          return pipeline('feature-extraction', embeddingModel, {
-            revision: embeddingRevision,
+          return pipeline('feature-extraction', cached ? snapshot : embeddingModel, {
+            ...(cached ? { local_files_only: true } : { revision: embeddingRevision }),
             dtype: 'q8',
             device: 'cpu',
             session_options: { intraOpNumThreads: 2, interOpNumThreads: 1 },

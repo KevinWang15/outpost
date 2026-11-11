@@ -23,6 +23,7 @@ export class HistoryIndex {
   readonly db: DatabaseSync
   private embedding: Promise<number> | null = null
   private closed = false
+  private preferredChunks = new Set<number>()
   constructor(
     path: string,
     private secret: string,
@@ -66,6 +67,15 @@ export class HistoryIndex {
     if (old && old.value !== embeddingIdentity)
       throw new Error('History embedding model changed. Rebuild the generated index.')
     this.db.prepare("INSERT OR IGNORE INTO settings VALUES('embedding_model',?)").run(embeddingIdentity)
+    // Give every source a representative message before embedding long tails.
+    // Rebuild this small queue after restart; vectors themselves remain durable.
+    for (const row of this.db
+      .prepare(
+        `SELECT (SELECT dc.chunk_id FROM messages m JOIN document_chunks dc ON dc.document_id=m.document_id
+      WHERE m.source_id=s.id AND dc.position=0 ORDER BY CASE WHEN m.role='user' THEN 0 ELSE 1 END,m.position LIMIT 1) chunk_id FROM sources s`,
+      )
+      .all())
+      if (row.chunk_id !== null) this.preferredChunks.add(Number(row.chunk_id))
   }
   close() {
     this.closed = true
@@ -133,10 +143,21 @@ export class HistoryIndex {
             checkpoint,
           )
         if (file.reset) this.db.prepare('DELETE FROM messages WHERE source_id=?').run(key)
+        let firstMessage = !this.db.prepare('SELECT 1 FROM messages WHERE source_id=? LIMIT 1').get(key)
+        let firstUser = !this.db.prepare("SELECT 1 FROM messages WHERE source_id=? AND role='user' LIMIT 1").get(key)
         for (const m of file.messages) {
           if (!['user', 'assistant', 'tool'].includes(m.role) || !m.text.trim()) continue
           const timestamp =
             m.timestamp && !Number.isNaN(Date.parse(m.timestamp)) ? new Date(m.timestamp).toISOString() : null
+          const document = this.document(m.text)
+          if (firstMessage || (m.role === 'user' && firstUser)) {
+            const chunk = this.db
+              .prepare('SELECT chunk_id FROM document_chunks WHERE document_id=? AND position=0')
+              .get(document)
+            if (chunk) this.preferredChunks.add(Number(chunk.chunk_id))
+          }
+          firstMessage = false
+          if (m.role === 'user') firstUser = false
           inserted += Number(
             this.db
               .prepare(
@@ -147,7 +168,7 @@ export class HistoryIndex {
                 key,
                 file.checkpoint.generation,
                 m.position,
-                this.document(m.text),
+                document,
                 m.role,
                 m.kind,
                 timestamp,
@@ -183,13 +204,32 @@ export class HistoryIndex {
     if (this.embedding) return this.embedding
     this.embedding = (async () => {
       if (!machineIds.length) return 0
-      const rows = this.db
-        .prepare(
-          `SELECT id,text FROM chunks c WHERE id NOT IN (SELECT chunk_id FROM embeddings)
-        AND EXISTS (SELECT 1 FROM document_chunks dc JOIN messages m ON m.document_id=dc.document_id JOIN sources s ON s.id=m.source_id WHERE dc.chunk_id=c.id AND s.machine_id IN (${machineIds.map(() => '?').join(',')}))
+      const eligible = `EXISTS (SELECT 1 FROM document_chunks dc JOIN messages m ON m.document_id=dc.document_id JOIN sources s ON s.id=m.source_id WHERE dc.chunk_id=c.id AND s.machine_id IN (${machineIds.map(() => '?').join(',')}))`
+      const preferred = [...this.preferredChunks].slice(0, 1024)
+      let rows = this.preferredChunks.size
+        ? this.db
+            .prepare(
+              `SELECT id,text FROM chunks c WHERE id IN (${preferred.map(() => '?').join(',')})
+        AND id NOT IN (SELECT chunk_id FROM embeddings) AND ${eligible} ORDER BY id LIMIT ?`,
+            )
+            .all(...preferred, ...machineIds, limit)
+        : []
+      if (!rows.length) {
+        for (const id of preferred) this.preferredChunks.delete(id)
+      }
+      if (rows.length < limit) {
+        const excluded = rows.map(row => Number(row.id))
+        rows = [
+          ...rows,
+          ...this.db
+            .prepare(
+              `SELECT id,text FROM chunks c WHERE id NOT IN (SELECT chunk_id FROM embeddings)
+        AND ${eligible} ${excluded.length ? `AND id NOT IN (${excluded.map(() => '?').join(',')})` : ''}
         ORDER BY id LIMIT ?`,
-        )
-        .all(...machineIds, limit)
+            )
+            .all(...machineIds, ...excluded, limit - rows.length),
+        ]
+      }
       let completed = 0
       for (const row of rows) {
         const vector = await this.embed(String(row.text), 'passage')
@@ -198,6 +238,7 @@ export class HistoryIndex {
           .prepare('INSERT OR REPLACE INTO embeddings(chunk_id,embedding) VALUES(?,?)')
           .run(BigInt(row.id as number), new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength))
         completed++
+        this.preferredChunks.delete(Number(row.id))
       }
       return completed
     })().finally(() => {

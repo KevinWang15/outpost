@@ -14,6 +14,7 @@ the agent ran on your computer.
 - **Local tool or hosted service.** Run it on your own computer with your SSH config, or host it for a team with accounts and per-user SSH keys.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
 - **Find any conversation.** Search the history on a target, including conversations started outside Outpost, and resume them as sessions.
+- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, and Kimi Code histories across all configured targets using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
 
 ![The Outpost workspace: a target with three sessions and their activity](docs/images/workspace.png)
 
@@ -29,7 +30,7 @@ the agent ran on your computer.
 ## Run the local tool
 
 ```sh
-npm ci
+ONNXRUNTIME_NODE_INSTALL=skip npm ci
 npm run build
 npm start          # http://127.0.0.1:3000
 ```
@@ -283,6 +284,58 @@ After updating Outpost, finish or save current work and restart an existing
 agent session once to load its MCP integration. This does not require a new
 Outpost Terminal binary. Update the server and desktop app together for native
 file downloads.
+
+### Cross-machine history MCP
+
+Managed Claude Code, Codex and Kimi Code sessions receive five history tools in
+the same **Outpost MCP** as `publish_file`, with no additional registration:
+
+| Tool | Purpose |
+| --- | --- |
+| `search_history` | Search every configured machine, or filter by machine, coding tool, session, working directory, role and dates. |
+| `read_context` | Read a chronological page around a match, then page before or after it. |
+| `read_message` | Retrieve further character pages of a long message. |
+| `get_session` | Inspect the source machine, native conversation and transcript files. |
+| `refresh_index` | Advance indexing and inspect machine availability and embedding coverage. |
+
+For example, ask a session to **"Search my history across machines for the TLS
+deployment failure, then read the surrounding discussion."** Keyword search
+requires all terms; substring search preserves literal text. Semantic search
+uses a pinned multilingual model on the Outpost server. Mixed search (the
+default, also named `hybrid`) combines keyword and semantic rankings. Single
+technical identifiers and CJK terms use literal lookup automatically in mixed
+mode; explicit semantic mode always uses embeddings.
+
+Results include a stable machine ID, display name and host, coding tool,
+native session ID, title, working directory and an opaque context cursor.
+Histories include native conversations started outside Outpost and the CLI
+storage directories pinned by managed sessions. Each hosted account has its own
+index and can search only its configured targets. Removing a target immediately
+removes access to its cached results. An offline target's already indexed history
+remains searchable, with its availability reported in the response.
+
+Indexing starts automatically, continues in the background and resumes after
+server restarts. Large archives take time to ingest and embed; responses report
+partial coverage and offline/unreadable sources. Terminal and chat MCP calls use
+a persistent account-scoped SSH control connection, so closing the browser does
+not disable history search. Source transcripts are read-only. Conversation text
+and embeddings stay on the Outpost server; the first semantic index downloads
+model weights and does not send conversation text to an external service.
+
+The generated account index lives in `history/index.sqlite` below its workspace;
+the shared model cache is `history-models` below `OUTPOST_DATA_DIR`. Include the
+index in state backups. Search returns up to 20 results from bounded candidates;
+context and message readers have explicit page and character budgets. Text
+above 1 Mi characters in a message is retrieved from the source machine on
+demand, rather than all being kept in the index. Native JSONL records above
+8 MiB are skipped with a warning. Search/context refer to physical transcript
+files; native fork or revert files remain individually inspectable through
+`get_session`. Historical messages are data, not instructions for the current
+agent.
+
+Existing coding-tool processes need their MCP connection reloaded or the coding
+tool restarted once to discover the newly registered tools. New sessions have
+them by default. No Outpost Terminal binary update is needed for this feature.
 
 ### Outpost Desktop
 

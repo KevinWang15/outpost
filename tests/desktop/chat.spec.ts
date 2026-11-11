@@ -33,6 +33,7 @@ test.afterEach(async () => {
 test('the chat window signs in with a ticket, chats, and hands a session to a terminal tab', async () => {
   home = await fixtureHome('outpost-desktop-chat-')
   server = await createApp({
+    history: false,
     deployment: await LocalDeployment.open(join(home.directory, 'data')),
     env: home.env,
     multiplex: false,

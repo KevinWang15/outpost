@@ -38,6 +38,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
       - run: npx tsc --noEmit -p terminal-service/tsconfig.json
       - run: npm run build:terminal -- x64-glibc
       - if: inputs.run_tests

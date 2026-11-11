@@ -32,6 +32,8 @@ export interface Deployment {
   owner(request: FastifyRequest): Owner
   active(owner: Owner): boolean
   account(userId: string): AccountIdentity | null
+  /** Verified owners whose configured targets can be indexed in the background. */
+  historyOwners(): Owner[]
   workspace(owner: Owner): Workspace
   identity(owner: Owner): Promise<SshIdentity | null>
   /** Public origin used in links that leave the browser, e.g. outpost:// URLs. */
@@ -104,6 +106,9 @@ export class LocalDeployment implements Deployment {
     return userId === 'local'
       ? { account: { id: 'local', name: 'Local workspace', email: null }, revision: 'local' }
       : null
+  }
+  historyOwners() {
+    return [LocalDeployment.owner]
   }
   workspace() {
     return this.store

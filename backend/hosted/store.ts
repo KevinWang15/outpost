@@ -95,6 +95,12 @@ export class AccountStore {
   byId(id: string) {
     return this.stored(this.db.prepare('SELECT * FROM users WHERE id = ?').get(id))
   }
+  verifiedUserIds() {
+    return this.db
+      .prepare('SELECT id FROM users WHERE verified_at IS NOT NULL')
+      .all()
+      .map(row => String(row.id))
+  }
   profile(id: string): AccountUser | null {
     const row = this.db.prepare('SELECT id, name, email, verified_at, created_at FROM users WHERE id = ?').get(id)
     return row ? publicUser(row) : null

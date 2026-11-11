@@ -26,7 +26,7 @@ for (const mode of ['local', 'hosted'] as const) {
       keys.push(key)
       return create(context, input)
     }
-    const app = await createApp({ deployment, sessions, software: fakeSoftware, multiplex: false })
+    const app = await createApp({ history: false, deployment, sessions, software: fakeSoftware, multiplex: false })
     await app.listen({ host: '127.0.0.1', port: 0 })
     const port = (app.server.address() as { port: number }).port
     t.after(async () => {

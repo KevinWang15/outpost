@@ -57,7 +57,7 @@ async function lifecycle(
   target: Record<string, unknown>,
   headers: Record<string, string> = {},
 ) {
-  const app = await createApp({ deployment, env, multiplex: true })
+  const app = await createApp({ history: false, deployment, env, multiplex: true })
   await app.listen({ host: '127.0.0.1', port: 0 })
   t.after(() => app.close())
   const port = (app.server.address() as { port: number }).port

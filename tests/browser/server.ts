@@ -25,7 +25,12 @@ execFileSync(
   ],
   { env, stdio: 'pipe' },
 )
-const app = await createApp({ deployment: await LocalDeployment.open(join(directory, 'data')), env, multiplex: false })
+const app = await createApp({
+  history: false,
+  deployment: await LocalDeployment.open(join(directory, 'data')),
+  env,
+  multiplex: false,
+})
 await app.listen({ host: '127.0.0.1', port: Number(process.env.PORT ?? 4179) })
 console.log(`browser test backend ready; home ${directory}`)
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

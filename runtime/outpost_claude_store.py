@@ -7,6 +7,50 @@ from outpost_harness import NativeActivity
 
 
 class ClaudeSessionStore(CodingSessionStore):
+    def history_paths(self, home):
+        yield from home.glob('projects/*/*.jsonl')
+        yield from home.glob('projects/*/*/subagents/agent-*.jsonl')
+
+    def history_session(self, path, home, scan, cache):
+        parts = path.relative_to(home).parts
+        if len(parts) == 3 and parts[0] == 'projects' and self.adapter.valid_id(path.stem):
+            native, primary = path.stem, path
+        elif (
+            len(parts) == 5
+            and parts[0] == 'projects'
+            and self.adapter.valid_id(parts[2])
+            and parts[3] == 'subagents'
+            and path.name.startswith('agent-')
+            and path.suffix == '.jsonl'
+        ):
+            native = parts[2]
+            primary = home / parts[0] / parts[1] / (native + '.jsonl')
+        else:
+            raise ValueError('Invalid Claude history path')
+        key = str(primary)
+        if key not in cache:
+            root, title, created = '', '', None
+            for index, record in enumerate(scan.records(primary)):
+                if isinstance(record.get('cwd'), str):
+                    root = record['cwd']
+                created = created or timestamp(record.get('timestamp'))
+                if record.get('type') == 'custom-title':
+                    title = clean(record.get('customTitle'), 200)
+                elif not title and record.get('type') == 'user' and isinstance(record.get('message'), dict):
+                    title = clean(' '.join(strings(record['message'].get('content', ''))), 200)
+                if index >= 255 or (root and title):
+                    break
+            cache[key] = CodingSession(native, root, title or native, created, None, [path], self.adapter.storage(home))
+        return cache[key]
+
+    def history_messages(self, record, history_format=''):
+        from outpost_history import message
+
+        role = record.get('type')
+        content = record.get('message')
+        if role in ('user', 'assistant') and isinstance(content, dict):
+            yield message(role, content.get('content', ''), record.get('timestamp'), record.get('turnId'))
+
     def discover(self, environment, scan, cwd=None):
         home = self.adapter.home(environment, cwd)
         if not scan.enter_store(self.adapter.tool, home):

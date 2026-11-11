@@ -21,6 +21,59 @@ from outpost_rpc import JsonRpcProcess
 
 
 class CodexSessionStore(CodingSessionStore):
+    def history_paths(self, home):
+        for folder in ('sessions', 'archived_sessions'):
+            yield from home.glob(folder + '/**/rollout-*.jsonl')
+
+    def history_session(self, path, home, scan, cache):
+        parts = path.relative_to(home).parts
+        if (
+            len(parts) < 2
+            or parts[0] not in ('sessions', 'archived_sessions')
+            or not path.name.startswith('rollout-')
+            or path.suffix != '.jsonl'
+        ):
+            raise ValueError('Invalid Codex history path')
+        first = next(scan.records(path), {})
+        meta = first.get('payload', {}) if first.get('type') == 'session_meta' else {}
+        if (
+            not isinstance(meta, dict)
+            or not self.adapter.valid_id(meta.get('id'))
+            or not isinstance(meta.get('cwd', ''), str)
+        ):
+            raise ValueError('Invalid Codex history metadata')
+        key = str(home / 'session_index.jsonl')
+        if key not in cache:
+            cache[key] = {
+                record.get('id'): clean(record.get('thread_name'), 200)
+                for record in scan.records(home / 'session_index.jsonl')
+                if isinstance(record.get('id'), str)
+            }
+        return CodingSession(
+            meta['id'],
+            meta.get('cwd', ''),
+            cache[key].get(meta['id']) or 'Codex conversation ' + meta['id'][:8],
+            timestamp(meta.get('timestamp')),
+            None,
+            [path],
+            self.adapter.storage(home),
+        )
+
+    def history_messages(self, record, history_format=''):
+        from outpost_history import message
+
+        payload = record.get('payload')
+        if record.get('type') == 'response_item' and isinstance(payload, dict):
+            kind, role = payload.get('type'), payload.get('role')
+            if kind == 'message' and role in ('user', 'assistant'):
+                yield message(role, payload.get('content', ''), record.get('timestamp'), payload.get('turn_id'))
+            elif kind in ('function_call_output', 'custom_tool_call_output'):
+                yield message(
+                    'tool', payload.get('output', ''), record.get('timestamp'), payload.get('call_id'), 'tool_result'
+                )
+        elif record.get('type') == 'compacted':
+            yield message('assistant', record.get('message', ''), record.get('timestamp'), kind='summary')
+
     def discover(self, environment, scan, cwd=None):
         home = self.adapter.home(environment, cwd)
         if not scan.enter_store(self.adapter.tool, home):

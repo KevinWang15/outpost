@@ -149,6 +149,9 @@ export class HostedDeployment implements Deployment {
     }
     return workspace
   }
+  historyOwners(): Owner[] {
+    return this.store.verifiedUserIds().map(userId => ({ userId, loginId: 'background' }))
+  }
   identity(owner: Owner) {
     return this.keys.identity(owner.userId)
   }

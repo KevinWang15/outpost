@@ -41,6 +41,18 @@ retain the license notices supplied with their distributions in `node_modules`.
   monochrome icons from [Lobe Icons](https://github.com/lobehub/lobe-icons)
   (MIT License). The marks themselves belong to their owners.
 
+## History search
+
+- [Transformers.js](https://github.com/huggingface/transformers.js) is distributed
+  under Apache License 2.0; [ONNX Runtime](https://github.com/microsoft/onnxruntime)
+  is distributed under the MIT License.
+- [sqlite-vec](https://github.com/asg017/sqlite-vec) supplies local vector search;
+  its installed package retains its license notices.
+- Semantic search uses the MIT-licensed
+  [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small)
+  model, with the pinned [Xenova ONNX conversion](https://huggingface.co/Xenova/multilingual-e5-small).
+  Model weights are cached separately from conversation data.
+
 ## Generated promo media
 
 Generated narration, music, and movie files are excluded from Git and are not

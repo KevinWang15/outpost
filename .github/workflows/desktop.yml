@@ -44,6 +44,8 @@ jobs:
             package-lock.json
             desktop/package-lock.json
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
       - run: npm --prefix desktop ci
       - run: npm --prefix desktop run typecheck
       - run: npm --prefix desktop run package -- ${{ matrix.arguments }}

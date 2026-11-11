@@ -157,6 +157,7 @@ class CodingSession:
     updated: str
     history: list
     storage: dict
+    history_format: str = ''
 
 
 class CodingSessionStore(ABC):
@@ -164,6 +165,18 @@ class CodingSessionStore(ABC):
 
     def __init__(self, adapter):
         self.adapter = adapter
+
+    @abstractmethod
+    def history_paths(self, home):
+        """Yield canonical native transcript paths, without reading their contents."""
+
+    @abstractmethod
+    def history_session(self, path, home, scan, cache):
+        """Validate a history path and return its native conversation metadata."""
+
+    @abstractmethod
+    def history_messages(self, record, history_format=''):
+        """Yield canonical user/assistant/tool messages, excluding system configuration."""
 
     @abstractmethod
     def discover(self, environment, scan, cwd=None):

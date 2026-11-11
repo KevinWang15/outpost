@@ -16,13 +16,7 @@ async function setup(t: test.TestContext, env: NodeJS.ProcessEnv = process.env) 
   const directory = await mkdtemp(join(tmpdir(), 'outpost-api-'))
   const sessions = new FakeSessions()
   const deployment = await LocalDeployment.open(directory)
-  const app = await createApp({
-    deployment,
-    sessions,
-    software: fakeSoftware,
-    multiplex: false,
-    env,
-  })
+  const app = await createApp({ history: false, deployment, sessions, software: fakeSoftware, multiplex: false, env })
   await app.listen({ host: '127.0.0.1', port: 0 })
   const port = (app.server.address() as { port: number }).port
   t.after(async () => {
@@ -284,6 +278,7 @@ test('the production server serves the terminal page on direct navigation and re
   const directory = await mkdtemp(join(tmpdir(), 'outpost-terminal-page-'))
   await writeFile(join(directory, 'index.html'), '<!doctype html><title>Outpost</title>')
   const app = await createApp({
+    history: false,
     deployment: await LocalDeployment.open(join(directory, 'data')),
     frontendRoot: directory,
   })

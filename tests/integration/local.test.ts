@@ -19,7 +19,7 @@ test(
   async t => {
     const { directory, home, env } = await fixtureHome('outpost-local-')
     const deployment = await LocalDeployment.open(join(directory, 'data'))
-    const app = await createApp({ deployment, env, multiplex: false })
+    const app = await createApp({ history: false, deployment, env, multiplex: false })
     await app.listen({ host: '127.0.0.1', port: 0 })
     const port = (app.server.address() as { port: number }).port
     const request = api(`http://127.0.0.1:${port}`)
@@ -240,6 +240,7 @@ test(
   async t => {
     const { directory, home, env } = await fixtureHome('outpost-local-')
     const app = await createApp({
+      history: false,
       deployment: await LocalDeployment.open(join(directory, 'data')),
       env,
       multiplex: false,

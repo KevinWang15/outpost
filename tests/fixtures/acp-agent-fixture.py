@@ -23,7 +23,7 @@ import time
 import uuid
 from pathlib import Path
 
-variant = os.environ.get('FIXTURE_ACP_VARIANT') or ('kimi' if 'KIMI_CODE_HOME' in os.environ else 'claude')
+variant = os.environ.get('FIXTURE_ACP_VARIANT', 'claude')
 lock = threading.Lock()
 pending = {}
 cancelled = threading.Event()

@@ -23,6 +23,7 @@ const program = deflateSync(
   [
     'import importlib.util, sys',
     `_sources = {${modules.map(name => `${JSON.stringify(name.slice(0, -3))}:${sourceLiteral(read(name))}`).join(',')}}`,
+    `_resources = {'history-tools.json': ${JSON.stringify(read('history-tools.json'))}.encode('utf-8')}`,
     'class _Runtime:',
     '    def find_spec(self, name, path=None, target=None):',
     '        return importlib.util.spec_from_loader(name, self) if name in _sources else None',
@@ -30,6 +31,8 @@ const program = deflateSync(
     '        return None',
     '    def get_source(self, name):',
     '        return _sources[name]',
+    '    def get_data(self, name):',
+    "        return _resources[name.rsplit('/', 1)[-1]]",
     '    def exec_module(self, module):',
     "        exec(compile(_sources[module.__name__], module.__name__, 'exec'), module.__dict__)",
     'sys.meta_path.insert(0, _Runtime())',

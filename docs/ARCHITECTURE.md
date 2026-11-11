@@ -1431,6 +1431,53 @@ session is the ACP client on the target; one session has one driver at a time
 (terminal service or chat host). The server keeps one link per chat host and
 routes channels, session messages and schedules. See [CHAT.md](CHAT.md).
 
+## Cross-machine history
+
+The built-in Outpost MCP registers `search_history`, `read_context`,
+`read_message`, `get_session` and `refresh_index` alongside `publish_file`.
+`runtime/history-tools.json` is the single tool/schema definition used by the
+server and packaged Python helper; the uploaded runtime loader also supplies it
+as a resource. Unmanaged CLI launches still expose no Outpost tools.
+
+`backend/history/` owns an account-private SQLite index, local multilingual
+embeddings, background backfill and one persistent SSH control connection per
+account/target. `Deployment.historyOwners()` supplies verified owners without
+history code branching on deployment mode. Calls enumerate the owner's current
+workspace each time, so removed targets and other accounts cannot be read through
+cached results or cursors. Offline targets retain explicitly identified cached
+history. The embedding model is shared; conversation indexes are not.
+
+`outpost_history_bridge.py` listens on an owner-only Unix socket whose name is
+derived from the server secret, owner and target. The session launcher writes
+the private binding used by its MCP helper; tool arguments cannot select an
+account or forge a binding. The bridge uses the existing framed SSH transport,
+survives viewer disconnects, bounds pending calls and output, and is recreated
+after server/SSH restarts. It does not own or interrupt a PTY or chat process.
+
+History reads use per-harness native-store adapters and Python's standard
+library on targets. Catalog pages include normal/archived Codex rollouts,
+Claude transcripts and subagents, and Kimi agents. Byte checkpoints, prefix/tail
+fingerprints and generations distinguish append from common rewrite/truncation
+cases; incomplete final records wait for a later append. Native configuration
+records are not indexed as conversation messages. Original transcripts remain
+read-only.
+
+The server deduplicates documents and overlapping chunks, uses FTS5 trigram
+lookup for literal/keyword candidates and sqlite-vec cosine distance for semantic
+candidates, then combines ranks for mixed search. Results retain physical
+machine/tool/session attribution. Short transactions yield during backfill, and
+file checkpoints advance only after their complete batches are durable.
+Account-signed cursors page through bounded context and message reads. Large
+message tails can be read online after verifying their full content hash.
+Native fork/revert files remain physical sources, not fabricated merged history.
+
+The pinned quantized multilingual model runs on CPU, with two inference threads;
+its cache is below the server's data directory. Server installations should
+allow at least 2 GiB of memory for inference and concurrent terminal/chat work.
+Indexing and vector coverage are reported independently; incomplete or offline
+history must never be presented as an exhaustive search. Historical text is
+untrusted data, never instructions for the current session.
+
 ## Coding harnesses
 
 `shared/harnesses.ts` lists harnesses for the UI and validation (id, label,

@@ -23,6 +23,8 @@ export interface TargetContext {
   target: Target
   transport: Transport
   workspace: Workspace
+  /** Private, account-scoped MCP connection assigned by the Outpost server. */
+  historySocket?: string
 }
 
 type Request =
@@ -72,8 +74,8 @@ export interface SessionService {
 
 export class SessionClient implements SessionService {
   constructor(private env: NodeJS.ProcessEnv = process.env) {}
-  private command({ transport }: TargetContext, request: Request): Command {
-    const operation = runtimeOperation(request)
+  private command({ transport, historySocket }: TargetContext, request: Request): Command {
+    const operation = runtimeOperation({ ...request, ...(historySocket ? { historySocket } : {}) })
     return { ...transport.runtime(operation.script), input: operation.input }
   }
   private run<T>(context: TargetContext, request: Request, signal?: AbortSignal, stdin: string | Uint8Array = '') {

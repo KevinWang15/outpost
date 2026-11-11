@@ -16,7 +16,13 @@ test(
   async t => {
     const directory = await mkdtemp(join(tmpdir(), 'outpost-hosted-'))
     const deployment = await HostedDeployment.open({ directory, publicUrl: 'http://127.0.0.1:5173', mailer: null })
-    const app = await createApp({ deployment, sessions: new FakeSessions(), software: fakeSoftware, multiplex: false })
+    const app = await createApp({
+      history: false,
+      deployment,
+      sessions: new FakeSessions(),
+      software: fakeSoftware,
+      multiplex: false,
+    })
     await app.listen({ host: '127.0.0.1', port: 0 })
     const port = (app.server.address() as { port: number }).port
     t.after(async () => {

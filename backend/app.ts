@@ -25,6 +25,7 @@ import { relayConnector, type ChatConnector } from './chat/links'
 import { ChatServer } from './chat/socket'
 import { ChatTokens } from './chat/tokens'
 import { chatRoutes } from './routes/chat'
+import { HistoryHub, type HistoryOptions } from './history/hub'
 
 export interface AppOptions {
   deployment: Deployment
@@ -38,6 +39,7 @@ export interface AppOptions {
   multiplex?: boolean
   /** How the server reaches chat hosts; tests connect to them directly. */
   chatConnector?: ChatConnector
+  history?: HistoryOptions | false
 }
 
 export async function createApp(options: AppOptions) {
@@ -56,7 +58,24 @@ export async function createApp(options: AppOptions) {
 
   const sessions = options.sessions ?? new SessionClient(options.env)
   const software = options.software ?? new SoftwareClient(options.env)
-  const resolve = targetResolver(deployment, options.multiplex ?? true)
+  const resolveTarget = targetResolver(deployment, options.multiplex ?? true)
+  const history =
+    options.history === false
+      ? null
+      : new HistoryHub({
+          deployment,
+          resolve: resolveTarget,
+          env: options.env,
+          ...options.history,
+        })
+  const resolve = async (owner: Owner, targetId: string) => {
+    const context = await resolveTarget(owner, targetId)
+    if (history) {
+      history.watch(owner)
+      context.historySocket = history.socket(owner, targetId)
+    }
+    return context
+  }
   const tokens = new ConnectTokens(deployment.secret)
   const desktop = await DesktopAccess.open(deployment)
   const active = (owner: Owner) => desktop.active(owner)
@@ -81,11 +100,13 @@ export async function createApp(options: AppOptions) {
   })
   const chat = new ChatServer(hub, new ChatTokens(deployment.secret), services)
   await hub.start()
+  await history?.start()
   app.addHook('preClose', async () => {
     broker.close()
     chat.close()
     hub.close()
     await services.installations.close()
+    await history?.close()
   })
   app.addHook('onClose', async () => {
     desktop.close()

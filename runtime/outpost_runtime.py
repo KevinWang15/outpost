@@ -107,8 +107,13 @@ def fail(message, status=400):
     sys.exit(1)
 
 
-def respond(data):
-    print('OUTPOST_RESULT:' + json.dumps({'ok': True, 'data': data}), flush=True)
+def respond(data, utf8=False):
+    envelope = 'OUTPOST_RESULT:' + json.dumps({'ok': True, 'data': data}, ensure_ascii=not utf8) + '\n'
+    if utf8:
+        sys.stdout.buffer.write(envelope.encode('utf-8'))
+        sys.stdout.buffer.flush()
+    else:
+        print(envelope, end='', flush=True)
 
 
 def now():
@@ -833,6 +838,41 @@ def main():
     if not sys.platform.startswith('linux'):
         fail('Outpost targets must run Linux.', 409)
     action = request['action']
+    if action in ('history-catalog', 'history-read', 'history-message', 'history-bridge'):
+        from outpost_history import catalog, read_batch, read_message
+        from outpost_history_bridge import Bridge
+
+        sessions = read_registry()['sessions'] if REGISTRY.is_file() else []
+        if action == 'history-catalog':
+            respond(catalog(sessions, request.get('after'), request.get('limit', 100)))
+        elif action == 'history-read':
+            respond(read_batch(sessions, request.get('sources')), utf8=True)
+        elif action == 'history-message':
+            respond(read_message(sessions, request), utf8=True)
+        else:
+            STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+            def valid_session(identifier):
+                if not isinstance(identifier, str) or not any(
+                    s['id'] == identifier for s in read_registry()['sessions']
+                ):
+                    return False
+                try:
+                    return json.loads((STATE / 'history-bindings' / (identifier + '.json')).read_text()).get(
+                        'socket'
+                    ) == request.get('socket')
+                except (OSError, ValueError):
+                    return False
+
+            Bridge(STATE, request.get('socket'), valid_session).run()
+        return
+    if request.get('historySocket') and action in ('attach', 'chat-attach'):
+        from outpost_history_bridge import bind_session
+
+        session_id = request.get('id')
+        if isinstance(session_id, str) and any(s['id'] == session_id for s in read_registry()['sessions']):
+            bind_session(STATE, session_id, request['historySocket'])
+            install_helpers()
     if action == 'directories':
         # Discovery is read-only and independent of the session registry and lock.
         respond(directory_suggestions(request['path']))
@@ -870,7 +910,13 @@ def main():
         fail('Session not found', 404)
     os.chdir(STATE)
     if action in ('create', 'fork'):
-        respond(create_session(request))
+        created = create_session(request)
+        if request.get('historySocket'):
+            from outpost_history_bridge import bind_session
+
+            bind_session(STATE, created['id'], request['historySocket'])
+            install_helpers()
+        respond(created)
         return
     if action in ('files-list', 'files-remove', 'files-read'):
         if not any(s['id'] == request.get('id') for s in read_registry()['sessions']):

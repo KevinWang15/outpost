@@ -37,7 +37,15 @@ export async function fixtureHome(prefix: string) {
   for (const name of ['.bash_profile', '.zprofile'])
     await writeFile(join(home, name), `export PATH=${quote(bin)}:"$PATH"\n`)
   await writeFile(join(home, '.hushlogin'), '')
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, SHELL: '/bin/bash', PATH: `${bin}:${process.env.PATH}` }
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: home,
+    CODEX_HOME: join(home, '.codex'),
+    CLAUDE_CONFIG_DIR: join(home, '.claude'),
+    KIMI_CODE_HOME: join(home, '.kimi-code'),
+    SHELL: '/bin/bash',
+    PATH: `${bin}:${process.env.PATH}`,
+  }
   delete env.TMUX
   return { directory, home, bin, env }
 }

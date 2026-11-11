@@ -16,7 +16,7 @@ Use Node.js 24+, npm 11+, Python 3.9+, an OpenSSH client and
 [ruff](https://docs.astral.sh/ruff/) (`pipx install ruff` or `uv tool install ruff`).
 
 ```sh
-npm ci
+ONNXRUNTIME_NODE_INSTALL=skip npm ci
 npm run build:terminal
 npm run dev
 ```
@@ -63,7 +63,7 @@ Native GPU behavior and OS integration require checks on the supported systems.
 ## Desktop development and previews
 
 ```sh
-npm ci
+ONNXRUNTIME_NODE_INSTALL=skip npm ci
 npm --prefix desktop ci
 npm --prefix desktop run typecheck
 npm --prefix desktop run dev

@@ -7,6 +7,76 @@ from outpost_rpc import JsonRpcProcess
 
 
 class KimiSessionStore(CodingSessionStore):
+    def history_paths(self, home):
+        yield from home.glob('sessions/*/session_*/agents/*/wire.jsonl')
+
+    def history_session(self, path, home, scan, cache):
+        parts = path.relative_to(home).parts
+        if (
+            len(parts) != 6
+            or parts[0] != 'sessions'
+            or not self.adapter.valid_id(parts[2])
+            or parts[3] != 'agents'
+            or parts[5] != 'wire.jsonl'
+        ):
+            raise ValueError('Invalid Kimi history path')
+        key = str(home / 'session_index.jsonl')
+        if key not in cache:
+            cache[key] = {
+                record.get('sessionId'): record.get('workDir', '')
+                for record in scan.records(home / 'session_index.jsonl')
+                if isinstance(record.get('sessionId'), str)
+            }
+        state = scan.document(home / parts[0] / parts[1] / parts[2] / 'state.json')
+        root = cache[key].get(parts[2], '')
+        first = next(scan.records(path), {})
+        protocol = str(first.get('protocol_version', '')) if first.get('type') == 'metadata' else ''
+        return CodingSession(
+            parts[2],
+            root if isinstance(root, str) else '',
+            clean(state.get('title') or state.get('lastPrompt')) or parts[2],
+            timestamp(state.get('createdAt')),
+            timestamp(state.get('updatedAt')),
+            [path],
+            self.adapter.storage(home),
+            'agent-messages' if protocol == '1.5' else 'context-messages',
+        )
+
+    def history_messages(self, record, history_format=''):
+        from outpost_history import message
+
+        kind = record.get('type')
+        if history_format == 'agent-messages':
+            if kind == 'agent.message.appended' and isinstance(record.get('message'), dict):
+                outer = record['message']
+                entry = outer.get('message')
+                if isinstance(entry, dict) and entry.get('role') in ('user', 'assistant', 'tool'):
+                    meta = outer.get('meta') or {}
+                    if not isinstance(meta, dict):
+                        meta = {}
+                    yield message(
+                        entry['role'],
+                        entry.get('content', ''),
+                        record.get('time') or meta.get('createdAt'),
+                        meta.get('turnId'),
+                    )
+            return
+        if kind == 'context.append_message' and isinstance(record.get('message'), dict):
+            entry = record['message']
+            role = entry.get('role')
+            if role in ('user', 'assistant', 'tool'):
+                yield message(role, entry.get('content', ''), record.get('time'), record.get('turnId'))
+        elif kind == 'context.append_loop_event' and isinstance(record.get('event'), dict):
+            event = record['event']
+            if event.get('type') == 'tool.result':
+                yield message(
+                    'tool',
+                    event.get('result', event.get('content', '')),
+                    record.get('time'),
+                    record.get('turnId'),
+                    'tool_result',
+                )
+
     def discover(self, environment, scan, cwd=None):
         home = self.adapter.home(environment, cwd)
         if not scan.enter_store(self.adapter.tool, home):

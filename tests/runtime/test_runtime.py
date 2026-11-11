@@ -53,6 +53,9 @@ class RuntimeTest(unittest.TestCase):
         self.env = {
             **os.environ,
             'HOME': str(self.home),
+            'CODEX_HOME': str(self.home / '.codex'),
+            'CLAUDE_CONFIG_DIR': str(self.home / '.claude'),
+            'KIMI_CODE_HOME': str(self.home / '.kimi-code'),
             'PATH': str(self.bin) + ':' + os.environ['PATH'],
             'PYTHONPATH': str(RUNTIME),
         }

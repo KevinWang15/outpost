@@ -1,3 +1,31 @@
+// The browser viewer matches the slate web terminal; desktop documents use
+// the app's neutral black palette.
+.file-viewer {
+  --viewer-bg: #0b1220;
+  --viewer-header: #111c2e;
+  --viewer-raised: #172338;
+  --viewer-hover: #26354b;
+  --viewer-line: #25324a;
+  --viewer-border: #334155;
+  --viewer-ink: #e2e8f0;
+  --viewer-text: #cbd5e1;
+  --viewer-muted: #94a3b8;
+  --viewer-focus: #60a5fa;
+  --viewer-backdrop: #020617cc;
+}
+:root[data-theme='terminal'] .file-viewer {
+  --viewer-bg: #0a0a0a;
+  --viewer-header: #121212;
+  --viewer-raised: #1a1a1a;
+  --viewer-hover: #262626;
+  --viewer-line: #222;
+  --viewer-border: #333;
+  --viewer-ink: #e6e6e6;
+  --viewer-text: #c8c8c8;
+  --viewer-muted: #8f8f8f;
+  --viewer-focus: #a3a3a3;
+  --viewer-backdrop: #000c;
+}
 .file-viewer {
   position: fixed;
   inset: 0;
@@ -10,27 +38,27 @@
   border: 0;
   border-radius: 0;
   overflow: hidden;
-  background: #0b1220;
-  color: #e2e8f0;
+  background: var(--viewer-bg);
+  color: var(--viewer-ink);
   color-scheme: dark;
   &[open] {
     display: flex;
     flex-direction: column;
   }
   &::backdrop {
-    background: #020617cc;
+    background: var(--viewer-backdrop);
   }
   .icon-button {
     flex-shrink: 0;
     width: 40px;
     height: 40px;
-    color: #cbd5e1;
+    color: var(--viewer-text);
     &:hover:not(:disabled) {
       color: #fff;
-      background: #26354b;
+      background: var(--viewer-hover);
     }
     &:focus-visible {
-      outline: 2px solid #60a5fa;
+      outline: 2px solid var(--viewer-focus);
       outline-offset: -2px;
     }
   }
@@ -41,7 +69,7 @@
     flex-wrap: wrap;
     gap: 8px 20px;
     padding: 8px 12px max(8px, env(safe-area-inset-bottom));
-    color: #94a3b8;
+    color: var(--viewer-muted);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
   }
@@ -53,8 +81,8 @@
   gap: 12px;
   padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px
     max(16px, env(safe-area-inset-left));
-  border-bottom: 1px solid #25324a;
-  background: #111c2e;
+  border-bottom: 1px solid var(--viewer-line);
+  background: var(--viewer-header);
 }
 .file-viewer-description {
   min-width: 0;
@@ -70,7 +98,7 @@
   }
   small {
     margin-top: 4px;
-    color: #94a3b8;
+    color: var(--viewer-muted);
     font-size: 12px;
   }
 }
@@ -88,8 +116,8 @@
   padding: 8px;
   .file-viewer-nav {
     align-self: center;
-    background: #172338;
-    border: 1px solid #334155;
+    background: var(--viewer-raised);
+    border: 1px solid var(--viewer-border);
     border-radius: 50%;
   }
 }
@@ -111,10 +139,10 @@
   padding: 20px;
   text-align: center;
   overflow-wrap: anywhere;
-  color: #94a3b8;
+  color: var(--viewer-muted);
   h2 {
     font-size: 18px;
-    color: #e2e8f0;
+    color: var(--viewer-ink);
   }
 }
 .file-viewer-error {

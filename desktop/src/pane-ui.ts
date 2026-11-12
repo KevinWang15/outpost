@@ -1,6 +1,7 @@
 import { paneLayout, splitGap, type DividerGeometry, type PaneBounds } from './layout'
 import { reconcileElements } from './keyed-elements'
 import { createTabStatus, updateTabStatus } from './tab-status'
+import { chromeIcon, setChromeIcon, type ChromeIcon } from './chrome-icons'
 import type { WorkspaceBridge, WorkspaceSnapshot } from './workspace-api'
 
 function place(node: HTMLElement, bounds: PaneBounds) {
@@ -19,6 +20,11 @@ function button(label: string, text: string, action: () => void, className = '')
   node.setAttribute('aria-label', label)
   node.textContent = text
   node.onclick = action
+  return node
+}
+function iconButton(label: string, icon: ChromeIcon, action: () => void, className: string) {
+  const node = button(label, '', action, `pane-icon ${className}`)
+  node.append(chromeIcon(icon))
   return node
 }
 
@@ -130,12 +136,12 @@ export function paneControls(stage: HTMLElement, api: WorkspaceBridge, run: (wor
         label.className = 'pane-label'
         select.append(createTabStatus(), label)
         select.ondblclick = () => run(api.zoomPane(pane.id))
-        const zoom = button('Zoom pane', '□', () => run(api.zoomPane(pane.id)), 'pane-zoom')
+        const zoom = iconButton('Zoom pane', 'maximize', () => run(api.zoomPane(pane.id)), 'pane-zoom')
         node.append(
           select,
           zoom,
-          button('Pane actions', '⋯', () => run(api.paneMenu(pane.id)), 'pane-menu'),
-          button('Close pane', '×', () => run(api.closePane(pane.id)), 'pane-close'),
+          iconButton('Pane actions', 'more', () => run(api.paneMenu(pane.id)), 'pane-menu'),
+          iconButton('Close pane', 'close', () => run(api.closePane(pane.id)), 'pane-close'),
         )
         node.oncontextmenu = event => {
           event.preventDefault()
@@ -160,7 +166,7 @@ export function paneControls(stage: HTMLElement, api: WorkspaceBridge, run: (wor
         const zoom = node.querySelector<HTMLButtonElement>('.pane-zoom')!
         zoom.title = state.zoomed ? 'Restore split panes' : 'Zoom pane'
         zoom.setAttribute('aria-label', zoom.title)
-        zoom.textContent = state.zoomed ? '▣' : '□'
+        setChromeIcon(zoom, state.zoomed ? 'restore' : 'maximize')
       },
     )
     reconcileElements(

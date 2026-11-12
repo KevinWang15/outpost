@@ -443,7 +443,7 @@ export class TerminalPanes {
     })
     // Attaching a new native child must not focus it before layout selects it.
     view.setVisible(false)
-    view.setBackgroundColor('#0f172a')
+    view.setBackgroundColor('#0c0c0c')
     const contents = view.webContents
     const pane: TerminalPane = {
       id: contents.id,

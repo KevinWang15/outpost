@@ -264,14 +264,14 @@ export class WorkspaceWindow {
       height: 840,
       minWidth: 640,
       minHeight: 420,
-      backgroundColor: '#0b1220',
+      backgroundColor: '#000000',
       // The tab strip occupies the title bar; Electron retains native window
       // controls and exposes their safe area to the bundled workspace renderer.
       titleBarStyle: 'hidden',
       titleBarOverlay: {
         height: tabBarHeight,
-        color: '#0b1220',
-        symbolColor: '#dbe5f4',
+        color: '#000000',
+        symbolColor: '#e6e6e6',
       },
       icon: join(this.directory, 'outpost.png'),
       autoHideMenuBar: true,

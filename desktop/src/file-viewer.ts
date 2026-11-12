@@ -70,7 +70,7 @@ export class SessionFileViewer {
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
-      backgroundColor: '#0f172a',
+      backgroundColor: '#0a0a0a',
       title: 'Session files · Outpost',
       webPreferences: {
         preload: join(this.directory, 'file-viewer-preload.cjs'),

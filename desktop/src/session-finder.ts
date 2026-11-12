@@ -71,7 +71,7 @@ export class SessionFinder {
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
-      backgroundColor: '#101a2b',
+      backgroundColor: '#0c0c0c',
       webPreferences: {
         preload: join(this.directory, 'session-finder-preload.cjs'),
         nodeIntegration: false,

@@ -21,3 +21,18 @@ export const terminalTheme = {
   brightCyan: '#67e8f9',
   brightWhite: '#f8fafc',
 }
+
+/** Outpost Desktop renders terminals on neutral black, like a native terminal
+ * app. ANSI hues match the web palette so program output reads the same. */
+export const desktopTerminalTheme = {
+  ...terminalTheme,
+  background: '#0c0c0c',
+  foreground: '#e6e6e6',
+  cursor: '#e6e6e6',
+  cursorAccent: '#0c0c0c',
+  selectionBackground: '#3d3d3d',
+  black: '#262626',
+  white: '#d4d4d4',
+  brightBlack: '#737373',
+  brightWhite: '#fafafa',
+}

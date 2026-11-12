@@ -155,7 +155,7 @@ export class SessionCreator {
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
-      backgroundColor: '#0f172a',
+      backgroundColor: '#0c0c0c',
       webPreferences: {
         preload: join(this.directory, 'session-creator-preload.cjs'),
         nodeIntegration: false,

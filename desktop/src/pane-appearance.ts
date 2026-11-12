@@ -6,7 +6,7 @@ const dimmedCSS = `html::after {
   content: "" !important;
   position: fixed !important;
   inset: 0 !important;
-  background: rgba(37, 41, 49, 0.26) !important;
+  background: rgba(0, 0, 0, 0.32) !important;
   pointer-events: none !important;
   z-index: 2147483647 !important;
 }`

@@ -29,7 +29,7 @@ export class DragPreview {
       hiddenInMissionControl: true,
       alwaysOnTop: true,
       resizable: false,
-      backgroundColor: '#162239',
+      backgroundColor: '#1a1a1a',
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false },
     })
     this.window = window
@@ -40,7 +40,7 @@ export class DragPreview {
       .loadURL(
         'data:text/html;charset=utf-8,' +
           encodeURIComponent(
-            `<meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;height:100%}body{padding:0 12px;color:#e2e8f0;background:#162239;font:13px/${size.height - 2}px system-ui;white-space:nowrap;text-overflow:ellipsis;border:1px solid #60a5fa;box-sizing:border-box}</style>${escaped}`,
+            `<meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;height:100%}body{padding:0 12px;color:#e6e6e6;background:#1a1a1a;font:13px/${size.height - 2}px system-ui;white-space:nowrap;text-overflow:ellipsis;border:1px solid #5a5a5a;box-sizing:border-box}</style>${escaped}`,
           ),
       )
       .then(() => {

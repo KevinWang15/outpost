@@ -9,6 +9,7 @@ import { paneActionShortcuts, tabActionShortcuts } from './workspace-shortcuts'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 import { serverAccountsControls } from './server-accounts-ui'
 import { tabScroller } from './tab-scroller'
+import { setChromeIcon } from './chrome-icons'
 
 declare global {
   interface Window {
@@ -112,7 +113,7 @@ function tabNode(id: number) {
       run(api.activateTab(state.tabs[next].id))
     }
   }
-  const close = button('×', () => run(api.closeTab(id)), 'tab-close')
+  const close = button('', () => run(api.closeTab(id)), 'tab-close')
   node.append(select, close)
   node.oncontextmenu = event => {
     event.preventDefault()
@@ -159,7 +160,7 @@ function renderTabs(panel: WorkspacePanel) {
       updateTabStatus(node.querySelector<HTMLElement>('.tab-status')!, tab.status)
       const close = node.querySelector<HTMLButtonElement>('.tab-close')!
       close.classList.toggle('draft', tab.hasDraft)
-      close.textContent = tab.hasDraft ? '•' : '×'
+      setChromeIcon(close, tab.hasDraft ? 'draft' : 'close')
       close.setAttribute('aria-label', `Close ${tab.label}${tab.hasDraft ? ' (unsent message)' : ''}`)
       close.title = tab.hasDraft ? 'Close tab (unsent message)' : 'Close tab'
     },

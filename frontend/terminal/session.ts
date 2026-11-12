@@ -8,7 +8,7 @@ import { imageProblem } from '../../shared/images'
 import { browserUrl } from '../../shared/signals'
 import { terminalService } from '../../shared/terminalService'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
-import { terminalTheme } from '../../shared/terminalTheme'
+import { desktopTerminalTheme, terminalTheme } from '../../shared/terminalTheme'
 import { touchInput } from '../browser'
 import { desktop } from '../desktop'
 import { TerminalActivity } from './activity'
@@ -69,7 +69,7 @@ export class TerminalSession {
       fontSize: 13.5,
       lineHeight: 1.15,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
-      theme: terminalTheme,
+      theme: document.documentElement.dataset.theme === 'terminal' ? desktopTerminalTheme : terminalTheme,
       cursorBlink: true,
       scrollback: terminalService.scrollback,
       allowProposedApi: true,

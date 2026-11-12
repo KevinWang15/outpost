@@ -4,8 +4,8 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
-  color: #dbe5f4;
-  background: #101a2b;
+  color: #e6e6e6;
+  background: #0c0c0c;
   color-scheme: dark;
 }
 * {
@@ -20,7 +20,7 @@ main {
   display: flex;
   flex-direction: column;
   padding: 14px;
-  border: 1px solid #344258;
+  border: 1px solid #2e2e2e;
   border-radius: 8px;
 }
 header {
@@ -47,13 +47,15 @@ input {
 }
 button {
   background: transparent;
-  border: 1px solid #344258;
+  border: 1px solid #2e2e2e;
   border-radius: 4px;
-  color: #93a4bd;
+  padding: 2px 8px;
+  color: #a3a3a3;
   cursor: pointer;
 }
 button:hover {
-  background: #22324b;
+  background: #222;
+  border-color: #484848;
   color: #fff;
 }
 button:disabled {
@@ -67,19 +69,28 @@ input {
   flex-shrink: 0;
   min-width: 0;
   width: 100%;
-  border: 1px solid #405575;
+  border: 1px solid #333;
   border-radius: 6px;
-  background: #0b1220;
+  background: #050505;
   padding: 9px 11px;
 }
 :focus-visible {
-  outline: 2px solid #60a5fa;
+  outline: 2px solid #a3a3a3;
   outline-offset: 1px;
 }
+input:focus-visible {
+  outline: none;
+  border-color: #5a5a5a;
+  box-shadow: 0 0 0 3px #ffffff14;
+}
+::selection {
+  background: #3d3d3d;
+}
 input::placeholder {
-  color: #93a4bd;
+  color: #6e6e6e;
 }
 ul {
+  scrollbar-color: #3a3a3a transparent;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -93,12 +104,12 @@ li {
   margin-bottom: 3px;
   border-radius: 5px;
 }
-li[aria-selected='true'] {
-  background: #223b5d;
-  outline: 1px solid #568bca;
-}
 li:hover {
-  background: #263a55;
+  background: #1a1a1a;
+}
+li[aria-selected='true'] {
+  background: #222;
+  box-shadow: inset 2px 0 #e6e6e6;
 }
 li strong,
 li span {
@@ -114,12 +125,12 @@ li strong {
 li span,
 footer,
 #empty {
-  color: #93a4bd;
+  color: #8f8f8f;
   font-size: 12px;
 }
 #status {
   margin: 8px 0 0;
-  color: #93a4bd;
+  color: #8f8f8f;
   font-size: 12px;
 }
 #errors {
@@ -139,7 +150,7 @@ footer {
   flex-shrink: 0;
   margin-top: auto;
   padding-top: 8px;
-  border-top: 1px solid #28364d;
+  border-top: 1px solid #1f1f1f;
 }
 [hidden] {
   display: none !important;

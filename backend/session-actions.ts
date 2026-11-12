@@ -34,6 +34,7 @@ export function desktopSession(session: Session, target: { id: string; name: str
     targetId: target.id,
     title: `${session.name} · ${target.name}`,
     detail: `${session.tool} · ${session.rootDir} · ${session.status}`.slice(0, 4096),
+    tool: session.tool,
   }
 }
 

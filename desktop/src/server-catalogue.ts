@@ -77,7 +77,13 @@ export async function loadSessionCatalogue(
                   targetId: target.id,
                   sessionId: item.sessionId,
                 }
-                sessions.push({ ...reference, id: desktopSessionId(reference), title: item.title, detail: item.detail })
+                sessions.push({
+                  ...reference,
+                  id: desktopSessionId(reference),
+                  title: item.title,
+                  detail: item.detail,
+                  tool: item.tool,
+                })
               }
               found.set(server, sessions)
               update()

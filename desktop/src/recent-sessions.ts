@@ -1,11 +1,14 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { validDesktopId, desktopSessionId, desktopOrigin, type DesktopSessionReference } from '../../shared/desktopAuth'
+import { isHarnessId, type HarnessId } from '../../shared/harnesses'
 
 export interface RecentSessionSummary {
   id: string
   server: string
   title: string
+  /** Absent for entries saved before tools were recorded. */
+  tool?: HarnessId
   lastConnectedAt: number
 }
 export interface RecentSession extends RecentSessionSummary, DesktopSessionReference {}
@@ -24,6 +27,7 @@ export class RecentSessions {
       for (const item of data) {
         if (!item || typeof item !== 'object') continue
         const { server, accountId, targetId, sessionId, title, lastConnectedAt } = item
+        const tool = isHarnessId(item.tool) ? item.tool : undefined
         if (
           typeof server !== 'string' ||
           !validDesktopId(accountId) ||
@@ -40,7 +44,7 @@ export class RecentSessions {
           const origin = desktopOrigin(server)
           const id = desktopSessionId({ server: origin, accountId, targetId, sessionId })
           if ((entries.get(id)?.lastConnectedAt ?? -1) <= lastConnectedAt)
-            entries.set(id, { id, server: origin, accountId, targetId, sessionId, title, lastConnectedAt })
+            entries.set(id, { id, server: origin, accountId, targetId, sessionId, title, tool, lastConnectedAt })
         } catch {
           // Ignore invalid origins without granting trust from this file.
         }
@@ -54,7 +58,13 @@ export class RecentSessions {
 
   /** The home view needs labels only; connection references stay in the main process. */
   list(): RecentSessionSummary[] {
-    return this.entries.map(({ id, server, title, lastConnectedAt }) => ({ id, server, title, lastConnectedAt }))
+    return this.entries.map(({ id, server, title, tool, lastConnectedAt }) => ({
+      id,
+      server,
+      title,
+      tool,
+      lastConnectedAt,
+    }))
   }
   get(id: string) {
     return this.entries.find(entry => entry.id === id)

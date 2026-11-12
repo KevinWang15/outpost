@@ -1,4 +1,5 @@
 import type { TerminalPreferences, TerminalPaneState } from '../../shared/desktop'
+import type { HarnessId } from '../../shared/harnesses'
 import type { ShellProfileSummary } from '../../shared/localTerminal'
 import type { RecentSessionSummary } from './recent-sessions'
 import type { ServerAccountsSnapshot } from './server-accounts-api'
@@ -19,6 +20,8 @@ export interface TabSummary {
   activePaneId: number
   panes: number[]
   status: PaneStatus
+  /** The selected pane's coding tool, matching the tab's label. */
+  tool?: HarnessId
   hasDraft: boolean
 }
 export interface TabGeometry {

@@ -240,7 +240,12 @@
   place-items: center;
   line-height: 1;
   > svg {
+    grid-area: 1 / 1;
     border-radius: 8px;
+  }
+  > .tool-icon {
+    color: #fff;
+    filter: drop-shadow(0 1px 1px #0f172a66);
   }
   &.user {
     border-radius: 50%;
@@ -398,7 +403,7 @@
   > * + * {
     margin-left: -6px;
   }
-  .chat-avatar > svg {
+  .chat-avatar > svg:not(.tool-icon) {
     box-shadow: 0 0 0 2px var(--surface);
   }
   .presence {

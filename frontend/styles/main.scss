@@ -1561,6 +1561,12 @@ kbd {
   align-items: center;
   gap: 12px;
   min-width: 0;
+  .terminal-tool {
+    display: inline-grid;
+    flex-shrink: 0;
+    margin-right: -4px;
+    color: var(--term-text);
+  }
   strong {
     overflow: hidden;
     font-weight: 600;

@@ -9,6 +9,7 @@ import { browserUrl } from '../../shared/signals'
 import { terminalService } from '../../shared/terminalService'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 import { desktopTerminalTheme, terminalTheme } from '../../shared/terminalTheme'
+import { isHarnessId, type HarnessId } from '../../shared/harnesses'
 import { touchInput } from '../browser'
 import { desktop } from '../desktop'
 import { TerminalActivity } from './activity'
@@ -32,6 +33,7 @@ interface SessionOptions {
   state(value: TerminalState): void
   activity(value: SessionActivity | null): void
   titleChanged(value: string): void
+  toolChanged(value: HarnessId | undefined): void
   bellChanged(value: boolean): void
   modifiersChanged(value: TerminalModifiers): void
   notice(message: string, sticky?: boolean): void
@@ -42,7 +44,7 @@ interface SessionOptions {
   attachSearch(term: Terminal, container: HTMLElement): () => void
   openSearch(): void
   bufferChanged(): void
-  resume(token: string, title: string): void | Promise<void>
+  resume(token: string, title: string, tool?: HarnessId): void | Promise<void>
 }
 
 /** Owns one terminal's imperative lifetime. React owns presentation and drafts;
@@ -119,9 +121,11 @@ export class TerminalSession {
                   `${message.target.id}/${message.session.id}`,
                   `${message.session.name} · ${message.target.name}`,
                 )
+                const tool = isHarnessId(message.session.tool) ? message.session.tool : undefined
+                if (!this.disposed) options.toolChanged(tool)
                 void Promise.resolve()
                   .then(() => {
-                    if (!this.disposed) return options.resume(message.resume, this.info.name)
+                    if (!this.disposed) return options.resume(message.resume, this.info.name, tool)
                   })
                   .catch(() => this.notice('Could not save this session in Recent sessions.', true))
               },

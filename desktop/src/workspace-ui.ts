@@ -9,7 +9,7 @@ import { paneActionShortcuts, tabActionShortcuts } from './workspace-shortcuts'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 import { serverAccountsControls } from './server-accounts-ui'
 import { tabScroller } from './tab-scroller'
-import { setChromeIcon } from './chrome-icons'
+import { createHarnessMark, setChromeIcon, updateHarnessMark } from './chrome-icons'
 
 declare global {
   interface Window {
@@ -93,7 +93,7 @@ function tabNode(id: number) {
   label.className = 'tab-label'
   const count = document.createElement('span')
   count.className = 'pane-count'
-  select.append(createTabStatus(), label, count)
+  select.append(createTabStatus(), createHarnessMark(), label, count)
   select.ondblclick = () => run(api.panel({ renameTab: id }))
   select.onkeydown = event => {
     if (!state) return
@@ -158,6 +158,7 @@ function renderTabs(panel: WorkspacePanel) {
       count.textContent = String(tab.panes.length)
       count.title = `${tab.panes.length} panes`
       updateTabStatus(node.querySelector<HTMLElement>('.tab-status')!, tab.status)
+      updateHarnessMark(node.querySelector<HTMLElement>('.harness-mark')!, tab.tool)
       const close = node.querySelector<HTMLButtonElement>('.tab-close')!
       close.classList.toggle('draft', tab.hasDraft)
       setChromeIcon(close, tab.hasDraft ? 'draft' : 'close')
@@ -202,14 +203,20 @@ function renderRecents() {
     session => {
       const row = document.createElement('li')
       const open = button('', () => run(api.openRecent(session.id)), 'row-main')
-      open.append(document.createElement('strong'), document.createElement('small'))
+      const title = document.createElement('strong')
+      title.className = 'session-title'
+      const label = document.createElement('span')
+      label.className = 'tab-label'
+      title.append(createHarnessMark(), label)
+      open.append(title, document.createElement('small'))
       const remove = button('Remove', () => run(api.removeRecent(session.id)))
       row.append(open, remove)
       return row
     },
     (row, session) => {
       const open = row.querySelector<HTMLButtonElement>('.row-main')!
-      open.querySelector('strong')!.textContent = session.title
+      open.querySelector('.tab-label')!.textContent = session.title
+      updateHarnessMark(open.querySelector<HTMLElement>('.harness-mark')!, session.tool)
       open.querySelector('small')!.textContent = session.server
       open.title = `${session.title}\n${session.server}\nLast connected ${new Date(session.lastConnectedAt).toLocaleString()}`
       open.setAttribute('aria-label', `Connect to ${session.title} on ${session.server}`)
@@ -245,7 +252,7 @@ function renderMatches(preserveSelection = true) {
       const indicator = createTabStatus()
       const label = document.createElement('span')
       label.className = 'tab-label'
-      title.append(indicator, label)
+      title.append(indicator, createHarnessMark(), label)
       const subtitle = document.createElement('small')
       open.append(title, subtitle)
       const pair = button('◫', () => run(api.movePaneBeside(pane.id, state!.activePaneId!)))
@@ -256,6 +263,7 @@ function renderMatches(preserveSelection = true) {
     (row, pane, index) => {
       row.classList.toggle('highlighted', index === selected)
       updateTabStatus(row.querySelector<HTMLElement>('.tab-status')!, pane)
+      updateHarnessMark(row.querySelector<HTMLElement>('.harness-mark')!, pane.tool)
       row.querySelector('.tab-label')!.textContent = pane.label
       row.querySelector('small')!.textContent = `${pane.origin} · ${tabStatusLabel(pane)}`
       const pair = row.lastElementChild as HTMLButtonElement

@@ -5,7 +5,7 @@ const bridge: DesktopBridge = {
   version: desktopBridgeVersion,
   notificationsSupported: process.argv.includes('--outpost-notifications'),
   ticket: () => ipcRenderer.invoke('terminal:ticket'),
-  saveResume: (token, title) => ipcRenderer.invoke('terminal:save-resume', token, title),
+  saveResume: (token, title, tool) => ipcRenderer.invoke('terminal:save-resume', token, title, tool),
   onCommand: listener => {
     const handle = (_event: Electron.IpcRendererEvent, command: Parameters<typeof listener>[0]) => listener(command)
     ipcRenderer.on('terminal:command', handle)

@@ -1,7 +1,7 @@
 import { paneLayout, splitGap, type DividerGeometry, type PaneBounds } from './layout'
 import { reconcileElements } from './keyed-elements'
 import { createTabStatus, updateTabStatus } from './tab-status'
-import { chromeIcon, setChromeIcon, type ChromeIcon } from './chrome-icons'
+import { chromeIcon, createHarnessMark, setChromeIcon, updateHarnessMark, type ChromeIcon } from './chrome-icons'
 import type { WorkspaceBridge, WorkspaceSnapshot } from './workspace-api'
 
 function place(node: HTMLElement, bounds: PaneBounds) {
@@ -134,7 +134,7 @@ export function paneControls(stage: HTMLElement, api: WorkspaceBridge, run: (wor
         const select = button('Drag to move pane', '', () => run(api.activatePane(pane.id)), 'pane-select')
         const label = document.createElement('span')
         label.className = 'pane-label'
-        select.append(createTabStatus(), label)
+        select.append(createTabStatus(), createHarnessMark(), label)
         select.ondblclick = () => run(api.zoomPane(pane.id))
         const zoom = iconButton('Zoom pane', 'maximize', () => run(api.zoomPane(pane.id)), 'pane-zoom')
         node.append(
@@ -163,6 +163,7 @@ export function paneControls(stage: HTMLElement, api: WorkspaceBridge, run: (wor
         select.setAttribute('aria-label', `Focus or drag ${pane.label}`)
         select.setAttribute('aria-pressed', String(pane.id === state.activePaneId))
         updateTabStatus(node.querySelector<HTMLElement>('.tab-status')!, pane)
+        updateHarnessMark(node.querySelector<HTMLElement>('.harness-mark')!, pane.tool)
         const zoom = node.querySelector<HTMLButtonElement>('.pane-zoom')!
         zoom.title = state.zoomed ? 'Restore split panes' : 'Zoom pane'
         zoom.setAttribute('aria-label', zoom.title)

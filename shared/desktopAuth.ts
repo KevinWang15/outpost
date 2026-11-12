@@ -1,3 +1,5 @@
+import { isHarnessId, type HarnessId } from './harnesses'
+
 /** First-party native app login. Passwords and browser cookies never enter the app. */
 export const desktopLoginLifetime = 30 * 24 * 60 * 60_000
 export const desktopAuthorizationLifetime = 10 * 60_000
@@ -53,6 +55,8 @@ export interface DesktopSession {
   targetId: string
   title: string
   detail: string
+  /** Absent from servers older than this field. */
+  tool?: HarnessId
 }
 export interface DesktopSessionReference {
   server: string
@@ -76,7 +80,8 @@ export function validDesktopSession(value: unknown, targetId: string): value is 
     session.targetId === targetId &&
     text(session.title, 512) &&
     typeof session.detail === 'string' &&
-    session.detail.length <= 4096
+    session.detail.length <= 4096 &&
+    (session.tool === undefined || isHarnessId(session.tool))
   )
 }
 

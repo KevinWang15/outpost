@@ -18,6 +18,8 @@ import type { SessionActivity } from '../../shared/activity'
 import type { CloseReason } from '../../shared/protocol'
 import type { LocalTerminalBridge } from '../../shared/localTerminal'
 import { imageMediaTypes } from '../../shared/images'
+import { harnessLabel, type HarnessId } from '../../shared/harnesses'
+import { ToolIcon } from '../ui/ToolIcon'
 import { openBrowserTab } from './browser'
 import { screenText } from './clipboard'
 import Composer from './Composer'
@@ -46,7 +48,7 @@ const closedTitles: Record<CloseReason, string> = {
 type Props = {
   title: string
   onClose: () => void
-  onResume?: (token: string, title: string) => void | Promise<void>
+  onResume?: (token: string, title: string, tool?: HarnessId) => void | Promise<void>
 } & ({ token: string; local?: never } | { token?: never; local: LocalTerminalBridge })
 
 const toolbarPreference = 'outpost.terminal.toolbar-hidden'
@@ -70,6 +72,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
   const [mountAttempt, setMountAttempt] = useState(0)
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   const [name, setName] = useState(title)
+  const [tool, setTool] = useState<HarnessId>()
   const [bellRinging, setBellRinging] = useState(false)
   const [status, setStatus] = useState('')
   const [fileAccess, setFileAccess] = useState<{ launch: string; resume: string } | null>(null)
@@ -129,9 +132,9 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
 
   useEffect(() => {
     void desktop
-      ?.reportState({ title: name, connection: state.kind, activity, attention: bellRinging, hasDraft })
+      ?.reportState({ title: name, tool, connection: state.kind, activity, attention: bellRinging, hasDraft })
       .catch(() => {})
-  }, [name, state.kind, activity, bellRinging, hasDraft])
+  }, [name, tool, state.kind, activity, bellRinging, hasDraft])
 
   const notify = useCallback((message: string, sticky = false) => {
     setStatus(message)
@@ -159,6 +162,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         state: setState,
         activity: setActivity,
         titleChanged: setName,
+        toolChanged: setTool,
         bellChanged: setBellRinging,
         modifiersChanged: setModifiers,
         notice: notify,
@@ -169,9 +173,9 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         attachSearch,
         openSearch,
         bufferChanged,
-        resume: (resume, title) => {
+        resume: (resume, title, tool) => {
           setFileAccess({ launch: token!, resume })
-          return lifecycle.current.onResume?.(resume, title)
+          return lifecycle.current.onResume?.(resume, title, tool)
         },
       })
     } catch (error) {
@@ -211,6 +215,11 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
     <div ref={container} className="terminal-view" role="dialog" aria-label={`Terminal · ${name}`}>
       <header className="terminal-bar" hidden={!toolbarShown}>
         <div className="terminal-title">
+          {tool && (
+            <span className="terminal-tool" title={harnessLabel(tool)}>
+              <ToolIcon tool={tool} size={15} />
+            </span>
+          )}
           <strong>{name}</strong>
           <span className={`terminal-state ${state.kind}`} role="status" aria-label={label}>
             {state.kind === 'connecting' || state.kind === 'reconnecting' ? (

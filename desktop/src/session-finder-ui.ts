@@ -1,6 +1,7 @@
 import type { SessionFinderState } from './session-finder-api'
 import type { DesktopSessionChoice } from '../../shared/desktopAuth'
 import { reconcileElements } from './keyed-elements'
+import { createHarnessMark, updateHarnessMark } from './chrome-icons'
 
 const api = window.outpostSessionFinder
 const input = document.querySelector<HTMLInputElement>('#query')!
@@ -50,7 +51,9 @@ function render(preserve = true, focusId?: string) {
       const row = document.createElement('li')
       row.setAttribute('role', 'option')
       const title = document.createElement('strong'),
-        server = document.createElement('span')
+        label = document.createElement('span'),
+        server = document.createElement('small')
+      title.append(createHarnessMark(), label)
       row.append(title, server)
       row.onpointerdown = event => event.preventDefault()
       row.onclick = () => choose(session.id)
@@ -60,8 +63,9 @@ function render(preserve = true, focusId?: string) {
       row.id = `result-${index}`
       row.setAttribute('aria-selected', String(index === selected))
       row.setAttribute('aria-disabled', String(state.busy !== 'idle' || submitting))
-      row.querySelector('strong')!.textContent = session.title
-      row.querySelector('span')!.textContent = session.server
+      row.querySelector('strong > span:last-child')!.textContent = session.title
+      updateHarnessMark(row.querySelector<HTMLElement>('.harness-mark')!, session.tool)
+      row.querySelector('small')!.textContent = session.server
       row.title = `${session.title}\n${session.server}\n${session.detail}`
     },
   )

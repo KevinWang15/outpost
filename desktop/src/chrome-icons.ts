@@ -1,3 +1,6 @@
+import { harnessLabel, type HarnessId } from '../../shared/harnesses'
+import { harnessMarks } from '../../shared/harnessMarks'
+
 // Stroke icons for workspace chrome, drawn on the same 24px grid as the
 // title-bar buttons in workspace.html so every control shares one weight.
 const paths = {
@@ -25,4 +28,32 @@ export function chromeIcon(name: ChromeIcon) {
 export function setChromeIcon(button: HTMLElement, name: ChromeIcon) {
   if (button.querySelector('svg')?.dataset.icon === name) return
   button.replaceChildren(chromeIcon(name))
+}
+
+/** A session's coding-tool logo. Hidden for local shells and until a remote
+ * pane learns its tool from the server. */
+export function createHarnessMark() {
+  const node = document.createElement('span')
+  node.className = 'harness-mark'
+  node.hidden = true
+  return node
+}
+export function updateHarnessMark(node: HTMLElement, tool: HarnessId | undefined) {
+  node.hidden = !tool
+  node.title = tool ? harnessLabel(tool) : ''
+  if (!tool || node.dataset.tool === tool) return
+  node.dataset.tool = tool
+  const mark = harnessMarks[tool]
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.setAttribute('focusable', 'false')
+  for (const d of mark.paths) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', d)
+    path.setAttribute('fill-rule', 'evenodd')
+    if (mark.evenOdd) path.setAttribute('clip-rule', 'evenodd')
+    svg.append(path)
+  }
+  node.replaceChildren(svg)
 }

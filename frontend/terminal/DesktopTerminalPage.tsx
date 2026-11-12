@@ -59,7 +59,7 @@ export default function DesktopTerminalPage() {
     <TerminalView
       token={token}
       title="Outpost Desktop"
-      onResume={(token, title) => bridge.saveResume(token, title)}
+      onResume={(token, title, tool) => bridge.saveResume(token, title, tool)}
       onClose={() => {
         void bridge.close()
       }}

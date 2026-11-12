@@ -289,6 +289,18 @@ select:focus-visible {
 .tab.selected .tab-select {
   color: var(--bright);
 }
+.harness-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+.harness-mark svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
 .tab-label {
   min-width: 0;
   overflow: hidden;

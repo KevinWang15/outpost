@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowRight, Link, LoaderCircle, Search } from 'lucide-react'
 import type { ConversationMatch, ConversationResults, Session, Target } from '../../shared/model'
 import { harnesses, harnessLabel, type HarnessId } from '../../shared/harnesses'
+import { ToolIcon } from '../ui/ToolIcon'
 import { api } from '../api'
 import { Dialog } from '../ui/Dialog'
 import { relativeTime } from './labels'
@@ -134,7 +135,10 @@ export default function FinderDialog({
                 <li key={`${match.tool}:${match.cliSessionId}:${JSON.stringify(match.cliSessionEnv)}`}>
                   <div className="match-text">
                     <div className="match-title">
-                      <span className="chip">{harnessLabel(match.tool)}</span>
+                      <span className="chip">
+                        <ToolIcon tool={match.tool} size={11} />
+                        {harnessLabel(match.tool)}
+                      </span>
                       <strong>{match.title}</strong>
                       {managed && <span className="chip accent">In Outpost</span>}
                     </div>

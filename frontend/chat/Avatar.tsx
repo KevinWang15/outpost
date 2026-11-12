@@ -2,12 +2,14 @@ import Marble from 'boring-avatars'
 import { UserRound } from 'lucide-react'
 import type { ChatSession } from '../../shared/chatApi'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
+import { ToolIcon } from '../ui/ToolIcon'
 import { presence, presenceLabel } from './format'
 
 /** Cool colors around the app's blue accent: varied per session, still one family. */
 const colors = ['#1d4ed8', '#6366f1', '#0ea5e9', '#14b8a6', '#c7d2fe']
 
-/** A session, drawn from its ID so a rename keeps its look; with a presence dot. */
+/** A session, drawn from its ID so a rename keeps its look; with its coding
+ * tool's mark and a presence dot. */
 export function Avatar({
   id,
   name,
@@ -30,6 +32,7 @@ export function Avatar({
       aria-hidden="true"
     >
       <Marble name={id} variant="marble" colors={colors} size={size} square title={false} />
+      {tool && <ToolIcon tool={tool} size={Math.round(size * 0.55)} />}
       {state && <i className={`presence ${state}`} />}
     </span>
   )

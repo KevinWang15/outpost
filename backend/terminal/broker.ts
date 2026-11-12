@@ -449,7 +449,7 @@ export class TerminalBroker {
       connection.send({
         type: 'hello',
         resume: this.dependencies.tokens.resume(redeemed.id, grant),
-        session: { id: session.id, name: session.name },
+        session: { id: session.id, name: session.name, tool: session.tool },
         target: { id: context.target.id, name: context.target.name },
       })
       const command = this.dependencies.sessions.attach(

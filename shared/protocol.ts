@@ -2,6 +2,7 @@
 // broker. Binary WebSocket frames carry raw terminal bytes; text frames carry
 // these JSON messages. See docs/ARCHITECTURE.md → "Terminal protocol".
 import type { SessionActivity } from './activity'
+import type { HarnessId } from './harnesses'
 import type { Checkpoint } from './terminalState'
 
 // Clients send ?protocol=<version>. The server accepts only its own version and
@@ -41,7 +42,13 @@ export interface SignalMessage {
   payload: unknown
 }
 export type ServerMessage =
-  | { type: 'hello'; resume: string; session: { id: string; name: string }; target: { id: string; name: string } }
+  | {
+      type: 'hello'
+      resume: string
+      /** `tool` is absent from servers older than this field. */
+      session: { id: string; name: string; tool?: HarnessId }
+      target: { id: string; name: string }
+    }
   | { type: 'ready' }
   | { type: 'restore'; checkpoint: Checkpoint }
   | { type: 'geometry'; cols: number; rows: number }

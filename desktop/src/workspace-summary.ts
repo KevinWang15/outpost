@@ -33,6 +33,7 @@ export function summarizeTabs(tabs: readonly TabGroup[], panes: readonly PaneSum
       activePaneId: tab.activePaneId,
       panes: members.map(pane => pane.id),
       status,
+      tool: active.tool,
       hasDraft: members.some(pane => pane.hasDraft),
     }
   })

@@ -111,18 +111,34 @@ li[aria-selected='true'] {
   background: #222;
   box-shadow: inset 2px 0 #e6e6e6;
 }
-li strong,
-li span {
+li strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+}
+li strong > span:last-child,
+li small {
   display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-li strong {
-  font-size: 13px;
-  font-weight: 500;
+.harness-mark {
+  display: grid;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  color: #c8c8c8;
 }
-li span,
+.harness-mark svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+li small,
 footer,
 #empty {
   color: #8f8f8f;

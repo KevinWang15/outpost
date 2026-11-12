@@ -40,6 +40,8 @@ export const harnesses = [
 
 export type HarnessId = (typeof harnesses)[number]['id']
 export const harnessIds = harnesses.map(harness => harness.id) as HarnessId[]
+export const isHarnessId = (value: unknown): value is HarnessId =>
+  typeof value === 'string' && (harnessIds as string[]).includes(value)
 export const harnessLabel = (id: HarnessId) => harnesses.find(harness => harness.id === id)!.label
 export const supportsTerminal = (id: HarnessId) => {
   const harness = harnesses.find(harness => harness.id === id)!

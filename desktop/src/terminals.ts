@@ -19,6 +19,7 @@ import {
   type WebContents,
 } from 'electron'
 import type { TerminalHostState, TerminalPaneState } from '../../shared/desktop'
+import { isHarnessId } from '../../shared/harnesses'
 import { desktopSessionId, type DesktopLaunch, type DesktopSessionReference } from '../../shared/desktopAuth'
 import { parseSessionActivity } from '../../shared/activity'
 import { pagePaths } from '../../shared/pages'
@@ -94,13 +95,13 @@ export class TerminalPanes {
       const connection = this.sender(event).connection
       return connection.kind === 'remote' ? connection.token : null
     })
-    ipcMain.handle('terminal:save-resume', (event, token: unknown, title: unknown) => {
+    ipcMain.handle('terminal:save-resume', (event, token: unknown, title: unknown, tool: unknown) => {
       const pane = this.sender(event)
       const connection = pane.connection
       if (connection.kind !== 'remote' || !validTerminalToken(token) || typeof title !== 'string' || title.length > 512)
         throw new Error('Invalid session reconnect credential.')
       connection.token = token
-      return this.remember(pane, cleanTitle(title))
+      return this.remember(pane, cleanTitle(title), isHarnessId(tool) ? tool : undefined)
     })
     ipcMain.handle('terminal:pending-launches', event => {
       const connection = this.sender(event).connection
@@ -128,6 +129,8 @@ export class TerminalPanes {
       // Native notification handlers must not race these ordered reports.
       pane.state = {
         title: cleanTitle(state.title),
+        // Local shells have no coding tool, whatever their page reports.
+        tool: pane.connection.kind === 'remote' && isHarnessId(state.tool) ? state.tool : undefined,
         connection: state.connection,
         activity: state.connection === 'connected' ? activity : null,
         attention: state.attention,
@@ -279,13 +282,14 @@ export class TerminalPanes {
       notification.close()
     }
   }
-  async remember(pane: TerminalPane, title = pane.state.title) {
+  async remember(pane: TerminalPane, title = pane.state.title, tool = pane.state.tool) {
     const connection = pane.connection
     if (connection.kind !== 'remote' || !connection.remember) return
     await this.host.remember({
       id: desktopSessionId(connection.reference),
       ...connection.reference,
       title,
+      tool,
       lastConnectedAt: Date.now(),
     })
   }

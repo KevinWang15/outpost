@@ -59,8 +59,6 @@ export function updateTabStatus(node: HTMLElement, tab: PaneStatus) {
   node.hidden = tab.kind === 'local'
   if (node.hidden) return
   node.title = tabStatusLabel(tab)
-  node.dataset.observation =
-    tab.connection === 'connected' && !tab.attention ? (tab.activity?.observation ?? 'current') : 'current'
   const kind = tabStatusIcon(tab)
   // Metadata updates must not restart a bell's animation or a connection spinner.
   if (node.dataset.state === kind) return

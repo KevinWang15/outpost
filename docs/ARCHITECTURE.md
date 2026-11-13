@@ -405,12 +405,15 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `paste {id, data}` | Paste text using the running application’s bracketed-paste mode |
 | → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without opening another stream |
 | → server | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
+| → server | `draft {active}` | The message box has text; messages from other sessions wait until it is sent or cleared |
+| → server | `deliver-now` | Type the next waiting message in once the agent is idle |
 | ← client | `hello {resume, session, target}` | Connection accepted |
 | ← client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
 | ← client | `geometry {cols, rows}` | Shared terminal dimensions, applied before subsequent output |
 | ← client | `clear` | Clear the screen at this point in the ordered output stream |
 | ← client | `ready` | Checkpoint restored; attached to the persistent PTY |
 | ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
+| ← client | `deliveries {waiting}` | Messages from other sessions, channels or schedules waiting to be typed in |
 | ← client | `result {id, ok, message?}` | Outcome of `ping` / `send` / `clear` / `paste` / `activate` / `acknowledge` |
 | ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
 | ← client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `unavailable`, `error` |
@@ -437,8 +440,8 @@ hold the session open. Each viewer flushes its snapshot and pending output befor
 the `exit` frame and EOF, with a 30-second shutdown deadline for slow viewers.
 The service removes its socket, so management reports the session as stopped.
 The broker handles `exit` immediately, independent of stream cleanup.
-Reconnect starts the coding tool with the same native conversation ID; it never
-automatically restarts a tool that deliberately exited.
+Reconnect starts the coding tool again in the session's current conversation; it
+never automatically restarts a tool that deliberately exited.
 
 **Current contracts.** Both clients send `protocolVersion` from `shared/protocol.ts`.
 A mismatch returns `outdated` before redeeming the launch ticket and asks the
@@ -605,10 +608,10 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract uses Outpost Terminal 2.0.0 / protocol 5 and client protocol 13.
-Publish the matching helper before deploying the server. A service protocol
-change requires explicitly restarting existing service processes after installing
-the dependency; replacing the executable does not alter a running PTY service.
+This contract uses Outpost Terminal 2.0.0 / protocol 5 and client protocol 14.
+Publish the matching Outpost Terminal before deploying the server. Replacing the
+executable does not alter a running PTY service: after a service protocol
+change, existing sessions restart explicitly to use it.
 
 The headless engine alone answers terminal queries, even when disconnected.
 The browser forwards user input, mouse and focus events, suppressing duplicate
@@ -818,10 +821,6 @@ direct buffer changes after clear, local reset and completed remote checkpoint
 restoration. Search invalidates cached lines and decorations at those barriers
 too, without waiting for a later PTY write or scrolling to a result.
 
-The current clear and health-check contract uses terminal service protocol 5 and client protocol 13.
-Install the updated helper and explicitly restart existing service processes;
-older protocols are rejected instead of ignoring the operation.
-
 ### Messages into terminals
 
 A message for a session running in a terminal (from another session, a
@@ -922,8 +921,8 @@ and [Kimi plugin MCP servers](https://moonshotai.github.io/kimi-code/en/customiz
 MCP configuration is additive; Codex/Claude user configuration and Kimi's
 `config.toml` and `mcp.json` are not rewritten. Harness-specific flags, plugin
 formats and lifecycle setup live in each adapter in `machine/harnesses/`;
-shared code contains no harness dispatch. Existing agent processes need one
-explicit restart to acquire the integration.
+shared code contains no harness dispatch. A running agent keeps the
+integration it started with.
 
 The MCP server trusts the machine's user account, like the rest of Outpost
 Terminal; file HTTP requests require an active resume grant scoped to owner, target and session.

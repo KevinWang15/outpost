@@ -122,18 +122,18 @@ shortcuts with the message box focused as well as the terminal. Do not infer
 OS behavior from a successful packaging job. The app and server must ship the
 same `desktopBridgeVersion`; there are no bridge compatibility shims.
 
-## Linux terminal dependency
+## Outpost Terminal
 
 Run `npm run build:terminal` before machine, integration and browser tests. Use
 `npm run build:terminal -- arm64-glibc` (or `x64-musl`, `arm64-musl`) for other
 targets. The build pins Bun; the resulting executable embeds its runtime.
 
-The **Linux terminal service** workflow is manual and builds all four assets.
-Enable **publish** to create `terminal-v<version>` with checksums. Bump the
-version in `shared/terminalService.ts` for every release; never overwrite an
-existing release. The existing **CI** dispatcher also exposes `suite=terminal`
-and `publish_preview=true`, so it works before GitHub registers the new workflow
-on the default branch. This release is separate from desktop installers.
+The **Outpost Terminal** workflow is manual and builds all four assets. Enable
+**publish** to create `terminal-v<version>` with checksums. Bump the version in
+`shared/terminalService.ts` for every release; never overwrite an existing
+release. The **CI** dispatcher also runs it (`suite=terminal`,
+`publish_preview=true`) from branches where GitHub has not registered it. This
+release is separate from desktop installers.
 
 `shared/terminalState.ts` defines checkpoint wire types, while
 `shared/terminalCheckpoint.ts` is the sole adapter to xterm internals. Keep the

@@ -3,7 +3,6 @@ export const terminalService = {
   version: '2.0.0',
   protocol: 5,
   repository: 'KevinWang15/outpost',
-  executable: 'outpost-terminal',
   scrollback: 10_000,
   maxCols: 400,
   maxRows: 200,

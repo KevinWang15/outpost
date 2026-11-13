@@ -42,7 +42,7 @@ test('the activity boundary shares all native states and rejects invalid metadat
     state({ observation: 'unavailable' }),
   ])
     assert.equal(parseSessionActivity(value), null)
-  assert.equal(activityLabel(state({ state: 'working', observation: 'stale' })), 'Working (last known)')
+  assert.equal(activityLabel(state({ state: 'working' })), 'Working')
   assert.equal(unavailableActivity('x'.repeat(5000)).detail?.length, 4096)
   assert.deepEqual(parseSessionActivity(unavailableActivity('failed')), unavailableActivity('failed'))
 })
@@ -65,7 +65,6 @@ test('activation waits for a fresh observation and never acknowledges approvals 
   const f = fixture()
   f.activity.setActive(true)
   f.activity.update(unavailableActivity('temporary outage'))
-  f.activity.update(completion('a', 'stale'))
   assert.equal(f.requests.length, 0)
   f.activity.update(completion())
   assert.equal(f.requests.length, 1)

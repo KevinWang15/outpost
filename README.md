@@ -90,8 +90,8 @@ and npm on that target. Configure its normal DeepSeek credentials, or provide
 `DEEPSEEK_API_KEY` in the session environment, then create a named session in
 **Chat**. Outpost uses `dsh --profile acp`, preserves its native session ID and
 `DSH_HOME` (default `~/.dsh`), and resumes the conversation after reconnecting.
-Its Outpost MCP includes file publishing, history search and chat messaging by
-default. User profile and home configuration remain intact.
+Its Outpost MCP has the same tools as every session's, from file publishing to
+history search and messaging other sessions. User profile and home configuration remain intact.
 
 The official package has no bundled terminal interface, so Outpost opens these
 sessions in Chat. The terminal picker excludes them. DeepSeek's ACP interface
@@ -327,10 +327,7 @@ current process's session binding; ordinary Kimi launches outside Outpost expose
 Outpost tools. No manual MCP setup is required, and existing user MCP servers
 remain configured.
 
-After updating Outpost, install the matching Outpost Terminal when Required
-Software asks, then finish or save current work and restart an existing agent
-session once to load its MCP integration. Update the server and desktop app together for native
-file downloads.
+Update the server and desktop app together for native file downloads.
 
 ### Cross-machine history MCP
 
@@ -342,7 +339,7 @@ the same **Outpost MCP** as `publish_file`, with no additional registration:
 | `search_history` | Search every configured machine, or filter by machine, coding tool, session, working directory, role and dates. |
 | `read_context` | Read a chronological page around a match, then page before or after it. |
 | `read_message` | Retrieve further character pages of a long message. |
-| `get_session` | Inspect the source machine, native conversation and transcript files. |
+| `get_session` | Inspect the source machine, native conversation and transcript files, its lineage and its Outpost session. |
 | `refresh_index` | Advance indexing and inspect machine availability and embedding coverage. |
 
 For example, ask a session to **"Search my history across machines for the TLS
@@ -394,10 +391,6 @@ Only the highest retained generation is scanned. Native files remain unchanged;
 compressed input is decoded in memory by Outpost Terminal on the target, capped
 at 256 MiB per file. An incomplete final frame
 is retried after the native log changes. Use `tool: "deepseek"` to filter it.
-
-Existing coding-tool processes need their MCP connection reloaded or the coding
-tool restarted once to discover the newly registered tools. New sessions have
-them by default.
 
 ### Outpost Desktop
 
@@ -530,15 +523,12 @@ Tab icons and the session switcher follow the session list's **Activity** field:
 a blue spinner means **Working**, a gray clock means **Idle**, and an amber
 bell means **Needs you** (unread completion) or **Waiting for you** (approval/input).
 A red alert means **Error**. Hover over a badge for its specific state.
-They use native lifecycle hooks, status APIs and turn records, with shared
-acknowledgement and updates about every two seconds. Temporary read failures show
-a dimmed, still icon labeled **last known** for up to 15 seconds, then **Unknown**
-with a diagnostic. Connection errors
-take priority, and an unread terminal bell remains highlighted until you return.
-The green check means connected while the first activity reading is pending.
-Lifecycle tracking follows conversation changes within the agent. After updating
-Outpost, restart existing managed agent sessions to install their observers;
-reconnecting a terminal alone keeps its existing agent process.
+They come from the coding tool's own lifecycle hooks and transcript, with
+shared acknowledgement, and update as the agent works. **Unknown** has a
+diagnostic. Connection errors take priority, and an unread terminal bell remains
+highlighted until you return. The green check means connected while the first
+activity reading is pending. Tracking follows the agent when it switches
+conversations.
 
 Activating a tab clears its terminal bell and marks the displayed **Needs you**
 completion as seen. This works with clicks, keyboard tab switching and returning
@@ -670,13 +660,12 @@ one each chat. Outpost Terminal has no listening network port.
 executable into `~/.outpost/bin`, verifies its SHA-256 checksum and installs it
 atomically. x86_64 and ARM64 targets with glibc or musl are supported. The runtime
 is bundled; targets need neither Node.js nor Bun. Minimal musl installations also
-receive the system `libstdc++` package. Existing sessions keep
-their running helper when its executable is upgraded.
+receive the system `libstdc++` package. Running sessions keep their processes
+when the executable is replaced.
 
-The **Linux terminal service** GitHub Actions workflow is manual. Enable
-**Publish** to create the versioned dependency release used by the installer.
-See [machine/RELEASE_NOTES.md](machine/RELEASE_NOTES.md) for
-upgrade instructions, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
+The **Outpost Terminal** GitHub Actions workflow is manual. Enable **Publish**
+to create the versioned release the installer downloads. See
+[machine/RELEASE_NOTES.md](machine/RELEASE_NOTES.md) for what it contains, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 protocol and ownership model.
 
 ## Development

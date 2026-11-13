@@ -224,20 +224,18 @@ test('native activity badges share pane and tab state and retain their SVG on fr
         state: 'working',
         updatedAt: null,
         observedAt: new Date().toISOString(),
-        observation: 'stale',
+        observation: 'current',
         completionId: null,
-        detail: 'Activity update delayed',
+        detail: 'Running the build',
       },
     }),
   )
-  await expect(badge).toHaveAttribute('data-observation', 'stale')
-  await expect(badge).toHaveAttribute('title', /Working \(last known\).*Activity update delayed/)
+  // A metadata update keeps the icon and its animation running.
+  await expect(badge).toHaveAttribute('title', /Working.*Running the build/)
   expect(await badge.locator('svg').evaluate((node, previous) => node === previous, original)).toBe(true)
-  expect(await badge.evaluate(node => getComputedStyle(node).animationName)).toBe('none')
-  expect(await badge.locator('svg').evaluate(node => getComputedStyle(node).animationName)).toBe('none')
+  expect(await badge.evaluate(node => getComputedStyle(node).animationName)).toBe('tab-spin')
   await page.evaluate(() => window.workspaceFixture.update(101, { attention: true }))
   await expect(badge).toHaveAttribute('data-state', 'attention')
-  await expect(badge).toHaveAttribute('data-observation', 'current')
   expect(await badge.locator('svg').evaluate(node => getComputedStyle(node).animationName)).toBe('tab-bell-ring')
   await page.evaluate(() => window.workspaceFixture.update(101, { kind: 'local' }))
   await expect(badge).toBeHidden()

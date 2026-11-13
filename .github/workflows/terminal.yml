@@ -1,4 +1,4 @@
-name: Linux terminal service
+name: Outpost Terminal
 
 on:
   workflow_call:
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the immutable terminal dependency release
+        description: Publish the immutable Outpost Terminal release
         type: boolean
         default: false
       run_tests:

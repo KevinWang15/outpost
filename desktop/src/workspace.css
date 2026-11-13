@@ -351,13 +351,6 @@ select:focus-visible {
 .tab-status[data-state='error'] {
   color: var(--danger);
 }
-.tab-status[data-observation='stale'] {
-  opacity: 0.6;
-}
-.tab-status[data-observation='stale'],
-.tab-status[data-observation='stale'] svg {
-  animation: none;
-}
 .tab-close {
   display: grid;
   place-items: center;

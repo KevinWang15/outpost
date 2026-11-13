@@ -20,7 +20,6 @@ export const terminalConnectionPolicy = {
   wakeProbeMs: 5_000,
   retryMaxMs: 30_000,
   stableMs: 30_000,
-  inputStallMs: 30_000,
   outputStallMs: 60_000,
 } as const
 

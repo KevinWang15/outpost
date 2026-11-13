@@ -2,7 +2,7 @@ import { Bell, CircleAlert, CircleHelp, LoaderCircle } from 'lucide-react'
 import { activityLabel } from '../../shared/activity'
 import type { Session } from '../../shared/model'
 
-/** Native agent state and observation freshness, shared with desktop badges. */
+/** Native agent state, shared with desktop badges. */
 export default function ActivityBadge({
   session,
   checking,
@@ -15,7 +15,6 @@ export default function ActivityBadge({
   const { activity } = session
   const { state } = activity
   const label = activityLabel(activity)
-  const stale = activity.observation === 'stale'
   if (session.status === 'ready') return <span className="muted">—</span>
   if (state === 'unknown')
     return (
@@ -28,13 +27,9 @@ export default function ActivityBadge({
     return (
       <button
         className="badge finished"
-        disabled={checking || stale}
+        disabled={checking}
         onClick={() => onCheck(session)}
-        title={
-          stale
-            ? (activity.detail ?? undefined)
-            : 'The agent finished and is waiting for you. Click to mark as checked.'
-        }
+        title="The agent finished and is waiting for you. Click to mark as checked."
         aria-label={`Mark ${session.name} as checked`}
       >
         {checking ? <LoaderCircle className="spin" size={12} /> : <Bell size={12} />}
@@ -45,7 +40,7 @@ export default function ActivityBadge({
   if (state === 'working')
     return (
       <span className="badge working" title={activity.detail ?? undefined}>
-        <LoaderCircle className={stale ? undefined : 'spin'} size={12} />
+        <LoaderCircle className="spin" size={12} />
         {label}
       </span>
     )

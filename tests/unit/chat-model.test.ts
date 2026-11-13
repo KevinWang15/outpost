@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { handles, mentionParts, mentions } from '../../shared/chatMentions'
+import { handles, mentions } from '../../shared/chatMentions'
 import { cronMatches, describeCron, nextRun, parseCron } from '../../shared/cron'
 import { channelPrompt } from '../../backend/chat/prompts'
 import { promptHeaderPattern } from '../../shared/chatTranscript'
@@ -28,10 +28,6 @@ test('chat mentions: known handles only, @all addresses everyone, emails are not
   })
   assert.deepEqual(mentions('mail me@coder.example; @all please', known), { handles: [], everyone: true })
   assert.deepEqual(mentions('(@Coder) then @coder- again', known), { handles: ['coder'], everyone: false })
-  assert.deepEqual(
-    mentionParts('ask @coder now', known).map(part => part.mention),
-    [null, 'coder', null],
-  )
 })
 
 test('cron: fields, steps, weekday OR rule and time zones', () => {

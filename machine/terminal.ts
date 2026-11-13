@@ -282,7 +282,9 @@ export async function serveTerminal() {
             oneShot(socket, message)
           } else if (message.type === 'attach' && !attached) {
             if (message.protocol !== terminalService.protocol)
-              throw new Error('Terminal service protocol mismatch; install the current dependency')
+              throw new Error(
+                'Terminal service protocol mismatch; install the current Outpost Terminal and restart this session',
+              )
             if (!terminalSize(message.cols, message.rows)) throw new Error('Invalid terminal size')
             // A raw full-width checkpoint can hold about 50 MiB of cells. Bound
             // concurrent captures; clients retry without pausing the live PTY.

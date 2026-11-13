@@ -54,19 +54,3 @@ export function mentions(text: string, known: readonly string[]): { handles: str
   }
   return { handles: found, everyone: all }
 }
-
-/** Split text into plain runs and recognised mentions, for display. */
-export function mentionParts(text: string, known: readonly string[]) {
-  const parts: { text: string; mention: string | null }[] = []
-  let last = 0
-  for (const match of text.matchAll(mentionPattern)) {
-    const handle = match[1].toLowerCase().replace(/-+$/, '')
-    if (!known.includes(handle) && !(everyone as readonly string[]).includes(handle)) continue
-    const start = match.index!
-    if (start > last) parts.push({ text: text.slice(last, start), mention: null })
-    parts.push({ text: `@${handle}`, mention: handle })
-    last = start + 1 + handle.length
-  }
-  if (last < text.length) parts.push({ text: text.slice(last), mention: null })
-  return parts
-}

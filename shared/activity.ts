@@ -7,7 +7,8 @@ export interface SessionActivity {
   updatedAt: string | null
   completionId: string | null
   detail: string | null
-  observation: 'current' | 'stale' | 'unavailable'
+  /** `unavailable`: no valid reading (then the state is `unknown`). */
+  observation: 'current' | 'unavailable'
   observedAt: string | null
 }
 
@@ -36,10 +37,7 @@ export function activityNeedsAttention(activity: SessionActivity | null) {
   return activity !== null && ['waiting', 'finished', 'error'].includes(activity.state)
 }
 
-export function activityLabel(activity: SessionActivity) {
-  const label = activityLabels[activity.state]
-  return activity.observation === 'stale' ? `${label} (last known)` : label
-}
+export const activityLabel = (activity: SessionActivity) => activityLabels[activity.state]
 
 /** Bound and copy data at the connection and native IPC boundaries. */
 export function parseSessionActivity(value: unknown): SessionActivity | null {
@@ -49,7 +47,7 @@ export function parseSessionActivity(value: unknown): SessionActivity | null {
     text === null || (typeof text === 'string' && text.length <= limit)
   if (
     !activityStates.includes(item.state) ||
-    !['current', 'stale', 'unavailable'].includes(item.observation) ||
+    !['current', 'unavailable'].includes(item.observation) ||
     !nullableText(item.observedAt, 64) ||
     !nullableText(item.updatedAt, 64) ||
     !(

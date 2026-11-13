@@ -9,11 +9,11 @@ on:
         options: [full, desktop, terminal]
         default: full
       publish_preview:
-        description: Publish the selected desktop or terminal dependency release
+        description: Publish the selected desktop or Outpost Terminal release
         type: boolean
         default: false
       terminal_tests:
-        description: Run tests when building the terminal dependency
+        description: Run tests when building Outpost Terminal
         type: boolean
         default: true
 

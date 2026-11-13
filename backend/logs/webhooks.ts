@@ -66,8 +66,10 @@ export class Webhooks {
   private queues = new Map<string, Job[]>()
   private running = new Set<string>()
   private closed = false
-  /** Delivery problems are logged as events of their own (never sent to the webhook that failed). */
-  failed: (owner: Owner, webhook: StoredWebhook, delivery: WebhookDelivery) => void = () => {}
+  /** A webhook started failing, or delivers again; logged as events of their
+   * own, never sent to that webhook. Only changes are reported, so a receiver
+   * that stays down is one warning, not one per event. */
+  changed: (owner: Owner, webhook: StoredWebhook, delivery: WebhookDelivery) => void = () => {}
 
   constructor(
     private deployment: Deployment,
@@ -232,9 +234,10 @@ export class Webhooks {
         }
         const account = await this.account(job.owner)
         if (!account.webhooks.includes(job.webhook)) continue
+        const failing = job.webhook.lastDelivery?.ok === false
         job.webhook.lastDelivery = delivery
         await this.save(job.owner, account).catch(() => {})
-        if (!delivery.ok) this.failed(job.owner, job.webhook, delivery)
+        if (failing !== !delivery.ok) this.changed(job.owner, job.webhook, delivery)
       }
     } finally {
       this.running.delete(id)

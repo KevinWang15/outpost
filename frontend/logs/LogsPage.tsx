@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ExternalLink, LoaderCircle, Plus, Webhook as WebhookIcon } from 'lucide-react'
+import { LoaderCircle, Plus, Webhook as WebhookIcon } from 'lucide-react'
 import type { LogKind, LogView, Webhook } from '../../shared/logs'
 import { api } from '../api'
 import { AppSidebar } from '../ui/AppSidebar'
@@ -128,13 +128,6 @@ export default function LogsPage() {
               <p>Agent status, messages between sessions, errors and changes across your machines.</p>
             </div>
           </div>
-          {view && (
-            <div className="page-actions">
-              <a className="button" href={view.path} target="_blank" rel="noopener noreferrer">
-                <ExternalLink size={15} /> Open the full viewer
-              </a>
-            </div>
-          )}
         </header>
         {error ? (
           <p className="banner error" role="alert">

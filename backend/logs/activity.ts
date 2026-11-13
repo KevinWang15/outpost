@@ -27,7 +27,8 @@ function entry(event: LogEvent): StreamEntryInput {
   const fields: Record<string, string | number | boolean | null> = { type: event.type }
   if (event.machine) fields.machine = event.machine.name
   if (event.session) fields.session = event.session.name
-  for (const [key, value] of Object.entries(event.details).slice(0, 24)) fields[key] = value
+  // Empty facts would only clutter the detail pane; webhooks still get them.
+  for (const [key, value] of Object.entries(event.details).slice(0, 24)) if (value !== null) fields[key] = value
   return {
     time: event.time,
     level: levelNames[event.level],
@@ -50,16 +51,23 @@ export class ActivityLog {
     private cookies: (header: string) => Record<string, string | undefined>,
   ) {
     this.webhooks = new Webhooks(deployment)
-    this.webhooks.failed = (owner, webhook, delivery) =>
+    this.webhooks.changed = (owner, webhook, delivery) =>
       this.record(
         owner,
-        {
-          level: 'warning',
-          kind: 'webhook',
-          type: 'failed',
-          message: `Webhook ${webhook.name} could not deliver an event: ${delivery.error}`,
-          details: { webhook: webhook.name, status: delivery.status, error: delivery.error },
-        },
+        delivery.ok
+          ? {
+              kind: 'webhook',
+              type: 'recovered',
+              message: `Webhook ${webhook.name} delivers events again`,
+              details: { webhook: webhook.name, status: delivery.status },
+            }
+          : {
+              level: 'warning',
+              kind: 'webhook',
+              type: 'failed',
+              message: `Webhook ${webhook.name} could not deliver events: ${delivery.error}`,
+              details: { webhook: webhook.name, status: delivery.status, error: delivery.error },
+            },
         webhook.id,
       )
     this.viewer = createLogViewer({

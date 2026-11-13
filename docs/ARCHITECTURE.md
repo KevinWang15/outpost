@@ -1608,8 +1608,8 @@ its filter over the `postMessage` bridge.
 for it (at most 200 waiting, oldest dropped) and sent one at a time as a POST
 with Outpost's JSON body and the owner's headers. Network errors, 429 and 5xx
 are retried after 2, 15 and 60 seconds; other answers are final, and redirects
-are not followed. A failed delivery is logged as a `webhook` event that is not
-sent to the webhook that failed. A hosted server resolves the address first,
+are not followed. A webhook that starts failing, and one that delivers again,
+is logged as a `webhook` event that is not sent to that webhook. A hosted server resolves the address first,
 refuses loopback, private, link-local and other non-public addresses, and
 connects to the address it checked.
 

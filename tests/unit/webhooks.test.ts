@@ -103,19 +103,23 @@ test('a receiver gets Outpost’s body and the owner’s headers, for the kinds 
   assert.equal(body.event.message, 'Coder stopped with an error')
 })
 
-test('server errors are retried; a refusal is not; a failure is reported once', async t => {
-  const { webhooks, received, input, until } = await setup(t, 'local', [503, 500, 204, 404])
-  const failures: string[] = []
-  webhooks.failed = (_owner, _webhook, delivery) => failures.push(delivery.error ?? '')
+test('server errors are retried, a refusal is not, and only changes in delivery are reported', async t => {
+  const { webhooks, received, input, until } = await setup(t, 'local', [503, 500, 204, 404, 404, 204])
+  const changes: string[] = []
+  webhooks.changed = (_owner, _webhook, delivery) => changes.push(delivery.ok ? 'delivers' : (delivery.error ?? ''))
   const created = await webhooks.create(owner, input())
   webhooks.publish(owner, event())
   await until(() => received.length === 3)
+  assert.deepEqual(changes, [], 'a retried delivery that arrived is no change')
   webhooks.publish(owner, event())
-  await until(() => failures.length === 1)
+  webhooks.publish(owner, event())
+  await until(() => received.length === 5)
   await new Promise(resolve => setTimeout(resolve, 100))
-  assert.equal(received.length, 4, 'a 404 is not retried')
-  assert.deepEqual(failures, ['The receiver answered 404.'])
+  assert.deepEqual(changes, ['The receiver answered 404.'], 'a 404 is not retried, and staying down is one report')
   assert.equal((await webhooks.list(owner)).find(item => item.id === created.id)?.lastDelivery?.status, 404)
+  webhooks.publish(owner, event())
+  await until(() => changes.length === 2)
+  assert.equal(changes[1], 'delivers')
 })
 
 test('a hosted server does not send to its own network; a paused webhook gets nothing', async t => {

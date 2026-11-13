@@ -143,8 +143,7 @@ changes, messages between you, channels, sessions and schedules, sessions create
 edited, started and stopped, machines added, unreachable or updated, terminal
 connections, and errors. The sidebar's views filter it (Agent status, Messages,
 Warnings and errors); the viewer itself filters by level, text and the fields
-each event carries (`machine`, `session`, `state`, `channel`, `error`).
-**Open the full viewer** adds its reports, search and export. Status changes are
+each event carries (`machine`, `session`, `state`, `channel`, `error`). Status changes are
 recorded on the machine as they happen, so changes while Outpost was not
 connected appear when it reconnects, at the time they happened. The log keeps
 the newest 50,000 events.
@@ -154,7 +153,8 @@ a JSON body Outpost defines and the headers you set (for example
 `Authorization`). Choose which kinds of events it receives and the lowest level
 (everything, warnings and errors, or errors only). Header values are stored on
 the server and never shown again. Deliveries are retried on network errors,
-429 and 5xx responses; redirects are not followed. A hosted server only sends to
+429 and 5xx responses; redirects are not followed. A webhook that stops
+delivering is logged once as a warning, and again when it delivers. A hosted server only sends to
 public addresses. **Send a test** posts a sample event.
 
 ```json

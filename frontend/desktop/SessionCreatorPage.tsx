@@ -159,20 +159,20 @@ function CreateOnServer({
           {serverField}
           {server && (
             <label className="field">
-              <span className="label">Execution target</span>
+              <span className="label">Machine</span>
               <select
                 required
                 value={targetId}
                 disabled={!targets?.length}
                 onChange={event => {
-                  // Re-selecting a target must inspect it again, even if its
+                  // Re-selecting a machine must inspect it again, even if its
                   // previous result was the last request to finish.
                   setInspection(null)
                   setTargetChoice(event.target.value)
                 }}
               >
                 <option value="" disabled>
-                  Choose a target
+                  Choose a machine
                 </option>
                 {targets?.map(item => (
                   <option key={item.id} value={item.id}>
@@ -184,15 +184,13 @@ function CreateOnServer({
           )}
           {server && !targets && !targetsError && (
             <p className="hint" role="status">
-              Loading targets…
+              Loading machines…
             </p>
           )}
-          {targets?.length === 0 && (
-            <p className="hint">Add an execution target in this server's Outpost web workspace first.</p>
-          )}
+          {targets?.length === 0 && <p className="hint">Add a machine in Machines on this server's website first.</p>}
           {target && !options && !optionsError && (
             <p className="hint" role="status">
-              Checking the target's required software…
+              Checking the machine's required software…
             </p>
           )}
           {(targetsError || optionsError) && (
@@ -202,8 +200,8 @@ function CreateOnServer({
           )}
           {options && !ready && (
             <p className="hint">
-              Install the required software in this target's Outpost web workspace:{' '}
-              {options.missing.join(', ') || 'a coding tool'}.
+              Install {options.missing.join(', ') || 'a coding tool'} on this machine first, from its page in Machines
+              on this server's website.
             </p>
           )}
           {(targetsError || optionsError || (options && !ready)) && (

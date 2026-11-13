@@ -16,16 +16,16 @@ default Outpost MCP tools and cross-machine history search.
 - **Local terminals, too.** Outpost Desktop opens your local shell alongside managed sessions, with shared tabs, splits and clipboard controls. Local tabs work offline and end when closed.
 - **Local tool or hosted service.** Run it on your own computer with your SSH config, or host it for a team with accounts and per-user SSH keys.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
-- **Find any conversation.** Search the history on a target, including conversations started outside Outpost, and resume them as sessions.
-- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code and DeepSeek Harness histories across all configured targets using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
+- **Find any conversation.** Search the coding tools' history on all your machines, including conversations started outside Outpost, and resume them as sessions.
+- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code and DeepSeek Harness histories across all configured machines using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
 
-![The Outpost workspace: a target with three sessions and their activity](docs/images/workspace.png)
+![Outpost's Machines view: a machine with three sessions and their activity](docs/images/workspace.png)
 
 ## Requirements
 
 | Where | What you need |
 | --- | --- |
-| Targets — where sessions run | Linux with Bash and Outpost Terminal, reachable over SSH as any user you choose (no root access needed). The computer running Outpost can be a target too when it runs Linux (including WSL). Outpost can install missing software for you. |
+| Machines — where sessions run | Linux with Bash and Outpost Terminal, reachable over SSH as any user you choose (no root access needed). The computer running Outpost can be one too when it runs Linux (including WSL). Outpost can install missing software for you. |
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Web terminal | Any current browser, including on phones. |
 | Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Bundles Electron; no browser or WSL installation needed. |
@@ -41,7 +41,7 @@ npm start          # http://127.0.0.1:3000
 For development, `npm run dev` serves the UI at http://127.0.0.1:5173 with hot reload.
 
 Local mode needs no account and accepts connections only from this computer.
-SSH targets use your own OpenSSH configuration, agent and keys. Data lives in
+SSH machines use your own OpenSSH configuration, agent and keys. Data lives in
 `~/.outpost` (set `OUTPOST_DATA_DIR` to change it). On Windows, run Outpost
 inside WSL and open http://localhost:3000 in your Windows browser: in WSL,
 Outpost listens on all interfaces so Windows' localhost forwarding reaches it,
@@ -53,8 +53,9 @@ http://127.0.0.1:3000.
 
 ## Chat with your sessions
 
-Switch the sidebar to **Chat** for a Slack-like view of the same sessions. Each
-session is a conversation: replies stream in, the steps the agent took fold into
+The sidebar switches between **Chat** and **Machines**. Both list the same
+sessions: Machines groups them by machine, with their software and terminals;
+Chat is a Slack-like view where each session is a conversation: replies stream in, the steps the agent took fold into
 one line you can open (commands and their output, file edits as diffs), and
 permission requests appear as buttons. Choose the agent's mode and model in the
 header, attach files and images (paste, drop or the paperclip), and use its
@@ -75,18 +76,23 @@ slash commands.
 - **Schedules** send a session a message at set times, e.g. a weekday summary.
 - **Instructions** give a session a role, added to the coding tool's own.
 
-Chat and the terminal continue the same conversation: **Open in terminal** in a
-chat, or **Open in chat** in the session list, moves it between them. Outpost
+A session runs in a terminal or in chat, never both, and each view shows which
+(**Runs in** in Machines). Opening a session that is not running starts nothing;
+**Connect** starts it in a terminal, and **Start in chat** or sending it a message
+starts it in chat. **Continue in chat** or **Continue in a terminal**, in the
+session's **…** menu in either view, ends the coding tool where it runs and
+continues the same conversation in the other. Both views offer the same session
+actions in the same order. Outpost
 Desktop opens chat in its own window (**Chat** next to a signed-in server, or
 **File → Chat**). Chat uses each tool's [Agent Client Protocol](https://agentclientprotocol.com)
-server; Claude Code's is installed from Required Software. See
+server; Claude Code's is installed from Required software. See
 [docs/CHAT.md](docs/CHAT.md) for how it works.
 
 ### DeepSeek Harness
 
-Enable **DeepSeek Harness** on a target and use **Required Software** to install
+Enable **DeepSeek Harness** on a machine and use **Required software** to install
 the official `dsh` CLI (`@deepseek-ai/dsh@0.2.2-rc.1`). It requires Node.js 24.9+
-and npm on that target. Configure its normal DeepSeek credentials, or provide
+and npm on that machine. Configure its normal DeepSeek credentials, or provide
 `DEEPSEEK_API_KEY` in the session environment, then create a named session in
 **Chat**. Outpost uses `dsh --profile acp`, preserves its native session ID and
 `DSH_HOME` (default `~/.dsh`), and resumes the conversation after reconnecting.
@@ -101,25 +107,37 @@ remain accessible through history MCP. See the [official ACP contract](https://g
 
 ## Edit a session and its conversations
 
-**Edit session** in a session’s **…** menu (in chat, the actions menu in its
-header) changes its name, chat instructions, arguments and environment. The
-name changes at once. The rest applies when the session next starts: a running
-session shows **Changes apply at the next start** with **Restart now**, which
-restarts it in the same conversation. The coding tool and project directory stay
-fixed; fork the session to work in another directory.
+**Edit session** in a session’s **…** menu changes its name, instructions,
+arguments and environment. The name changes at once. The rest applies when the
+session next starts: a running session shows **Changes apply at the next start**
+with **Restart now**, which restarts it in the same conversation. The coding tool
+and project directory stay fixed; fork the session to work in another directory.
+Instructions apply when the session runs in chat.
 
 A session keeps the conversations its coding tool works in. Starting a new one
 inside the tool (`/new`, `/clear`, or resuming another), or **New conversation**
 in chat, adds it, and it becomes the one the session resumes. The session keeps
 your name for it; the tool’s own title for the current conversation is shown
-beneath. **Conversations** lists them all and resumes an earlier one. A
-conversation resumed in another session moves there, and the session it left
-asks which conversation to continue.
+beneath. A conversation that a channel, another session or a schedule started is
+titled by where it came from and what was asked, such as `#release · the user:
+@api draft the notes`. **Conversations** lists them all and resumes an earlier one; resuming
+while the session runs stops its coding tool first (chat starts it again in that
+conversation). A conversation resumed in another session moves there, and the
+session it left asks which conversation to continue.
+
+## Find a conversation
+
+**Find a conversation** on a machine's page in Machines, or typing in chat's
+search box and choosing **Search conversation history** (or pressing Enter),
+searches the coding tools' history on all your machines or one of them,
+including conversations started outside Outpost. A conversation that already
+belongs to a session opens it; any other can be linked as a new session that
+resumes it.
 
 ## Fork a session
 
 Choose **Fork** in a session’s **…** menu to create a new Git branch and
-worktree on the same target. A branch such as `feature/new-login` suggests
+worktree on the same machine. A branch such as `feature/new-login` suggests
 `/path/project-feature-new-login`; you can edit the path or restore the
 suggestion. The branch starts at the source directory’s current commit,
 leaving uncommitted changes in the source.
@@ -127,7 +145,7 @@ leaving uncommitted changes in the source.
 Only after Git succeeds does Outpost create a fresh conversation, using the
 source session’s coding tool, arguments, and environment. The new session is
 named after the branch and starts when you connect. Git must be installed on
-the target; invalid repositories, existing branches, and existing destination
+the machine; invalid repositories, existing branches, and existing destination
 paths produce an error without creating a session.
 
 ## Connect
@@ -261,9 +279,10 @@ explicit scrollback clearing, and alternate-screen applications follow normal
 terminal semantics. Full-screen applications can still provide their own
 conversation/history viewer. Outpost does not force Codex into inline mode.
 
-The target must stay running: this preserves sessions across browser, app, SSH,
-and Outpost server disconnects/restarts, not target reboots or machine
-crashes. Closing a tab disconnects; **Terminate** explicitly stops the session.
+The machine must stay running: this preserves sessions across browser, app, SSH,
+and Outpost server disconnects/restarts, not reboots or crashes of the
+machine. Closing a tab disconnects; **Stop coding tool** in the session's **…**
+menu explicitly stops it.
 
 When the coding tool rings the terminal bell, the page and tab title show
 which session rang, and a short chime plays. Click or type in the terminal
@@ -311,7 +330,7 @@ Thumbnails, previews and downloads share a bounded session cache, avoiding repea
 transfers while the file remains cached. Closing the file panel keeps the cache;
 closing the session clears it.
 
-Files are snapshots stored on the target, survive client disconnects, and
+Files are snapshots stored on the machine, survive client disconnects, and
 appear again after reconnection. The same list holds files you attach in chat.
 Removing a file leaves the original alone. Deleting the managed session also
 deletes its files. Limits
@@ -354,8 +373,8 @@ Results include a stable machine ID, display name and host, coding tool,
 native session ID, title, working directory and an opaque context cursor.
 Histories include native conversations started outside Outpost and the CLI
 storage directories pinned by managed sessions. Each hosted account has its own
-index and can search only its configured targets. Removing a target immediately
-removes access to its cached results. An offline target's already indexed history
+index and can search only its configured machines. Removing a machine immediately
+removes access to its cached results. An offline machine's already indexed history
 remains searchable, with its availability reported in the response.
 
 Indexing starts automatically, continues in the background and resumes after
@@ -385,10 +404,10 @@ the agent now has only a summary of them; the summaries themselves are not
 searched while the messages they replaced are. Results group by Outpost session
 across all of its conversations.
 
-DeepSeek history reads `$DSH_HOME/sessions` on each target, including root and
+DeepSeek history reads `$DSH_HOME/sessions` on each machine, including root and
 subagent logs in formats v0–v4, raw JSONL and concatenated Zstandard frames.
 Only the highest retained generation is scanned. Native files remain unchanged;
-compressed input is decoded in memory by Outpost Terminal on the target, capped
+compressed input is decoded in memory by Outpost Terminal on the machine, capped
 at 256 MiB per file. An incomplete final frame
 is retried after the native log changes. Use `tool: "deepseek"` to filter it.
 
@@ -469,9 +488,9 @@ or browser cookies. An existing browser login provides SSO. App logins last
 Right-click a tab and choose **Split with Outpost terminal…**, or right-click
 **+** and choose **Outpost terminal…** for a new tab. The shared finder loads
 all sessions on your logged-in servers, including sessions you have never
-opened in the app. Type to filter by session, target, tool, directory or server;
+opened in the app. Type to filter by session, machine, tool, directory or server;
 use **↑ / ↓** and **Enter**, click a result, or choose **New session** in the
-finder; **Esc** cancels. Servers and unreachable targets report errors
+finder; **Esc** cancels. Servers and unreachable machines report errors
 independently, so available results remain usable. An already-open session moves
 its existing pane into the chosen split or tab, preserving its connection and
 draft. A split uses the selected pane of the tab whose menu you opened.
@@ -480,17 +499,18 @@ The finder's **New session** action opens the same dialog as **New session** bes
 a logged-in server. It temporarily hides the finder, then refreshes the full
 catalogue and highlights the created session so Enter opens it in the original
 destination. The server row preselects its server; splitting beside a remote
-pane preselects that pane's server and target. All creation fields are shared:
-Outpost server, execution target, then the web workspace's session name, coding
+pane preselects that pane's server and machine. All creation fields are shared:
+Outpost server, machine, then the website's session name, coding
 tool, project directory (with suggestions), directory creation, arguments and
-environment fields. A single available server or target is selected
+environment fields. A single available server or machine is selected
 automatically. You can change either selection.
 
 **Cancel** creates nothing and leaves the layout alone. **Create session**
 creates the session and opens it in the original new-tab or split destination.
 During creation, the dialog waits for the server to finish before it can close.
 If creation succeeds but opening fails, the session remains available in the
-finder. Missing target software must first be installed from the web workspace.
+finder. Missing software must first be installed from the machine's page in
+**Machines** on the website.
 This works with both local-mode and hosted Outpost servers.
 
 Drag a pane's header to reorganize it:
@@ -533,7 +553,7 @@ conversations.
 Activating a tab clears its terminal bell and marks the displayed **Needs you**
 completion as seen. This works with clicks, keyboard tab switching and returning
 to the app window, without typing into the terminal. The icon updates immediately
-while the target saves the acknowledgement shared with the session list. A later
+while the machine saves the acknowledgement shared with the session list. A later
 completion remains unread until you return or interact again. If saving fails,
 the unchecked state returns with an error. Browser terminals use the same logic
 when you return to their page.
@@ -579,7 +599,7 @@ for manual installation; remote sessions survive closing or upgrading the app.
 Server badges distinguish **Connected**, **Offline**, and **Sign-in expired**.
 Pending browser sign-ins show temporary progress beneath the URL field. Click an offline badge to retry, **Cancel sign-in** to
 stop waiting, or **Sign out** to revoke that app login. Sign-out requires the
-server to be reachable. It does not end the coding processes on your targets.
+server to be reachable. It does not end the coding processes on your machines.
 Trust is remembered independently of login and is not cleared by sign-out.
 The **Outpost logo → Recent sessions** list keeps your 10 most recent remote
 sessions across app restarts. Click an entry, or choose with ↑/↓ and press Enter,
@@ -598,8 +618,8 @@ changing/resetting the account password invalidates app access. Account
 passwords, browser cookies and terminal reconnect credentials are never saved
 by the app. There is no silent renewal.
 
-You can start from the app's URL field or the website's **Connect Outpost app**
-button. **Connect → Outpost Desktop** also signs in if needed, then opens the
+You can start from the app's URL field or the website's **Open in Outpost
+Desktop** button. **Connect → Outpost Desktop** also signs in if needed, then opens the
 selected session. Approval happens in your browser. First use asks whether to
 trust that server; accepting is remembered, declining cancels only this attempt.
 There is no trusted-server list or management screen.
@@ -610,7 +630,7 @@ The app needs a network connection and an open terminal tab for bells.
 
 Set `OUTPOST_MODE=hosted`. Users sign up with a verified email, get their own
 workspace and an Ed25519 SSH key that they authorize on their servers, in
-`~/.ssh/authorized_keys` of the user each target's sessions run as. Web terminal and Outpost Desktop work exactly as in local mode, connecting
+`~/.ssh/authorized_keys` of the user each machine's sessions run as. Web terminal and Outpost Desktop work exactly as in local mode, connecting
 to the hosted server.
 
 ```dotenv
@@ -653,13 +673,13 @@ machine an account uses, running `outpost-terminal node` over SSH or the local
 shell; everything on that machine travels on it, including agents' calls to
 Outpost's tools. Machines never connect to Outpost or to each other: if Outpost
 can reach a machine, everything works there. A dedicated `outpost-terminal`
-process owns each session's PTY and terminal state on the target, and another
+process owns each session's PTY and terminal state on the machine, and another
 one each chat. Outpost Terminal has no listening network port.
 
-**Required Software → Outpost Terminal → Install** downloads the matching Linux
+**Required software → Outpost Terminal → Install** downloads the matching Linux
 executable into `~/.outpost/bin`, verifies its SHA-256 checksum and installs it
-atomically. x86_64 and ARM64 targets with glibc or musl are supported. The runtime
-is bundled; targets need neither Node.js nor Bun. Minimal musl installations also
+atomically. x86_64 and ARM64 machines with glibc or musl are supported. The runtime
+is bundled; machines need neither Node.js nor Bun. Minimal musl installations also
 receive the system `libstdc++` package. Running sessions keep their processes
 when the executable is replaced.
 
@@ -673,7 +693,7 @@ protocol and ownership model.
 ```sh
 npm run build:terminal   # build Outpost Terminal before machine, integration and browser tests
 npm run check            # lint, typecheck, build, unit and machine tests
-npm run test:integration # persistent PTYs: local targets and SSH in Docker
+npm run test:integration # persistent PTYs: this computer and SSH in Docker
 npx playwright install chromium webkit
 npm run test:ui          # browser tests against a real backend
 npm run test:mobile      # Android Chromium, iPhone WebKit, iPad WebKit

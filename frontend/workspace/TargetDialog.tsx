@@ -25,7 +25,7 @@ function ToolChoice({ value, onChange }: { value: HarnessId[]; onChange: (tools:
           </label>
         ))}
       </div>
-      <small>Sessions on this target can use these tools. You can change this later.</small>
+      <small>Sessions on this machine can use these tools. You can change this later.</small>
     </fieldset>
   )
 }
@@ -80,7 +80,7 @@ export default function TargetDialog({
 
   return (
     <Dialog
-      title={target ? `Edit ${target.name}` : 'Add a target'}
+      title={target ? `Edit ${target.name}` : 'Add a machine'}
       busy={busy}
       onClose={onClose}
       description={target ? undefined : 'A Linux machine where your coding sessions run.'}
@@ -90,14 +90,14 @@ export default function TargetDialog({
             Cancel
           </button>
           <button className="button primary" form="target-form" disabled={busy || !tools.length}>
-            {busy ? 'Saving…' : target ? 'Save' : 'Add target'}
+            {busy ? 'Saving…' : target ? 'Save' : 'Add machine'}
           </button>
         </>
       }
     >
       <form id="target-form" className="form" onSubmit={submit}>
         {!target && environment?.localTargets && (
-          <div className="segmented" role="radiogroup" aria-label="Target type">
+          <div className="segmented" role="radiogroup" aria-label="Machine type">
             <button type="button" role="radio" aria-checked={kind === 'ssh'} onClick={() => setKind('ssh')}>
               <Server size={16} />
               SSH server

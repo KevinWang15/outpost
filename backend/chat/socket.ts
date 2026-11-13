@@ -14,7 +14,7 @@ import { sessionCreationOptions } from '../../shared/sessionCreation'
 import type { Owner } from '../deployment'
 import { AppError } from '../errors'
 import type { Services } from '../services'
-import { createSession, inspectTargetSoftware } from '../session-actions'
+import { createSession, forkSession, inspectTargetSoftware } from '../session-actions'
 import type { ChatClient, ChatHub } from './hub'
 import type { LinkEvent } from './links'
 import type { ChatTokens } from './tokens'
@@ -135,7 +135,8 @@ class Connection implements ChatClient {
 
   private async existing(ref: SessionRef) {
     const link = await this.server.hub.link(this.owner, ref)
-    if (link.state !== 'live') throw new AppError(link.message ?? 'The chat is not running. Open it to start it.', 409)
+    if (link.state !== 'live')
+      throw new AppError(link.message ?? 'The session is not running in chat. Start it first.', 409)
     return link
   }
 
@@ -203,6 +204,19 @@ class Connection implements ChatClient {
         await hub.refreshFor(this.owner)
         return { ok: true, data: session }
       }
+      case 'session-fork': {
+        const context = await this.server.services.resolve(this.owner, ref!.targetId)
+        const session = await forkSession(this.server.services, context, ref!.sessionId, message.input)
+        await hub.refreshFor(this.owner)
+        return { ok: true, data: { targetId: context.target.id, sessionId: session.id } }
+      }
+      case 'session-delete': {
+        const context = await this.server.services.resolve(this.owner, ref!.targetId)
+        await this.server.services.sessions.remove(context, ref!.sessionId)
+        this.server.services.broker.closeTarget(this.owner, context.target.id, ref!.sessionId)
+        await hub.refreshFor(this.owner)
+        return { ok: true }
+      }
       case 'new-conversation': {
         const result = await (await this.existing(ref!)).request({ type: 'new' }, 60_000)
         await hub.refreshFor(this.owner)
@@ -251,6 +265,13 @@ class Connection implements ChatClient {
         const session = await createSession(this.server.services, context, message.input, message.requestId)
         await hub.refreshFor(this.owner)
         return { ok: true, data: { targetId: context.target.id, sessionId: session.id } }
+      }
+      case 'conversation-search': {
+        const context = await this.server.services.resolve(this.owner, message.targetId)
+        return {
+          ok: true,
+          data: await this.server.services.sessions.search(context, message.search, AbortSignal.timeout(60_000)),
+        }
       }
       default:
         throw new AppError('Unknown chat request.', 400)

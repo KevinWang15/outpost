@@ -306,6 +306,14 @@ export function PlanView({ entries }: { entries: acp.PlanEntry[] }) {
   )
 }
 
+/** How an answered request reads, by the option's kind; also the options' order. */
+const answered: Record<string, string> = {
+  allow_once: 'Allowed',
+  allow_always: 'Allowed from now on',
+  reject_once: 'Declined',
+  reject_always: 'Declined from now on',
+}
+
 export function PermissionCard({ item }: { item: Extract<TurnItem, { type: 'permission' }> }) {
   const { answer, readOnly } = useContext(ConversationContext)
   const [busy, setBusy] = useState<string | null>(null)
@@ -317,7 +325,7 @@ export function PermissionCard({ item }: { item: Extract<TurnItem, { type: 'perm
         string | undefined)
     : undefined
   const chosen = item.options.find(option => option.optionId === item.optionId)
-  const order = (kind: string) => ['allow_once', 'allow_always', 'reject_once', 'reject_always'].indexOf(kind)
+  const order = (kind: string) => Object.keys(answered).indexOf(kind)
   return (
     <div
       className={`permission ${item.resolved ? 'resolved' : ''}`}
@@ -332,9 +340,7 @@ export function PermissionCard({ item }: { item: Extract<TurnItem, { type: 'perm
         </span>
       </div>
       {item.resolved ? (
-        <p className="muted">
-          {chosen ? `${chosen.kind.startsWith('allow') ? 'Allowed' : 'Declined'}: ${chosen.name}` : 'Cancelled'}
-        </p>
+        <p className="muted">{chosen ? (answered[chosen.kind] ?? chosen.name) : 'Cancelled'}</p>
       ) : readOnly ? (
         <p className="muted">Waiting for approval in the session’s chat.</p>
       ) : (

@@ -159,7 +159,7 @@ export class HostedDeployment implements Deployment {
     return this.publicUrl.origin
   }
   validateTarget(input: TargetInput) {
-    if (input.kind !== 'ssh') throw new AppError('Hosted workspaces connect to SSH targets.', 400)
+    if (input.kind !== 'ssh') throw new AppError('Hosted Outpost connects to machines over SSH.', 400)
     if (input.identityFile) throw new AppError('Hosted workspaces use your account SSH key.', 400)
   }
 

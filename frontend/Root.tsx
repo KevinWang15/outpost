@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import App from './App'
 import AuthGate from './auth/AuthGate'
 import { pagePaths } from '../shared/pages'
+import { rememberedMode } from './mode'
 
 const DesktopTerminalPage = lazy(() => import('./terminal/DesktopTerminalPage'))
 const DesktopDownloadPage = lazy(() => import('./desktop/DesktopDownloadPage'))
@@ -10,15 +11,7 @@ const DesktopAuthorizePage = lazy(() => import('./desktop/DesktopAuthorizePage')
 const ChatApp = lazy(() => import('./chat/ChatApp'))
 const DesktopChatPage = lazy(() => import('./chat/DesktopChatPage'))
 
-// The workspace address opens the mode used last on this browser.
-function remembersChat() {
-  try {
-    return localStorage.getItem('outpost:mode') === 'chat'
-  } catch {
-    return false
-  }
-}
-if (window.location.pathname === pagePaths.workspace && !window.location.search && remembersChat())
+if (window.location.pathname === pagePaths.workspace && !window.location.search && rememberedMode() === 'chat')
   window.history.replaceState(null, '', pagePaths.chat)
 
 /** Scoped terminal grants authorize desktop views. Browser app approval and

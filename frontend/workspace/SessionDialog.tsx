@@ -4,7 +4,7 @@ import { harnessLabel, type HarnessId } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import { Dialog } from '../ui/Dialog'
 import DirectoryInput, { type DirectorySource } from './DirectoryInput'
-import LaunchFields from './LaunchFields'
+import LaunchFields, { InstructionsField } from './LaunchFields'
 import { readLaunch } from './launch'
 
 /** Create a session, or link an existing conversation found by Find conversations. */
@@ -14,7 +14,6 @@ export default function SessionDialog({
   conversation,
   directories,
   beforeFields,
-  afterFields,
   description,
   onSave,
   onClose,
@@ -24,8 +23,6 @@ export default function SessionDialog({
   conversation: ConversationMatch | null
   directories: DirectorySource
   beforeFields?: ReactNode
-  /** Shown after the project directory, e.g. chat instructions. */
-  afterFields?: ReactNode
   description?: string
   onSave: (input: SessionInput) => Promise<void>
   onClose: () => void
@@ -43,8 +40,9 @@ export default function SessionDialog({
     setBusy(true)
     setError('')
     try {
-      if (!tool) throw new Error('Install a coding tool on this target first.')
+      if (!tool) throw new Error('Install a coding tool on this machine first.')
       const { args, env } = readLaunch(data)
+      const instructions = String(data.get('instructions')).trim()
       await onSave({
         tool,
         name: String(data.get('name')).trim(),
@@ -54,6 +52,7 @@ export default function SessionDialog({
           : { createDirectory: data.get('createDirectory') === 'on' }),
         ...(args ? { args } : {}),
         ...(Object.keys(env).length ? { env } : {}),
+        ...(instructions ? { instructions } : {}),
       })
     } catch (problem) {
       setError((problem as Error).message)
@@ -71,7 +70,7 @@ export default function SessionDialog({
           ? `Resume this ${harnessLabel(conversation.tool)} conversation as an Outpost session.`
           : target
             ? (description ?? `On ${target.name}. It starts when you first connect.`)
-            : 'Choose an Outpost server and execution target.'
+            : 'Choose where the session runs.'
       }
       footer={
         <>
@@ -120,7 +119,7 @@ export default function SessionDialog({
                 </div>
                 {!available && (
                   <small className="error">
-                    Install {conversation ? harnessLabel(conversation.tool) : 'a coding tool'} on this target first.
+                    Install {conversation ? harnessLabel(conversation.tool) : 'a coding tool'} on this machine first.
                   </small>
                 )}
               </fieldset>
@@ -138,7 +137,7 @@ export default function SessionDialog({
                   </label>
                 </>
               )}
-              {afterFields}
+              <InstructionsField tool={tool} />
               <LaunchFields tool={tool} />
             </>
           )}

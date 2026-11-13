@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import type { Session, SessionUpdate } from '../../shared/model'
 import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { Dialog } from '../ui/Dialog'
-import LaunchFields from './LaunchFields'
+import LaunchFields, { InstructionsField } from './LaunchFields'
 import { readLaunch } from './launch'
 
 const sameEnv = (a: Record<string, string>, b: Record<string, string>) =>
@@ -90,21 +90,7 @@ export default function SessionSettingsDialog({
             <input name="name" required maxLength={80} autoFocus defaultValue={session.name} />
             <small>Yours to choose; it also sets the session’s @handle in chat.</small>
           </label>
-          <label className="field">
-            <span className="label">Chat instructions</span>
-            <textarea
-              name="instructions"
-              rows={3}
-              maxLength={32000}
-              defaultValue={session.config.instructions ?? ''}
-              placeholder="Optional. A role or rules for this session, e.g. “You review pull requests. Be concise.”"
-            />
-            <small>
-              {session.tool === 'kimi'
-                ? 'Kimi Code does not accept session instructions over ACP yet.'
-                : 'Added to the coding tool’s own instructions in chat. Claude Code and Codex support this.'}
-            </small>
-          </label>
+          <InstructionsField tool={session.tool} defaultValue={session.config.instructions ?? ''} />
           {supportsTerminal(session.tool) && (
             <label className="check">
               <input type="checkbox" name="delivery" defaultChecked={session.delivery === 'auto'} />

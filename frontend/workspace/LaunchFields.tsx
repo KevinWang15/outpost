@@ -78,3 +78,25 @@ export default function LaunchFields({
     </details>
   )
 }
+
+/** A session's instructions: a role or rules added to the coding tool's own, in chat. */
+export function InstructionsField({ tool, defaultValue = '' }: { tool: HarnessId | undefined; defaultValue?: string }) {
+  const supported = tool === 'claude' || tool === 'codex'
+  return (
+    <label className="field">
+      <span className="label">Instructions</span>
+      <textarea
+        name="instructions"
+        rows={3}
+        maxLength={32000}
+        defaultValue={defaultValue}
+        placeholder="Optional. A role or rules for this session, e.g. “You review pull requests. Be concise.”"
+      />
+      <small>
+        {!tool || supported
+          ? `Added to ${tool ? harnessLabel(tool) : 'the coding tool'}’s own instructions when the session runs in chat.`
+          : `${harnessLabel(tool)} does not accept session instructions yet.`}
+      </small>
+    </label>
+  )
+}

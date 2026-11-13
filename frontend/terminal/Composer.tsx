@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { LoaderCircle, SendHorizontal } from 'lucide-react'
 
-/** A text box for phones and long prompts. Drafts stay until the target confirms delivery. */
+/** A text box for phones and long prompts. Drafts stay until the machine confirms delivery. */
 export default function Composer({
   enabled,
   visible,

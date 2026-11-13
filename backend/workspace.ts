@@ -44,7 +44,7 @@ export class Workspace {
       new Set(data.targets.map(target => target.id)).size !== data.targets.length ||
       new Set(data.targets.map(target => target.name.toLowerCase())).size !== data.targets.length
     ) {
-      throw new AppError('Duplicate targets in workspace.json. No data was modified.', 409)
+      throw new AppError('Duplicate machines in workspace.json. No data was modified.', 409)
     }
     return data
   }
@@ -63,11 +63,11 @@ export class Workspace {
   private update(id: string, change: (target: Target) => Target, message: string) {
     return this.transaction(data => {
       const index = data.targets.findIndex(target => target.id === id)
-      if (index < 0) throw new AppError('Target not found', 404)
+      if (index < 0) throw new AppError('Machine not found', 404)
       const updated = change(data.targets[index])
       if (!validTarget(updated)) throw new AppError(message, 400)
       if (data.targets.some(target => target.id !== id && target.name.toLowerCase() === updated.name.toLowerCase()))
-        throw new AppError('A target with this name already exists', 409)
+        throw new AppError('A machine with this name already exists', 409)
       data.targets[index] = updated
       return updated
     })
@@ -78,29 +78,29 @@ export class Workspace {
   }
   async get(id: string) {
     const target = (await this.list()).find(item => item.id === id)
-    if (!target) throw new AppError('Target not found', 404)
+    if (!target) throw new AppError('Machine not found', 404)
     return target
   }
   add(target: Target) {
     return this.transaction(data => {
-      if (!validTarget(target)) throw new AppError('Invalid target settings.', 400)
+      if (!validTarget(target)) throw new AppError('Invalid machine settings.', 400)
       if (data.targets.some(item => item.id === target.id))
-        throw new AppError('A target with this ID already exists', 409)
+        throw new AppError('A machine with this ID already exists', 409)
       if (data.targets.some(item => item.name.toLowerCase() === target.name.toLowerCase()))
-        throw new AppError('A target with this name already exists', 409)
+        throw new AppError('A machine with this name already exists', 409)
       data.targets.push(target)
       return target
     })
   }
   edit(id: string, patch: TargetUpdate) {
-    return this.update(id, target => ({ ...target, ...patch }), 'Invalid target settings.')
+    return this.update(id, target => ({ ...target, ...patch }), 'Invalid machine settings.')
   }
   setEnvironment(id: string, environment: ExecutionEnvironment) {
     return this.update(id, target => ({ ...target, environment }), 'Invalid execution environment.')
   }
   remove(id: string) {
     return this.transaction(data => {
-      if (!data.targets.some(item => item.id === id)) throw new AppError('Target not found', 404)
+      if (!data.targets.some(item => item.id === id)) throw new AppError('Machine not found', 404)
       data.targets = data.targets.filter(item => item.id !== id)
     })
   }

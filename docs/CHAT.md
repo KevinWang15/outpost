@@ -2,8 +2,8 @@
 
 Outpost has two ways to work with the same sessions:
 
-- **Terminal** (`/`): each session is the coding tool's own terminal interface in
-  a persistent PTY, as before.
+- **Machines** (`/`): sessions by machine; each session can open the coding
+  tool's own terminal interface in a persistent PTY.
 - **Chat** (`/chat`, and a Chat window in Outpost Desktop): each session is a
   conversation with streamed replies, folded steps, inline permission requests
   and the agent's mode and model. Sessions can share **channels**, message each
@@ -21,7 +21,9 @@ conversation started in one mode continues in the other.
    terminal output, patch the tool, or reimplement its agent.
 2. **One driver per conversation.** A session runs either its terminal service
    or its chat host, never both: two processes writing one transcript would fork
-   it. Opening the other mode first ends the running one; the conversation stays.
+   it. Viewing a session starts nothing. **Continue in chat** or **Continue in a
+   terminal** ends the running driver and continues the conversation in the
+   other; Connect, Start in chat and sending a message start a stopped one.
 3. **The machine owns the chat**, as it owns the terminal. A chat host on the
    machine keeps the agent, its prompt queue and its history while browsers,
    SSH and the Outpost server come and go.
@@ -29,8 +31,10 @@ conversation started in one mode continues in the other.
    envelope adds what one ACP client connection lacks: sequence numbers, many
    viewers, a prompt queue, and who a prompt came from.
 5. **Outpost composes, the agent decides.** Channels, session messages and
-   schedules become ordinary prompts with a short `[Outpost: …]` header. Agents
-   use Outpost only through its MCP tools; their replies are their own turns.
+   schedules become ordinary prompts with a short `[Outpost: …]` header, then
+   what was asked, then how to answer (`backend/chat/prompts.ts`). The header
+   and what was asked title the conversation. Agents use Outpost only through
+   its MCP tools; their replies are their own turns.
 
 ## Components
 
@@ -60,7 +64,7 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 
 | Tool | ACP server | Installed by |
 | --- | --- | --- |
-| Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the target's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Required Software (`claude-agent-acp`, pinned in `shared/chatAgents.json`) |
+| Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the target's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Required software (`claude-agent-acp`, pinned in `shared/chatAgents.json`) |
 | Codex | Official [`codex-acp`](https://github.com/agentclientprotocol/codex-acp), run with the target's own `codex` (`CODEX_PATH`) | Bundled in Outpost Terminal (`outpost-terminal agent codex`), fetched with an integrity pin by `scripts/vendor-agents.mjs` |
 | Kimi Code | `kimi acp` | Kimi itself |
 | DeepSeek Harness | `dsh --profile acp`, through `outpost-terminal agent deepseek` | DeepSeek itself |
@@ -96,10 +100,10 @@ and the chat starts again in it.
 `outpost-terminal chat-serve` reads its launch configuration on stdin, listens on
 `~/.outpost/chats/<session>.sock` (owner-only), and outlives its viewers. After
 ten minutes with no viewer, no turn, no request waiting for approval and no
-unseen reply, it stops; opening the chat starts it again in the same
-conversation. Its `status` reports its state and the same `SessionActivity` as
-terminal sessions, so lists and badges work in both modes. Terminate ends
-either driver.
+unseen reply, it stops; Start in chat or the next message starts it again in
+the same conversation. Its `status` reports its state and the same `SessionActivity` as
+terminal sessions, so lists and badges work in both modes. **Stop coding tool**
+ends either driver.
 
 Requests (`shared/chatHost.ts`): `hello`, `prompt` (with a key: a retried key
 is the same turn), `cancel`, `unqueue`, `permission`, `config`, `mode`, `new`,
@@ -222,9 +226,9 @@ Uploads are buffered (at most two at a time per account) before they are stored.
 ## Limits and known gaps
 
 - Schedules fire only while the Outpost server runs; missed times are not caught up.
-- A chat host does not survive a machine reboot or a crash of the tool; opening
-  the chat starts it again and the conversation continues.
-- Terminal-mode arguments (`args`) do not apply to chat; the agent's mode and
+- A chat host does not survive a machine reboot or a crash of the tool; Start in
+  chat or the next message starts it again and the conversation continues.
+- Terminal arguments (`args`) do not apply to chat; the agent's mode and
   model are chosen in the chat instead.
 - Server-side Web Push is not implemented. Phones use the
   web app; there is no native mobile app.

@@ -127,7 +127,7 @@ class Connection {
     try {
       frames = this.decoder.feed(chunk)
     } catch {
-      return this.close('unavailable', 'The target sent an invalid terminal stream.')
+      return this.close('unavailable', 'The machine sent an invalid terminal stream.')
     }
     for (const { kind, payload } of frames) {
       if (this.finished) return
@@ -141,10 +141,10 @@ class Connection {
         try {
           message = JSON.parse(payload.toString('utf8'))
         } catch {
-          return this.close('unavailable', 'The target sent an invalid control message.')
+          return this.close('unavailable', 'The machine sent an invalid control message.')
         }
         if (!message || typeof message !== 'object' || Array.isArray(message))
-          return this.close('unavailable', 'The target sent an invalid control message.')
+          return this.close('unavailable', 'The machine sent an invalid control message.')
         this.control(message)
       }
     }
@@ -162,7 +162,7 @@ class Connection {
         typeof message.message === 'string' ? message.message : 'Terminal service failed.',
       )
     } else if (message.type === 'ready') {
-      if (this.started) return this.close('unavailable', 'The target sent duplicate terminal readiness.')
+      if (this.started) return this.close('unavailable', 'The machine sent duplicate terminal readiness.')
       this.started = true
       clearTimeout(this.attachTimer)
       const pending = this.pending
@@ -181,7 +181,7 @@ class Connection {
       this.send({
         type: 'activity',
         activity:
-          parseSessionActivity(message.activity) ?? unavailableActivity('The target sent invalid activity metadata.'),
+          parseSessionActivity(message.activity) ?? unavailableActivity('The machine sent invalid activity metadata.'),
       })
     } else if (message.type === 'result' && typeof message.id === 'string') {
       if (message.id === this.probe?.id) {

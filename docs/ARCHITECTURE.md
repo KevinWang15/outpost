@@ -4,7 +4,9 @@ Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code, DeepSeek Harnes
 running on Linux machines, in persistent PTYs or as chats, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
 
 This document is the source of truth for how Outpost behaves and why. Code
-comments refer back to the principles below by name.
+comments refer back to the principles below by name. A *target* is a machine
+where sessions run; the code and API say target (`/api/targets`,
+`TargetContext`), the interface says machine.
 
 ## Principles
 
@@ -31,7 +33,7 @@ comments refer back to the principles below by name.
    who owns this request, where is their workspace stored, which SSH identity
    do they use, and may they use this computer as a target. Everything else —
    sessions, software, terminals, the UI — is mode-agnostic.
-5. **One installed machine dependency.** Required Software installs Outpost
+5. **One installed machine dependency.** Required software installs Outpost
    Terminal, a versioned, self-contained Linux executable in `~/.outpost/bin`.
    It is everything Outpost runs on a machine: the node, terminal services, chat
    hosts, the MCP server and hooks. Its processes run as the machine's user and
@@ -155,7 +157,7 @@ authentication or desktop trust confirmation.
 2. Desktop receives `outpost://server?origin=…&account=…&target=…&session=…`.
    `useDesktopEntry` builds this link synchronously in the browser click handler.
    It is only an intent and contains no credential; ownership is checked when
-   the app requests a terminal grant. The website's **Connect Outpost app**
+   the app requests a terminal grant. The website's **Open in Outpost Desktop**
    button uses the same link without a session. Electron validates the URL and
    confirms first-use server trust before contacting it.
 3. `ServerAccounts` uses an existing app login for the requested account, or
@@ -464,7 +466,7 @@ and image transfers, history reads, and agents' calls to Outpost's tools.
 Login shells may print first; the node then prints the marker
 `\0OUTPOST-NODE-1\0` and a `hello` with its version and protocol. A machine
 running another Outpost Terminal version is asked to reinstall it from
-Required Software, before any operation runs.
+Required software, before any operation runs.
 
 Frames are length-prefixed as everywhere in Outpost (one type byte, a 4-byte
 big-endian length, the payload): `C` carries a JSON control message and `D`
@@ -627,7 +629,7 @@ Ctrl+C and other application keys pass directly through the PTY.
 
 The terminal service persists across client, SSH and Outpost server restarts.
 Its in-memory state and running processes do not survive a target reboot or
-service crash. Explicit Terminate asks the driver to stop; if it does not
+service crash. Explicit **Stop coding tool** asks the driver to stop; if it does not
 answer, the node ends its process tree, children first, after checking that the
 PID still runs an Outpost driver. Updating the installed executable atomically
 leaves already-running sessions alone.
@@ -638,7 +640,7 @@ leaves already-running sessions alone.
 and terminal bounds; the node protocol has its own version in
 `shared/machine.ts`. The manual `.github/workflows/terminal.yml` builds baseline x86_64 and ARM64
 binaries for glibc and musl, plus SHA256SUMS. Publishing creates an immutable
-`terminal-v<version>` release. The Required Software installer selects the
+`terminal-v<version>` release. The Required software installer selects the
 architecture/libc, downloads that exact release, checks SHA-256 and `--version`,
 and renames the verified executable into `~/.outpost/bin/outpost-terminal`.
 It uses the existing editable installation plan, SSH/local transport and log UI.

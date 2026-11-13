@@ -155,7 +155,7 @@ export async function serveNode(socketName: string) {
         throw new RegistryError('Invalid terminal request', 400)
       const record = findSession(readRegistry(), args.session)
       const { terminal, chat } = await driverStatus(record.id)
-      if (chat) throw new RegistryError('This session is open in chat. Stop it there to continue in a terminal.')
+      if (chat) throw new RegistryError('This session runs in chat. Choose Continue in a terminal to move it.')
       if (terminal && terminal.protocol !== terminalService.protocol)
         throw new RegistryError(
           'This session runs an older Outpost Terminal. Stop it, then connect again to restart it with the current one.',
@@ -176,11 +176,11 @@ export async function serveNode(socketName: string) {
     async chat(stream: number, args: ChatStreamArgs) {
       const record = findSession(readRegistry(), args.session)
       const { terminal, chat } = await driverStatus(record.id)
-      if (terminal) throw new RegistryError('This session is running in a terminal. Stop it there to continue in chat.')
+      if (terminal) throw new RegistryError('This session runs in a terminal. Choose Continue in chat to move it.')
       if (chat && chat.protocol !== chatHost.protocol)
         throw new RegistryError('This chat runs an older Outpost Terminal. Stop the session, then open it again.')
       if (!chat) {
-        if (!args.start) throw new RegistryError('The chat stopped. Open it again to restart the coding tool.', 410)
+        if (!args.start) throw new RegistryError('This session is not running in chat.', 410)
         await startChat(record)
       }
       await touchSession(record.id)

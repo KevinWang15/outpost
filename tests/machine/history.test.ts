@@ -251,16 +251,19 @@ test("Outpost's MCP server offers each driver its tools, and fails closed on a p
   assert.equal(partial.status, 1)
 })
 
-test("a title taken from a prompt leaves out the header of Outpost's composed prompts", async t => {
+test("a composed prompt's title is its header and what was asked, without Outpost's instructions", async t => {
   const home = machine(t)
   const id = crypto.randomUUID()
   put(join(home, '.claude/projects/project', `${id}.jsonl`), [
     {
       type: 'user',
       cwd: '/work',
-      message: { content: '[Outpost: message from @coder in #release]\nPlease review the notes' },
+      message: {
+        content:
+          '[Outpost: From @coder]\nPlease review\nthe notes\n\nThis is a message from the Outpost session @coder.',
+      },
     },
   ])
   const session = record(home, 'claude', id, { storage: { CLAUDE_CONFIG_DIR: join(home, '.claude') } })
-  assert.equal(harness('claude').title(session, id, new Scan()), 'Please review the notes')
+  assert.equal(harness('claude').title(session, id, new Scan()), 'From @coder · Please review the notes')
 })

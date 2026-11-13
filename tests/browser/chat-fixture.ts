@@ -1,13 +1,13 @@
 import { expect, type Page } from '@playwright/test'
 
-/** Add this computer as a target with the fixture coding tools, from the workspace. */
+/** Add this computer as a machine with the fixture coding tools, from Machines. */
 export async function addClaudeTarget(page: Page, name: string) {
   await page.goto('/')
-  await page.getByRole('button', { name: 'Add target' }).first().click()
-  const dialog = page.getByRole('dialog', { name: 'Add a target' })
+  await page.getByRole('button', { name: 'Add a machine' }).first().click()
+  const dialog = page.getByRole('dialog', { name: 'Add a machine' })
   await dialog.getByRole('radio', { name: 'This computer' }).click()
   await dialog.getByLabel('Name').fill(name)
-  await dialog.getByRole('button', { name: 'Add target' }).click()
+  await dialog.getByRole('button', { name: 'Add machine' }).click()
   await expect(page.getByRole('region', { name: 'Required software' })).toContainText('Ready')
 }
 

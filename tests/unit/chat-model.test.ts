@@ -80,9 +80,11 @@ test('channel prompts: attributed header, newest messages within bounds', () => 
     Array.from({ length: 40 }, (_, index) => message(index)),
   )
   assert.equal(prompt.match(promptHeaderPattern)?.[1], '#release')
-  assert.match(prompt, /You are @coder in the Outpost channel #release\. Members: @coder, @writer\./)
-  assert.match(prompt, /\(10 older not shown\)/)
-  assert.ok(prompt.includes('the user: note 39'))
+  // What was said comes first, as the paragraph after the header; the instructions follow.
+  assert.ok(prompt.startsWith('[Outpost: #release]\nthe user: note 10\n'))
+  assert.match(prompt, /\n\nYou are @coder in the Outpost channel #release\. Members: @coder, @writer\./)
+  assert.match(prompt, /10 older ones are not shown/)
+  assert.ok(prompt.includes('the user: note 39\n\n'))
   assert.ok(!prompt.includes('note 9\n'))
 
   // Attached files are named in their message; ones the member could not get are listed.

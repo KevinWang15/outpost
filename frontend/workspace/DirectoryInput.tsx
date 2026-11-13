@@ -143,7 +143,7 @@ export default function DirectoryInput({ source }: { source: DirectorySource }) 
         />
         {visible && (
           <div className="directory-popup">
-            <ul id={`${id}-list`} role="listbox" aria-label="Target directories">
+            <ul id={`${id}-list`} role="listbox" aria-label="Directories on the machine">
               {directories.map((directory, index) => (
                 <li key={directory} role="presentation">
                   <button
@@ -163,7 +163,7 @@ export default function DirectoryInput({ source }: { source: DirectorySource }) 
             </ul>
             <p className="directory-status" role="status">
               {!current
-                ? 'Looking up target directories…'
+                ? 'Looking up directories on the machine…'
                 : current.error
                   ? `Could not load suggestions: ${current.error}. You can still enter a path.`
                   : !directories.length

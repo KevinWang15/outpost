@@ -32,6 +32,7 @@ export default function Composer({
   onUpload,
   running = false,
   disabled = null,
+  hint,
   onSend,
   onStop,
 }: {
@@ -44,6 +45,8 @@ export default function Composer({
   running?: boolean
   /** A reason sending is unavailable, shown instead of sending. */
   disabled?: string | null
+  /** A note on what sending this text will do, shown while typing. */
+  hint?: (text: string) => string | null
   /** `key` stays the same when an unchanged draft is sent again, so the
    * server can tell a resend from a new message. `files` are uploaded IDs. */
   onSend: (text: string, files: string[], key: string) => Promise<void>
@@ -315,10 +318,17 @@ export default function Composer({
           </button>
         </div>
       </div>
-      {error && (
+      {error ? (
         <p className="error composer-error" role="alert">
           {error}
         </p>
+      ) : (
+        text.trim() &&
+        hint?.(text) && (
+          <p className="composer-hint" role="status">
+            {hint(text)}
+          </p>
+        )
       )}
     </div>
   )

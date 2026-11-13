@@ -22,6 +22,7 @@ import { replyText, turnFiles } from '../../shared/chatTranscript'
 import type { SessionFile } from '../../shared/sessionFiles'
 import { handles, mentions } from '../../shared/chatMentions'
 import { cronMatches, parseCron, validTimeZone, zonedParts } from '../../shared/cron'
+import type { HarnessId } from '../../shared/harnesses'
 import type { Session } from '../../shared/model'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
@@ -48,7 +49,7 @@ interface Account {
   clients: Set<ChatClient>
   sessions: Map<string, Session[]>
   errors: Map<string, string>
-  names: Map<string, string>
+  machines: Map<string, { name: string; tools: HarnessId[] }>
   view: ChatSession[]
   targets: ChatTarget[]
   refreshedAt: number
@@ -131,7 +132,7 @@ export class ChatHub {
           clients: new Set(),
           sessions: new Map(),
           errors: new Map(),
-          names: new Map(),
+          machines: new Map(),
           view: [],
           targets: [],
           refreshedAt: 0,
@@ -222,7 +223,7 @@ export class ChatHub {
     account.refreshing ??= (async () => {
       try {
         const targets = await this.dependencies.deployment.workspace(account.owner).list()
-        account.names = new Map(targets.map(target => [target.id, target.name]))
+        account.machines = new Map(targets.map(target => [target.id, { name: target.name, tools: target.tools }]))
         await Promise.all(
           targets.map(async target => {
             try {
@@ -234,7 +235,7 @@ export class ChatHub {
             }
           }),
         )
-        for (const id of account.sessions.keys()) if (!account.names.has(id)) account.sessions.delete(id)
+        for (const id of account.sessions.keys()) if (!account.machines.has(id)) account.sessions.delete(id)
         account.refreshedAt = Date.now()
         this.rebuild(account)
         for (const [targetId, sessions] of account.sessions)
@@ -257,7 +258,7 @@ export class ChatHub {
 
   private rebuild(account: Account) {
     const items = [...account.sessions.entries()].flatMap(([targetId, sessions]) =>
-      sessions.map(session => ({ targetId, target: account.names.get(targetId) ?? targetId, session })),
+      sessions.map(session => ({ targetId, target: account.machines.get(targetId)?.name ?? targetId, session })),
     )
     const named = handles(items.map(item => ({ ...item, sessionId: item.session.id, name: item.session.name })))
     account.view = items.map(({ targetId, target, session }) => {
@@ -271,7 +272,11 @@ export class ChatHub {
         handle: named.get(`${targetId}/${session.id}`)!,
       }
     })
-    account.targets = [...account.names].map(([id, name]) => ({ id, name, error: account.errors.get(id) ?? null }))
+    account.targets = [...account.machines].map(([id, machine]) => ({
+      id,
+      ...machine,
+      error: account.errors.get(id) ?? null,
+    }))
     const key = JSON.stringify([
       account.view.map(item => ({ ...item, activity: { ...item.activity, observedAt: null } })),
       account.targets,

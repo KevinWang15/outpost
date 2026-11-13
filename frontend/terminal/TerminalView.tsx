@@ -292,6 +292,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
             onClick={() => chooser.current?.click()}
           >
             <ImagePlus size={17} />
+            <span className="terminal-action-label">Image</span>
           </button>
           <button
             className="icon-button"
@@ -301,6 +302,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
             onClick={() => setKeysShown(!keysShown)}
           >
             <Keyboard size={17} />
+            <span className="terminal-action-label">Keys</span>
           </button>
           <button
             className="icon-button"
@@ -310,6 +312,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
             onClick={() => setComposerShown(!composerShown)}
           >
             <MessageSquareText size={17} />
+            <span className="terminal-action-label">Message</span>
           </button>
           <button
             className="icon-button"

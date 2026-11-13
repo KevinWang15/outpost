@@ -3,11 +3,12 @@
 // these schemas; server messages are typed below. See docs/CHAT.md.
 import Type, { type Static } from 'typebox'
 import { chatHost, type ChatEntry, type ChatInfo, type ChatJournalSnapshot, type ChatOrigin } from './chatHost'
+import type { HarnessId } from './harnesses'
 import type { Session } from './model'
-import { sessionInput, sessionUpdate } from './schemas'
+import { conversationSearch, sessionForkInput, sessionInput, sessionUpdate } from './schemas'
 import type { SessionFile } from './sessionFiles'
 
-export const chatProtocol = 1
+export const chatProtocol = 2
 export const chatLimits = {
   text: 32 * 1024,
   members: 24,
@@ -112,6 +113,7 @@ export interface ChatSession extends Session {
 export interface ChatTarget {
   id: string
   name: string
+  tools: HarnessId[]
   error: string | null
 }
 export interface ChannelView extends Channel {
@@ -187,6 +189,10 @@ export const chatClientMessage = Type.Union([
   message('session-switch', { id, ...session, conversation: Type.String({ minLength: 1, maxLength: 128 }) }),
   /** Start a new conversation in the running chat, like /new in a terminal. */
   message('new-conversation', { id, ...session }),
+  /** A new session on a new Git branch and worktree, from this one. */
+  message('session-fork', { id, ...session, input: sessionForkInput }),
+  /** Remove a stopped session from Outpost. */
+  message('session-delete', { id, ...session }),
   message('channel-save', { id, channel: channelInput }),
   message('channel-delete', { id, channelId: uuid }),
   message('channel-history', { id, channelId: uuid, before: Type.Union([uuid, Type.Null()]) }),
@@ -211,6 +217,8 @@ export const chatClientMessage = Type.Union([
     requestId: uuid,
     input: sessionInput,
   }),
+  /** Search the coding tools' history on one machine. */
+  message('conversation-search', { id, targetId, search: conversationSearch }),
 ])
 export type ChatClientMessage = Static<typeof chatClientMessage>
 export type ChannelInput = Static<typeof channelInput>

@@ -1,32 +1,28 @@
-# Outpost Desktop 0.19.0 preview
+# Outpost Desktop 1.0.0 preview
 
-This preview adds a **Chat** window for Outpost's chat mode.
+Outpost's desktop app for macOS and Windows: your sessions in tabbed windows
+with splits, local terminals alongside them, and Outpost Chat in its own window.
 
-## What's changed
-
-- **Chat window:** choose **Chat** on a logged-in server in the home panel. It
-  opens one window per server with your sessions as conversations, channels
-  where sessions reply when mentioned, session-to-session messages and
-  schedules. It signs in with a single-use ticket from the app login.
-- **Open in terminal:** a chat session can continue in a terminal tab of the
-  workspace; the conversation is the same.
-- **Files:** files an agent publishes appear in its chat; **Download** saves
-  them through the save dialog.
+- **Sessions:** **Connect → Outpost Desktop** on the website, or the app's
+  session finder, opens a session in a tab or split. Closing a tab disconnects;
+  the session keeps running on its machine.
+- **Local terminals:** your own shell opens at startup and with **+**. Local
+  tabs work offline and end when closed.
+- **Chat:** choose **Chat** next to a signed-in server, or **File → Chat**. A
+  session that runs in chat can continue in a terminal tab with the same
+  conversation.
+- **Native feel:** pasted screenshots reach the agent, links open in your
+  browser, and bells become desktop notifications.
 
 ## Update
 
-Chat needs an Outpost server with chat mode and **Outpost Terminal 1.3.0**
-on its targets (Required Software installs it). With an older server, the Chat
-window cannot connect; terminal tabs work as before. Claude Code sessions in
-chat also need the **Claude Code chat adapter** from Required Software. The
-desktop bridge remains at **version 9**.
+Use it with an Outpost server whose machines run Outpost Terminal 2.0.0
+(**Required software** installs it). The desktop bridge is version 10.
 
 ## Install
 
-- **Apple silicon Mac:** download `Outpost-0.19.0-mac-arm64.dmg`.
-- **Intel Mac:** download `Outpost-0.19.0-mac-x64.dmg`.
-- **Windows x64:** download `Outpost-0.19.0-windows-x64.exe`.
+- **Apple silicon Mac:** download `Outpost-1.0.0-mac-arm64.dmg`.
+- **Intel Mac:** download `Outpost-1.0.0-mac-x64.dmg`.
+- **Windows x64:** download `Outpost-1.0.0-windows-x64.exe`.
 
 On macOS, drag Outpost to Applications and open it once. These previews have no Developer ID signature or notarization; after the first launch attempt, use **System Settings → Privacy & Security → Open Anyway** if macOS blocks the app. Windows may show **SmartScreen → More info → Run anyway**. `SHA256SUMS` lists the artifact checksums.
-
-Use **Help → Check for updates** to open a newer release. Preview updates install manually.

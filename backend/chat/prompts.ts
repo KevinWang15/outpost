@@ -1,5 +1,7 @@
 // Prompts Outpost writes on behalf of channels, other sessions and schedules.
 // The first line is the header the transcript uses to attribute replayed turns.
+// What is asked comes next, as its first paragraph, and the instructions for
+// answering after it; a conversation's title is the header and that paragraph.
 import { chatLimits, type Channel, type ChannelMessage } from '../../shared/chatApi'
 import { promptHeader } from '../../shared/chatTranscript'
 
@@ -29,36 +31,32 @@ export function channelPrompt(channel: Channel, handle: string, messages: Channe
   }
   const members = channel.members.map(member => `@${member.handle}`).join(', ')
   return [
-    `${promptHeader(`#${channel.name}`)}You are @${handle} in the Outpost channel #${channel.name}${channel.topic ? ` (${channel.topic})` : ''}. Members: ${members}.`,
-    `New messages since your last reply${omitted ? ` (${omitted} older not shown)` : ''}:`,
+    `${promptHeader(`#${channel.name}`)}${lines.join('\n')}`,
     '',
-    ...lines,
-    '',
-    ...(missing.length ? [`Files that could not be attached: ${missing.join('; ')}.`, ''] : []),
+    `You are @${handle} in the Outpost channel #${channel.name}${channel.topic ? ` (${channel.topic})` : ''}. Members: ${members}. Above are the new messages since your last reply, oldest first${omitted ? `; ${omitted} older ones are not shown` : ''}.`,
+    ...(missing.length ? [`Files that could not be attached: ${missing.join('; ')}.`] : []),
     'Your final message is posted to the channel. To hand work to a member, mention them, e.g. @name.',
   ].join('\n')
 }
 
 export function sessionPrompt(from: string, text: string) {
   return [
-    `${promptHeader(`From @${from}`)}Message from the Outpost session @${from}:`,
+    `${promptHeader(`From @${from}`)}${text}`,
     '',
-    text,
-    '',
-    `Your final message is sent back to @${from} as the reply.`,
+    `This is a message from the Outpost session @${from}. Your final message is sent back to @${from} as the reply.`,
   ].join('\n')
 }
 
 export function replyPrompt(from: string, text: string) {
   return [
-    `${promptHeader(`Reply from @${from}`)}Reply from the Outpost session @${from}:`,
+    `${promptHeader(`Reply from @${from}`)}${text || '(no reply text)'}`,
     '',
-    text || '(no reply text)',
+    `This is the reply from the Outpost session @${from}.`,
   ].join('\n')
 }
 
 export function schedulePrompt(name: string, text: string) {
-  return [`${promptHeader(`Scheduled · ${name}`)}Scheduled task "${name}":`, '', text].join('\n')
+  return [`${promptHeader(`Scheduled · ${name}`)}${text}`, '', `This is the scheduled task "${name}".`].join('\n')
 }
 
 /** Short display text for an origin. */

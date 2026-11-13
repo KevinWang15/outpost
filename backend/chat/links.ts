@@ -227,7 +227,7 @@ export class ChatLink {
     } else this.setState('stopped', null)
     if (this.state === 'stopped' || this.state === 'unavailable')
       for (const id of [...this.pending.keys()])
-        this.settle(id, { ok: false, message: this.message ?? 'The chat is not running. Open it to start it.' })
+        this.settle(id, { ok: false, message: this.message ?? 'The session is not running in chat. Start it first.' })
     this.message = null
     this.schedule()
   }
@@ -314,7 +314,7 @@ export class ChatLink {
     const request = { ...message, id } as ChatHostRequest
     return new Promise<LinkResult>(resolve => {
       if (this.disposed || this.state === 'stopped' || this.state === 'unavailable')
-        return resolve({ ok: false, message: this.message ?? 'The chat is not running. Open it to start it.' })
+        return resolve({ ok: false, message: this.message ?? 'The session is not running in chat. Start it first.' })
       const timer = setTimeout(() => {
         const pending = this.pending.get(id)
         if (pending)

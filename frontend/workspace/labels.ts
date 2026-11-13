@@ -1,5 +1,6 @@
-import type { SoftwareId, Target } from '../../shared/model'
+import type { Session, SoftwareId, Target } from '../../shared/model'
 import { harnesses } from '../../shared/harnesses'
+import { pagePaths } from '../../shared/pages'
 
 const systemLabels: Record<string, string> = {
   bash: 'Bash',
@@ -24,3 +25,19 @@ export const address = (target: Target) =>
     : target.environment?.username
       ? `${target.environment.username} on this computer`
       : 'This computer'
+
+/** Where a session runs now, in the words both modes use. */
+export function placeLabel(session: Pick<Session, 'driver' | 'status'>) {
+  if (session.driver === 'chat') return 'In chat'
+  if (session.driver === 'terminal')
+    return session.status === 'attached' ? 'In a terminal · connected' : 'In a terminal'
+  return session.status === 'ready' ? 'Not started' : 'Not running'
+}
+
+/** A session in chat; `start` starts its coding tool there, `schedule` opens a new schedule for it. */
+export function chatHref(targetId: string, sessionId: string, extra: { start?: boolean; schedule?: boolean } = {}) {
+  const query = new URLSearchParams({ target: targetId, session: sessionId })
+  if (extra.start) query.set('start', '1')
+  if (extra.schedule) query.set('schedule', 'new')
+  return `${pagePaths.chat}?${query}`
+}

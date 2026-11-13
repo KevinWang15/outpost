@@ -167,10 +167,16 @@ export function decode(line: Buffer | string): Record<string, unknown> | null {
   }
 }
 
-/** A conversation title from a prompt, without the header Outpost puts on the
- * prompts it composes (channel messages, session messages, schedules). */
-export const promptTitle = (text: unknown, limit = 200) =>
-  clean(typeof text === 'string' ? text.replace(promptHeaderPattern, '') : text, limit)
+/** A conversation title from its first prompt. For a prompt Outpost composed
+ * (channel messages, session messages, schedules) that is its header and what was
+ * asked, the paragraph after the header, without the instructions that follow. */
+export function promptTitle(text: unknown, limit = 200) {
+  if (typeof text !== 'string') return ''
+  const header = text.match(promptHeaderPattern)
+  if (!header) return clean(text, limit)
+  const asked = text.slice(header[0].length).split(/\n\s*\n/)[0]
+  return clean(`${header[1]} · ${asked}`, limit)
+}
 
 /** Collapse whitespace and drop control characters. */
 export function clean(value: unknown, limit = 280) {

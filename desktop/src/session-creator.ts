@@ -107,7 +107,7 @@ export class SessionCreator {
   }
   private selection(current: Creation, value: unknown) {
     const selection = value as SessionCreationSelection
-    if (!selection || !validDesktopId(selection.targetId)) throw new Error('Choose an execution target.')
+    if (!selection || !validDesktopId(selection.targetId)) throw new Error('Choose a machine.')
     return { server: this.server(current, selection.server), targetId: selection.targetId }
   }
   private abortReads(current: Creation) {

@@ -22,7 +22,7 @@ const versionFlags: Record<string, string> = { bash: '--version' }
 function inspectionScript(ids: SoftwareId[], marker: string) {
   return `set -eu
 ${supportingPath}
-[ "$(uname -s)" = Linux ] || { echo "Outpost targets must run Linux." >&2; exit 1; }
+[ "$(uname -s)" = Linux ] || { echo "Outpost machines must run Linux." >&2; exit 1; }
 shell="\${SHELL:-/bin/bash}"
 case "\${shell##*/}" in bash|zsh) ;; *) shell=$(command -v bash || printf /bin/bash) ;; esac
 printf '\\000%s\\000%s\\000%s\\000%s\\000%s\\000' ${quote(marker)} "$HOME" "$(id -u)" "$(id -un)" "$shell"
@@ -173,7 +173,7 @@ echo 'Outpost Terminal ${terminalService.version} installed.'
     return `#!/bin/sh
 set -eu
 # Install the official Claude Code ACP adapter ${chatAgents.claude.version} (${chatAgents.claude.license}) for chat mode.
-# Outpost runs it with this target's own claude, so its bundled copy is removed.
+# Outpost runs it with this machine's own claude, so its bundled copy is removed.
 ${packages}
 command -v curl >/dev/null 2>&1 || install_packages curl ca-certificates
 command -v tar >/dev/null 2>&1 || install_packages tar
@@ -261,7 +261,7 @@ export class SoftwareClient implements SoftwareService {
     )
     const start = stdout.indexOf(`\0${marker}\0`)
     if (code !== 0 || start < 0)
-      throw new AppError(`Software check failed. ${stderr.trim() || 'Check access to the target.'}`, 502)
+      throw new AppError(`Software check failed. ${stderr.trim() || 'Check access to the machine.'}`, 502)
     const fields = stdout.slice(start + marker.length + 2).split('\0')
     const [home, uid, username, shell] = fields.splice(0, 4)
     const environment: ExecutionEnvironment = { home, uid: Number(uid), username, shell }

@@ -74,7 +74,7 @@ port. Sessions' terminal services and chat hosts keep running between
 connections. All their sockets and files are owner-only under `~/.outpost`, so
 the target's user account is the trust boundary. An agent's Outpost tools act
 only as its own session. Installation scripts run only as reviewed and
-submitted. Find conversation returns bounded metadata and excerpts. The
+submitted. Find a conversation returns bounded metadata and excerpts. The
 cross-machine history index keeps message text and embeddings on the Outpost
 server, in each account's own index; native history files are only read, never
 changed. Pasted images are kept under `~/.outpost/clipboard/` (newest 20 per

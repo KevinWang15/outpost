@@ -46,7 +46,7 @@ export class Installations {
     const id = key(owner, targetId)
     return this.serialize(id, async () => {
       if (this.jobs.get(id)?.installation.status === 'running')
-        throw new AppError('Wait for the installation to finish before removing this target.', 409)
+        throw new AppError('Wait for the installation to finish before removing this machine.', 409)
       await remove()
       this.jobs.delete(id)
     })
@@ -56,11 +56,11 @@ export class Installations {
     return this.serialize(id, async () => {
       if (this.closed) throw new AppError('Outpost is shutting down. No new installations can start.', 503)
       const target = await context.workspace.get(context.target.id)
-      if (!target.environment) throw new AppError('Check Required Software before installing.', 409)
+      if (!target.environment) throw new AppError('Check Required software before installing.', 409)
       if (!requiredSoftware(target).includes(softwareId))
-        throw new AppError('Software is not required by this target', 400)
+        throw new AppError('This machine does not need this software.', 400)
       if (this.jobs.get(id)?.installation.status === 'running')
-        throw new AppError('An installation is already running on this target. Open its log to follow progress.', 409)
+        throw new AppError('An installation is already running on this machine. Open its log to follow progress.', 409)
       const installation: Installation = {
         id: randomUUID(),
         softwareId,

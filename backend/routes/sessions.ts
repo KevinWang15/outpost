@@ -3,7 +3,7 @@ import type { ConversationSearch, SessionForkInput, SessionInput, SessionUpdate 
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
-import { createSession } from '../session-actions'
+import { createSession, forkSession } from '../session-actions'
 import {
   acknowledgeInput,
   conversationSearch,
@@ -37,10 +37,7 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
     { schema: { body: sessionForkInput } },
     async (request, reply) => {
       const context = await services.context(request, request.params.targetId)
-      const source = await sessions.get(context, request.params.sessionId)
-      if (!context.target.tools.includes(source.tool))
-        throw new AppError('Add this coding tool to the target before creating a session.', 400)
-      return reply.code(201).send(await sessions.fork(context, source.id, request.body))
+      return reply.code(201).send(await forkSession(services, context, request.params.sessionId, request.body))
     },
   )
   // Name changes apply at once; launch settings when the session next starts.

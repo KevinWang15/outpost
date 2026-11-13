@@ -104,7 +104,7 @@ export default function InstallDialog({
       description={
         job
           ? 'The installation keeps running if you close this dialog.'
-          : 'Review or edit the script. Outpost runs exactly this script on the target.'
+          : 'Review or edit the script. Outpost runs exactly this script on the machine.'
       }
       footer={
         <>

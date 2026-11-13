@@ -1,7 +1,10 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 
-/** Modal dialog. Only explicit Close/Cancel controls dismiss it, so drafts are never lost to a stray click or Escape. */
+/** Modal dialog. Escape closes it until something in it is edited; after that only
+ * its Close and Cancel controls do, so a draft is never lost to a stray key. Dialogs
+ * whose fields hold no draft (a search) set `drafts={false}`. Clicks outside never
+ * close it. */
 export function Dialog({
   title,
   description,
@@ -10,6 +13,7 @@ export function Dialog({
   footer,
   size = 'medium',
   busy = false,
+  drafts = true,
   className = '',
 }: {
   title: ReactNode
@@ -19,9 +23,11 @@ export function Dialog({
   footer?: ReactNode
   size?: 'small' | 'medium' | 'large'
   busy?: boolean
+  drafts?: boolean
   className?: string
 }) {
   const ref = useRef<HTMLDialogElement>(null)
+  const edited = useRef(false)
   const id = useId()
   useEffect(() => {
     ref.current?.showModal()
@@ -30,11 +36,14 @@ export function Dialog({
     <dialog
       ref={ref}
       className={`dialog dialog-${size} ${className}`}
-      closedby="none"
+      closedby="closerequest"
       aria-labelledby={`${id}-title`}
       aria-describedby={description ? `${id}-description` : undefined}
+      onInput={() => (edited.current = true)}
       onCancel={event => {
-        if (event.target === event.currentTarget) event.preventDefault()
+        if (event.target !== event.currentTarget) return
+        event.preventDefault()
+        if (!busy && !(drafts && edited.current)) onClose()
       }}
     >
       <header className="dialog-header">

@@ -164,8 +164,8 @@ export class MachineConnection {
           }
           const message = !this.started
             ? code === 127 || code === 126 || /outpost-terminal: (not found|No such file)/.test(stderr)
-              ? 'Outpost Terminal is missing on this machine. Open Required Software to install it.'
-              : stderr.split('\n').at(-1) || 'Could not connect to the machine. Check access and Required Software.'
+              ? 'Outpost Terminal is missing on this machine. Open Required software to install it.'
+              : stderr.split('\n').at(-1) || 'Could not connect to the machine. Check access and Required software.'
             : 'The connection to the machine was lost.'
           this.lost(message)
         })
@@ -203,7 +203,7 @@ export class MachineConnection {
       if (message.type === 'hello') {
         clearTimeout(timer)
         if (message.version !== terminalService.version || message.protocol !== machineProtocol) {
-          const problem = `This machine runs Outpost Terminal ${message.version}; ${terminalService.version} is required. Open Required Software to install it.`
+          const problem = `This machine runs Outpost Terminal ${message.version}; ${terminalService.version} is required. Open Required software to install it.`
           this.lost(problem, 409)
           return
         }

@@ -11,6 +11,7 @@ import {
 import { Avatar, UserAvatar } from './Avatar'
 import { FileCard, SessionFileViewer } from './Files'
 import { transcriptOf } from './client'
+import { mentions } from '../../shared/chatMentions'
 import Composer from './Composer'
 import { clock, day, elapsed } from './format'
 import { MarkdownContext, useChat } from './context'
@@ -315,6 +316,12 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
               { value: 'all', label: 'Everyone in this channel' },
             ]}
             disabled={channel.members.length ? null : 'Add members in channel settings first.'}
+            hint={text => {
+              const found = mentions(text, handles)
+              return found.everyone || found.handles.length
+                ? null
+                : `No one is mentioned, so no session will reply. Mention one, like @${handles[0] ?? 'name'}, or @all.`
+            }}
             onSend={async (text, files, key) => {
               pinned.current = true
               await client.call({ type: 'channel-post', channelId, key, text, files })

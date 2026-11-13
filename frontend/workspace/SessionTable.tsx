@@ -1,34 +1,13 @@
 import { useState } from 'react'
-import {
-  GitFork,
-  History,
-  LoaderCircle,
-  MessagesSquare,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Search,
-  Square,
-  SquareTerminal,
-  Trash2,
-} from 'lucide-react'
-import { pagePaths } from '../../shared/pages'
+import { LoaderCircle, MessagesSquare, Plus, RefreshCw, Search, SquareTerminal } from 'lucide-react'
 import type { Session } from '../../shared/model'
-import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
+import { harnessLabel } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
-import { Menu } from '../ui/Menu'
 import ActivityBadge from './ActivityBadge'
-import { relativeTime } from './labels'
-
-const statusLabels: Record<Session['status'], string> = {
-  ready: 'Not started',
-  attached: 'Attached',
-  detached: 'Running',
-  stopped: 'Stopped',
-}
+import { placeLabel, relativeTime } from './labels'
+import { SessionMenu, type SessionActions } from './SessionMenu'
 
 export default function SessionTable({
-  targetId,
   sessions,
   error,
   refreshing,
@@ -36,16 +15,12 @@ export default function SessionTable({
   checking,
   onRefresh,
   onCreate,
-  onConnect,
-  onFork,
-  onEdit,
-  onConversations,
+  primary,
+  actionsFor,
   onRestart,
+  onConversations,
   onCheck,
-  onTerminate,
-  onDelete,
 }: {
-  targetId: string
   sessions: Session[] | null
   error: string
   refreshing: boolean
@@ -53,14 +28,12 @@ export default function SessionTable({
   checking: string[]
   onRefresh: () => void
   onCreate: () => void
-  onConnect: (session: Session) => void
-  onFork: (session: Session) => void
-  onEdit: (session: Session) => void
-  onConversations: (session: Session) => void
+  /** The row's main action; the menu offers the other place. */
+  primary: (session: Session) => { kind: 'chat'; href: string } | { kind: 'terminal'; connect: () => void }
+  actionsFor: (session: Session) => SessionActions
   onRestart: (session: Session) => void
+  onConversations: (session: Session) => void
   onCheck: (session: Session) => void
-  onTerminate: (session: Session) => void
-  onDelete: (session: Session) => void
 }) {
   const [filter, setFilter] = useState('')
   const visible = (sessions ?? []).filter(session =>
@@ -98,7 +71,7 @@ export default function SessionTable({
       {sessions === null ? (
         <div className="empty">
           <LoaderCircle className="spin" size={18} />
-          <p>Reading sessions from the target…</p>
+          <p>Reading sessions from the machine…</p>
         </div>
       ) : error ? (
         <div className="empty">
@@ -113,7 +86,7 @@ export default function SessionTable({
         <div className="empty">
           <SquareTerminal size={28} strokeWidth={1.5} />
           <h3>No sessions yet</h3>
-          <p>A session runs a coding tool on this target and keeps running when you disconnect.</p>
+          <p>A session runs a coding tool on this machine and keeps running when you disconnect.</p>
           <button className="button primary" disabled={!canCreate} onClick={onCreate}>
             <Plus size={15} />
             New session
@@ -124,12 +97,12 @@ export default function SessionTable({
           <div className="table-row table-head" role="row">
             <span role="columnheader">Session</span>
             <span role="columnheader">Activity</span>
-            <span role="columnheader">Status</span>
+            <span role="columnheader">Runs in</span>
             <span role="columnheader">Last connected</span>
             <span role="columnheader" />
           </div>
           {visible.map(session => {
-            const running = session.status === 'attached' || session.status === 'detached'
+            const main = primary(session)
             const pending = session.runningRevision !== null && session.runningRevision !== session.config.revision
             const moved = session.conversations.at(-1)!.movedTo
             return (
@@ -168,52 +141,28 @@ export default function SessionTable({
                 <span role="cell">
                   <ActivityBadge session={session} checking={checking.includes(session.id)} onCheck={onCheck} />
                 </span>
-                <span role="cell" className={`status ${session.status}`}>
+                <span role="cell" className={`status ${session.driver ?? ''} ${session.status}`}>
                   <i />
-                  {session.driver === 'chat' ? 'In chat' : statusLabels[session.status]}
+                  {placeLabel(session)}
                 </span>
                 <span role="cell" className="muted">
                   {relativeTime(session.lastConnectedAt)}
                 </span>
                 <div className="row-actions" role="cell">
-                  {session.driver === 'chat' || !supportsTerminal(session.tool) ? (
-                    <a
-                      className="button small"
-                      href={`${pagePaths.chat}?${new URLSearchParams({ target: targetId, session: session.id })}`}
-                    >
+                  {main.kind === 'chat' ? (
+                    <a className="button small" href={main.href}>
                       <MessagesSquare size={14} />
                       Open in chat
                     </a>
                   ) : (
-                    <button className="button primary small" onClick={() => onConnect(session)}>
+                    <button className="button primary small" onClick={main.connect}>
                       Connect
                     </button>
                   )}
-                  <Menu
+                  <SessionMenu
+                    session={session}
                     label={`More actions for ${session.name}`}
-                    items={[
-                      { label: 'Edit session', icon: <Pencil size={14} />, onSelect: () => onEdit(session) },
-                      {
-                        label: 'Conversations',
-                        icon: <History size={14} />,
-                        onSelect: () => onConversations(session),
-                      },
-                      { label: 'Fork', icon: <GitFork size={14} />, onSelect: () => onFork(session) },
-                      'separator',
-                      running
-                        ? {
-                            label: 'Terminate',
-                            icon: <Square size={14} />,
-                            danger: true,
-                            onSelect: () => onTerminate(session),
-                          }
-                        : {
-                            label: 'Delete',
-                            icon: <Trash2 size={14} />,
-                            danger: true,
-                            onSelect: () => onDelete(session),
-                          },
-                    ]}
+                    actions={actionsFor(session)}
                   />
                 </div>
               </div>

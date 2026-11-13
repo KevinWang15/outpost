@@ -5,7 +5,7 @@ import type { useSoftware } from './useSoftware'
 import InstallDialog from './InstallDialog'
 import { shortVersion, softwareLabel } from './labels'
 
-/** Required software, checked live on the target. Collapsed to one line when everything is ready. */
+/** Required software, checked live on the machine. Collapsed to one line when everything is ready. */
 export default function SoftwarePanel({
   targetId,
   state,
@@ -24,9 +24,9 @@ export default function SoftwarePanel({
   const job = report?.installation
   const summary =
     checking && !report
-      ? 'Checking required software…'
+      ? 'Checking…'
       : error
-        ? 'Could not check required software'
+        ? 'Could not check it'
         : ready
           ? report!.software.map(item => `${softwareLabel(item.id)} ${shortVersion(item.version)}`).join(' · ')
           : `${problems.length} ${problems.length === 1 ? 'requirement needs' : 'requirements need'} attention`
@@ -44,7 +44,8 @@ export default function SoftwarePanel({
           ) : (
             <TriangleAlert size={16} />
           )}
-          <strong>{ready ? 'Ready' : 'Software'}</strong>
+          <strong>Required software</strong>
+          {ready && <span className="software-ready">Ready</span>}
           <span>{summary}</span>
           <ChevronDown size={15} className="chevron" />
         </button>
@@ -104,7 +105,7 @@ export default function SoftwarePanel({
               </button>
             </p>
           )}
-          <p className="hint">Checked on the target’s login shell. Coding tools sign in when you first connect.</p>
+          <p className="hint">Checked in the machine’s login shell. Coding tools sign in when you first connect.</p>
         </div>
       )}
       {install && (

@@ -69,7 +69,7 @@ function validLaunch(env: Record<string, string>, args: string) {
   if (Buffer.byteLength(JSON.stringify({ env, args })) > 16 * 1024)
     throw new RegistryError('Environment variables and arguments must fit within 16 KiB.', 400)
   const syntax = spawnSync('bash', ['-n', '-c', `exec "$1" ${args}`], { encoding: 'utf8' })
-  if (syntax.error) throw new RegistryError('Bash is missing on this machine. Open Required Software to install it.')
+  if (syntax.error) throw new RegistryError('Bash is missing on this machine. Open Required software to install it.')
   if (syntax.status !== 0) throw new RegistryError(`Invalid Bash argument syntax: ${syntax.stderr.trim()}`, 400)
 }
 
@@ -152,7 +152,7 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
     const executable = which(adapter.command, environment.PATH)
     if (!executable)
       throw new RegistryError(
-        `${adapter.command} is missing on this machine. Check Required Software and your login PATH.`,
+        `${adapter.command} is missing on this machine. Check Required software and your login PATH.`,
       )
     // A Git failure never allocates a conversation or a session.
     if (input.worktree) createWorktree(input.worktree.source, resolve(path), input.worktree.branch)

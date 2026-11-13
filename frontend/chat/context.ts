@@ -1,5 +1,6 @@
 import { createContext, useContext, useSyncExternalStore } from 'react'
 import type { SessionRef } from '../../shared/chatApi'
+import type { ConversationMatch } from '../../shared/model'
 import type { ChatBridge } from '../../shared/chatBridge'
 import type { ChatClient } from './client'
 import type { SessionFiles } from '../terminal/sessionFiles'
@@ -8,11 +9,12 @@ import type { SessionFilesState } from '../terminal/useSessionFiles'
 export type Selection = ({ kind: 'session' } & SessionRef) | { kind: 'channel'; channelId: string } | null
 
 export type ChatDialog =
-  | { kind: 'session' }
+  /** A new session; with a conversation found on `targetId`, a session that resumes it. */
+  | { kind: 'session'; targetId?: string; conversation?: ConversationMatch }
   | { kind: 'channel'; channelId: string | null }
   | { kind: 'schedule'; scheduleId: string | null; session: SessionRef | null }
-  | ({ kind: 'settings' | 'conversations' } & SessionRef)
-  | ({ kind: 'terminal' } & SessionRef)
+  | ({ kind: 'settings' | 'conversations' | 'fork' | 'stop' | 'delete' | 'chat' | 'terminal' } & SessionRef)
+  | { kind: 'find'; query: string }
 
 export interface ChatApp {
   client: ChatClient

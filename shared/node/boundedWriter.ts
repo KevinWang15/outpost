@@ -36,7 +36,7 @@ export class BoundedWriter {
     if (this.stream.write(data)) return
     this.blocked = true
     this.timer = setTimeout(
-      () => this.fail('The target stopped accepting input. Check the terminal before reconnecting.'),
+      () => this.fail('The machine stopped accepting input. Check the terminal before reconnecting.'),
       this.stallMs,
     )
     this.timer.unref()

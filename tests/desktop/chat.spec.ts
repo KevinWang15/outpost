@@ -96,9 +96,9 @@ test('the chat window signs in with a ticket, chats, and hands a session to a te
   await expect(chat.locator('.reply .markdown').last()).toContainText('Fixture reply to: Hello from the desktop')
   if (process.env.CHAT_SCREENS) await chat.screenshot({ path: `${process.env.CHAT_SCREENS}/11-desktop-chat.png` })
 
-  // Open in terminal ends the chat process, then opens a terminal tab in the workspace.
+  // Continue in a terminal ends the chat process, then opens a terminal tab in the workspace.
   await chat.getByRole('button', { name: 'Actions for Desktop coder' }).click()
-  await chat.getByRole('menuitem', { name: 'Open in terminal' }).click()
+  await chat.getByRole('menuitem', { name: 'Continue in a terminal' }).click()
   const dialog = chat.getByRole('dialog', { name: /Continue Desktop coder in a terminal/ })
   await dialog.getByRole('button', { name: 'Continue in a terminal' }).click()
   await chat

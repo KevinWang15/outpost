@@ -8,19 +8,18 @@ import { relativeTime } from './labels'
 /** A session's conversations, newest first; choosing an earlier one resumes it at the next start. */
 export default function ConversationsDialog({
   session,
-  restarts = false,
+  whileRunning,
   onSwitch,
   onClose,
 }: {
   session: Session
-  /** `onSwitch` stops a running session and starts it again in the chosen conversation. */
-  restarts?: boolean
+  /** What resuming does to the running coding tool; `onSwitch` stops it first. */
+  whileRunning: string
   onSwitch: (conversation: string) => Promise<unknown>
   onClose: () => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const blocked = session.driver !== null && !restarts
   const current = session.conversations.at(-1)!
   const conversations = [...session.conversations].reverse()
 
@@ -53,10 +52,7 @@ export default function ConversationsDialog({
           The current conversation continues in {current.movedTo.name} now. Choose another one to resume here.
         </p>
       )}
-      {blocked && <p className="hint">Terminate the session to resume another conversation.</p>}
-      {restarts && session.driver !== null && (
-        <p className="hint">Resuming another conversation restarts the coding tool in it.</p>
-      )}
+      {session.driver !== null && <p className="hint">{whileRunning}</p>}
       <ul className="choices conversations" aria-label="Conversations">
         {conversations.map(conversation => {
           const isCurrent = conversation === current
@@ -81,7 +77,7 @@ export default function ConversationsDialog({
                 <button
                   className="button small"
                   aria-label={`Resume ${label}`}
-                  disabled={blocked || busy !== null}
+                  disabled={busy !== null}
                   onClick={() => void choose(conversation.id)}
                 >
                   <ArrowRightLeft size={14} />

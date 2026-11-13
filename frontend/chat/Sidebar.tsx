@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import {
   CalendarClock,
   Hash,
+  History,
   LoaderCircle,
-  MessagesSquare,
   Plus,
   Search,
   SquareTerminal,
@@ -12,9 +12,11 @@ import {
 } from 'lucide-react'
 import { describeCron } from '../../shared/cron'
 import { sessionKey, type ChannelView, type ChatSession } from '../../shared/chatApi'
-import { pagePaths } from '../../shared/pages'
+import { AppSidebar } from '../ui/AppSidebar'
+import { placeLabel } from '../workspace/labels'
 import { Avatar } from './Avatar'
 import { useChat, type Selection } from './context'
+import { MachineLink } from './Dialogs'
 import { needsYou, presence, presenceLabel } from './format'
 
 const working = (session: ChatSession) => presence(session) === 'working'
@@ -24,9 +26,11 @@ function SessionRow({ session, active }: { session: ChatSession; active: boolean
   const { select } = useChat()
   const state = presence(session)
   const detail =
-    state === 'idle' || state === 'stopped'
+    state === 'idle'
       ? session.rootDir.split('/').filter(Boolean).at(-1) || session.rootDir
-      : presenceLabel[state]
+      : state === 'stopped' || state === 'terminal'
+        ? placeLabel(session)
+        : presenceLabel[state]
   return (
     <button
       className={`chat-row ${active ? 'active' : ''}`}
@@ -75,9 +79,16 @@ function ChannelRow({ channel, active }: { channel: ChannelView; active: boolean
 }
 
 export default function Sidebar({ selection }: { selection: Selection }) {
-  const { client, open } = useChat()
+  const { client, open, bridge } = useChat()
   const [query, setQuery] = useState('')
   const search = useRef<HTMLInputElement>(null)
+  // Whatever the search led to, or what was just created, shows in the full list.
+  const shown = selection?.kind === 'channel' ? selection.channelId : selection ? sessionKey(selection) : ''
+  const [shownBefore, setShownBefore] = useState(shown)
+  if (shown !== shownBefore) {
+    setShownBefore(shown)
+    setQuery('')
+  }
   useEffect(() => {
     function key(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -113,38 +124,21 @@ export default function Sidebar({ selection }: { selection: Selection }) {
     .filter(group => group.sessions.length || !filter)
   const schedules = [...client.schedules.values()]
   return (
-    <aside className="chat-sidebar">
-      <div className="chat-brand">
-        <a href={pagePaths.chat} className="brand-link">
-          <img src="/outpost.svg" width="24" height="24" alt="" />
-          <span>Outpost</span>
-        </a>
-        <nav className="mode-switch" aria-label="Mode">
-          <a href={pagePaths.chat} aria-current="page">
-            <MessagesSquare size={14} /> Chat
-          </a>
-          <a
-            href={pagePaths.workspace}
-            onClick={() => {
-              try {
-                localStorage.setItem('outpost:mode', 'terminal')
-              } catch {
-                /* Storage is optional. */
-              }
-            }}
-          >
-            <SquareTerminal size={14} /> Terminal
-          </a>
-        </nav>
-      </div>
+    <AppSidebar mode="chat" embedded={Boolean(bridge)}>
       <label className="chat-search">
         <Search size={14} aria-hidden="true" />
         <input
           ref={search}
           value={query}
           placeholder="Search"
-          aria-label="Search sessions and channels"
+          aria-label="Search sessions, channels and conversation history"
           onChange={event => setQuery(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Escape') {
+              setQuery('')
+              event.currentTarget.blur()
+            } else if (event.key === 'Enter' && filter) open({ kind: 'find', query: query.trim() })
+          }}
         />
         {query ? (
           <button className="icon-button" aria-label="Clear search" onClick={() => setQuery('')}>
@@ -230,7 +224,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
           ))}
           {client.sessionsLoaded && !client.targets.length && (
             <p className="hint-row muted">
-              Add a machine in <a href={pagePaths.workspace}>Terminal</a> mode first.
+              <MachineLink>Add a machine</MachineLink> to create sessions on it.
             </p>
           )}
         </section>
@@ -272,10 +266,15 @@ export default function Sidebar({ selection }: { selection: Selection }) {
             })}
           </section>
         )}
+        {filter && client.targets.length > 0 && (
+          <button className="chat-row hint-row" onClick={() => open({ kind: 'find', query: query.trim() })}>
+            <History size={15} /> Search conversation history for “{query.trim()}”
+          </button>
+        )}
       </div>
       <button className="chat-new" disabled={!client.targets.length} onClick={() => open({ kind: 'session' })}>
         <Plus size={15} /> New session
       </button>
-    </aside>
+    </AppSidebar>
   )
 }

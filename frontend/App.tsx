@@ -1,39 +1,29 @@
 import { useEffect, useReducer, useState } from 'react'
-import {
-  LoaderCircle,
-  LogOut,
-  MessagesSquare,
-  Monitor,
-  Plus,
-  Server,
-  Settings2,
-  SquareTerminal,
-  UserRound,
-} from 'lucide-react'
-import { pagePaths } from '../shared/pages'
-import { useDesktopEntry } from './desktop/useDesktopEntry'
-import type { Target, TargetInput } from '../shared/model'
+import { LoaderCircle, Monitor, Plus, Server } from 'lucide-react'
+import type { ConversationResults, ConversationSearch, Target, TargetInput } from '../shared/model'
 import { api } from './api'
-import AccountDialog from './auth/AccountDialog'
 import { useAuth } from './auth/useAuth'
-import ConnectionPreferences from './connect/ConnectionPreferences'
-import { Menu } from './ui/Menu'
+import { rememberMode } from './mode'
+import { AppSidebar } from './ui/AppSidebar'
+import FinderDialog from './workspace/FinderDialog'
 import TargetDialog from './workspace/TargetDialog'
-import TargetView from './workspace/TargetView'
+import TargetView, { type TargetRequest } from './workspace/TargetView'
 import { address } from './workspace/labels'
 
 interface Workspace {
   targets: Target[] | null
   selected: string
   visit: number
+  /** What the newly shown machine should do first, e.g. open a found conversation. */
+  request: TargetRequest | null
 }
 type Action =
   | { type: 'loaded'; targets: Target[] }
-  | { type: 'select'; id: string }
+  | { type: 'select'; id: string; request?: TargetRequest }
   | { type: 'added' | 'updated'; target: Target }
   | { type: 'removed'; id: string }
 
-// Navigation and target changes live together so late responses cannot undo newer choices.
+// Navigation and machine changes live together so late responses cannot undo newer choices.
 function reducer(state: Workspace, action: Action): Workspace {
   const targets = state.targets ?? []
   switch (action.type) {
@@ -46,9 +36,9 @@ function reducer(state: Workspace, action: Action): Workspace {
       }
     }
     case 'select':
-      return { ...state, selected: action.id, visit: state.visit + 1 }
+      return { ...state, selected: action.id, visit: state.visit + 1, request: action.request ?? null }
     case 'added':
-      return { targets: [...targets, action.target], selected: action.target.id, visit: state.visit + 1 }
+      return { targets: [...targets, action.target], selected: action.target.id, visit: state.visit + 1, request: null }
     case 'updated':
       return { ...state, targets: targets.map(target => (target.id === action.target.id ? action.target : target)) }
     case 'removed': {
@@ -57,21 +47,30 @@ function reducer(state: Workspace, action: Action): Workspace {
         targets: remaining,
         selected: state.selected === action.id ? (remaining[0]?.id ?? '') : state.selected,
         visit: state.visit + 1,
+        request: null,
       }
     }
   }
 }
 
+const searchMachine = (id: string, input: ConversationSearch, signal: AbortSignal) =>
+  api<ConversationResults>(`/targets/${id}/conversations/search`, 'POST', input, signal)
+
 export default function App() {
-  const { mode, user, signOut } = useAuth()
-  const openDesktop = useDesktopEntry()
-  const [{ targets, selected, visit }, dispatch] = useReducer(reducer, { targets: null, selected: '', visit: 0 })
+  const { mode } = useAuth()
+  const [{ targets, selected, visit, request }, dispatch] = useReducer(reducer, {
+    targets: null,
+    selected: '',
+    visit: 0,
+    request: null,
+  })
   const [error, setError] = useState('')
-  const [adding, setAdding] = useState(false),
-    [account, setAccount] = useState(false),
-    [connectionPreferences, setConnectionPreferences] = useState(false)
+  // Chat links here with ?add=1 to add a machine.
+  const [adding, setAdding] = useState(() => new URLSearchParams(window.location.search).has('add'))
+  const [finding, setFinding] = useState(false)
   const target = targets?.find(item => item.id === selected)
 
+  useEffect(() => rememberMode('machines'), [])
   useEffect(() => {
     const controller = new AbortController()
     api<Target[]>('/targets', 'GET', undefined, controller.signal).then(
@@ -85,6 +84,7 @@ export default function App() {
   useEffect(() => {
     if (!targets) return
     const url = new URL(window.location.href)
+    url.searchParams.delete('add')
     if (selected) url.searchParams.set('target', selected)
     else url.searchParams.delete('target')
     window.history.replaceState(null, '', url)
@@ -92,42 +92,20 @@ export default function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <a className="brand" href="/">
-          <img src="/outpost.svg" width="28" height="28" alt="" />
-          <span>Outpost</span>
-          <span className="mode">{mode === 'hosted' ? 'Hosted' : 'Local'}</span>
-        </a>
-        <nav className="mode-switch workspace-mode" aria-label="Mode">
-          <a
-            href={pagePaths.chat}
-            onClick={() => {
-              try {
-                localStorage.setItem('outpost:mode', 'chat')
-              } catch {
-                /* Storage is optional. */
-              }
-            }}
-          >
-            <MessagesSquare size={14} /> Chat
-          </a>
-          <a href={pagePaths.workspace} aria-current="page">
-            <SquareTerminal size={14} /> Terminal
-          </a>
-        </nav>
+      <AppSidebar mode="machines">
         <div className="sidebar-heading">
-          <span>Targets</span>
+          <span>Machines</span>
           <button
             className="icon-button"
-            aria-label="Add target"
-            title="Add target"
+            aria-label="Add a machine"
+            title="Add a machine"
             disabled={!targets}
             onClick={() => setAdding(true)}
           >
             <Plus size={16} />
           </button>
         </div>
-        <nav aria-label="Targets">
+        <nav aria-label="Machines">
           {targets?.map(item => {
             const Icon = item.kind === 'ssh' ? Server : Monitor
             return (
@@ -146,50 +124,7 @@ export default function App() {
             )
           })}
         </nav>
-        <div className="sidebar-footer">
-          <button
-            className="connection-preferences"
-            onClick={() => {
-              try {
-                openDesktop()
-              } catch (error) {
-                setError(error instanceof Error ? error.message : 'Could not open Outpost Desktop.')
-              }
-            }}
-          >
-            <Monitor size={16} />
-            Connect Outpost app
-          </button>
-          <button className="connection-preferences" onClick={() => setConnectionPreferences(true)}>
-            <Settings2 size={16} />
-            Connection preferences
-          </button>
-          {mode === 'hosted' && user ? (
-            <Menu
-              label="Account"
-              trigger={
-                <button className="account-button" aria-label="Account">
-                  <span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span>
-                  <span>
-                    <strong>{user.name}</strong>
-                    <small>{user.email}</small>
-                  </span>
-                </button>
-              }
-              items={[
-                { label: 'Account settings', icon: <UserRound size={14} />, onSelect: () => setAccount(true) },
-                {
-                  label: 'Sign out',
-                  icon: <LogOut size={14} />,
-                  onSelect: () => void signOut().catch(problem => setError(problem.message)),
-                },
-              ]}
-            />
-          ) : (
-            <p className="muted">Runs on this computer. Sessions keep running on your targets.</p>
-          )}
-        </div>
-      </aside>
+      </AppSidebar>
       <main className="content">
         {error && (
           <p className="banner error" role="alert">
@@ -206,24 +141,27 @@ export default function App() {
           <TargetView
             key={`${target.id}:${visit}`}
             target={target}
+            request={request}
+            onFind={() => setFinding(true)}
             onUpdated={updated => dispatch({ type: 'updated', target: updated })}
             onRemoved={removed => dispatch({ type: 'removed', id: removed.id })}
           />
         ) : (
           <section className="welcome">
             <img src="/outpost.svg" width="48" height="48" alt="" />
-            <h1>Keep your AI coding sessions running</h1>
+            <h1>Run your coding agents on your own machines</h1>
             <p>
-              Add a Linux machine, start Claude Code, Codex or Kimi in a session, and connect from your browser or your
-              own terminal. Sessions keep running when you disconnect.
+              Outpost keeps Claude Code, Codex, Kimi Code and DeepSeek Harness running in sessions on your Linux
+              machines. Work with a session in a terminal from your browser, Outpost Desktop or your phone, or chat with
+              it and bring several into a channel. Sessions keep running when you close the page.
             </p>
             <button className="button primary" onClick={() => setAdding(true)}>
               <Plus size={15} />
-              Add a target
+              Add a machine
             </button>
             <ol className="steps">
               <li>
-                <strong>Add a target</strong>
+                <strong>Add a machine</strong>
                 <span>
                   {mode === 'hosted'
                     ? 'An SSH server that trusts your Outpost key.'
@@ -235,8 +173,8 @@ export default function App() {
                 <span>Pick a coding tool and a project directory.</span>
               </li>
               <li>
-                <strong>Connect anywhere</strong>
-                <span>Web terminal or Outpost Desktop for macOS and Windows.</span>
+                <strong>Work in a terminal or in chat</strong>
+                <span>Connect a terminal from anywhere, or message the session in Chat.</span>
               </li>
             </ol>
           </section>
@@ -251,8 +189,22 @@ export default function App() {
           }}
         />
       )}
-      {account && <AccountDialog onClose={() => setAccount(false)} />}
-      {connectionPreferences && <ConnectionPreferences onClose={() => setConnectionPreferences(false)} />}
+      {finding && targets && (
+        <FinderDialog
+          machines={targets}
+          initialMachine={selected}
+          search={searchMachine}
+          onOpen={(machineId, sessionId) => {
+            setFinding(false)
+            dispatch({ type: 'select', id: machineId, request: { kind: 'open', sessionId } })
+          }}
+          onLink={(machineId, match) => {
+            setFinding(false)
+            dispatch({ type: 'select', id: machineId, request: { kind: 'link', match } })
+          }}
+          onClose={() => setFinding(false)}
+        />
+      )}
     </div>
   )
 }

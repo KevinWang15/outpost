@@ -19,7 +19,7 @@ const text = (value: unknown, limit: number): value is string => typeof value ==
  * login before and after every request; the dialog never selects a credential. */
 export function sessionCreationServer(summary: SessionCreatorServerSummary, request: Request) {
   const path = (targetId: string) => {
-    if (!validDesktopId(targetId)) throw new Error('Choose an execution target.')
+    if (!validDesktopId(targetId)) throw new Error('Choose a machine.')
     return `/targets/${encodeURIComponent(targetId)}`
   }
   return {

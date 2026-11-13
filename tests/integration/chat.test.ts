@@ -27,7 +27,10 @@ test('chat hub: channels pass the floor, sessions message each other, schedules 
       () => chat.messages().find(message => message.author.kind === 'session' && message.author.handle === 'coder'),
       'the coder reply',
     )
-    assert.match(reply.text, /^Fixture reply to: You are coder in the Outpost channel #release \(Ship 1\.2\)/)
+    assert.match(
+      reply.text,
+      /^Fixture reply to: the user: coder check the build\n\nYou are coder in the Outpost channel #release \(Ship 1\.2\)/,
+    )
     assert.deepEqual(reply.mentions, [])
     assert.equal(reply.hop, 1)
     assert.ok(reply.turn)

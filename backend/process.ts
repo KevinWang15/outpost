@@ -45,7 +45,7 @@ export async function runCommand(
 function runCommandOnce(command: Command, input: string | Uint8Array, options: CommandOptions): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const aborted = () => new AppError(`${command.label} operation aborted`, 502)
-    const timedOut = () => new AppError(`${command.label} operation timed out. Check the target and retry.`, 504)
+    const timedOut = () => new AppError(`${command.label} operation timed out. Check the machine and retry.`, 504)
     if (options.signal?.aborted) return reject(aborted())
     const timeoutMs = options.timeoutMs ?? 30_000
     if (timeoutMs <= 0) return reject(timedOut())
@@ -95,7 +95,7 @@ function runCommandOnce(command: Command, input: string | Uint8Array, options: C
       else {
         size += chunk.length
         if (size > (options.maxOutputBytes ?? 4_000_000))
-          fail(new AppError('Target response exceeded the size limit', 502))
+          fail(new AppError('The machine’s response exceeded the size limit.', 502))
         else stdout.push(chunk)
       }
     })

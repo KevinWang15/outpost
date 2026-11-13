@@ -39,7 +39,7 @@ test('a chat session follows its conversations, resumes an earlier one, and appl
   await page.getByRole('menuitem', { name: 'Edit session' }).click()
   const settings = page.getByRole('dialog', { name: 'Edit Planner' })
   await settings.getByLabel('Name').fill('Release planner')
-  await settings.getByLabel('Chat instructions').fill('Be brief.')
+  await settings.getByLabel('Instructions').fill('Be brief.')
   await settings.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(settings).toBeHidden()
   await expect(page.getByRole('heading', { name: 'Release planner', level: 1 })).toBeVisible()

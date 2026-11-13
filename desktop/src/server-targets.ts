@@ -14,6 +14,6 @@ export function parseServerTargets(value: unknown): DesktopTarget[] {
         item.name.length <= 512,
     )
   )
-    throw new Error('Invalid server target list.')
+    throw new Error('Invalid server machine list.')
   return value.map(({ id, name }) => ({ id, name }))
 }

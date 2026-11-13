@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LoaderCircle, Play, Trash2 } from 'lucide-react'
-import type { DirectorySuggestions, SessionInput } from '../../shared/model'
-import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
+import type { ConversationMatch, ConversationResults, DirectorySuggestions, SessionInput } from '../../shared/model'
 import { describeCron, nextRun, parseCron } from '../../shared/cron'
+import { harnessLabel } from '../../shared/harnesses'
+import { pagePaths } from '../../shared/pages'
 import { sessionKey, type ChannelView, type SessionRef } from '../../shared/chatApi'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
 import ConnectDialog from '../connect/ConnectDialog'
 import { useConnect } from '../connect/useConnect'
 import { Dialog } from '../ui/Dialog'
 import ConversationsDialog from '../workspace/ConversationsDialog'
+import FinderDialog from '../workspace/FinderDialog'
+import ForkDialog from '../workspace/ForkDialog'
 import SessionDialog from '../workspace/SessionDialog'
+import { ContinueInChat, DeleteConfirm, MoveToTerminal, StopConfirm } from '../workspace/SessionMenu'
 import SessionSettingsDialog from '../workspace/SessionSettingsDialog'
 import { plainRef } from './client'
 import { Avatar } from './Avatar'
@@ -41,15 +45,23 @@ function Footer({
   )
 }
 
-export function NewSessionDialog({ onClose }: { onClose: () => void }) {
+/** Create a session that starts in chat, or link a conversation found on a machine. */
+export function NewSessionDialog({
+  machine,
+  conversation = null,
+  onClose,
+}: {
+  machine?: string
+  conversation?: ConversationMatch | null
+  onClose: () => void
+}) {
   const { client, select } = useChat()
-  const [targetId, setTargetId] = useState(client.targets[0]?.id ?? '')
+  const [targetId, setTargetId] = useState(machine ?? client.targets[0]?.id ?? '')
   const [loaded, setLoaded] = useState<{
     targetId: string
     options: SessionCreationOptions | null
     problem: string
   } | null>(null)
-  const [instructions, setInstructions] = useState('')
   const requestId = useRef(crypto.randomUUID())
   useEffect(() => {
     if (!targetId) return
@@ -73,14 +85,18 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
     <SessionDialog
       target={options ? target : null}
       tools={options?.tools ?? []}
-      conversation={null}
+      conversation={conversation}
       directories={directories}
-      description={target ? `On ${target.name}. Opens in chat.` : undefined}
+      description={target ? `On ${target.name}. It starts in chat.` : undefined}
       beforeFields={
         <>
           <label className="field">
             <span className="label">Machine</span>
-            <select value={targetId} onChange={event => setTargetId(event.target.value)}>
+            <select
+              value={targetId}
+              disabled={Boolean(conversation)}
+              onChange={event => setTargetId(event.target.value)}
+            >
               {client.targets.map(item => (
                 <option key={item.id} value={item.id}>
                   {item.name}
@@ -95,30 +111,21 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
           )}
           {problem && <p className="error">{problem}</p>}
           {options && options.missing.length > 0 && (
-            <p className="warning">Install {options.missing.join(', ')} on this machine in Terminal mode first.</p>
+            <p className="warning">
+              Install {options.missing.join(', ')} on {target?.name} first, from{' '}
+              <MachineLink targetId={targetId}>its page in Machines</MachineLink>.
+            </p>
           )}
         </>
-      }
-      afterFields={
-        <label className="field">
-          <span className="label">Instructions</span>
-          <textarea
-            rows={3}
-            maxLength={32000}
-            value={instructions}
-            onChange={event => setInstructions(event.target.value)}
-            placeholder="Optional. A role or rules for this session, e.g. “You review pull requests. Be concise.”"
-          />
-          <small>Added to the coding tool’s own instructions in chat. Claude Code and Codex support this.</small>
-        </label>
       }
       onSave={async (input: SessionInput) => {
         const created = await client.call<SessionRef>({
           type: 'session-create',
           targetId,
           requestId: requestId.current,
-          input: { ...input, instructions: instructions.trim() || null },
+          input,
         })
+        client.restart(created)
         select({ kind: 'session', ...created })
         onClose()
       }}
@@ -153,7 +160,7 @@ export function ConversationsChatDialog({ target: selected, onClose }: { target:
   return (
     <ConversationsDialog
       session={session}
-      restarts
+      whileRunning="Resuming another conversation restarts the coding tool in it."
       onClose={onClose}
       onSwitch={async conversation => {
         if (session.driver) await client.call({ type: 'stop', ...target })
@@ -546,7 +553,8 @@ function BrowserTerminalDialog({ target, onClose }: { target: SessionRef; onClos
   const { client } = useChat()
   const session = client.session(target)
   const connector = useConnect({ id: target.targetId, name: session?.target ?? '' }, onClose)
-  if (session && connector.connection)
+  if (!session) return null
+  if (connector.connection)
     return (
       <ConnectDialog
         target={{ name: session.target }}
@@ -560,116 +568,127 @@ function BrowserTerminalDialog({ target, onClose }: { target: SessionRef; onClos
   // pop-up inside the user's gesture.
   return (
     <MoveToTerminal
-      target={target}
-      onOpen={() => {
-        if (session) connector.connect(session)
-      }}
+      session={session}
+      stop={() => client.call({ type: 'stop', ...target })}
+      onOpen={() => connector.connect(session)}
       onClose={onClose}
     />
   )
 }
 
-/** Move a conversation to a terminal: end the chat's process, then connect. */
+/** Open a session in a terminal; one that runs in chat stops there first. */
 export function TerminalDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
-  const { bridge } = useChat()
+  const { bridge, client } = useChat()
   const target = plainRef(selected)
+  const session = client.session(target)
   if (!bridge) return <BrowserTerminalDialog target={target} onClose={onClose} />
+  if (!session) return null
   return (
     <MoveToTerminal
-      target={target}
+      session={session}
+      stop={() => client.call({ type: 'stop', ...target })}
       onOpen={() => bridge.openTerminal(target.targetId, target.sessionId).then(onClose)}
       onClose={onClose}
     />
   )
 }
 
-function MoveToTerminal({
-  target,
-  onOpen,
-  onClose,
-}: {
-  target: SessionRef
-  onOpen: () => void | Promise<void>
-  onClose: () => void
-}) {
+/** Continue a session that runs in a terminal here in chat. */
+export function ContinueChatDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
   const { client } = useChat()
+  const target = plainRef(selected)
   const session = client.session(target)
-  const info = client.conversations.get(sessionKey(target))?.info
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [ready, setReady] = useState(session?.driver !== 'chat')
-  const working = info?.activity.state === 'working' || info?.activity.state === 'waiting'
   if (!session) return null
-  if (!supportsTerminal(session.tool))
-    return (
-      <Dialog
-        title={harnessLabel(session.tool)}
-        description="This harness runs in Outpost Chat and has no bundled terminal interface."
-        onClose={onClose}
-      >
-        <button className="button" onClick={onClose}>
-          Close
-        </button>
-      </Dialog>
-    )
   return (
-    <Dialog
-      title={ready ? `Open ${session.name} in a terminal` : `Continue ${session.name} in a terminal?`}
-      description={
-        ready
-          ? 'The same conversation continues in the coding tool’s own terminal interface.'
-          : `This ends the chat’s ${harnessLabel(session.tool)} process. The conversation stays and continues in the terminal.`
-      }
-      size="small"
-      busy={busy}
+    <ContinueInChat
+      session={session}
       onClose={onClose}
-      footer={
-        <>
-          <button className="button" disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
-          {ready ? (
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() => {
-                const opening = onOpen()
-                if (!opening) return
-                setBusy(true)
-                opening.catch(problem => {
-                  setError((problem as Error).message)
-                  setBusy(false)
-                })
-              }}
-            >
-              Open terminal
-            </button>
-          ) : (
-            <button
-              className={`button ${working ? 'danger' : 'primary'}`}
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true)
-                setError('')
-                try {
-                  await client.call({ type: 'stop', ...target })
-                  setReady(true)
-                } catch (problem) {
-                  setError((problem as Error).message)
-                }
-                setBusy(false)
-              }}
-            >
-              {working ? 'Stop the current work and continue' : 'Continue in a terminal'}
-            </button>
-          )}
-        </>
-      }
+      onConfirm={async () => {
+        await client.call({ type: 'stop', ...target })
+        client.restart(target)
+      }}
+    />
+  )
+}
+
+export function StopChatDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
+  const { client } = useChat()
+  const target = plainRef(selected)
+  const session = client.session(target)
+  if (!session) return null
+  return <StopConfirm session={session} onClose={onClose} onConfirm={() => client.call({ type: 'stop', ...target })} />
+}
+
+export function DeleteChatDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
+  const { client, select } = useChat()
+  const target = plainRef(selected)
+  const session = client.session(target)
+  if (!session) return null
+  return (
+    <DeleteConfirm
+      session={session}
+      onClose={onClose}
+      onConfirm={async () => {
+        await client.call({ type: 'session-delete', ...target })
+        select(null)
+      }}
+    />
+  )
+}
+
+export function ForkChatDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
+  const { client, select } = useChat()
+  const target = plainRef(selected)
+  const session = client.session(target)
+  if (!session) return null
+  return (
+    <ForkDialog
+      session={session}
+      machine={session.target}
+      onClose={onClose}
+      onSave={async input => {
+        const created = await client.call<SessionRef>({ type: 'session-fork', ...target, input })
+        select({ kind: 'session', ...created })
+        onClose()
+      }}
+    />
+  )
+}
+
+/** Find a conversation on any machine; one Outpost has opens here, others link as new sessions. */
+export function FindChatDialog({ query, onClose }: { query: string; onClose: () => void }) {
+  const { client, select, open } = useChat()
+  return (
+    <FinderDialog
+      machines={client.targets}
+      initialQuery={query}
+      search={(targetId, search) => client.call<ConversationResults>({ type: 'conversation-search', targetId, search })}
+      onOpen={(targetId, sessionId) => {
+        onClose()
+        select({ kind: 'session', targetId, sessionId })
+      }}
+      onLink={(targetId, match) => open({ kind: 'session', targetId, conversation: match })}
+      onClose={onClose}
+    />
+  )
+}
+
+/** A machine's page in Machines; Outpost Desktop's chat window opens it in the browser. */
+export function MachineLink({ targetId, children }: { targetId?: string; children: React.ReactNode }) {
+  const { bridge } = useChat()
+  const href = targetId
+    ? `${pagePaths.workspace}?target=${encodeURIComponent(targetId)}`
+    : `${pagePaths.workspace}?add=1`
+  return (
+    <a
+      href={href}
+      onClick={event => {
+        if (!bridge) return
+        event.preventDefault()
+        bridge.openLink(new URL(href, window.location.origin).href)
+      }}
     >
-      {working && !ready && (
-        <p className="warning">{session.name} is working now. Stopping it interrupts the current turn.</p>
-      )}
-      {error && <p className="error">{error}</p>}
-    </Dialog>
+      {children}
+    </a>
   )
 }

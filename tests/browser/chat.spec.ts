@@ -96,15 +96,17 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
   await expect(
     page.locator('.channel-message').filter({ hasText: 'draft the notes' }).locator('.file-card'),
   ).toContainText('brief.md')
-  const reply = page.locator('.channel-message').filter({ hasText: 'Fixture reply to: You are writer' })
+  const reply = page
+    .locator('.channel-message')
+    .filter({ hasText: 'Fixture reply to: the user: writer draft the notes' })
   await expect(reply).toBeVisible()
   await expect(reply).toContainText('(read brief.md: # Launch brief)')
   await expect(reply.getByRole('button', { name: 'Writer' })).toBeVisible()
   await reply.getByRole('button', { name: 'Steps' }).click()
   await expect(reply.locator('.member-steps')).toContainText('Worked')
 
-  // The same conversation, seen from Terminal mode, is running in chat.
-  await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Terminal' }).click()
+  // The same conversation, seen from Machines, is running in chat.
+  await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Machines' }).click()
   await expect(page).toHaveURL(/\/(\?.*)?$/)
   await expect(page.getByRole('row').filter({ has: page.getByText('Coder', { exact: true }) })).toBeVisible()
 })
@@ -117,7 +119,7 @@ test('a remembered web terminal opens once, from the click that moves a chat ses
   const popups: string[] = []
   context.on('page', popup => popups.push(popup.url()))
   await page.getByRole('button', { name: 'Actions for Handoff' }).click()
-  await page.getByRole('menuitem', { name: 'Open in terminal' }).click()
+  await page.getByRole('menuitem', { name: 'Continue in a terminal' }).click()
   const dialog = page.getByRole('dialog', { name: /in a terminal/ })
   const continueButton = dialog.getByRole('button', { name: 'Continue in a terminal' })
   if (await continueButton.isVisible()) await continueButton.click()

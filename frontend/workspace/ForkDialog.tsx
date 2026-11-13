@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import type { Session, SessionForkInput, Target } from '../../shared/model'
+import type { Session, SessionForkInput } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
 import { Dialog } from '../ui/Dialog'
 
@@ -16,12 +16,13 @@ function suggestedPath(root: string, branch: string) {
 
 export default function ForkDialog({
   session,
-  target,
+  machine,
   onSave,
   onClose,
 }: {
   session: Session
-  target: Target
+  /** The machine's name; the fork runs there too. */
+  machine: string
   onSave: (input: SessionForkInput) => Promise<void>
   onClose: () => void
 }) {
@@ -47,7 +48,7 @@ export default function ForkDialog({
   return (
     <Dialog
       title={`Fork ${session.name}`}
-      description={`Create a fresh ${harnessLabel(session.tool)} session on ${target.name}, with the same arguments and environment.`}
+      description={`Create a fresh ${harnessLabel(session.tool)} session on ${machine}, with the same arguments and environment.`}
       busy={busy}
       onClose={onClose}
       footer={

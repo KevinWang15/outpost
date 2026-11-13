@@ -3,12 +3,11 @@ import type * as acp from '@agentclientprotocol/sdk'
 import {
   ArrowDown,
   ArrowLeft,
-  CalendarClock,
   CircleAlert,
   Files,
   History,
   LoaderCircle,
-  MessageSquarePlus,
+  MessagesSquare,
   NotebookPen,
   Play,
   Square,
@@ -20,7 +19,7 @@ import { linkedFile, type ChatInfo } from '../../shared/chatHost'
 import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { FileViewer } from '../terminal/FileViewer'
 import { useSessionFiles } from '../terminal/useSessionFiles'
-import { Menu } from '../ui/Menu'
+import { SessionMenu } from '../workspace/SessionMenu'
 import { FilesPanel } from './Files'
 import { Avatar } from './Avatar'
 import { transcriptOf } from './client'
@@ -65,32 +64,34 @@ function Settings({ target, info }: { target: SessionRef; info: ChatInfo | null 
   return (
     <div className="session-settings">
       {options.map(option => (
-        <select
-          key={option.id}
-          aria-label={option.name}
-          title={option.description ?? option.name}
-          value={String(option.currentValue)}
-          onChange={event => void set({ type: 'config', ...target, configId: option.id, value: event.target.value })}
-        >
-          {flatOptions(option).map(item => (
-            <option key={item.value} value={item.value}>
-              {item.name}
-            </option>
-          ))}
-        </select>
+        <label key={option.id} className="session-setting" title={option.description ?? option.name}>
+          <span>{option.name}</span>
+          <select
+            value={String(option.currentValue)}
+            onChange={event => void set({ type: 'config', ...target, configId: option.id, value: event.target.value })}
+          >
+            {flatOptions(option).map(item => (
+              <option key={item.value} value={item.value}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
       ))}
       {!options.length && info.modes && (
-        <select
-          aria-label="Mode"
-          value={info.modes.currentModeId}
-          onChange={event => void set({ type: 'mode', ...target, modeId: event.target.value })}
-        >
-          {info.modes.availableModes.map(mode => (
-            <option key={mode.id} value={mode.id}>
-              {mode.name}
-            </option>
-          ))}
-        </select>
+        <label className="session-setting">
+          <span>Mode</span>
+          <select
+            value={info.modes.currentModeId}
+            onChange={event => void set({ type: 'mode', ...target, modeId: event.target.value })}
+          >
+            {info.modes.availableModes.map(mode => (
+              <option key={mode.id} value={mode.id}>
+                {mode.name}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
       {error && (
         <span className="error" title={error}>
@@ -118,14 +119,14 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const pinned = useRef(true)
   const [behind, setBehind] = useState(false)
 
-  // Follow the session while this view shows it. Opening it starts the coding
-  // tool, unless the conversation is running in a terminal. (Views are keyed by
-  // session, so scroll and paging state start fresh for each one.)
+  // Follow the session while this view shows it. Viewing never starts the coding
+  // tool; Start or sending a message does. (Views are keyed by session, so scroll
+  // and paging state start fresh for each one.)
   const loaded = client.sessionsLoaded
   useEffect(() => {
     if (!loaded) return
-    return client.open(target, !terminal)
-  }, [client, target, loaded, terminal])
+    return client.open(target, false)
+  }, [client, target, loaded])
 
   // Mark the latest reply as seen while it is on screen.
   const completion = session?.activity.state === 'finished' ? session.activity.completionId : null
@@ -230,18 +231,12 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               </button>
             )}
             <Settings target={target} info={info} />
-            <Menu
+            <SessionMenu
+              session={session}
               label={`Actions for ${session.name}`}
-              items={[
-                {
-                  label: 'Open in terminal',
-                  disabled: !supportsTerminal(session.tool),
-                  icon: <SquareTerminal size={14} />,
-                  onSelect: () => open({ kind: 'terminal', ...target }),
-                },
-                {
-                  label: 'New conversation',
-                  icon: <MessageSquarePlus size={14} />,
+              actions={{
+                terminal: () => open({ kind: 'terminal', ...target }),
+                newConversation: {
                   disabled: link !== 'live' || running || info?.state !== 'ready',
                   onSelect: () => {
                     setActionError('')
@@ -250,36 +245,13 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                       .catch(error => setActionError((error as Error).message))
                   },
                 },
-                {
-                  label: 'Conversations',
-                  icon: <History size={14} />,
-                  onSelect: () => open({ kind: 'conversations', ...target }),
-                },
-                {
-                  label: 'Edit session',
-                  icon: <NotebookPen size={14} />,
-                  onSelect: () => open({ kind: 'settings', ...target }),
-                },
-                {
-                  label: 'Schedule a task',
-                  icon: <CalendarClock size={14} />,
-                  onSelect: () => open({ kind: 'schedule', scheduleId: null, session: target }),
-                },
-                'separator',
-                stopped || terminal
-                  ? {
-                      label: 'Start chat',
-                      icon: <Play size={14} />,
-                      disabled: terminal,
-                      onSelect: () => client.restart(target),
-                    }
-                  : {
-                      label: 'Stop coding tool',
-                      icon: <Square size={14} />,
-                      danger: true,
-                      onSelect: () => void client.request({ type: 'stop', ...target }),
-                    },
-              ]}
+                conversations: () => open({ kind: 'conversations', ...target }),
+                edit: () => open({ kind: 'settings', ...target }),
+                fork: () => open({ kind: 'fork', ...target }),
+                schedule: () => open({ kind: 'schedule', scheduleId: null, session: target }),
+                stop: () => open({ kind: 'stop', ...target }),
+                remove: () => open({ kind: 'delete', ...target }),
+              }}
             />
           </header>
           <div
@@ -361,19 +333,24 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                 <div className="status-card">
                   <SquareTerminal size={18} />
                   <div>
-                    <strong>This conversation is open in a terminal.</strong>
-                    <p>To continue here, end the terminal process; the conversation itself stays the same.</p>
+                    <strong>{session.name} runs in a terminal.</strong>
+                    <p>Continuing here ends the terminal’s process; the conversation stays the same.</p>
                   </div>
-                  <button className="button small" onClick={() => open({ kind: 'terminal', ...target })}>
-                    Open terminal
-                  </button>
+                  <div className="status-actions">
+                    <button className="button small" onClick={() => open({ kind: 'terminal', ...target })}>
+                      Open terminal
+                    </button>
+                    <button className="button small primary" onClick={() => open({ kind: 'chat', ...target })}>
+                      <MessagesSquare size={14} /> Continue in chat
+                    </button>
+                  </div>
                 </div>
               ) : link === 'unavailable' ? (
                 <div className="status-card error">
                   <CircleAlert size={18} />
                   <div>
                     <strong>The chat could not open.</strong>
-                    <p>{conversation?.message ?? 'Check Required Software for this target.'}</p>
+                    <p>{conversation?.message ?? 'Check Required software on the machine’s page in Machines.'}</p>
                   </div>
                   <button className="button small" onClick={() => client.restart(target)}>
                     Try again
@@ -383,12 +360,19 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                 <div className={`status-card ${info?.error ? 'error' : ''}`}>
                   {info?.error ? <CircleAlert size={18} /> : <Square size={16} />}
                   <div>
-                    <strong>{info?.error ? 'The coding tool stopped.' : 'The coding tool is not running.'}</strong>
-                    {(info?.error || conversation?.message) && <p>{info?.error ?? conversation?.message}</p>}
+                    <strong>{info?.error ? 'The coding tool stopped.' : `${session.name} is not running.`}</strong>
+                    <p>{info?.error ?? 'Start it here, or send a message to start it in chat.'}</p>
                   </div>
-                  <button className="button small primary" onClick={() => client.restart(target)}>
-                    <Play size={14} /> Start
-                  </button>
+                  <div className="status-actions">
+                    {supportsTerminal(session.tool) && (
+                      <button className="button small" onClick={() => open({ kind: 'terminal', ...target })}>
+                        <SquareTerminal size={14} /> Open in a terminal
+                      </button>
+                    )}
+                    <button className="button small primary" onClick={() => client.restart(target)}>
+                      <Play size={14} /> Start in chat
+                    </button>
+                  </div>
                 </div>
               ) : starting ? (
                 <p className="transcript-status">
@@ -440,13 +424,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                 onUpload={file => client.upload(target, file)}
                 commands={(info?.commands ?? []).map(command => ({ value: command.name, label: command.description }))}
                 running={running}
-                disabled={
-                  link === 'unavailable'
-                    ? 'This chat is unavailable.'
-                    : stopped
-                      ? 'Start the coding tool to send messages.'
-                      : null
-                }
+                disabled={link === 'unavailable' ? 'This chat is unavailable.' : null}
                 onSend={async (text, files, key) => {
                   pinned.current = true
                   await client.prompt(target, text, files, key)

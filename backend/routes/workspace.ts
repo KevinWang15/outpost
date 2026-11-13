@@ -58,7 +58,7 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
     async request => {
       const { target } = await services.context(request, request.params.targetId)
       if (!requiredSoftware(target).includes(request.params.softwareId))
-        throw new AppError('Software is not required by this target', 400)
+        throw new AppError('This machine does not need this software.', 400)
       return planInstallation(request.params.softwareId)
     },
   )

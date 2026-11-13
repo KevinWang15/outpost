@@ -690,7 +690,7 @@ export class ChatHost {
     switch (message.type) {
       case 'prompt': {
         if (this.ended || this.info.state === 'failed' || this.info.state === 'exited')
-          return fail('This chat has stopped. Open it again to restart the coding tool.')
+          return fail('The coding tool stopped. Start the session again to continue.')
         const key = message.key
         if (key !== null && !identifier(key)) return fail('Invalid message key.')
         if (!validOrigin(message.origin)) return fail('Invalid message origin.')
@@ -836,7 +836,7 @@ function kept(update: acp.SessionUpdate): acp.SessionUpdate {
 function describeError(error: unknown) {
   if (error instanceof acp.RequestError) {
     const details = record(error.data) && typeof error.data.details === 'string' ? `: ${error.data.details}` : ''
-    if (error.code === -32000) return `Sign in to this coding tool on the target first${details}`
+    if (error.code === -32000) return `Sign in to this coding tool on the machine first${details}`
     return `${error.message}${details}`.slice(0, 2000)
   }
   return (error instanceof Error ? error.message : String(error)).slice(0, 2000)

@@ -156,7 +156,7 @@ class LocalTransport implements Transport {
   readonly label = 'Local shell'
   constructor(private target: Extract<Target, { kind: 'local' }>) {
     if (process.platform !== 'linux')
-      throw new AppError('Local targets require the Outpost server to run on Linux.', 409)
+      throw new AppError('Running sessions on this computer requires the Outpost server to run on Linux.', 409)
   }
   management(mode: LoginMode): Command {
     return { executable: 'sh', args: ['-c', loginScriptShell(mode)], label: this.label }

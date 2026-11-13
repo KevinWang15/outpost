@@ -241,9 +241,12 @@ def run(identifier, params):
             reply = mcp_call(session, 'list_sessions', {})
         elif match:
             reply = mcp_call(session, 'message_session', {'session': match.group(1), 'message': match.group(2)})
-        me = re.search(r'You are @([a-z0-9-]+)', text)
-        members = re.search(r'Members: ([^\n]+)\.', text)
-        last = text.rstrip().split('\n')[-3] if text.count('\n') >= 3 else ''
+        # A channel prompt's messages come after its header, then its instructions
+        # ("You are @…"); quoted earlier replies may contain the same words.
+        body, _, instructions = text.split('\n', 1)[-1].rpartition('\n\nYou are @')
+        me = re.match(r'([a-z0-9-]+)', instructions) if body else None
+        members = re.search(r'Members: ([^\n]+?)\.', instructions) if body else None
+        last = '' if direct else body.split('\n')[-1]
         # "publish NAME" writes a file and publishes it with Outpost's MCP tool.
         published = re.search(r'(?:^|\s)publish ([\w.-]+)', text if direct else last)
         if published:

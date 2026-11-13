@@ -4,14 +4,14 @@ import { desktopTerminal, appConnection } from './terminal-fixture'
 
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)])
 
-async function addTarget(page: Page, name: string) {
+async function addMachine(page: Page, name: string) {
   await page.goto('/')
-  await page.getByRole('button', { name: 'Add target' }).first().click()
-  const dialog = page.getByRole('dialog', { name: 'Add a target' })
+  await page.getByRole('button', { name: 'Add a machine' }).first().click()
+  const dialog = page.getByRole('dialog', { name: 'Add a machine' })
   await dialog.getByRole('radio', { name: 'This computer' }).click()
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByText('Codex').click()
-  await dialog.getByRole('button', { name: 'Add target' }).click()
+  await dialog.getByRole('button', { name: 'Add machine' }).click()
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Required software' })).toContainText('Ready')
 }
@@ -26,8 +26,8 @@ async function createSession(page: Page, name: string, directory: string) {
   await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible()
 }
 
-test('add a target, create a session, and work in the web terminal', async ({ page }) => {
-  await addTarget(page, 'Browser box')
+test('add a machine, create a session, and work in the web terminal', async ({ page }) => {
+  await addMachine(page, 'Browser box')
   await createSession(page, 'Browser session', '~/browser-project')
   const row = page.getByRole('row').filter({ hasText: 'Browser session' })
   await expect(row).toContainText('Not started')
@@ -62,19 +62,19 @@ test('add a target, create a session, and work in the web terminal', async ({ pa
   const closed = popup.waitForEvent('close')
   await terminal.getByRole('button', { name: 'Close terminal' }).click()
   await closed
-  await expect(row).toContainText('Running')
+  await expect(row).toContainText('In a terminal')
 
   await row.getByRole('button', { name: `More actions for Browser session` }).click()
-  await page.getByRole('menuitem', { name: 'Terminate' }).click()
+  await page.getByRole('menuitem', { name: 'Stop coding tool' }).click()
   await page
-    .getByRole('dialog', { name: /Terminate/ })
-    .getByRole('button', { name: 'Terminate' })
+    .getByRole('dialog', { name: 'Stop Browser session?' })
+    .getByRole('button', { name: 'Stop coding tool' })
     .click()
-  await expect(row).toContainText('Stopped')
+  await expect(row).toContainText('Not running')
 })
 
 test('Outpost Desktop hands off a session reference and uses app-owned access', async ({ page, context }) => {
-  await addTarget(page, 'Desktop app box')
+  await addMachine(page, 'Desktop app box')
   await createSession(page, 'Desktop app session', '~/desktop-app-project')
   await page
     .getByRole('row')
@@ -107,7 +107,7 @@ test('Outpost Desktop hands off a session reference and uses app-owned access', 
 test('phones get on-screen keys and a message box', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true })
   const page = await context.newPage()
-  await addTarget(page, 'Phone box')
+  await addMachine(page, 'Phone box')
   await createSession(page, 'Phone session', '~/phone-project')
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
@@ -127,7 +127,7 @@ test('phones get on-screen keys and a message box', async ({ browser }) => {
 })
 
 test('fork suggests a dash-case worktree path and preserves a manual override', async ({ page }) => {
-  await addTarget(page, 'Fork box')
+  await addMachine(page, 'Fork box')
   await createSession(page, 'Fork source', '~/fork-project')
   const source = page.getByRole('row').filter({ hasText: 'Fork source' })
   const root = await source.locator('code').innerText()
@@ -171,7 +171,7 @@ test('fork suggests a dash-case worktree path and preserves a manual override', 
 })
 
 test('a failed worktree creation shows the error and creates no session', async ({ page }) => {
-  await addTarget(page, 'Non-Git box')
+  await addMachine(page, 'Non-Git box')
   await createSession(page, 'Not a repository', '~/not-a-repository')
   const rows = page.getByRole('table', { name: 'Sessions' }).getByRole('row')
   const initialCount = await rows.count()

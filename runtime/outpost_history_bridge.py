@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from outpost_frames import MAGIC, FrameDecoder, control
+from outpost_storage import replace_file
 
 MAX_REQUEST = 65536
 MAX_RESPONSE = 4 * 1024 * 1024
@@ -28,10 +29,7 @@ def bind_session(state, session, path):
     directory = state / 'history-bindings'
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     destination = directory / (session + '.json')
-    temporary = directory / ('.' + uuid.uuid4().hex)
-    temporary.write_text(json.dumps({'socket': path}))
-    temporary.chmod(0o600)
-    os.replace(temporary, destination)
+    replace_file(destination, json.dumps({'socket': path}))
 
 
 class Bridge:

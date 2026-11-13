@@ -36,6 +36,8 @@ def read_json(path, limit=32768):
 
 
 def write_json(path, value):
+    # This module also runs alone as the installed hook, so it cannot import
+    # outpost_storage; keep this the hook's only file writer.
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix='.activity-', dir=path.parent)
     try:

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import outpost_terminal as terminal
 from outpost_frames import MAGIC, FrameDecoder, control, encode
+from outpost_storage import replace_file
 
 PROTOCOL = 1
 MAX_INSTRUCTIONS = 32000
@@ -78,9 +79,7 @@ def write_settings(state, session, instructions):
     instructions = instructions.strip() if instructions else None
     path = settings_path(state, session)
     path.parent.mkdir(mode=0o700, exist_ok=True)
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps({'instructions': instructions or None}) + '\n')
-    os.replace(temporary, path)
+    replace_file(path, json.dumps({'instructions': instructions or None}) + '\n')
     return {'instructions': instructions or None}
 
 

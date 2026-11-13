@@ -6,12 +6,12 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 import time
 import uuid
 from contextlib import contextmanager
 
 from outpost_activity_events import STATES, event_token, file_lock, read_json, write_json
+from outpost_storage import replace_file
 
 MAX_PATHS = 4096
 
@@ -190,16 +190,7 @@ class Activity:
             yield
 
     def save(self, data):
-        descriptor, temporary = tempfile.mkstemp(prefix='.activity-', dir=self.directory)
-        try:
-            with os.fdopen(descriptor, 'w') as stream:
-                json.dump(data, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self.path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+        replace_file(self.path, json.dumps(data))
 
     def snapshot(self):
         found = latest_file(self.adapter, self.selected_session())

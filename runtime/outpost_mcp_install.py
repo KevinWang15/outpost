@@ -2,14 +2,13 @@
 
 import io
 import json
-import os
 import sys
-import tempfile
 import zipfile
 
 import outpost_files
 import outpost_history_tools
 import outpost_mcp
+from outpost_storage import replace_file
 
 
 def install(directory):
@@ -32,15 +31,7 @@ def install(directory):
     path = directory / 'outpost-mcp'
     if path.exists() and path.read_bytes() == data:
         return path
-    descriptor, temporary = tempfile.mkstemp(prefix='.outpost-mcp-', dir=directory)
-    try:
-        with os.fdopen(descriptor, 'wb') as stream:
-            stream.write(data)
-            os.fchmod(stream.fileno(), 0o700)
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    replace_file(path, data, mode=0o700)
     return path
 
 

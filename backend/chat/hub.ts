@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   chatLimits,
@@ -29,6 +29,7 @@ import type { TargetContext } from '../sessions'
 import { ChatLink, type ChatConnector, type LinkEvent } from './links'
 import { channelPrompt, replyPrompt, schedulePrompt, sessionPrompt, summary } from './prompts'
 import { ChatStore } from './store'
+import { writeJsonFile } from '../../shared/node/jsonFile'
 
 export interface ChatClient {
   owner: Owner
@@ -102,9 +103,7 @@ export class ChatHub {
     }
     if (owners.includes(userId)) return
     owners.push(userId)
-    const temporary = `${this.ownersPath}.${randomUUID()}.tmp`
-    await writeFile(temporary, `${JSON.stringify({ version: 1, owners })}\n`, { mode: 0o600 })
-    await rename(temporary, this.ownersPath)
+    await writeJsonFile(this.ownersPath, { version: 1, owners })
   }
 
   private account(owner: Owner): Promise<Account> {

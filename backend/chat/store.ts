@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto'
-import { appendFile, chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Channel, ChannelMessage, Delivery, Schedule } from '../../shared/chatApi'
 import { AppError } from '../errors'
+import { writeJsonFile } from '../../shared/node/jsonFile'
 
 interface ChannelsFile {
   version: 1
@@ -124,14 +124,7 @@ export class ChatStore {
         )
     }
     await this.prepare()
-    const path = join(this.directory, `${file}.json`)
-    const temporary = join(this.directory, `${file}.${randomUUID()}.tmp`)
-    try {
-      await writeFile(temporary, `${JSON.stringify(this[file], null, 2)}\n`, { mode: 0o600, flag: 'wx' })
-      await rename(temporary, path)
-    } finally {
-      await rm(temporary, { force: true })
-    }
+    await writeJsonFile(join(this.directory, `${file}.json`), this[file])
   }
 
   // Channel messages ------------------------------------------------------------------

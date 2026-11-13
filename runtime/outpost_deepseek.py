@@ -1,12 +1,11 @@
 """Official DeepSeek Harness (dsh): persistent ACP Chat and native history."""
 
-import os
 import sys
-import tempfile
 from functools import cached_property
 
 import outpost_deepseek_acp
 from outpost_harness import CodingSessionAdapter
+from outpost_storage import replace_file
 
 
 class DeepSeekAdapter(CodingSessionAdapter):
@@ -46,12 +45,5 @@ class DeepSeekAdapter(CodingSessionAdapter):
         if source is None:
             raise ValueError('DeepSeek ACP adapter source is unavailable')
         if not path.exists() or path.read_text() != source:
-            descriptor, temporary = tempfile.mkstemp(prefix='.deepseek-acp-', dir=path.parent)
-            try:
-                with os.fdopen(descriptor, 'w') as stream:
-                    stream.write(source)
-                os.replace(temporary, path)
-            finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
+            replace_file(path, source)
         return [sys.executable, '-I', str(path), executable], {}

@@ -1,11 +1,10 @@
 """Shared activity helper packaging; native hook configuration belongs to adapters."""
 
-import os
 import shlex
 import sys
-import tempfile
 
 import outpost_activity_events as events
+from outpost_storage import replace_file
 
 
 def install_helper(directory):
@@ -19,14 +18,7 @@ def install_helper(directory):
             return path
     except FileNotFoundError:
         pass
-    descriptor, temporary = tempfile.mkstemp(prefix='.activity-hook-', dir=directory)
-    try:
-        with os.fdopen(descriptor, 'w') as stream:
-            stream.write(source)
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    replace_file(path, source)
     return path
 
 

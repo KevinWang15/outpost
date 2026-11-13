@@ -15,7 +15,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 from contextlib import contextmanager
@@ -27,6 +26,7 @@ import outpost_mcp_install
 import outpost_terminal as terminal
 from outpost_activity_state import Activity
 from outpost_harness import adapters
+from outpost_storage import replace_file
 
 CODING_ADAPTERS = adapters()
 
@@ -129,17 +129,7 @@ def timestamp(value):
 
 
 def save(data):
-    descriptor, temporary = tempfile.mkstemp(prefix='.registry-', dir=STATE)
-    try:
-        with os.fdopen(descriptor, 'w') as stream:
-            json.dump(data, stream, indent=2)
-            stream.write('\n')
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, REGISTRY)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    replace_file(REGISTRY, json.dumps(data, indent=2) + '\n')
 
 
 def validate(data):
@@ -250,10 +240,7 @@ def install_helpers():
                 continue
         except OSError:
             pass
-        temporary = HELPERS / ('.' + name + '.' + uuid.uuid4().hex[:8])
-        temporary.write_text(HELPER)
-        temporary.chmod(0o700)
-        os.replace(temporary, path)
+        replace_file(path, HELPER, mode=0o700)
 
 
 def launch_script(session, executable, activity_generation=None, launch_arguments=()):

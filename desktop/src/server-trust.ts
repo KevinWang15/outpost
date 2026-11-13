@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { desktopOrigin } from '../../shared/desktopAuth'
+import { writeJsonFile } from '../../shared/node/jsonFile'
 
 /** Persistent first-use trust, separate from app logins and terminal grants. */
 export class ServerTrust {
@@ -49,9 +49,7 @@ export class ServerTrust {
     const write = this.writes.then(async () => {
       const next = new Set(this.servers)
       next.add(desktopOrigin(origin))
-      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-      await writeFile(this.path + '.tmp', JSON.stringify([...next]), { mode: 0o600 })
-      await rename(this.path + '.tmp', this.path)
+      await writeJsonFile(this.path, [...next])
       this.servers = next
     })
     this.writes = write.catch(() => {})

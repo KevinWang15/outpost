@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { desktopOrigin, validDesktopCredential, type DesktopCredential } from '../../shared/desktopAuth'
+import { writeJsonFile } from '../../shared/node/jsonFile'
 
 export interface SavedServerLogin extends DesktopCredential {
   origin: string
@@ -59,9 +59,7 @@ export class ServerLoginStore {
     const work = this.writes.then(async () => {
       const next = new Map(this.records)
       update(next)
-      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-      await writeFile(this.path + '.tmp', JSON.stringify([...next.values()]), { mode: 0o600 })
-      await rename(this.path + '.tmp', this.path)
+      await writeJsonFile(this.path, [...next.values()])
       this.records = next
     })
     this.writes = work.catch(() => {})

@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type { TerminalPreferences } from '../../shared/desktop'
+import { writeJsonFile } from '../../shared/node/jsonFile'
 
 export const defaultPreferences: TerminalPreferences = { fontSize: 13.5, sound: true }
 export function validPreferences(value: unknown): value is TerminalPreferences {
@@ -41,9 +41,7 @@ export class Preferences {
     if (!validPreferences(value) || !validShell(localShell)) throw new Error('Invalid terminal preferences.')
     const next = { fontSize: value.fontSize, sound: value.sound }
     const write = this.writes.then(async () => {
-      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-      await writeFile(this.path + '.tmp', JSON.stringify({ ...next, localShell }), { mode: 0o600 })
-      await rename(this.path + '.tmp', this.path)
+      await writeJsonFile(this.path, { ...next, localShell })
       this.value = next
       this.localShell = localShell
     })

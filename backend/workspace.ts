@@ -1,11 +1,11 @@
-import { randomUUID } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Ajv } from 'ajv'
 import type { ExecutionEnvironment, Target, TargetUpdate } from '../shared/model'
 import Type from 'typebox'
 import { targetRecord } from '../shared/schemas'
 import { AppError } from './errors'
+import { writeJsonFile } from '../shared/node/jsonFile'
 
 interface WorkspaceFile {
   version: 2
@@ -54,13 +54,7 @@ export class Workspace {
       await chmod(this.directory, 0o700)
       const data = await this.read()
       const result = await action(data)
-      const temporary = join(this.directory, `workspace.${randomUUID()}.tmp`)
-      try {
-        await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
-        await rename(temporary, this.path)
-      } finally {
-        await rm(temporary, { force: true })
-      }
+      await writeJsonFile(this.path, data)
       return result
     })
     this.queue = work.catch(() => {})

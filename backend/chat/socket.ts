@@ -191,16 +191,22 @@ class Connection implements ChatClient {
         await hub.refreshFor(this.owner)
         return { ok: true }
       }
-      case 'instructions': {
-        // Instructions are session configuration; they apply when the chat next starts.
+      case 'session-update': {
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
-        const session = await this.server.services.sessions.get(context, ref!.sessionId)
-        await this.server.services.sessions.update(context, ref!.sessionId, {
-          revision: session.config.revision,
-          instructions: message.instructions,
-        })
+        const session = await this.server.services.sessions.update(context, ref!.sessionId, message.update)
         await hub.refreshFor(this.owner)
-        return { ok: true }
+        return { ok: true, data: session }
+      }
+      case 'session-switch': {
+        const context = await this.server.services.resolve(this.owner, ref!.targetId)
+        const session = await this.server.services.sessions.switch(context, ref!.sessionId, message.conversation)
+        await hub.refreshFor(this.owner)
+        return { ok: true, data: session }
+      }
+      case 'new-conversation': {
+        const result = await (await this.existing(ref!)).request({ type: 'new' }, 60_000)
+        await hub.refreshFor(this.owner)
+        return result
       }
       case 'channel-save':
         return { ok: true, data: await hub.saveChannel(this.owner, message.channel) }

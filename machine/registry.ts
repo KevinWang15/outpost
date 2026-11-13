@@ -89,14 +89,17 @@ export function session(registry: Registry, id: unknown) {
 export const current = (session: SessionRecord) => session.conversations.at(-1)!
 
 /** The tool made `conversation` current in this session (new, clear, resume).
- * If another session held it, it moves here. */
-export function switchConversation(registry: Registry, sessionId: string, conversation: string) {
+ * If another session held it, it moves here. `replacing` drops the current
+ * conversation, which never started. */
+export function switchConversation(registry: Registry, sessionId: string, conversation: string, replacing = false) {
   const target = session(registry, sessionId)
   if (!harness(target.tool).validId(conversation))
     throw new RegistryError('The coding tool reported an invalid conversation ID.')
   const latest = current(target)
   if (latest.id === conversation && !latest.movedTo) return false
-  target.conversations = target.conversations.filter(item => item.id !== conversation)
+  target.conversations = target.conversations.filter(
+    item => item.id !== conversation && !(replacing && item === latest),
+  )
   target.conversations.push({ id: conversation, startedAt: now(), movedTo: null })
   target.conversations = target.conversations.slice(-200)
   for (const other of registry.sessions)

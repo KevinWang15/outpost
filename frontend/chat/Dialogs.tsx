@@ -8,7 +8,9 @@ import type { SessionCreationOptions } from '../../shared/sessionCreation'
 import ConnectDialog from '../connect/ConnectDialog'
 import { useConnect } from '../connect/useConnect'
 import { Dialog } from '../ui/Dialog'
+import ConversationsDialog from '../workspace/ConversationsDialog'
 import SessionDialog from '../workspace/SessionDialog'
+import SessionSettingsDialog from '../workspace/SessionSettingsDialog'
 import { plainRef } from './client'
 import { Avatar } from './Avatar'
 import { useChat } from './context'
@@ -125,73 +127,40 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
-export function InstructionsDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
+export function SessionSettingsChatDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
   const { client } = useChat()
   const target = plainRef(selected)
   const session = client.session(target)
-  const [text, setText] = useState(session?.config.instructions ?? '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const running = session?.driver === 'chat'
-  async function save(restart: boolean) {
-    setBusy(true)
-    setError('')
-    try {
-      await client.call({ type: 'instructions', ...target, instructions: text.trim() || null })
-      if (restart) {
+  if (!session) return null
+  return (
+    <SessionSettingsDialog
+      session={session}
+      onClose={onClose}
+      onSave={update => client.call({ type: 'session-update', ...target, update })}
+      onRestart={async () => {
         await client.call({ type: 'stop', ...target })
         client.restart(target)
-      }
-      onClose()
-    } catch (problem) {
-      setError((problem as Error).message)
-      setBusy(false)
-    }
-  }
+      }}
+    />
+  )
+}
+
+export function ConversationsChatDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
+  const { client } = useChat()
+  const target = plainRef(selected)
+  const session = client.session(target)
+  if (!session) return null
   return (
-    <Dialog
-      title="Session instructions"
-      description={
-        session ? `Added to ${harnessLabel(session.tool)}’s own instructions when this chat starts.` : undefined
-      }
-      busy={busy}
+    <ConversationsDialog
+      session={session}
+      restarts
       onClose={onClose}
-      footer={
-        <>
-          <button className="button" disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
-          {running && (
-            <button className="button" disabled={busy} onClick={() => void save(true)}>
-              Save and restart
-            </button>
-          )}
-          <button className="button primary" disabled={busy} onClick={() => void save(false)}>
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </>
-      }
-    >
-      <div className="form">
-        <textarea
-          rows={8}
-          maxLength={32000}
-          value={text}
-          autoFocus
-          onChange={event => setText(event.target.value)}
-          placeholder="You are the release manager. Keep answers short and list risks first."
-        />
-        {running && (
-          <p className="hint">
-            The running chat keeps its current instructions until it restarts. The conversation continues either way.
-          </p>
-        )}
-        {session?.tool === 'kimi' && (
-          <p className="warning">Kimi Code does not accept session instructions over ACP yet.</p>
-        )}
-        {error && <p className="error">{error}</p>}
-      </div>
-    </Dialog>
+      onSwitch={async conversation => {
+        if (session.driver) await client.call({ type: 'stop', ...target })
+        await client.call({ type: 'session-switch', ...target, conversation })
+        client.restart(target)
+      }}
+    />
   )
 }
 

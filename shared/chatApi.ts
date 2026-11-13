@@ -4,7 +4,7 @@
 import Type, { type Static } from 'typebox'
 import { chatHost, type ChatEntry, type ChatInfo, type ChatJournalSnapshot, type ChatOrigin } from './chatHost'
 import type { Session } from './model'
-import { sessionInput } from './schemas'
+import { sessionInput, sessionUpdate } from './schemas'
 import type { SessionFile } from './sessionFiles'
 
 export const chatProtocol = 1
@@ -177,7 +177,12 @@ export const chatClientMessage = Type.Union([
   message('mode', { id, ...session, modeId: Type.String({ minLength: 1, maxLength: 200 }) }),
   message('seen', { ...session, completionId: Type.String({ pattern: '^[0-9a-f]{64}$' }) }),
   message('stop', { id, ...session }),
-  message('instructions', { id, ...session, instructions: Type.Union([text(32_000), Type.Null()]) }),
+  /** Edit the session; launch configuration applies when it next starts. */
+  message('session-update', { id, ...session, update: sessionUpdate }),
+  /** Make an earlier conversation current; refused while the session runs. */
+  message('session-switch', { id, ...session, conversation: Type.String({ minLength: 1, maxLength: 128 }) }),
+  /** Start a new conversation in the running chat, like /new in a terminal. */
+  message('new-conversation', { id, ...session }),
   message('channel-save', { id, channel: channelInput }),
   message('channel-delete', { id, channelId: uuid }),
   message('channel-history', { id, channelId: uuid, before: Type.Union([uuid, Type.Null()]) }),

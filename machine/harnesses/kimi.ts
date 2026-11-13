@@ -7,7 +7,7 @@ import type { SessionRecord } from '../../shared/model'
 import { shellJoin } from '../../shared/shell'
 import { withRpc } from '../rpc'
 import { locked, readJson, statePath, writeJson } from '../state'
-import { clean, foldLines, glob, isRecord, lines, strings, timestamp, type Scan } from '../stores'
+import { clean, foldLines, glob, isRecord, lines, promptTitle, strings, timestamp, type Scan } from '../stores'
 import {
   Harness,
   historyMessage,
@@ -57,7 +57,7 @@ export class Kimi extends Harness {
     return {
       id,
       root: this.index(home).get(id) ?? '',
-      title: clean(state.title || state.lastPrompt) || id,
+      title: clean(state.title) || promptTitle(state.lastPrompt, 280) || id,
       created: timestamp(state.createdAt),
       updated: timestamp(state.updatedAt),
       history,
@@ -104,7 +104,7 @@ export class Kimi extends Harness {
     const transcript = this.transcript(session, conversation)
     if (!transcript) return null
     const state = scan.document(join(dirname(dirname(dirname(transcript))), 'state.json'))
-    return clean(state.title || state.lastPrompt, 200) || null
+    return clean(state.title, 200) || promptTitle(state.lastPrompt) || null
   }
 
   activity(record: Record<string, unknown>): NativeActivity | null {

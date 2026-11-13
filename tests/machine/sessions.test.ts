@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { currentConversation, type SessionInput } from '../../shared/model'
 import { checkImage, saveImage } from '../../machine/files'
-import { readRegistry } from '../../machine/registry'
+import { changeRegistry, readRegistry, switchConversation } from '../../machine/registry'
 import {
   createSession,
   deleteSession,
@@ -250,4 +250,17 @@ test('pasted images: valid types and sizes, private files, the newest 20 kept', 
   assert.throws(() => checkImage(crypto.randomUUID(), 'png', 1), { status: 404 })
   await deleteSession(session.id)
   assert.equal(existsSync(directory), false, 'deleting a session removes its images')
+})
+
+test('a conversation the tool started fresh replaces the one that never started; a switch keeps the timeline', async t => {
+  const home = machine(t)
+  const [unused, first, second] = ['4', '5', '6'].map(digit => `${digit.repeat(8)}-1111-4111-8111-111111111111`)
+  const session = record(home, 'claude', unused)
+  await register(session)
+  await changeRegistry(registry => switchConversation(registry, session.id, first, true))
+  await changeRegistry(registry => switchConversation(registry, session.id, second))
+  assert.deepEqual(
+    readRegistry().sessions[0].conversations.map(item => item.id),
+    [first, second],
+  )
 })

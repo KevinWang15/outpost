@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import {
   GitFork,
+  History,
   LoaderCircle,
   MessagesSquare,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -36,6 +38,9 @@ export default function SessionTable({
   onCreate,
   onConnect,
   onFork,
+  onEdit,
+  onConversations,
+  onRestart,
   onCheck,
   onTerminate,
   onDelete,
@@ -50,6 +55,9 @@ export default function SessionTable({
   onCreate: () => void
   onConnect: (session: Session) => void
   onFork: (session: Session) => void
+  onEdit: (session: Session) => void
+  onConversations: (session: Session) => void
+  onRestart: (session: Session) => void
   onCheck: (session: Session) => void
   onTerminate: (session: Session) => void
   onDelete: (session: Session) => void
@@ -122,6 +130,8 @@ export default function SessionTable({
           </div>
           {visible.map(session => {
             const running = session.status === 'attached' || session.status === 'detached'
+            const pending = session.runningRevision !== null && session.runningRevision !== session.config.revision
+            const moved = session.conversations.at(-1)!.movedTo
             return (
               <div className="table-row" role="row" key={session.id}>
                 <div className="session-name" role="cell">
@@ -132,7 +142,28 @@ export default function SessionTable({
                       {harnessLabel(session.tool)}
                     </span>
                   </div>
+                  {session.title && session.title !== session.name && (
+                    <span className="session-title" title={session.title}>
+                      {session.title}
+                    </span>
+                  )}
                   <code title={session.rootDir}>{session.rootDir}</code>
+                  {pending && (
+                    <span className="session-pending">
+                      Changes apply at the next start
+                      <button className="button small" onClick={() => onRestart(session)}>
+                        Restart now
+                      </button>
+                    </span>
+                  )}
+                  {moved && (
+                    <span className="session-pending">
+                      Its conversation continues in {moved.name}
+                      <button className="button small" onClick={() => onConversations(session)}>
+                        Choose another
+                      </button>
+                    </span>
+                  )}
                 </div>
                 <span role="cell">
                   <ActivityBadge session={session} checking={checking.includes(session.id)} onCheck={onCheck} />
@@ -161,6 +192,12 @@ export default function SessionTable({
                   <Menu
                     label={`More actions for ${session.name}`}
                     items={[
+                      { label: 'Edit session', icon: <Pencil size={14} />, onSelect: () => onEdit(session) },
+                      {
+                        label: 'Conversations',
+                        icon: <History size={14} />,
+                        onSelect: () => onConversations(session),
+                      },
                       { label: 'Fork', icon: <GitFork size={14} />, onSelect: () => onFork(session) },
                       'separator',
                       running

@@ -96,6 +96,23 @@ does not apply custom session instructions or replay imported native messages;
 Outpost retains messages from its own Chat journal, and earlier native messages
 remain accessible through history MCP. See the [official ACP contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md).
 
+## Edit a session and its conversations
+
+**Edit session** in a session’s **…** menu (in chat, the actions menu in its
+header) changes its name, chat instructions, arguments and environment. The
+name changes at once. The rest applies when the session next starts: a running
+session shows **Changes apply at the next start** with **Restart now**, which
+restarts it in the same conversation. The coding tool and project directory stay
+fixed; fork the session to work in another directory.
+
+A session keeps the conversations its coding tool works in. Starting a new one
+inside the tool (`/new`, `/clear`, or resuming another), or **New conversation**
+in chat, adds it, and it becomes the one the session resumes. The session keeps
+your name for it; the tool’s own title for the current conversation is shown
+beneath. **Conversations** lists them all and resumes an earlier one. A
+conversation resumed in another session moves there, and the session it left
+asks which conversation to continue.
+
 ## Fork a session
 
 Choose **Fork** in a session’s **…** menu to create a new Git branch and

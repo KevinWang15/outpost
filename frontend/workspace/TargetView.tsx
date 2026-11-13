@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { Monitor, Pencil, Plus, Search, Server, Trash2 } from 'lucide-react'
-import type { ConversationMatch, Session, SessionInput, Target, TargetUpdate } from '../../shared/model'
+import type { ConversationMatch, Session, SessionInput, SessionUpdate, Target, TargetUpdate } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import { api } from '../api'
@@ -9,9 +9,11 @@ import { useConnect } from '../connect/useConnect'
 import { Confirm } from '../ui/Dialog'
 import { Menu } from '../ui/Menu'
 import { useToast } from '../ui/toast-context'
+import ConversationsDialog from './ConversationsDialog'
 import FinderDialog from './FinderDialog'
 import ForkDialog from './ForkDialog'
 import SessionDialog from './SessionDialog'
+import SessionSettingsDialog from './SessionSettingsDialog'
 import SessionTable from './SessionTable'
 import SoftwarePanel from './SoftwarePanel'
 import TargetDialog from './TargetDialog'
@@ -25,6 +27,7 @@ type Panel =
   | { kind: 'session'; conversation: ConversationMatch | null }
   | { kind: 'finder' }
   | { kind: 'fork'; session: Session }
+  | { kind: 'settings' | 'conversations'; session: Session }
   | { kind: 'edit' }
   | { kind: 'remove' }
   | { kind: 'terminate' | 'delete'; session: Session }
@@ -61,6 +64,20 @@ export default function TargetView({
   function connect(session: Session) {
     close()
     connectFlow.connect(session)
+  }
+
+  const sessionPath = (session: Session) => `/targets/${target.id}/sessions/${session.id}`
+
+  /** Stop the session and start it again in the same conversation with its current settings. */
+  async function restart(session: Session) {
+    try {
+      await api(`${sessionPath(session)}/terminate`, 'POST')
+      if (session.driver === 'chat') toast(`Stopped ${session.name}. Open it in chat to start it again.`)
+      else connect(session)
+      await refresh()
+    } catch (problem) {
+      toast((problem as Error).message, 'error')
+    }
   }
 
   async function check(session: Session) {
@@ -140,6 +157,9 @@ export default function TargetView({
         onCreate={() => setPanel({ kind: 'session', conversation: null })}
         onConnect={connect}
         onFork={session => setPanel({ kind: 'fork', session })}
+        onEdit={session => setPanel({ kind: 'settings', session })}
+        onConversations={session => setPanel({ kind: 'conversations', session })}
+        onRestart={session => void restart(session)}
         onCheck={session => void check(session)}
         onTerminate={session => setPanel({ kind: 'terminate', session })}
         onDelete={session => setPanel({ kind: 'delete', session })}
@@ -179,6 +199,27 @@ export default function TargetView({
             close()
             toast(`Created ${session.name}`)
             void refresh()
+          }}
+        />
+      )}
+      {panel?.kind === 'settings' && (
+        <SessionSettingsDialog
+          session={panel.session}
+          onClose={close}
+          onSave={async (update: SessionUpdate) => {
+            await api<Session>(sessionPath(panel.session), 'PATCH', update)
+            await refresh()
+          }}
+          onRestart={() => restart(panel.session)}
+        />
+      )}
+      {panel?.kind === 'conversations' && (
+        <ConversationsDialog
+          session={panel.session}
+          onClose={close}
+          onSwitch={async conversation => {
+            await api<Session>(`${sessionPath(panel.session)}/switch`, 'POST', { conversation })
+            await refresh()
           }}
         />
       )}

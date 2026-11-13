@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, sep } from 'node:path'
 import type { SessionRecord } from '../../shared/model'
 import { shellJoin } from '../../shared/shell'
 import { statePath } from '../state'
-import { clean, foldLines, glob, isRecord, strings, timestamp, type Scan } from '../stores'
+import { clean, foldLines, glob, isRecord, promptTitle, strings, timestamp, type Scan } from '../stores'
 import {
   Harness,
   historyMessage,
@@ -60,7 +60,7 @@ export class Claude extends Harness {
         value.created ??= timestamp(record.timestamp)
         if (record.type === 'custom-title') value.custom = clean(record.customTitle, 200)
         else if (!value.title && record.type === 'user' && isRecord(record.message))
-          value.title = clean([...strings(record.message.content)].join(' '), 200)
+          value.title = promptTitle([...strings(record.message.content)].join(' '))
         return value
       },
     )

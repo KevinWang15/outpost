@@ -79,7 +79,8 @@ export async function removeHome(directory: string, home: string) {
   } finally {
     state.directory = previous
   }
-  await rm(directory, { recursive: true, force: true })
+  // Processes just killed (an app's helpers, say) may still be writing into it.
+  await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 }
 
 /** A minimal terminal client speaking the terminal protocol. */

@@ -1,10 +1,11 @@
-import { useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import type { ConversationMatch, SessionInput, Target } from '../../shared/model'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import { Dialog } from '../ui/Dialog'
 import DirectoryInput, { type DirectorySource } from './DirectoryInput'
+import LaunchFields from './LaunchFields'
+import { readLaunch } from './launch'
 
 /** Create a session, or link an existing conversation found by Find conversations. */
 export default function SessionDialog({
@@ -31,24 +32,19 @@ export default function SessionDialog({
 }) {
   const [selectedTool, setTool] = useState<HarnessId>()
   const tool = conversation?.tool ?? (selectedTool && tools.includes(selectedTool) ? selectedTool : tools[0])
-  const [variables, setVariables] = useState<number[]>([])
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('')
-  const nextVariable = useRef(0)
   const available = target && (conversation ? tools.includes(conversation.tool) : Boolean(tool))
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (busy || !available) return
     const data = new FormData(event.currentTarget)
-    const names = data.getAll('envName').map(String),
-      values = data.getAll('envValue').map(String)
-    const args = String(data.get('args') ?? '')
     setBusy(true)
     setError('')
     try {
       if (!tool) throw new Error('Install a coding tool on this target first.')
-      if (new Set(names).size !== names.length) throw new Error('Environment variable names must be unique.')
+      const { args, env } = readLaunch(data)
       await onSave({
         tool,
         name: String(data.get('name')).trim(),
@@ -57,7 +53,7 @@ export default function SessionDialog({
           ? { conversation: conversation.conversation, storage: conversation.storage }
           : { createDirectory: data.get('createDirectory') === 'on' }),
         ...(args ? { args } : {}),
-        ...(names.length ? { env: Object.fromEntries(names.map((name, index) => [name, values[index]])) } : {}),
+        ...(Object.keys(env).length ? { env } : {}),
       })
     } catch (problem) {
       setError((problem as Error).message)
@@ -143,59 +139,7 @@ export default function SessionDialog({
                 </>
               )}
               {afterFields}
-              <details className="disclosure">
-                <summary>
-                  <ChevronRight size={14} />
-                  Arguments and environment
-                </summary>
-                <label className="field">
-                  <span className="label">Arguments</span>
-                  <textarea name="args" rows={2} maxLength={8192} spellCheck={false} placeholder='--model "$MODEL"' />
-                  <small>
-                    Appended to the {tool ? harnessLabel(tool) : 'tool'} command. Bash quoting and expansion apply.
-                  </small>
-                </label>
-                <div className="field">
-                  <span className="label">Environment variables</span>
-                  {variables.map((id, index) => (
-                    <div className="env-row" key={id}>
-                      <input
-                        name="envName"
-                        aria-label={`Variable ${index + 1} name`}
-                        required
-                        pattern="[A-Za-z_][A-Za-z0-9_]*"
-                        maxLength={128}
-                        placeholder="NAME"
-                        spellCheck={false}
-                      />
-                      <input
-                        name="envValue"
-                        aria-label={`Variable ${index + 1} value`}
-                        maxLength={4096}
-                        placeholder="value"
-                        spellCheck={false}
-                      />
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label={`Remove variable ${index + 1}`}
-                        onClick={() => setVariables(rows => rows.filter(row => row !== id))}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="button small"
-                    disabled={variables.length >= 32}
-                    onClick={() => setVariables(rows => [...rows, nextVariable.current++])}
-                  >
-                    <Plus size={14} />
-                    Add variable
-                  </button>
-                </div>
-              </details>
+              <LaunchFields tool={tool} />
             </>
           )}
         </fieldset>

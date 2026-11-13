@@ -2,6 +2,7 @@
 // JSON documents, path patterns and conversation text. Nothing here writes.
 import { closeSync, lstatSync, openSync, readSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
+import { promptHeaderPattern } from '../shared/chatTranscript'
 
 export class SearchLimit extends Error {}
 
@@ -165,6 +166,11 @@ export function decode(line: Buffer | string): Record<string, unknown> | null {
     return null
   }
 }
+
+/** A conversation title from a prompt, without the header Outpost puts on the
+ * prompts it composes (channel messages, session messages, schedules). */
+export const promptTitle = (text: unknown, limit = 200) =>
+  clean(typeof text === 'string' ? text.replace(promptHeaderPattern, '') : text, limit)
 
 /** Collapse whitespace and drop control characters. */
 export function clean(value: unknown, limit = 280) {

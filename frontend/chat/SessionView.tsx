@@ -6,7 +6,9 @@ import {
   CalendarClock,
   CircleAlert,
   Files,
+  History,
   LoaderCircle,
+  MessageSquarePlus,
   NotebookPen,
   Play,
   Square,
@@ -154,6 +156,8 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const files = useSessionFiles(access, client.status === 'live', changes)
   const [panel, setPanel] = useState(false)
   const [viewing, setViewing] = useState<string | null>(null)
+  /** A header action that failed, shown until dismissed. */
+  const [actionError, setActionError] = useState('')
 
   const actions: ConversationActions = useMemo(
     () => ({
@@ -188,6 +192,8 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const starting = link === 'starting' || info?.state === 'starting'
   const stopped = link === 'stopped' || info?.state === 'exited' || info?.state === 'failed'
   const usage = info?.usage
+  const moved = session.conversations.at(-1)!.movedTo
+  const pending = session.runningRevision !== null && session.runningRevision !== session.config.revision
   return (
     <ConversationContext.Provider value={actions}>
       <FilesContext.Provider value={fileContext}>
@@ -199,6 +205,11 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
             <Avatar id={session.id} name={session.name} tool={session.tool} session={session} size={32} />
             <div className="conversation-title">
               <h1>{session.name}</h1>
+              {session.title && session.title !== session.name && (
+                <p className="conversation-tool-title" title={session.title}>
+                  {session.title}
+                </p>
+              )}
               <p>
                 <span className={`presence-label ${state}`}>{presenceLabel[state]}</span>
                 {' · '}
@@ -229,9 +240,25 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                   onSelect: () => open({ kind: 'terminal', ...target }),
                 },
                 {
-                  label: session.config.instructions ? 'Edit instructions' : 'Add instructions',
+                  label: 'New conversation',
+                  icon: <MessageSquarePlus size={14} />,
+                  disabled: link !== 'live' || running || info?.state !== 'ready',
+                  onSelect: () => {
+                    setActionError('')
+                    void client
+                      .call({ type: 'new-conversation', ...target })
+                      .catch(error => setActionError((error as Error).message))
+                  },
+                },
+                {
+                  label: 'Conversations',
+                  icon: <History size={14} />,
+                  onSelect: () => open({ kind: 'conversations', ...target }),
+                },
+                {
+                  label: 'Edit session',
                   icon: <NotebookPen size={14} />,
-                  onSelect: () => open({ kind: 'instructions', ...target }),
+                  onSelect: () => open({ kind: 'settings', ...target }),
                 },
                 {
                   label: 'Schedule a task',
@@ -285,7 +312,52 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               {shown.map(turn => (
                 <Turn key={turn.id} turn={turn} avatar={avatar} />
               ))}
-              {terminal ? (
+              {actionError && (
+                <div className="status-card error" role="alert">
+                  <CircleAlert size={18} />
+                  <div>
+                    <strong>{actionError}</strong>
+                  </div>
+                  <button className="button small" onClick={() => setActionError('')}>
+                    Dismiss
+                  </button>
+                </div>
+              )}
+              {pending && !stopped && (
+                <div className="status-card">
+                  <NotebookPen size={18} />
+                  <div>
+                    <strong>Changes apply at the next start.</strong>
+                    <p>
+                      The coding tool runs with the session’s earlier settings. The conversation continues either way.
+                    </p>
+                  </div>
+                  <button
+                    className="button small"
+                    onClick={() => {
+                      setActionError('')
+                      client.call({ type: 'stop', ...target }).then(
+                        () => client.restart(target),
+                        error => setActionError((error as Error).message),
+                      )
+                    }}
+                  >
+                    Restart now
+                  </button>
+                </div>
+              )}
+              {moved ? (
+                <div className="status-card">
+                  <History size={18} />
+                  <div>
+                    <strong>This conversation continues in {moved.name}.</strong>
+                    <p>It was resumed there. Choose another conversation to continue here.</p>
+                  </div>
+                  <button className="button small" onClick={() => open({ kind: 'conversations', ...target })}>
+                    Choose a conversation
+                  </button>
+                </div>
+              ) : terminal ? (
                 <div className="status-card">
                   <SquareTerminal size={18} />
                   <div>

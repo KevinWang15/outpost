@@ -11,7 +11,7 @@ export type ChatDialog =
   | { kind: 'session' }
   | { kind: 'channel'; channelId: string | null }
   | { kind: 'schedule'; scheduleId: string | null; session: SessionRef | null }
-  | ({ kind: 'instructions' } & SessionRef)
+  | ({ kind: 'settings' | 'conversations' } & SessionRef)
   | ({ kind: 'terminal' } & SessionRef)
 
 export interface ChatApp {

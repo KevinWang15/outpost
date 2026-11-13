@@ -86,8 +86,10 @@ chat host opens the current one with `session/load` when the tool can load it
 conversation has no transcript until its first prompt, so the host starts it
 with `session/new` and records the agent's id as the session's current
 conversation before it accepts prompts. A restart therefore always finds the
-conversation. The `new` request starts another conversation the same way, like
-`/new` in a terminal.
+conversation. The `new` request (**New conversation** in the session's actions)
+starts another conversation the same way, like `/new` in a terminal.
+**Conversations** resumes an earlier one: the chat stops, the session switches,
+and the chat starts again in it.
 
 ## The chat host
 

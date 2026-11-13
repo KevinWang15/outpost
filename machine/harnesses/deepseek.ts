@@ -6,7 +6,7 @@ import { zstdDecompressSync } from 'node:zlib'
 import type { SessionRecord } from '../../shared/model'
 import { machineExecutable } from '../state'
 import { withRpc } from '../rpc'
-import { clean, decode, glob, isRecord, strings, timestamp, type Scan } from '../stores'
+import { clean, decode, glob, isRecord, promptTitle, strings, timestamp, type Scan } from '../stores'
 import { Harness, historyMessage, type NativeActivity, type NativeConversation } from './harness'
 
 const generation = /^session(?:\.v([0-9]+))?\.jsonl(?:\.zstd)?$/
@@ -150,7 +150,7 @@ export class DeepSeek extends Harness {
       const data = row.data
       if (!isRecord(data)) continue
       if (row.type === 'session/title' && typeof data.title === 'string') title = data.title
-      else if (title === header.id && row.type === 'user/message') title = [...this.text(row)][0] ?? title
+      else if (title === header.id && row.type === 'user/message') title = promptTitle([...this.text(row)][0]) || title
     }
     return { header, title: clean(title, 160) }
   }

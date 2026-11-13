@@ -1,26 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
-
-async function addClaudeTarget(page: Page, name: string) {
-  await page.goto('/')
-  await page.getByRole('button', { name: 'Add target' }).first().click()
-  const dialog = page.getByRole('dialog', { name: 'Add a target' })
-  await dialog.getByRole('radio', { name: 'This computer' }).click()
-  await dialog.getByLabel('Name').fill(name)
-  await dialog.getByRole('button', { name: 'Add target' }).click()
-  await expect(page.getByRole('region', { name: 'Required software' })).toContainText('Ready')
-}
-
-async function newSession(page: Page, name: string, directory: string, instructions = '') {
-  await page.getByRole('button', { name: 'New session' }).last().click()
-  const dialog = page.getByRole('dialog', { name: 'New session' })
-  await dialog.getByLabel('Name').fill(name)
-  await dialog.getByRole('combobox', { name: 'Project directory' }).fill(directory)
-  await dialog.getByText('Create the directory if it doesn’t exist').click()
-  if (instructions) await dialog.getByLabel('Instructions').fill(instructions)
-  await dialog.getByRole('button', { name: 'Create session' }).click()
-  await expect(dialog).toBeHidden()
-  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible()
-}
+import { expect, test } from '@playwright/test'
+import { addClaudeTarget, newSession } from './chat-fixture'
 
 test('chat mode: talk to a session, approve a step, and work with sessions in a channel', async ({ page }) => {
   if (process.env.CHAT_DEBUG)
@@ -127,7 +106,7 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
   // The same conversation, seen from Terminal mode, is running in chat.
   await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Terminal' }).click()
   await expect(page).toHaveURL(/\/(\?.*)?$/)
-  await expect(page.getByRole('row').filter({ hasText: 'Coder' })).toBeVisible()
+  await expect(page.getByRole('row').filter({ has: page.getByText('Coder', { exact: true }) })).toBeVisible()
 })
 
 test('a remembered web terminal opens once, from the click that moves a chat session', async ({ page, context }) => {

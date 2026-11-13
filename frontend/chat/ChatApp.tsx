@@ -14,7 +14,14 @@ import {
   type ChatDialog,
   type Selection,
 } from './context'
-import { ChannelDialog, InstructionsDialog, NewSessionDialog, ScheduleDialog, TerminalDialog } from './Dialogs'
+import {
+  ChannelDialog,
+  ConversationsChatDialog,
+  NewSessionDialog,
+  ScheduleDialog,
+  SessionSettingsChatDialog,
+  TerminalDialog,
+} from './Dialogs'
 import { needsYou } from './format'
 import SessionView from './SessionView'
 import Sidebar from './Sidebar'
@@ -125,7 +132,8 @@ function Shell() {
         {dialog?.kind === 'schedule' && (
           <ScheduleDialog scheduleId={dialog.scheduleId} session={dialog.session} onClose={close} />
         )}
-        {dialog?.kind === 'instructions' && <InstructionsDialog target={dialog} onClose={close} />}
+        {dialog?.kind === 'settings' && <SessionSettingsChatDialog target={dialog} onClose={close} />}
+        {dialog?.kind === 'conversations' && <ConversationsChatDialog target={dialog} onClose={close} />}
         {dialog?.kind === 'terminal' && <TerminalDialog target={dialog} onClose={close} />}
       </div>
     </ShellContext.Provider>

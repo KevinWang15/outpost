@@ -259,8 +259,10 @@ export class ChatHost {
       this.info.config = created.configOptions ?? []
       this.info.nativeId = created.sessionId
       // The first prompt writes the native transcript. Its identity is saved
-      // in the session's timeline first, or a restart would lose it.
-      await this.recordConversation(created.sessionId)
+      // in the session's timeline first, or a restart would lose it. It takes
+      // the place of the current conversation, which could not be loaded
+      // because it never started.
+      await this.recordConversation(created.sessionId, true)
     }
     if (instructions && !supportsInstructions)
       this.record({
@@ -278,8 +280,8 @@ export class ChatHost {
   }
 
   /** The conversation is current in this session from now on. */
-  private async recordConversation(conversation: string) {
-    await changeRegistry(registry => switchConversation(registry, this.launch.session, conversation))
+  private async recordConversation(conversation: string, replacing = false) {
+    await changeRegistry(registry => switchConversation(registry, this.launch.session, conversation, replacing))
   }
 
   /** Start a new conversation in the same session, like /new in a terminal. */

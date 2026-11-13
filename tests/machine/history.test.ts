@@ -6,8 +6,10 @@ import { dirname, join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import type { HistorySource } from '../../shared/history'
+import { harness } from '../../machine/harnesses'
 import { catalog, readBatch, readMessage } from '../../machine/history'
-import { machine, tools } from './fixtures'
+import { Scan } from '../../machine/stores'
+import { machine, record, tools } from './fixtures'
 
 const binary = fileURLToPath(
   new URL(`../../machine/dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
@@ -235,4 +237,18 @@ test("Outpost's MCP server offers each driver its tools, and fails closed on a p
   }
   const partial = run({ OUTPOST_SESSION_ID: session, OUTPOST_STATE_DIRECTORY: state })
   assert.equal(partial.status, 1)
+})
+
+test("a title taken from a prompt leaves out the header of Outpost's composed prompts", async t => {
+  const home = machine(t)
+  const id = crypto.randomUUID()
+  put(join(home, '.claude/projects/project', `${id}.jsonl`), [
+    {
+      type: 'user',
+      cwd: '/work',
+      message: { content: '[Outpost: message from @coder in #release]\nPlease review the notes' },
+    },
+  ])
+  const session = record(home, 'claude', id, { storage: { CLAUDE_CONFIG_DIR: join(home, '.claude') } })
+  assert.equal(harness('claude').title(session, id, new Scan()), 'Please review the notes')
 })

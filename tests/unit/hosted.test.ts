@@ -66,14 +66,19 @@ test(
         await call(
           'POST',
           '/targets',
-          { kind: 'ssh', name: 'x', host: 'dev', identityFile: '~/.ssh/id', tools: ['claude'] },
+          { kind: 'ssh', name: 'x', host: 'dev', user: 'dev', identityFile: '~/.ssh/id', tools: ['claude'] },
           alice,
         )
       ).status,
       400,
     )
     const target = (
-      await call('POST', '/targets', { kind: 'ssh', name: 'dev', host: 'dev.example.com', tools: ['claude'] }, alice)
+      await call(
+        'POST',
+        '/targets',
+        { kind: 'ssh', name: 'dev', host: 'dev.example.com', user: 'dev', tools: ['claude'] },
+        alice,
+      )
     ).body as Target
     assert.deepEqual((await call('GET', '/targets', undefined, bob)).body, [])
     assert.equal((await call('GET', `/targets/${target.id}/sessions`, undefined, bob)).status, 404)

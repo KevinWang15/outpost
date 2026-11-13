@@ -113,7 +113,9 @@ export class TerminalSession {
       }
       this.connection =
         options.source.kind === 'local'
-          ? new LocalTerminalConnection(options.source.bridge, size, rendering, state, localTitle, this.notice)
+          ? new LocalTerminalConnection(options.source.bridge, size, rendering, state, localTitle, this.notice, text =>
+              this.terminal.paste(text),
+            )
           : new TerminalSocket(options.source.token, size, rendering, {
               state,
               hello: message => {
@@ -250,7 +252,8 @@ export class TerminalSession {
     this.notice(this.options.source.kind === 'local' ? 'Saving image…' : 'Uploading image…', true)
     try {
       await this.connection.pasteImage(file)
-      this.notice('Image pasted')
+      // A local shell may be running ssh; its path names a file on this computer.
+      this.notice(this.options.source.kind === 'local' ? 'Image saved on this computer and pasted' : 'Image pasted')
     } catch (error) {
       this.notice((error as Error).message)
     } finally {

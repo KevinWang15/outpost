@@ -116,7 +116,7 @@ export function sshArgs(
     // Explicitly override all sharing options, including ~/.ssh/config.
     args.push('-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'ControlPersist=no')
   }
-  args.push('-l', 'root', '--', target.host)
+  args.push('-l', target.user, '--', target.host)
   return args
 }
 

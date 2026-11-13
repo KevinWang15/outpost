@@ -17,6 +17,8 @@ export class LocalTerminalConnection implements TerminalConnection {
     private state: (state: TerminalState) => void,
     private title: (name: string) => void,
     private notice: (message: string) => void,
+    /** Pastes into the screen, which applies the program's bracketed-paste mode. */
+    private paste: (text: string) => void,
   ) {}
 
   open() {
@@ -111,6 +113,10 @@ export class LocalTerminalConnection implements TerminalConnection {
     const data = new Uint8Array(await file.arrayBuffer())
     if (!this.connected || this.generation !== generation)
       throw new Error('The shell changed before the image was pasted.')
-    return this.bridge.pasteImage(generation, data, file.type as ImageMediaType)
+    const reference = await this.bridge.saveImage(generation, data, file.type as ImageMediaType)
+    if (!this.connected || this.generation !== generation)
+      throw new Error('The shell changed before the image was pasted.')
+    this.paste(reference)
+    return reference
   }
 }

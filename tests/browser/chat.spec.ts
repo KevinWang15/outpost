@@ -112,6 +112,7 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
     mimeType: 'text/markdown',
     buffer: Buffer.from('# Launch brief\n'),
   })
+  await expect(page.locator('.attachments')).toContainText('brief.md')
   await message.press('Enter')
   await expect(
     page.locator('.channel-message').filter({ hasText: 'draft the notes' }).locator('.file-card'),

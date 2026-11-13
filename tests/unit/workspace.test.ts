@@ -13,6 +13,7 @@ const target = (fields: Partial<Target> = {}) =>
     kind: 'ssh',
     name: 'dev',
     host: 'dev.example.com',
+    user: 'dev',
     tools: ['claude'],
     ...fields,
   }) as Target
@@ -28,7 +29,7 @@ test('workspace stores targets atomically with a strict schema', async t => {
   await assert.rejects(workspace.edit(added.id, { tools: [] }), /Invalid target/)
   await workspace.setEnvironment(added.id, { home: '/root', username: 'root', uid: 0, shell: '/bin/bash' })
   const saved = JSON.parse(await readFile(join(directory, 'workspace.json'), 'utf8'))
-  assert.equal(saved.version, 2)
+  assert.equal(saved.version, 3)
   assert.equal(saved.targets[0].environment.home, '/root')
   await workspace.remove(added.id)
   assert.deepEqual(await workspace.list(), [])

@@ -8,13 +8,13 @@ import { AppError } from './errors'
 import { writeJsonFile } from '../shared/node/jsonFile'
 
 interface WorkspaceFile {
-  version: 2
+  version: 3
   targets: Target[]
 }
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false })
 const validTarget = ajv.compile<Target>(targetRecord)
 const validFile = ajv.compile<WorkspaceFile>(
-  Type.Object({ version: Type.Literal(2), targets: Type.Array(targetRecord) }, { additionalProperties: false }),
+  Type.Object({ version: Type.Literal(3), targets: Type.Array(targetRecord) }, { additionalProperties: false }),
 )
 
 /** Target settings live with the server. Sessions are always read from their target. */
@@ -30,7 +30,7 @@ export class Workspace {
       raw = await readFile(this.path, 'utf8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      return { version: 2, targets: [] }
+      return { version: 3, targets: [] }
     }
     let data: unknown
     try {

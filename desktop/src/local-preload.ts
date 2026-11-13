@@ -15,6 +15,6 @@ const bridge: LocalTerminalBridge = {
   resize: (generation, cols, rows) => ipcRenderer.invoke('local:resize', generation, cols, rows),
   acknowledge: (generation, length) => ipcRenderer.send('local:ack', generation, length),
   stop: generation => ipcRenderer.invoke('local:stop', generation),
-  pasteImage: (generation, data, mediaType) => ipcRenderer.invoke('local:image', generation, data, mediaType),
+  saveImage: (generation, data, mediaType) => ipcRenderer.invoke('local:image', generation, data, mediaType),
 }
 contextBridge.exposeInMainWorld('outpostLocalTerminal', Object.freeze(bridge))

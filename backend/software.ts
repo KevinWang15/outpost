@@ -21,10 +21,9 @@ const minimums: Partial<Record<SoftwareId, { pattern: RegExp; version: [number, 
 }
 
 // Read-only, POSIX sh: it must work before Bash or Python are installed.
-function inspectionScript(ids: SoftwareId[], marker: string, root: boolean) {
+function inspectionScript(ids: SoftwareId[], marker: string) {
   return `set -eu
 ${supportingPath}
-${root ? '[ "$(id -u)" = 0 ] || { echo "Root SSH access is required." >&2; exit 1; }' : ''}
 [ "$(uname -s)" = Linux ] || { echo "Outpost targets must run Linux." >&2; exit 1; }
 shell="\${SHELL:-/bin/bash}"
 case "\${shell##*/}" in bash|zsh) ;; *) shell=$(command -v bash || printf /bin/bash) ;; esac
@@ -266,7 +265,7 @@ export class SoftwareClient implements SoftwareService {
     const ids = requiredSoftware(target)
     const { code, stdout, stderr } = await runCommand(
       transport.management('interactive'),
-      inspectionScript(ids, marker, target.kind === 'ssh'),
+      inspectionScript(ids, marker),
       { env: this.env, signal, timeoutMs: 45_000, readOnly: true },
     )
     const start = stdout.indexOf(`\0${marker}\0`)

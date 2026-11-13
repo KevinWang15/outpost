@@ -67,6 +67,7 @@ export default function TargetDialog({
           kind,
           name: text('name'),
           host: text('host'),
+          user: text('user'),
           tools,
           ...(text('port') ? { port: Number(text('port')) } : {}),
           ...(text('identityFile') ? { identityFile: text('identityFile') } : {}),
@@ -136,13 +137,18 @@ export default function TargetDialog({
                 <input name="port" type="number" min={1} max={65535} placeholder="22" />
               </label>
             </div>
+            <label className="field">
+              <span className="label">User</span>
+              <input name="user" required spellCheck={false} autoCapitalize="off" maxLength={32} placeholder="ubuntu" />
+              <small>Sessions run as this Linux user. It needs no root access.</small>
+            </label>
             {!hosted && (
               <label className="field">
                 <span className="label">
                   Identity file <em>optional</em>
                 </span>
                 <input name="identityFile" spellCheck={false} placeholder="~/.ssh/id_ed25519" />
-                <small>Outpost connects as root using your SSH config and agent.</small>
+                <small>Otherwise Outpost uses your SSH config and agent.</small>
               </label>
             )}
             {hosted && <AccountKey />}

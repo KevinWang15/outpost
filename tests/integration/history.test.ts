@@ -260,6 +260,7 @@ test('history: hosted owners have separate indexes and cursors; offline machines
       kind: 'ssh',
       name,
       host: `${name}.example`,
+      user: 'dev',
       tools: ['codex'],
       createdAt: new Date().toISOString(),
     })

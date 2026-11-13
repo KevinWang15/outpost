@@ -21,5 +21,8 @@ export interface LocalTerminalBridge {
   resize(generation: string, cols: number, rows: number): Promise<void>
   acknowledge(generation: string, length: number): void
   stop(generation: string): Promise<void>
-  pasteImage(generation: string, data: Uint8Array, mediaType: ImageMediaType): Promise<string>
+  /** Save an image in the tab's private directory and return its path, quoted
+   * for the tab's shell. The renderer pastes it, so the running program sees a
+   * paste (with its bracketed-paste mode), not typing. */
+  saveImage(generation: string, data: Uint8Array, mediaType: ImageMediaType): Promise<string>
 }

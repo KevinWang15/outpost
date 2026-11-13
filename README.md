@@ -25,7 +25,7 @@ default Outpost MCP tools and cross-machine history search.
 
 | Where | What you need |
 | --- | --- |
-| Targets — where sessions run | Linux with Bash, Python 3.9+ and Outpost Terminal, reachable over SSH as root. The computer running Outpost can be a target too when it runs Linux (including WSL). Outpost can install missing software for you. |
+| Targets — where sessions run | Linux with Bash, Python 3.9+ and Outpost Terminal, reachable over SSH as any user you choose (no root access needed). The computer running Outpost can be a target too when it runs Linux (including WSL). Outpost can install missing software for you. |
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Web terminal | Any current browser, including on phones. |
 | Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Bundles Electron; no browser, Python or WSL installation needed. |
@@ -591,8 +591,8 @@ The app needs a network connection and an open terminal tab for bells.
 ## Run a hosted service
 
 Set `OUTPOST_MODE=hosted`. Users sign up with a verified email, get their own
-workspace and an Ed25519 SSH key that they authorize on their servers
-(`/root/.ssh/authorized_keys`). Web terminal and Outpost Desktop work exactly as in local mode, connecting
+workspace and an Ed25519 SSH key that they authorize on their servers, in
+`~/.ssh/authorized_keys` of the user each target's sessions run as. Web terminal and Outpost Desktop work exactly as in local mode, connecting
 to the hosted server.
 
 ```dotenv

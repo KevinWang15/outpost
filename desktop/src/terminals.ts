@@ -228,7 +228,7 @@ export class TerminalPanes {
     ipcMain.handle('local:resize', (event, generation, cols, rows) => this.local(event).resize(generation, cols, rows))
     ipcMain.handle('local:stop', (event, generation) => this.local(event).stop(generation))
     ipcMain.handle('local:image', (event, generation, data, mediaType) =>
-      this.local(event).pasteImage(generation, data, mediaType),
+      this.local(event).saveImage(generation, data, mediaType),
     )
     ipcMain.on('local:ack', (event, generation, length) => {
       try {

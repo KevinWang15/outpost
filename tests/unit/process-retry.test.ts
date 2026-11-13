@@ -93,7 +93,15 @@ async function fixture(
   }
   const context: TargetContext = {
     owner: { userId: 'local', loginId: 'local' },
-    target: { id: 'target', kind: 'ssh', name: 'Fixture', host: 'unused', tools: ['claude'], createdAt: '' },
+    target: {
+      id: 'target',
+      kind: 'ssh',
+      name: 'Fixture',
+      host: 'unused',
+      user: 'dev',
+      tools: ['claude'],
+      createdAt: '',
+    },
     workspace: new Workspace(directory),
     transport: { label: command.label, runtime: () => command, management: () => command },
   }

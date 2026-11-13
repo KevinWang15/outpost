@@ -109,7 +109,7 @@ export class LocalTerminal {
     }
   }
 
-  async pasteImage(generation: string, data: Uint8Array, mediaType: ImageMediaType) {
+  async saveImage(generation: string, data: Uint8Array, mediaType: ImageMediaType) {
     const pty = this.current(generation)
     if (this.imageBusy) throw new Error('Wait for the previous image to finish.')
     if (!(data instanceof Uint8Array)) throw new Error('Invalid image data.')
@@ -140,8 +140,7 @@ export class LocalTerminal {
           : this.profile.syntax === 'cmd'
             ? `"${path}"`
             : `'${path.replaceAll("'", "'\\''")}'`
-      pty.write(quoted + ' ')
-      return path
+      return quoted + ' '
     } finally {
       this.imageBusy = false
       if (this.disposed) await rm(this.images, { recursive: true, force: true }).catch(() => {})

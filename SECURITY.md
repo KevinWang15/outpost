@@ -27,8 +27,9 @@ use. Password changes and resets revoke every login; logout revokes its own.
 
 **SSH.** Hosted SSH uses only the account's Ed25519 key and known-hosts file
 (`-F none`, no agent, no passwords), and rejects changed host keys. Local mode
-uses your OpenSSH configuration and agent. SSH targets run commands as root;
-authorize an account key only on servers that account's owner should control.
+uses your OpenSSH configuration and agent. SSH targets run commands as the user
+named for the target; authorize an account key only for users that account's
+owner should control.
 Connection-sharing sockets are kept under the data directory and scoped per
 owner and identity, so a connection opened with one credential is never reused
 by another.

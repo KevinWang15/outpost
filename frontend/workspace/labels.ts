@@ -21,7 +21,7 @@ export function relativeTime(value: string | null) {
 
 export const address = (target: Target) =>
   target.kind === 'ssh'
-    ? `root@${target.host}${target.port ? `:${target.port}` : ''}`
+    ? `${target.user}@${target.host}${target.port ? `:${target.port}` : ''}`
     : target.environment?.username
       ? `${target.environment.username} on this computer`
       : 'This computer'

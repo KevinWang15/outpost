@@ -14,7 +14,7 @@ test('local desktop image picker, drop and native clipboard save bytes and paste
   const script = join(directory, 'capture.py')
   await writeFile(
     script,
-    `import os, sys, tty\ntty.setraw(sys.stdin.fileno())\nprint('LOCAL_IMAGE_READY', flush=True)\nwith open(sys.argv[1], 'ab', buffering=0) as stream:\n    while True:\n        data = os.read(sys.stdin.fileno(), 4096)\n        if not data: break\n        stream.write(data)\n`,
+    `import os, sys, tty\ntty.setraw(sys.stdin.fileno())\nsys.stdout.write('\\x1b[?2004h')\nprint('LOCAL_IMAGE_READY', flush=True)\nwith open(sys.argv[1], 'ab', buffering=0) as stream:\n    while True:\n        data = os.read(sys.stdin.fileno(), 4096)\n        if not data: break\n        stream.write(data)\n`,
   )
   const app = await electron.launch({
     executablePath: resolve('desktop/node_modules/electron/dist/electron'),
@@ -82,9 +82,12 @@ test('local desktop image picker, drop and native clipboard save bytes and paste
         expect(
           await app.evaluate(({ nativeImage }, path) => nativeImage.createFromPath(path).getSize(), added),
         ).toEqual({ width: 256, height: 256 })
-      previous += `'${added}' `
+      // The program enabled bracketed paste, so the path arrives as a paste, not as typing.
+      previous += `\x1b[200~'${added}' \x1b[201~`
       await expect.poll(input).toBe(previous)
-      await expect(page.getByRole('status').filter({ hasText: 'Image pasted' })).toBeVisible()
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Image saved on this computer and pasted' }),
+      ).toBeVisible()
       expect(await page.locator('.xterm-screen').boundingBox()).toEqual(size)
     }
     await app.evaluate(({ Menu }) => {

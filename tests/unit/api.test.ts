@@ -61,12 +61,44 @@ test('requests are limited to loopback, the configured host, same origin, and ma
 
 test('targets and sessions are validated strictly', async t => {
   const { call } = await setup(t)
+  // SSH targets name the Linux user sessions run as; it is required and cannot look like an option.
+  for (const user of [undefined, '', '-oProxyCommand=evil', 'a b', 'x'.repeat(33)])
+    assert.equal(
+      (
+        await call('POST', '/targets', {
+          kind: 'ssh',
+          name: 'x',
+          host: 'dev',
+          tools: ['claude'],
+          ...(user === undefined ? {} : { user }),
+        })
+      ).status,
+      400,
+      String(user),
+    )
   assert.equal(
-    (await call('POST', '/targets', { kind: 'ssh', name: 'x', host: '-oProxyCommand=evil', tools: ['claude'] })).status,
+    (
+      await call('POST', '/targets', {
+        kind: 'ssh',
+        name: 'x',
+        host: '-oProxyCommand=evil',
+        user: 'dev',
+        tools: ['claude'],
+      })
+    ).status,
     400,
   )
   assert.equal(
-    (await call('POST', '/targets', { kind: 'ssh', name: 'x', host: 'dev', tools: ['claude'], unknown: true })).status,
+    (
+      await call('POST', '/targets', {
+        kind: 'ssh',
+        name: 'x',
+        host: 'dev',
+        user: 'dev',
+        tools: ['claude'],
+        unknown: true,
+      })
+    ).status,
     400,
   )
   assert.equal(
@@ -77,6 +109,7 @@ test('targets and sessions are validated strictly', async t => {
     kind: 'ssh',
     name: ' dev ',
     host: 'dev.example.com',
+    user: 'dev',
     port: 2222,
     tools: ['claude', 'codex'],
   })) as { body: Target }
@@ -124,6 +157,7 @@ test('web connections issue scoped tickets and reject terminal-choice payloads',
     kind: 'ssh',
     name: 'dev',
     host: 'dev.example.com',
+    user: 'dev',
     tools: ['claude'],
   })) as { body: Target }
   const { body: session } = (await call('POST', `/targets/${target.id}/sessions`, {
@@ -176,6 +210,7 @@ test('the broker relays a terminal and reports attach failures', async t => {
     kind: 'ssh',
     name: 'dev',
     host: 'dev.example.com',
+    user: 'dev',
     tools: ['claude'],
   })) as { body: Target }
   const { body: session } = (await call('POST', `/targets/${target.id}/sessions`, {
@@ -234,6 +269,7 @@ test('the broker relays a terminal and reports attach failures', async t => {
     kind: 'ssh',
     name: 'dev',
     host: 'dev',
+    user: 'dev',
     tools: ['claude'],
   })) as { body: Target }
   const { body: otherSession } = (await failing.call('POST', `/targets/${other.id}/sessions`, {
@@ -256,6 +292,7 @@ test('clients speaking another protocol version are told to update, without spen
     kind: 'ssh',
     name: 'dev',
     host: 'dev.example.com',
+    user: 'dev',
     tools: ['claude'],
   })) as { body: Target }
   const { body: session } = (await call('POST', `/targets/${target.id}/sessions`, {

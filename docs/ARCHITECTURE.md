@@ -85,7 +85,7 @@ browser page must be registered there so development and production agree.
 
 | Role | Supported |
 | --- | --- |
-| Targets (where sessions run) | Linux with Bash, Python 3.9+ and Outpost Terminal. SSH as root, or the Outpost computer itself when the server runs on Linux (including WSL). |
+| Targets (where sessions run) | Linux with Bash, Python 3.9+ and Outpost Terminal. SSH as the user named for the target (root is not required), or the Outpost computer itself when the server runs on Linux (including WSL). |
 | Outpost server | Node.js 24+ with OpenSSH, on Linux (including WSL) or macOS. Hosted deployments run on Linux. |
 | Web terminal | Any current browser, including phones. |
 | Outpost Desktop | Packaged Electron for macOS arm64/x64 and Windows x64. No Python, WSL or installed browser required. |
@@ -1152,6 +1152,10 @@ in xterm memory. There is no local session recovery after renderer reload or app
 exit. Local panes report connection and bell state, without guessing coding-harness
 activity. Image paste sends raw bytes over IPC and saves a bounded file in the pane's private clipboard directory,
 quotes the path for its shell, and uses `wslpath` for the default WSL distribution.
+The renderer then pastes that path through xterm, so the running program sees a
+paste with its bracketed-paste mode rather than typing. The path names a file on
+this computer, which the notice says, because a program reached through `ssh`
+in a local tab cannot open it.
 Closing the pane cleans up those files. Native PTY bindings and spawn helpers are
 kept outside ASAR and rebuilt for Electron by the packaging tools. Windows uses
 node-pty's bundled ConPTY DLL; `desktop/scripts/native-assets.mjs` restores its

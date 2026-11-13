@@ -23,8 +23,8 @@ export default function AccountKey() {
         Authorize your Outpost key
       </h3>
       <p>
-        Add this public key to <code>/root/.ssh/authorized_keys</code> on the server. Outpost uses it for sessions and
-        terminals.
+        Add this public key to <code>~/.ssh/authorized_keys</code> of the user sessions run as on each server. Outpost
+        uses it for sessions and terminals.
       </p>
       {key ? (
         <>

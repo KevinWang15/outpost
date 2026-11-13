@@ -22,16 +22,14 @@ const docker = await execute('docker', ['info'], { timeout: 20_000 }).then(
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(16, 3)])
 
 async function container(t: test.TestContext) {
-  await execute('docker', ['build', '-q', '-t', 'outpost-v2-ssh-target', fixtures], { timeout: 600_000 })
-  const id = (
-    await execute('docker', ['run', '-d', '--rm', '-p', '127.0.0.1::22', 'outpost-v2-ssh-target'])
-  ).stdout.trim()
+  await execute('docker', ['build', '-q', '-t', 'outpost-ssh-target', fixtures], { timeout: 600_000 })
+  const id = (await execute('docker', ['run', '-d', '--rm', '-p', '127.0.0.1::22', 'outpost-ssh-target'])).stdout.trim()
   t.after(() => execute('docker', ['rm', '-f', id]).catch(() => {}))
-  await execute('docker', ['exec', id, 'mkdir', '-p', '/root/.outpost/bin'])
-  await execute('docker', ['cp', terminalBinary, `${id}:/root/.outpost/bin/outpost-terminal`])
+  await execute('docker', ['cp', terminalBinary, `${id}:/home/dev/.outpost/bin/outpost-terminal`])
   // Claude Code's ACP adapter for chat; the scripted ACP agent stands in for it.
-  await execute('docker', ['cp', acpFixture, `${id}:/root/.outpost/bin/claude-agent-acp`])
-  await execute('docker', ['exec', id, 'chmod', '700', '/root/.outpost/bin/claude-agent-acp'])
+  await execute('docker', ['cp', acpFixture, `${id}:/home/dev/.outpost/bin/claude-agent-acp`])
+  await execute('docker', ['exec', id, 'chmod', '700', '/home/dev/.outpost/bin/claude-agent-acp'])
+  await execute('docker', ['exec', id, 'chown', '-R', 'dev:dev', '/home/dev/.outpost'])
   const port = Number((await execute('docker', ['port', id, '22/tcp'])).stdout.trim().split(':').pop())
   const authorize = (key: string) =>
     new Promise<void>((resolve, reject) => {
@@ -41,7 +39,7 @@ async function container(t: test.TestContext) {
         id,
         'sh',
         '-c',
-        'cat >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys',
+        'cat >> /home/dev/.ssh/authorized_keys && chown dev:dev /home/dev/.ssh/authorized_keys && chmod 600 /home/dev/.ssh/authorized_keys',
       ])
       child.on('exit', code => (code === 0 ? resolve() : reject(new Error(`authorize failed: ${code}`))))
       child.stdin.end(`${key.trim()}\n`)
@@ -81,7 +79,8 @@ async function lifecycle(
     report.software.find(item => item.id === 'outpost-terminal')!.version,
     `outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`,
   )
-  assert.equal(report.environment.home, '/root')
+  assert.equal(report.environment.home, '/home/dev')
+  assert.equal(report.environment.username, 'dev')
   const session = await call<Session>('POST', `/targets/${added.id}/sessions`, {
     name: 'Over SSH',
     rootDir: '~/work',
@@ -93,7 +92,7 @@ async function lifecycle(
     branch: `feature/fork-${session.id}`,
     rootDir: `~/work-${session.id}`,
   })
-  assert.equal(fork.rootDir, `/root/work-${session.id}`)
+  assert.equal(fork.rootDir, `/home/dev/work-${session.id}`)
   assert.equal(fork.tool, session.tool)
   assert.notEqual(fork.cliSessionId, session.cliSessionId)
   assert.equal(fork.status, 'ready')
@@ -114,7 +113,7 @@ async function lifecycle(
   })
   assert.equal(upload.status, 200)
   const image = (await upload.json()) as { reference: string }
-  assert.match(image.reference, /^\/root\/\.outpost\/clipboard\/.+\.png$/)
+  assert.match(image.reference, /^\/home\/dev\/\.outpost\/clipboard\/.+\.png$/)
   client.send({ type: 'paste', id: 'img', data: image.reference })
   const pasted = await client.take('result')
   assert.equal(pasted.ok, true, pasted.message)
@@ -159,6 +158,7 @@ test(
         kind: 'ssh',
         name: 'Container',
         host: '127.0.0.1',
+        user: 'dev',
         port: target.port,
         identityFile: join(directory, 'id'),
         tools: ['claude'],
@@ -183,7 +183,7 @@ test(
         t,
         deployment,
         process.env,
-        { kind: 'ssh', name: 'Container', host: '127.0.0.1', port: target.port, tools: ['claude'] },
+        { kind: 'ssh', name: 'Container', host: '127.0.0.1', user: 'dev', port: target.port, tools: ['claude'] },
         { cookie: `outpost_session=${login.token}` },
       )
       assert.match(await readFile(join(directory, 'hosted', 'users', user.id, 'known_hosts'), 'utf8'), /127\.0\.0\.1/)

@@ -18,6 +18,8 @@ const ssh = {
   name,
   tools,
   host: Type.String({ minLength: 1, maxLength: 253, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._:-]*$' }),
+  /** The Linux user sessions run as; root is allowed, never assumed. */
+  user: Type.String({ minLength: 1, maxLength: 32, pattern: '^[A-Za-z_][A-Za-z0-9._-]*$' }),
   port: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
   identityFile: Type.Optional(
     Type.String({ minLength: 1, maxLength: 1024, pattern: '^(~/|/)[^\\u0000-\\u001f\\u007f]+$' }),

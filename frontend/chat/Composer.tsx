@@ -63,6 +63,8 @@ export default function Composer({
   const attempt = useRef<{ key: string; text: string; files: File[] } | null>(null)
   /** Files already uploaded for this draft, so a resend does not store them again. */
   const uploaded = useRef(new Map<File, string>())
+  /** Where the caret goes after an inserted suggestion renders, before any further key. */
+  const caretAfter = useRef<number | null>(null)
 
   // Each conversation mounts its own composer (keyed views), so this runs per draft.
   useEffect(() => {
@@ -75,6 +77,10 @@ export default function Composer({
   useLayoutEffect(() => {
     const element = input.current
     if (!element) return
+    if (caretAfter.current !== null) {
+      element.setSelectionRange(caretAfter.current, caretAfter.current)
+      caretAfter.current = null
+    }
     element.style.height = 'auto'
     element.style.height = `${Math.min(element.scrollHeight, Math.round(window.innerHeight * 0.4))}px`
   }, [text])
@@ -99,12 +105,10 @@ export default function Composer({
     const start = caret - (token![2].length + 1)
     const insert = `${token![1]}${option.value} `
     const next = text.slice(0, start) + insert + text.slice(caret)
-    setText(next)
     const position = start + insert.length
-    requestAnimationFrame(() => {
-      input.current?.setSelectionRange(position, position)
-      setCaret(position)
-    })
+    caretAfter.current = position
+    setText(next)
+    setCaret(position)
   }
 
   function attach(list: Iterable<File>) {

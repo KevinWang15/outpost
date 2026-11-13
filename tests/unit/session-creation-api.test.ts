@@ -65,7 +65,7 @@ for (const mode of ['local', 'hosted'] as const) {
       cookie = verified.cookie
       accountId = (await call('GET', '/auth/session')).body.user.id
     }
-    const targetInput = { kind: 'ssh', name: 'Target', host: 'fixture.example', tools: ['codex'] }
+    const targetInput = { kind: 'ssh', name: 'Target', host: 'fixture.example', user: 'dev', tools: ['codex'] }
     const target = (await call('POST', '/targets', targetInput)).body
     const input = { name: 'Created', rootDir: '/tmp/project', tool: 'codex' }
     const path = `/desktop/targets/${target.id}/sessions`

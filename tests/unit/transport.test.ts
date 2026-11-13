@@ -11,6 +11,7 @@ const target: SshTarget = {
   createdAt: '',
   kind: 'ssh',
   host: 'dev.example.com',
+  user: 'dev',
   port: 2222,
   tools: ['claude'],
   identityFile: '~/.ssh/key',
@@ -32,7 +33,7 @@ function onPlatform<T>(platform: NodeJS.Platform, action: () => T): T {
 
 test('local mode uses your SSH configuration and identity file', () => {
   const args = sshArgs(target, null, { scope: 'local' })
-  assert.deepEqual(args.slice(-4), ['-l', 'root', '--', 'dev.example.com'])
+  assert.deepEqual(args.slice(-4), ['-l', 'dev', '--', 'dev.example.com'])
   assert.ok(args.includes('-T') && args.includes('BatchMode=yes'))
   assert.equal(args[args.indexOf('-i') + 1], join(homedir(), '.ssh/key'))
   assert.ok(!args.includes('-F'))

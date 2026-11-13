@@ -18,8 +18,9 @@ function local() {
     resize: async () => {},
     acknowledge: () => {},
     stop: async () => {},
-    pasteImage: async () => '/image.png',
+    saveImage: async () => "'/image.png' ",
   }
+  const pasted: string[] = []
   const client = new LocalTerminalConnection(
     bridge,
     () => ({ cols: 80, rows: 24 }),
@@ -32,20 +33,23 @@ function local() {
     () => {},
     () => {},
     () => {},
+    text => pasted.push(text),
   )
   client.open()
-  return { bridge, client }
+  return { bridge, client, pasted }
 }
 
-test('local image delivery uses binary IPC and the current shell generation, without HTTP', async t => {
-  const { bridge, client } = local()
+test('local image delivery saves over binary IPC, then pastes through the screen, without HTTP', async t => {
+  const { bridge, client, pasted } = local()
   t.after(() => client.close())
-  const paste = t.mock.method(bridge, 'pasteImage')
+  const paste = t.mock.method(bridge, 'saveImage')
   const fetch = t.mock.method(globalThis, 'fetch', () => {
     throw new Error('Local images cannot use HTTP')
   })
   const bytes = new Uint8Array([137, 80, 78, 71, 0, 255, 13, 10])
-  assert.equal(await client.pasteImage(new File([bytes], 'image.png', { type: 'image/png' })), '/image.png')
+  assert.equal(await client.pasteImage(new File([bytes], 'image.png', { type: 'image/png' })), "'/image.png' ")
+  // The screen pastes it, applying the program's bracketed-paste mode; it is never typed into the PTY.
+  assert.deepEqual(pasted, ["'/image.png' "])
   assert.equal(paste.mock.callCount(), 1)
   const [generation, data, type] = paste.mock.calls[0].arguments
   assert.match(generation, /^[a-f0-9-]{36}$/)
@@ -55,9 +59,9 @@ test('local image delivery uses binary IPC and the current shell generation, wit
 })
 
 test('a local image read finishing after a shell restart cannot enter the new shell', async t => {
-  const { bridge, client } = local()
+  const { bridge, client, pasted } = local()
   t.after(() => client.close())
-  const paste = t.mock.method(bridge, 'pasteImage')
+  const paste = t.mock.method(bridge, 'saveImage')
   const file = new File([new Uint8Array([137, 80, 78, 71])], 'image.png', { type: 'image/png' })
   let finish!: (data: ArrayBuffer) => void
   t.mock.method(
@@ -74,6 +78,7 @@ test('a local image read finishing after a shell restart cannot enter the new sh
   finish(new ArrayBuffer(4))
   await rejected
   assert.equal(paste.mock.callCount(), 0)
+  assert.deepEqual(pasted, [])
   assert.equal(client.connected, true)
 })
 

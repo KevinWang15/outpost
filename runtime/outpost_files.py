@@ -1,4 +1,10 @@
-"""Durable, immutable session attachments. No terminal or client lifetime dependencies."""
+"""Durable, immutable session files, in both directions: files the agent
+published for the user, and files the user (or a channel) sent to the agent.
+No terminal or client lifetime dependencies.
+
+Each file is `<session>/<id>/metadata.json` beside `<session>/<id>/content/<name>`,
+so the agent's own tools see the file's real name and extension.
+"""
 
 import datetime
 import fcntl
@@ -22,6 +28,9 @@ def session_directory(session):
     if not isinstance(session, str) or not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', session):
         raise ValueError('Invalid Outpost session ID')
     return STATE / 'files' / session
+
+
+SOURCES = ('published', 'received')
 
 
 def file_directory(session, identifier):
@@ -82,14 +91,7 @@ def sync_directory(directory):
         os.close(descriptor)
 
 
-def publish(session, path, name=None):
-    require_session(session)
-    if not isinstance(path, str) or not path or len(path) > 4096:
-        raise ValueError('Provide a file path')
-    source = Path(path).expanduser()
-    if not source.is_absolute():
-        raise ValueError('Use an absolute path for the file to publish')
-    name = source.name if name is None else name
+def valid_name(name):
     if (
         not isinstance(name, str)
         or not 0 < len(name.encode('utf-8')) <= 240
@@ -97,32 +99,42 @@ def publish(session, path, name=None):
         or any(ord(c) < 32 or ord(c) == 127 or c in '/\\' for c in name)
     ):
         raise ValueError('Provide a filename without directories or control characters (240 UTF-8 bytes maximum)')
+    return name
+
+
+def content_path(session, metadata):
+    return file_directory(session, metadata['id']) / 'content' / metadata['name']
+
+
+def copy(incoming, output, limit):
+    """Copy at most limit bytes; return the size and the first bytes."""
+    total, prefix = 0, b''
+    while True:
+        chunk = incoming.read(min(65536, limit + 1 - total))
+        if not chunk:
+            return total, prefix
+        total += len(chunk)
+        if total > limit:
+            raise ValueError('Files must be at most 32 MiB')
+        if not prefix:
+            prefix = chunk[:16]
+        output.write(chunk)
+
+
+def store(session, name, source, write):
+    """Snapshot one file into the session's store. write(output) returns
+    (size, first bytes); content and metadata appear together by rename."""
+    require_session(session)
+    valid_name(name)
+    if source not in SOURCES:
+        raise ValueError('Invalid session file source')
     directory = session_directory(session)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # Snapshot first; a source file changed or deleted later cannot change an attachment.
-    temporary = Path(tempfile.mkdtemp(prefix='.publishing-', dir=directory))
+    temporary = Path(tempfile.mkdtemp(prefix='.storing-', dir=directory))
     try:
-        descriptor = os.open(source, os.O_RDONLY | os.O_NONBLOCK)
-        with os.fdopen(descriptor, 'rb') as incoming, open(temporary / 'content', 'xb') as output:
-            info = os.fstat(incoming.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                raise ValueError('Only regular files can be published')
-            if info.st_size > MAX_BYTES:
-                raise ValueError('Files must be at most 32 MiB')
-            total, prefix = 0, b''
-            while True:
-                chunk = incoming.read(min(65536, MAX_BYTES + 1 - total))
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > MAX_BYTES:
-                    raise ValueError('Files must be at most 32 MiB')
-                if not prefix:
-                    prefix = chunk[:16]
-                output.write(chunk)
-            after = os.fstat(incoming.fileno())
-            if (info.st_size, info.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-                raise ValueError('File changed while publishing. Finish writing it and retry.')
+        (temporary / 'content').mkdir(mode=0o700)
+        with open(temporary / 'content' / name, 'xb') as output:
+            total, prefix = write(output)
             output.flush()
             os.fsync(output.fileno())
         metadata = {
@@ -131,24 +143,70 @@ def publish(session, path, name=None):
             'size': total,
             'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'mediaType': media_type(prefix),
+            'source': source,
         }
         with open(temporary / 'metadata.json', 'x') as output:
             json.dump(metadata, output)
             output.flush()
             os.fsync(output.fileno())
+        sync_directory(temporary / 'content')
         sync_directory(temporary)
         with locked(session):
             require_session(session)
             files = list_files(session)
             if len(files) >= MAX_FILES or sum(item['size'] for item in files) + total > MAX_TOTAL_BYTES:
-                raise ValueError(
-                    'Session file storage is full (100 files / 256 MiB). Remove files before publishing more.'
-                )
+                raise ValueError('Session file storage is full (100 files / 256 MiB). Remove files before adding more.')
             os.rename(temporary, directory / metadata['id'])
             sync_directory(directory)
         return metadata
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
+
+
+def publish(session, path, name=None):
+    """The agent shares a file from its filesystem."""
+    if not isinstance(path, str) or not path or len(path) > 4096:
+        raise ValueError('Provide a file path')
+    source = Path(path).expanduser()
+    if not source.is_absolute():
+        raise ValueError('Use an absolute path for the file to publish')
+
+    def write(output):
+        # Snapshot first; a source file changed or deleted later cannot change the stored file.
+        descriptor = os.open(source, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as incoming:
+            info = os.fstat(incoming.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError('Only regular files can be published')
+            if info.st_size > MAX_BYTES:
+                raise ValueError('Files must be at most 32 MiB')
+            result = copy(incoming, output, MAX_BYTES)
+            after = os.fstat(incoming.fileno())
+            if (info.st_size, info.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise ValueError('File changed while publishing. Finish writing it and retry.')
+            return result
+
+    return store(session, source.name if name is None else name, 'published', write)
+
+
+def receive(session, name, size, incoming):
+    """A file sent to the agent: exactly size bytes from incoming."""
+    if type(size) is not int or not 0 <= size <= MAX_BYTES:
+        raise ValueError('Files must be at most 32 MiB')
+
+    def write(output):
+        # Never read past the declared size: the caller's stream may stay open.
+        total, prefix = 0, b''
+        while total < size:
+            chunk = incoming.read(min(65536, size - total))
+            if not chunk:
+                raise ValueError('Incomplete file upload')
+            prefix = prefix or chunk[:16]
+            total += len(chunk)
+            output.write(chunk)
+        return total, prefix
+
+    return store(session, name, 'received', write)
 
 
 def remove(session, identifier):
@@ -167,7 +225,7 @@ def read_file(session, identifier):
     with locked(session):
         directory = file_directory(session, identifier)
         metadata = json.loads((directory / 'metadata.json').read_text())
-        stream = open(directory / 'content', 'rb')
+        stream = open(content_path(session, metadata), 'rb')
         if os.fstat(stream.fileno()).st_size != metadata['size'] or not 0 <= metadata['size'] <= MAX_BYTES:
             stream.close()
             raise ValueError('Stored file is incomplete')

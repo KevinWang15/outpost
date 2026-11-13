@@ -20,6 +20,12 @@ export class SessionFileClient {
     if (!Array.isArray(files) || files.length > maxSessionFiles) throw new AppError('Invalid session file list.', 502)
     return files.map(parseSessionFile)
   }
+  /** Store a file sent to the session's agent; the bytes follow the operation. */
+  async receive(context: TargetContext, id: string, name: string, data: Buffer, signal: AbortSignal) {
+    const operation = runtimeOperation({ action: 'files-receive', id, name, size: data.length })
+    const command = { ...context.transport.runtime(operation.script), input: operation.input }
+    return parseSessionFile(await runProtocol<unknown>(command, data, { env: this.env, signal, timeoutMs: 120_000 }))
+  }
   async remove(context: TargetContext, id: string, fileId: string) {
     await runProtocol(this.command(context, 'files-remove', id, fileId), '', { env: this.env })
   }

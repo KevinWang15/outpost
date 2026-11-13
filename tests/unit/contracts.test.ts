@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { harnesses, supportsTerminal } from '../../shared/harnesses'
 import historyTools from '../../runtime/history-tools.json' with { type: 'json' }
+import { chatHost } from '../../shared/chatHost'
 import { terminalService } from '../../shared/terminalService'
 import { FrameDecoder, terminalFrame, terminalControl, relayMagic } from '../../shared/node/terminalFrames'
 
@@ -23,6 +24,10 @@ test('terminal service: Python and TypeScript agree on the installed contract', 
 print(json.dumps({'version': t.VERSION, 'protocol': t.PROTOCOL, 'maxCols': t.MAX_COLS, 'maxRows': t.MAX_ROWS, 'executable': t.EXECUTABLE.name}))`)
   for (const key of ['version', 'protocol', 'maxCols', 'maxRows', 'executable'] as const)
     assert.equal(service[key], terminalService[key], key)
+})
+
+test('chat host: the runtime checks the same protocol the host speaks', () => {
+  assert.equal(json(`import outpost_chat\nprint(outpost_chat.PROTOCOL)`), chatHost.protocol)
 })
 
 test('coding harnesses: shared/harnesses.ts matches the runtime adapters', () => {

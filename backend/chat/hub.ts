@@ -17,7 +17,7 @@ import {
   type ScheduleInput,
   type SessionRef,
 } from '../../shared/chatApi'
-import type { ChatHostMessage, ChatOrigin } from '../../shared/chatHost'
+import { chatHost, type ChatHostMessage, type ChatOrigin } from '../../shared/chatHost'
 import { replyText, turnFiles } from '../../shared/chatTranscript'
 import type { SessionFile } from '../../shared/sessionFiles'
 import { handles, mentions } from '../../shared/chatMentions'
@@ -25,7 +25,9 @@ import { cronMatches, parseCron, validTimeZone, zonedParts } from '../../shared/
 import type { Session } from '../../shared/model'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
+import type { SessionFileClient } from '../sessionFiles'
 import type { TargetContext } from '../sessions'
+import { ChannelFiles } from './files'
 import { ChatLink, type ChatConnector, type LinkEvent } from './links'
 import { channelPrompt, replyPrompt, schedulePrompt, sessionPrompt, summary } from './prompts'
 import { ChatStore } from './store'
@@ -41,6 +43,8 @@ interface Account {
   /** Any current login of the account; background work resolves targets with it. */
   owner: Owner
   store: ChatStore
+  /** Files attached to the user's channel posts. */
+  files: ChannelFiles
   clients: Set<ChatClient>
   sessions: Map<string, Session[]>
   errors: Map<string, string>
@@ -59,6 +63,8 @@ interface Dependencies {
   deployment: Deployment
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
   list(context: TargetContext, signal?: AbortSignal): Promise<Session[]>
+  /** Session files on targets, to give channel members the files a delivery carries. */
+  files: Pick<SessionFileClient, 'read' | 'receive'>
   connect: ChatConnector
   /** How long a target may take to accept a composed prompt. */
   promptMs?: number
@@ -117,6 +123,7 @@ export class ChatHub {
           userId: owner.userId,
           owner,
           store,
+          files: new ChannelFiles(join(workspace.directory, 'chat', 'files')),
           clients: new Set(),
           sessions: new Map(),
           errors: new Map(),
@@ -368,6 +375,7 @@ export class ChatHub {
       source,
       rerun: null,
       prompt,
+      files: [],
       host: null,
       origin,
       error: null,
@@ -391,6 +399,7 @@ export class ChatHub {
           key: promptKey(delivery),
           origin: delivery.origin ?? { kind: 'user' },
           prompt: [{ type: 'text', text: delivery.prompt ?? '' }],
+          files: delivery.files,
         },
         this.dependencies.promptMs ?? 180_000,
         instance => {
@@ -592,6 +601,7 @@ export class ChatHub {
           Object.assign(delivery, { state: 'failed', error: 'The channel was deleted.', prompt: null })
     })
     await account.store.removeMessages(channelId)
+    await account.files.removeChannel(channelId)
     this.broadcast(account, { type: 'channel-removed', channelId })
   }
 
@@ -638,12 +648,12 @@ export class ChatHub {
 
   /** Post the user's message. A draft resent with the same key, also after a
    * restart, returns the first post. */
-  async post(owner: Owner, channelId: string, key: string, text: string) {
+  async post(owner: Owner, channelId: string, key: string, text: string, files: string[] = []) {
     const account = await this.account(owner)
     const channel = account.store.channels.channels.find(item => item.id === channelId)
     if (!channel) throw new AppError('Channel not found.', 404)
     const body = text.trim()
-    if (!body) throw new AppError('Write a message first.', 400)
+    if (!body && !files.length) throw new AppError('Write a message first.', 400)
     const writing = account.posts.get(key)
     if (writing) return { messageId: writing, duplicate: true }
     const id = randomUUID()
@@ -666,6 +676,7 @@ export class ChatHub {
     try {
       const stored = (await account.store.recent(channelId)).find(item => item.key === key)
       if (stored) return { messageId: stored.id, duplicate: true }
+      message.files = await account.files.commit(channelId, files)
       await account.store.append(message)
     } finally {
       account.posts.delete(key)
@@ -735,9 +746,11 @@ export class ChatHub {
       .filter(item => !(item.author.kind === 'session' && sessionKey(item.author) === sessionKey(member)))
     if (!delta.length) return this.update(account, delivery, { state: 'done' })
     const trigger = [...delta].reverse().find(item => item.mentions.includes(member.handle)) ?? delta.at(-1)!
+    const attached = await this.memberFiles(account, channel, member, delta)
     await this.update(account, delivery, {
       source: { ...source, through: delta.at(-1)!.id },
-      prompt: channelPrompt(channel, member.handle, delta),
+      prompt: channelPrompt(channel, member.handle, delta, attached.missing),
+      files: attached.files,
       origin: {
         kind: 'channel',
         channelId: channel.id,
@@ -747,6 +760,63 @@ export class ChatHub {
       },
     })
     await this.send(account, delivery)
+  }
+
+  /** Give the member the files in its new messages, newest first: each is
+   * copied into the member's own session files, where its tools can read it. */
+  private async memberFiles(account: Account, channel: Channel, member: SessionRef, messages: ChannelMessage[]) {
+    const files: string[] = []
+    const missing: string[] = []
+    const signal = AbortSignal.timeout(120_000)
+    const destination = await this.dependencies.resolve(account.owner, member.targetId)
+    for (const message of [...messages].reverse())
+      for (const file of message.files) {
+        if (files.length >= chatHost.maxFiles) {
+          missing.push(`${file.name} (more than ${chatHost.maxFiles} files)`)
+          continue
+        }
+        try {
+          const { author } = message
+          const bytes =
+            author.kind === 'session'
+              ? (
+                  await this.dependencies.files.read(
+                    await this.dependencies.resolve(account.owner, author.targetId),
+                    author.sessionId,
+                    file.id,
+                    signal,
+                  )
+                ).bytes
+              : (await account.files.read(channel.id, file.id)).bytes
+          files.push(
+            (await this.dependencies.files.receive(destination, member.sessionId, file.name, bytes, signal)).id,
+          )
+        } catch (error) {
+          missing.push(`${file.name} (${(error as Error).message})`)
+        }
+      }
+    return { files, missing }
+  }
+
+  async stageFile(owner: Owner, channelId: string, name: string, data: Buffer) {
+    const account = await this.account(owner)
+    if (!account.store.channels.channels.some(channel => channel.id === channelId))
+      throw new AppError('Channel not found.', 404)
+    return account.files.stage(name, data)
+  }
+
+  async channelFiles(owner: Owner, channelId: string) {
+    const account = await this.account(owner)
+    if (!account.store.channels.channels.some(channel => channel.id === channelId))
+      throw new AppError('Channel not found.', 404)
+    return account.files.list(channelId)
+  }
+
+  async readChannelFile(owner: Owner, channelId: string, fileId: string) {
+    const account = await this.account(owner)
+    if (!account.store.channels.channels.some(channel => channel.id === channelId))
+      throw new AppError('Channel not found.', 404)
+    return account.files.read(channelId, fileId)
   }
 
   private async channelReply(

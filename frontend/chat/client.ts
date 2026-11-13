@@ -17,6 +17,7 @@ import {
 } from '../../shared/chatApi'
 import { ChatJournal, type ChatInfo } from '../../shared/chatHost'
 import { transcript, type Transcript } from '../../shared/chatTranscript'
+import { parseSessionFile } from '../../shared/sessionFiles'
 import { SessionFiles } from '../terminal/sessionFiles'
 
 export interface Conversation {
@@ -69,8 +70,6 @@ export class ChatClient {
   deliveries = new Map<string, Delivery>()
   conversations = new Map<string, Conversation>()
   channelMessages = new Map<string, ChannelState>()
-  /** Prompt images by message key, for this page's own sent messages. */
-  previews = new Map<string, string[]>()
   token = ''
   private socket: WebSocket | null = null
   private pending = new Map<string, (result: Result) => void>()
@@ -85,17 +84,48 @@ export class ChatClient {
 
   constructor(private ticket: (() => Promise<string>) | null) {}
 
-  /** A session's published files, read with this page's chat grant. One per
-   * session, so its panel, cards and channel messages share thumbnails. */
+  /** A session's files, read with this page's chat grant. One per session, so
+   * its panel, cards and channel messages share thumbnails. */
   files(target: SessionRef) {
-    const key = sessionKey(target)
+    return this.fileAccess(
+      sessionKey(target),
+      `/api/chat/files/${encodeURIComponent(target.targetId)}/${target.sessionId}`,
+    )
+  }
+
+  /** Files attached to the user's posts in a channel. */
+  channelFiles(channelId: string) {
+    return this.fileAccess(`channel:${channelId}`, `/api/chat/channels/${channelId}/files`)
+  }
+
+  private fileAccess(key: string, base: string) {
     let files = this.sessionFiles.get(key)
     if (!files) {
-      const base = `/api/chat/files/${encodeURIComponent(target.targetId)}/${target.sessionId}`
       files = new SessionFiles(() => ({ origin: '', token: this.token, base }))
       this.sessionFiles.set(key, files)
     }
     return files
+  }
+
+  /** Upload one file the user attaches: into the session's files, or staged
+   * for a channel post. Returns its ID for the message. */
+  async upload(destination: SessionRef | { channelId: string }, file: File) {
+    const base =
+      'channelId' in destination
+        ? `/api/chat/channels/${destination.channelId}/files`
+        : `/api/chat/files/${encodeURIComponent(destination.targetId)}/${destination.sessionId}`
+    const response = await fetch(`${base}?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: {
+        'x-outpost-request': '1',
+        authorization: `Bearer ${this.token}`,
+        'content-type': 'application/octet-stream',
+      },
+      body: file,
+    })
+    if (!response.ok)
+      throw new Error((await response.json().catch(() => null))?.message ?? `Could not upload ${file.name}.`)
+    return parseSessionFile(await response.json()).id
   }
 
   // Store -------------------------------------------------------------------------------
@@ -344,28 +374,10 @@ export class ChatClient {
     return this.sessions.find(item => item.targetId === ref.targetId && item.id === ref.sessionId) ?? null
   }
 
-  async upload(file: File) {
-    const response = await fetch('/api/chat/images', {
-      method: 'POST',
-      headers: { 'x-outpost-request': '1', authorization: `Bearer ${this.token}`, 'content-type': file.type },
-      body: file,
-    })
-    if (!response.ok)
-      throw new Error((await response.json().catch(() => null))?.message ?? 'Could not upload the image.')
-    return ((await response.json()) as { id: string }).id
-  }
-
-  /** Send a prompt; resending it with the same key cannot run it twice. */
-  async prompt(target: SessionRef, text: string, images: File[], key: string) {
-    const ref = plainRef(target)
-    const ids: string[] = []
-    for (const file of images) ids.push(await this.upload(file))
-    if (images.length)
-      this.previews.set(
-        key,
-        images.map(file => URL.createObjectURL(file)),
-      )
-    const result = await this.request({ type: 'prompt', ...ref, key, text, images: ids })
+  /** Send a prompt with uploaded session files; resending it with the same key
+   * cannot run it twice. */
+  async prompt(target: SessionRef, text: string, files: string[], key: string) {
+    const result = await this.request({ type: 'prompt', ...plainRef(target), key, text, files })
     if (!result.ok) throw new Error(result.message ?? 'The message was not sent.')
   }
 

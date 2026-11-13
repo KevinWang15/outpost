@@ -75,6 +75,23 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
   await expect(card).toContainText('Removed')
   await files.getByRole('button', { name: 'Close files' }).click()
 
+  // Files the user attaches go to the session's files; the agent reads them, and sees images inline.
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  )
+  await page.locator('.chat-composer input[type=file]').setInputFiles([
+    { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Ship on Friday\n') },
+    { name: 'dot.png', mimeType: 'image/png', buffer: png },
+  ])
+  await expect(page.locator('.attachments')).toContainText('notes.txt')
+  await composer.fill('Summarize these')
+  await composer.press('Enter')
+  await expect(page.locator('.prompt').last().locator('.file-card')).toHaveCount(2)
+  const summary = page.locator('.reply .markdown').last()
+  await expect(summary).toContainText('(1 image) (read notes.txt: Ship on Friday) (read dot.png')
+  await expect(page.getByRole('button', { name: 'Files (2)' })).toBeVisible()
+
   await newSession(page, 'Writer', '~/chat-writer')
   await page.getByRole('button', { name: 'New channel' }).click()
   const channel = page.getByRole('dialog', { name: 'New channel' })
@@ -90,9 +107,18 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
   await page.getByRole('option', { name: /@writer/ }).click()
   await expect(message).toHaveValue('@writer ')
   await message.pressSequentially('draft the notes')
+  await page.locator('.chat-composer input[type=file]').setInputFiles({
+    name: 'brief.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# Launch brief\n'),
+  })
   await message.press('Enter')
+  await expect(
+    page.locator('.channel-message').filter({ hasText: 'draft the notes' }).locator('.file-card'),
+  ).toContainText('brief.md')
   const reply = page.locator('.channel-message').filter({ hasText: 'Fixture reply to: You are writer' })
   await expect(reply).toBeVisible()
+  await expect(reply).toContainText('(read brief.md: # Launch brief)')
   await expect(reply.getByRole('button', { name: 'Writer' })).toBeVisible()
   await reply.getByRole('button', { name: 'Steps' }).click()
   await expect(reply.locator('.member-steps')).toContainText('Worked')

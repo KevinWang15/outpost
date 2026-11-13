@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { Ajv } from 'ajv'
 import type { FastifyRequest } from 'fastify'
 import { WebSocket } from 'ws'
@@ -11,7 +10,6 @@ import {
   type ChatServerMessage,
   type SessionRef,
 } from '../../shared/chatApi'
-import { chatHost } from '../../shared/chatHost'
 import { sessionCreationOptions } from '../../shared/sessionCreation'
 import type { Owner } from '../deployment'
 import { AppError } from '../errors'
@@ -29,50 +27,6 @@ const ajv = new Ajv({
   strict: false,
 })
 const validMessage = ajv.compile<ChatClientMessage>(chatClientMessage)
-const uploadLifetime = 10 * 60_000
-const uploadBudget = 32 * 1024 * 1024
-
-interface Upload {
-  owner: string
-  mimeType: string
-  data: Buffer
-  expires: number
-}
-
-/** Prompt images, uploaded over HTTP and referenced by id from the chat socket. */
-export class ChatUploads {
-  private items = new Map<string, Upload>()
-  private prune() {
-    const now = Date.now()
-    for (const [id, item] of this.items) if (item.expires <= now) this.items.delete(id)
-  }
-  put(owner: Owner, mimeType: string, data: Buffer) {
-    this.prune()
-    const used = [...this.items.values()]
-      .filter(item => item.owner === owner.userId)
-      .reduce((sum, item) => sum + item.data.length, 0)
-    if (used + data.length > uploadBudget)
-      throw new AppError('Too many images are waiting to be sent. Send or remove some first.', 413)
-    const id = randomUUID()
-    this.items.set(id, { owner: owner.userId, mimeType, data, expires: Date.now() + uploadLifetime })
-    return id
-  }
-  take(owner: Owner, ids: string[]) {
-    this.prune()
-    const items = ids.map(id => {
-      const item = this.items.get(id)
-      if (!item || item.owner !== owner.userId) throw new AppError('An image expired. Attach it again.', 410)
-      return item
-    })
-    return {
-      blocks: items.map(
-        item => ({ type: 'image', mimeType: item.mimeType, data: item.data.toString('base64') }) as acp.ContentBlock,
-      ),
-      commit: () => ids.forEach(id => this.items.delete(id)),
-    }
-  }
-}
-
 /** One chat page's socket. */
 class Connection implements ChatClient {
   private subscriptions = new Map<string, () => void>()
@@ -197,19 +151,14 @@ class Connection implements ChatClient {
         this.subscriptions.delete(sessionKey(ref!))
         return { ok: true }
       case 'prompt': {
-        const images = this.server.uploads.take(this.owner, message.images)
-        const prompt: acp.ContentBlock[] = [
-          ...(message.text.trim() ? [{ type: 'text' as const, text: message.text }] : []),
-          ...images.blocks,
-        ]
-        if (!prompt.length) throw new AppError('Write a message first.', 400)
+        const prompt: acp.ContentBlock[] = message.text.trim() ? [{ type: 'text', text: message.text }] : []
+        if (!prompt.length && !message.files.length) throw new AppError('Write a message first.', 400)
         const link = await hub.link(this.owner, ref!)
         link.ensure(true)
         const result = await link.request(
-          { type: 'prompt', key: message.key, origin: { kind: 'user' }, prompt },
+          { type: 'prompt', key: message.key, origin: { kind: 'user' }, prompt, files: message.files },
           180_000,
         )
-        if (result.ok) images.commit()
         return result.unknown
           ? { ok: false, message: 'The chat did not confirm this message. If it does not appear above, send it again.' }
           : result
@@ -256,7 +205,10 @@ class Connection implements ChatClient {
       case 'channel-history':
         return { ok: true, data: await hub.history(this.owner, message.channelId, message.before) }
       case 'channel-post':
-        return { ok: true, data: await hub.post(this.owner, message.channelId, message.key, message.text) }
+        return {
+          ok: true,
+          data: await hub.post(this.owner, message.channelId, message.key, message.text, message.files),
+        }
       case 'channel-read':
         await hub.markRead(this.owner, message.channelId)
         return { ok: true }
@@ -300,7 +252,6 @@ class Connection implements ChatClient {
 export class ChatServer {
   private connections = new Set<Connection>()
   private sweep: NodeJS.Timeout
-  readonly uploads = new ChatUploads()
 
   constructor(
     readonly hub: ChatHub,
@@ -348,5 +299,3 @@ export class ChatServer {
     for (const connection of this.connections) connection.close('Outpost is restarting. Reconnecting…')
   }
 }
-
-export const chatImageBytes = chatHost.maxImageBytes

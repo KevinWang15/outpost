@@ -14,7 +14,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { sessionKey, type ChatSession, type SessionRef } from '../../shared/chatApi'
-import type { ChatInfo } from '../../shared/chatHost'
+import { linkedFile, type ChatInfo } from '../../shared/chatHost'
 import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { FileViewer } from '../terminal/FileViewer'
 import { useSessionFiles } from '../terminal/useSessionFiles'
@@ -142,10 +142,16 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
     else setBehind(true)
   }, [view, info?.state])
 
-  // Published files: listed over HTTP, refreshed when the agent publishes one.
+  // Session files: listed over HTTP, refreshed when the agent publishes one or a
+  // message attaches some.
   const access = useMemo(() => client.files(target), [client, target])
-  const published = journal?.entries.reduce((count, entry) => count + Number(entry.kind === 'file'), 0) ?? 0
-  const files = useSessionFiles(access, client.status === 'live', published)
+  const changes =
+    journal?.entries.reduce(
+      (count, entry) =>
+        count + (entry.kind === 'file' ? 1 : entry.kind === 'queued' ? entry.prompt.filter(linkedFile).length : 0),
+      0,
+    ) ?? 0
+  const files = useSessionFiles(access, client.status === 'live', changes)
   const [panel, setPanel] = useState(false)
   const [viewing, setViewing] = useState<string | null>(null)
 
@@ -160,7 +166,6 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
         const result = await client.request({ type: 'unqueue', ...target, turn })
         if (!result.ok) throw new Error(result.message ?? 'The message already started.')
       },
-      previews: key => (key ? (client.previews.get(key) ?? []) : []),
     }),
     [client, target],
   )
@@ -360,7 +365,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               <Composer
                 draftKey={`session:${key}`}
                 placeholder={`Message ${session.name}`}
-                images={info?.images ?? true}
+                onUpload={file => client.upload(target, file)}
                 commands={(info?.commands ?? []).map(command => ({ value: command.name, label: command.description }))}
                 running={running}
                 disabled={
@@ -370,9 +375,9 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                       ? 'Start the coding tool to send messages.'
                       : null
                 }
-                onSend={async (text, images, key) => {
+                onSend={async (text, files, key) => {
                   pinned.current = true
-                  await client.prompt(target, text, images, key)
+                  await client.prompt(target, text, files, key)
                 }}
                 onStop={() => void client.request({ type: 'cancel', ...target })}
               />

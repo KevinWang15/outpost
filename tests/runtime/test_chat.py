@@ -41,6 +41,7 @@ class ChatTest(unittest.TestCase):
                 'key': None,
                 'origin': {'kind': 'user'},
                 'prompt': [{'type': 'text', 'text': 'publish deepseek-result.txt'}],
+                'files': [],
             }
         )
         ended = chat.expect(lambda m: m['type'] == 'entry' and m['entry']['kind'] == 'ended')
@@ -55,6 +56,59 @@ class ChatTest(unittest.TestCase):
         )
         self.assertEqual(blocked['status'], 409)
         self.assertIn('Outpost Chat', blocked['message'])
+
+    def test_files_sent_to_the_agent_are_stored_and_linked_where_its_tools_can_read_them(self):
+        session = self.create(name='Attachments')
+        data = b'Ship on Friday\n'
+        request = {'action': 'files-receive', 'id': session['id'], 'name': 'notes v2.txt', 'size': len(data)}
+        stored = self.call(request, data)
+        self.assertEqual((stored['name'], stored['size'], stored['source']), ('notes v2.txt', len(data), 'received'))
+        self.assertEqual(
+            [item['id'] for item in self.call({'action': 'files-list', 'id': session['id']})], [stored['id']]
+        )
+        short = self.call({**request, 'size': 10}, b'abc', expect_ok=False)
+        self.assertIn('Incomplete', short['message'])
+        nested = self.call({**request, 'name': 'a/b.txt'}, data, expect_ok=False)
+        self.assertIn('filename', nested['message'])
+
+        chat = self.open(session)
+        self.ready(chat)
+        chat.send(
+            {
+                'type': 'prompt',
+                'id': 'f1',
+                'key': None,
+                'origin': {'kind': 'user'},
+                'prompt': [{'type': 'text', 'text': 'Summarize'}],
+                'files': [stored['id']],
+            }
+        )
+        queued = chat.expect(lambda m: m['type'] == 'entry' and m['entry']['kind'] == 'queued')
+        link = queued['entry']['prompt'][-1]
+        self.assertEqual((link['type'], link['name']), ('resource_link', 'notes v2.txt'))
+        self.assertEqual(link['_meta']['outpost']['file']['id'], stored['id'])
+        chat.expect(lambda m: m['type'] == 'entry' and m['entry']['kind'] == 'ended')
+        reply = ''.join(
+            m['entry']['update']['content']['text']
+            for m in chat.messages
+            if m['type'] == 'entry'
+            and m['entry']['kind'] == 'update'
+            and m['entry']['update']['sessionUpdate'] == 'agent_message_chunk'
+        )
+        self.assertIn('(read notes v2.txt: Ship on Friday)', reply)
+        chat.send(
+            {
+                'type': 'prompt',
+                'id': 'f2',
+                'key': None,
+                'origin': {'kind': 'user'},
+                'prompt': [],
+                'files': ['0' * 32],
+            }
+        )
+        missing = chat.expect(lambda m: m['type'] == 'result' and m['id'] == 'f2')
+        self.assertFalse(missing['ok'])
+        self.assertIn('no longer in this session', missing['message'])
 
     def ready(self, chat):
         return chat.expect(
@@ -81,7 +135,7 @@ class ChatTest(unittest.TestCase):
 
         self.addCleanup(cleanup)
         connection = ChatConnection(process)
-        connection.send({'type': 'hello', 'protocol': 1, 'role': role})
+        connection.send({'type': 'hello', 'protocol': 2, 'role': role})
         return connection
 
     def test_chat_starts_a_conversation_records_it_and_continues_it_after_a_restart(self):
@@ -107,6 +161,7 @@ class ChatTest(unittest.TestCase):
                 'key': 'k1',
                 'origin': {'kind': 'user'},
                 'prompt': [{'type': 'text', 'text': 'Check with permission'}],
+                'files': [],
             }
         )
         queued = chat.expect(lambda m: m['type'] == 'result' and m['id'] == 'p1')
@@ -125,6 +180,7 @@ class ChatTest(unittest.TestCase):
                 'key': 'k1',
                 'origin': {'kind': 'user'},
                 'prompt': [{'type': 'text', 'text': 'Check with permission'}],
+                'files': [],
             }
         )
         duplicate = chat.expect(lambda m: m['type'] == 'result' and m['id'] == 'p2')
@@ -175,6 +231,7 @@ class ChatTest(unittest.TestCase):
                 'key': None,
                 'origin': {'kind': 'user'},
                 'prompt': [{'type': 'text', 'text': 'list sessions please'}],
+                'files': [],
             }
         )
         call = hub.expect(lambda m: m['type'] == 'call')
@@ -199,6 +256,7 @@ class ChatTest(unittest.TestCase):
                 'key': None,
                 'origin': {'kind': 'user'},
                 'prompt': [{'type': 'text', 'text': 'wait here'}],
+                'files': [],
             }
         )
         viewer.expect(lambda m: m['type'] == 'result' and m['id'] == 'p2')
@@ -209,6 +267,7 @@ class ChatTest(unittest.TestCase):
                 'key': None,
                 'origin': {'kind': 'user'},
                 'prompt': [{'type': 'text', 'text': 'later'}],
+                'files': [],
             }
         )
         queued = viewer.expect(lambda m: m['type'] == 'result' and m['id'] == 'p3')['data']['turn']
@@ -242,6 +301,7 @@ class ChatTest(unittest.TestCase):
                 'key': None,
                 'origin': {'kind': 'user'},
                 'prompt': [{'type': 'text', 'text': 'list sessions'}],
+                'files': [],
             }
         )
         # The plugin's MCP server reaches the chat host, which holds the call until

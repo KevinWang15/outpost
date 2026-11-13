@@ -6,7 +6,6 @@ from functools import cached_property
 
 from outpost_activity_install import hook_command
 from outpost_harness import CodingSessionAdapter
-from outpost_mcp_install import stdio_server
 
 
 class ClaudeAdapter(CodingSessionAdapter):
@@ -58,15 +57,19 @@ class ClaudeAdapter(CodingSessionAdapter):
         # A new conversation has no transcript until its first prompt.
         return any(path.is_file() for path in self.activity_files(session))
 
-    def prepare_launch(self, directory, session):
+    def prepare_launch(self, directory, session, servers):
         # The launch contract places arguments(session) after these options,
         # ending variadic --mcp-config before any user-supplied prompt.
-        server = {
-            'type': 'stdio',
-            **stdio_server(directory / 'bin' / 'outpost-mcp'),
-            'env': {'OUTPOST_SESSION_ID': session['id'], 'OUTPOST_STATE_DIRECTORY': str(directory)},
+        native = {
+            server['name']: {
+                'type': 'stdio',
+                'command': server['command'],
+                'args': server['args'],
+                'env': server['env'],
+            }
+            for server in servers
         }
-        return ['--mcp-config', json.dumps({'mcpServers': {'outpost': server}}, separators=(',', ':'))]
+        return ['--mcp-config', json.dumps({'mcpServers': native}, separators=(',', ':'))]
 
     def prepare_activity(self, directory, session, generation, executable):
         command = hook_command(directory, session, generation)

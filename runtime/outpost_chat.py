@@ -20,7 +20,7 @@ import outpost_terminal as terminal
 from outpost_frames import MAGIC, FrameDecoder, control, encode
 from outpost_storage import replace_file
 
-PROTOCOL = 1
+PROTOCOL = 2
 MAX_INSTRUCTIONS = 32000
 
 
@@ -89,26 +89,13 @@ def remove(state, session):
     Path(socket_name(session)).unlink(missing_ok=True)
 
 
-def start(state, session, adapter, executable, environment, mcp_server):
-    """Start the chat host; it opens the native conversation asynchronously."""
+def start(state, session, adapter, executable, environment, servers):
+    """Start the chat host; it opens the native conversation asynchronously.
+    servers are the launch's MCP servers (outpost_mcp_servers.servers)."""
     (state / 'chats').mkdir(mode=0o700, exist_ok=True)
     Path(socket_name(session)).unlink(missing_ok=True)
     command, additions = adapter.chat_command(state, executable)
-    environment = {
-        **environment,
-        **additions,
-        'OUTPOST_CHAT_SOCKET': socket_name(session),
-    }
-    server = {
-        'name': 'outpost',
-        'command': mcp_server['command'],
-        'args': mcp_server['args'],
-        'env': [
-            {'name': 'OUTPOST_SESSION_ID', 'value': session['id']},
-            {'name': 'OUTPOST_STATE_DIRECTORY', 'value': str(state)},
-            {'name': 'OUTPOST_CHAT_SOCKET', 'value': socket_name(session)},
-        ],
-    }
+    environment = {**environment, **additions}
     launch = {
         'socket': socket_name(session),
         'session': session['id'],
@@ -116,7 +103,7 @@ def start(state, session, adapter, executable, environment, mcp_server):
         'cwd': session['rootDir'],
         'env': environment,
         'resume': session['cliSessionId'] if adapter.chat_resumable(session) else None,
-        'mcpServers': adapter.chat_mcp_servers(state, session, server),
+        'mcpServers': adapter.chat_mcp_servers(state, session, servers),
         'instructions': read_settings(state, session)['instructions'],
     }
     logs = state / 'logs'

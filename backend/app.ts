@@ -95,6 +95,7 @@ export async function createApp(options: AppOptions) {
   const hub = new ChatHub({
     deployment,
     resolve,
+    files: services.files,
     list: async (context, signal) => (await sessions.list(context, signal)).sessions,
     connect: options.chatConnector ?? relayConnector(sessions, options.env),
   })

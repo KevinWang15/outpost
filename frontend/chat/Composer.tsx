@@ -7,8 +7,10 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, ImagePlus, LoaderCircle, Square, X } from 'lucide-react'
+import { ArrowUp, FileText, LoaderCircle, Paperclip, Square, X } from 'lucide-react'
 import { chatHost } from '../../shared/chatHost'
+import { maxSessionFileBytes } from '../../shared/sessionFiles'
+import { fileSize } from '../terminal/sessionFiles'
 import { newKey } from './client'
 
 export interface Suggestion {
@@ -17,7 +19,7 @@ export interface Suggestion {
   detail?: string
 }
 
-/** Unsent text and images, per conversation, for this page. */
+/** Unsent text, per conversation, for this page. */
 const drafts = new Map<string, string>()
 const imageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const coarse = () => window.matchMedia?.('(pointer: coarse)').matches
@@ -27,7 +29,7 @@ export default function Composer({
   placeholder,
   mentions = [],
   commands = [],
-  images,
+  onUpload,
   running = false,
   disabled = null,
   onSend,
@@ -37,17 +39,19 @@ export default function Composer({
   placeholder: string
   mentions?: Suggestion[]
   commands?: Suggestion[]
-  images: boolean
+  /** Uploads one attached file and returns its ID; without it, nothing can be attached. */
+  onUpload?: (file: File) => Promise<string>
   running?: boolean
   /** A reason sending is unavailable, shown instead of sending. */
   disabled?: string | null
   /** `key` stays the same when an unchanged draft is sent again, so the
-   * server can tell a resend from a new message. */
-  onSend: (text: string, images: File[], key: string) => Promise<void>
+   * server can tell a resend from a new message. `files` are uploaded IDs. */
+  onSend: (text: string, files: string[], key: string) => Promise<void>
   onStop?: () => void
 }) {
   const [text, setText] = useState(() => drafts.get(draftKey) ?? '')
-  const [files, setFiles] = useState<{ file: File; url: string }[]>([])
+  /** `url` previews an image. */
+  const [files, setFiles] = useState<{ file: File; url: string | null }[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [active, setActive] = useState(0)
@@ -57,6 +61,8 @@ export default function Composer({
   const picker = useRef<HTMLInputElement>(null)
   /** The last attempt that was not confirmed: resending it keeps its key. */
   const attempt = useRef<{ key: string; text: string; files: File[] } | null>(null)
+  /** Files already uploaded for this draft, so a resend does not store them again. */
+  const uploaded = useRef(new Map<File, string>())
 
   // Each conversation mounts its own composer (keyed views), so this runs per draft.
   useEffect(() => {
@@ -102,19 +108,22 @@ export default function Composer({
   }
 
   function attach(list: Iterable<File>) {
-    const added: { file: File; url: string }[] = []
+    const added: { file: File; url: string | null }[] = []
     for (const file of list) {
-      if (!imageTypes.includes(file.type)) {
-        setError('Attach PNG, JPEG, GIF or WebP images.')
+      if (file.size > maxSessionFileBytes) {
+        setError(`${file.name} is larger than ${maxSessionFileBytes / 1024 / 1024} MB.`)
         continue
       }
-      if (file.size > chatHost.maxImageBytes) {
-        setError(`Images must be ${chatHost.maxImageBytes / 1024 / 1024} MB or smaller.`)
-        continue
-      }
-      added.push({ file, url: URL.createObjectURL(file) })
+      added.push({ file, url: imageTypes.includes(file.type) ? URL.createObjectURL(file) : null })
     }
-    setFiles(current => [...current, ...added].slice(0, chatHost.maxImages))
+    if (files.length + added.length > chatHost.maxFiles) setError(`Attach at most ${chatHost.maxFiles} files at once.`)
+    setFiles(current => [...current, ...added].slice(0, chatHost.maxFiles))
+  }
+
+  function detach(item: { file: File; url: string | null }) {
+    if (item.url) URL.revokeObjectURL(item.url)
+    uploaded.current.delete(item.file)
+    setFiles(current => current.filter(other => other !== item))
   }
 
   async function send() {
@@ -123,16 +132,28 @@ export default function Composer({
     if (!body && !files.length) return
     setBusy(true)
     setError('')
-    const images = files.map(item => item.file)
+    const attached = files.map(item => item.file)
     const last = attempt.current
     const same =
-      last?.text === body && last.files.length === images.length && last.files.every((file, i) => file === images[i])
+      last?.text === body &&
+      last.files.length === attached.length &&
+      last.files.every((file, i) => file === attached[i])
     const key = same ? last.key : newKey()
-    attempt.current = { key, text: body, files: images }
+    attempt.current = { key, text: body, files: attached }
     try {
-      await onSend(body, images, key)
+      const ids: string[] = []
+      for (const file of attached) {
+        let id = uploaded.current.get(file)
+        if (!id) {
+          id = await onUpload!(file)
+          uploaded.current.set(file, id)
+        }
+        ids.push(id)
+      }
+      await onSend(body, ids, key)
       attempt.current = null
-      for (const item of files) URL.revokeObjectURL(item.url)
+      uploaded.current.clear()
+      for (const item of files) if (item.url) URL.revokeObjectURL(item.url)
       setText('')
       setFiles([])
       drafts.delete(draftKey)
@@ -174,9 +195,9 @@ export default function Composer({
   return (
     <div
       className={`chat-composer ${disabled ? 'disabled' : ''}`}
-      onDragOver={event => images && event.dataTransfer.types.includes('Files') && event.preventDefault()}
+      onDragOver={event => onUpload && event.dataTransfer.types.includes('Files') && event.preventDefault()}
       onDrop={(event: DragEvent) => {
-        if (!images || !event.dataTransfer.files.length) return
+        if (!onUpload || !event.dataTransfer.files.length) return
         event.preventDefault()
         attach(event.dataTransfer.files)
       }}
@@ -203,16 +224,24 @@ export default function Composer({
       )}
       {files.length > 0 && (
         <div className="attachments">
-          {files.map(item => (
-            <span key={item.url} className="attachment">
-              <img src={item.url} alt={item.file.name} />
+          {files.map((item, index) => (
+            <span key={`${index}:${item.file.name}`} className={`attachment ${item.url ? '' : 'document'}`}>
+              {item.url ? (
+                <img src={item.url} alt={item.file.name} />
+              ) : (
+                <span className="attachment-file" title={item.file.name}>
+                  <FileText size={16} />
+                  <span>
+                    <strong>{item.file.name}</strong>
+                    <small>{fileSize(item.file.size)}</small>
+                  </span>
+                </span>
+              )}
               <button
                 className="icon-button"
                 aria-label={`Remove ${item.file.name}`}
-                onClick={() => {
-                  URL.revokeObjectURL(item.url)
-                  setFiles(current => current.filter(other => other !== item))
-                }}
+                disabled={busy}
+                onClick={() => detach(item)}
               >
                 <X size={12} />
               </button>
@@ -236,19 +265,18 @@ export default function Composer({
           onSelect={event => setCaret(event.currentTarget.selectionStart)}
           onKeyDown={keyDown}
           onPaste={(event: ClipboardEvent) => {
-            const pasted = [...event.clipboardData.files].filter(file => file.type.startsWith('image/'))
-            if (!images || !pasted.length) return
+            const pasted = [...event.clipboardData.files]
+            if (!onUpload || !pasted.length) return
             event.preventDefault()
             attach(pasted)
           }}
         />
         <div className="composer-actions">
-          {images && (
+          {onUpload && (
             <>
               <input
                 ref={picker}
                 type="file"
-                accept={imageTypes.join(',')}
                 multiple
                 hidden
                 onChange={event => {
@@ -258,12 +286,12 @@ export default function Composer({
               />
               <button
                 className="icon-button"
-                aria-label="Attach images"
-                title="Attach images"
-                disabled={Boolean(disabled)}
+                aria-label="Attach files"
+                title="Attach files"
+                disabled={Boolean(disabled) || busy}
                 onClick={() => picker.current?.click()}
               >
-                <ImagePlus size={17} />
+                <Paperclip size={17} />
               </button>
             </>
           )}

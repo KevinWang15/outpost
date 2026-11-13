@@ -75,6 +75,8 @@ test('channel prompts: attributed header, newest messages within bounds', () => 
     root: String(index),
     hop: 0,
     turn: null,
+    key: null,
+    files: [],
   })
   const prompt = channelPrompt(
     channel,
@@ -86,4 +88,15 @@ test('channel prompts: attributed header, newest messages within bounds', () => 
   assert.match(prompt, /\(10 older not shown\)/)
   assert.ok(prompt.includes('the user: note 39'))
   assert.ok(!prompt.includes('note 9\n'))
+
+  // Attached files are named in their message; ones the member could not get are listed.
+  const file = { id: 'f'.repeat(32), name: 'plan.pdf', createdAt: '', size: 3, mediaType: 'application/octet-stream' }
+  const attached = channelPrompt(
+    channel,
+    'coder',
+    [{ ...message(1), files: [{ ...file, source: 'received' }] }],
+    ['big.zip (Files must be at most 32 MiB)'],
+  )
+  assert.ok(attached.includes('the user: note 1 [attached: plan.pdf]'))
+  assert.ok(attached.includes('Files that could not be attached: big.zip (Files must be at most 32 MiB).'))
 })

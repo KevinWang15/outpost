@@ -1,15 +1,14 @@
-import type { FastifyInstance } from 'fastify'
-import { imageMediaTypes } from '../../shared/images'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { desktopOrigin } from '../../shared/desktopAuth'
 import { chatProtocol } from '../../shared/chatApi'
 import { AppError } from '../errors'
 import type { Services } from '../services'
 import type { DesktopAccess } from '../desktop-access'
-import { chatImageBytes, type ChatServer } from '../chat/socket'
+import type { ChatServer } from '../chat/socket'
 import type { Owner } from '../deployment'
-import { sessionFileId } from '../../shared/sessionFiles'
+import { maxSessionFileBytes, sessionFileId, sessionFileName } from '../../shared/sessionFiles'
 import { withRequestSignal } from '../request'
-import type { SessionFileDownload } from './sessionFiles'
+import { sendAttachment, type SessionFileDownload } from './sessionFiles'
 
 export function chatRoutes(
   app: FastifyInstance,
@@ -29,8 +28,12 @@ export function chatRoutes(
     if (!/^[0-9a-f-]{36}$/.test(params.sessionId)) throw new AppError('Invalid session.')
     return params.sessionId
   }
+  const channel = (params: { channelId: string }) => {
+    if (!/^[0-9a-f-]{36}$/.test(params.channelId)) throw new AppError('Invalid channel.')
+    return params.channelId
+  }
 
-  // A session's published files (Outpost MCP publish_file), stored on its target.
+  // A session's files (published by its agent or sent to it), stored on its target.
   type FileParams = { targetId: string; sessionId: string; fileId: string }
   app.get<{ Params: Omit<FileParams, 'fileId'> }>('/api/chat/files/:targetId/:sessionId', (request, reply) =>
     withRequestSignal(reply, async signal => {
@@ -65,38 +68,74 @@ export function chatRoutes(
     },
   )
 
-  // Prompt images: authenticated with the page's chat grant before buffering.
+  // Files the user attaches: raw bytes, authenticated with the page's chat grant
+  // before buffering. A session's go to its store on the target; a channel's
+  // wait on the server until the post commits them.
   app.register(async uploads => {
     uploads.removeAllContentTypeParsers()
-    uploads.addContentTypeParser([...imageMediaTypes], { parseAs: 'buffer' }, (_request, body, done) =>
+    uploads.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) =>
       done(null, body),
     )
     const owners = new WeakMap<object, Owner>()
-    uploads.post<{ Body: Buffer }>(
-      '/api/chat/images',
-      {
-        bodyLimit: chatImageBytes,
-        onRequest: async request => {
-          const match = /^Bearer ([A-Za-z0-9_.-]{1,4096})$/.exec(request.headers.authorization ?? '')
-          const owner = match ? chat.tokens.authorize(match[1]) : null
-          if (!owner || !services.active(owner))
-            throw new AppError('This chat authorization expired. Reload the page.', 401)
-          owners.set(request, owner)
-        },
-      },
-      async (request, reply) => {
-        const owner = owners.get(request)!
-        const mediaType = request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() ?? ''
-        if (!Buffer.isBuffer(request.body) || !(imageMediaTypes as readonly string[]).includes(mediaType))
-          throw new AppError('Use a PNG, JPEG, GIF, or WebP image.', 415)
-        return reply.code(201).send({
-          id: chat.uploads.put(owner, mediaType, request.body),
-          mimeType: mediaType,
-          size: request.body.length,
+    const active = new Map<string, number>()
+    const options = {
+      bodyLimit: maxSessionFileBytes,
+      onRequest: async (request: FastifyRequest, reply: FastifyReply) => {
+        const who = owner(request.headers.authorization)
+        // Each upload is buffered in memory; bound them per account. The slot is
+        // released when the response ends or the connection drops mid-upload.
+        if ((active.get(who.userId) ?? 0) >= 2) throw new AppError('Too many uploads at once. Try again shortly.', 429)
+        active.set(who.userId, (active.get(who.userId) ?? 0) + 1)
+        reply.raw.once('close', () => {
+          const count = (active.get(who.userId) ?? 1) - 1
+          if (count) active.set(who.userId, count)
+          else active.delete(who.userId)
         })
+        owners.set(request, who)
+      },
+    }
+    const upload = (request: { body: unknown; query: { name?: string } }) => {
+      if (!Buffer.isBuffer(request.body)) throw new AppError('Send the file as application/octet-stream.', 415)
+      if (!sessionFileName(request.query.name))
+        throw new AppError('Use a filename without folders or control characters.')
+      return { name: request.query.name, data: request.body }
+    }
+    uploads.post<{ Params: { targetId: string; sessionId: string }; Querystring: { name?: string }; Body: Buffer }>(
+      '/api/chat/files/:targetId/:sessionId',
+      options,
+      (request, reply) =>
+        withRequestSignal(reply, async signal => {
+          const { name, data } = upload(request)
+          const context = await services.resolve(owners.get(request)!, request.params.targetId)
+          return reply
+            .code(201)
+            .send(await services.files.receive(context, session(request.params), name, data, signal))
+        }),
+    )
+    uploads.post<{ Params: { channelId: string }; Querystring: { name?: string }; Body: Buffer }>(
+      '/api/chat/channels/:channelId/files',
+      options,
+      async (request, reply) => {
+        const { name, data } = upload(request)
+        return reply.code(201).send(await chat.hub.stageFile(owners.get(request)!, channel(request.params), name, data))
       },
     )
   })
+
+  // Files attached to the user's channel posts.
+  app.get<{ Params: { channelId: string } }>('/api/chat/channels/:channelId/files', async (request, reply) => {
+    const who = owner(request.headers.authorization)
+    reply.header('Cache-Control', 'no-store')
+    return chat.hub.channelFiles(who, channel(request.params))
+  })
+  app.get<{ Params: { channelId: string; fileId: string } }>(
+    '/api/chat/channels/:channelId/files/:fileId',
+    async (request, reply) => {
+      const who = owner(request.headers.authorization)
+      const { file, bytes } = await chat.hub.readChannelFile(who, channel(request.params), request.params.fileId)
+      return sendAttachment(reply, file, bytes)
+    },
+  )
 
   /** Outpost Desktop's chat window: a ticket for one chat socket, from the app login. */
   app.post('/api/desktop/chat/connect', async request => {

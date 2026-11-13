@@ -159,6 +159,7 @@ test(
         HOME: home,
         OUTPOST_SESSION_ID: session.id,
         OUTPOST_STATE_DIRECTORY: join(home, '.outpost'),
+        OUTPOST_DRIVER: 'terminal',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
@@ -225,12 +226,12 @@ test(
     await writeFile(file, 'A generated deployment report')
     const published = await call('publish_file', { path: file })
     assert.equal(published.stored, true)
-    assert.match(
+    assert.equal(
       await readFile(
-        join(home, '.outpost/files', session.id, String((published.file as { id: string }).id), 'content'),
+        join(home, '.outpost/files', session.id, (published.file as { id: string }).id, 'content', 'report.txt'),
         'utf8',
-      ).catch(() => ''),
-      /./,
+      ),
+      'A generated deployment report',
     )
     await deployment.workspace().remove('beta')
     const reduced = (await call('search_history', { query: 'TLS certificate', mode: 'keyword' })) as {

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import outpost_chat as chat
 import outpost_files
-import outpost_mcp_install
+import outpost_mcp_servers as mcp
 import outpost_terminal as terminal
 from outpost_activity_state import Activity
 from outpost_harness import adapters
@@ -232,7 +232,7 @@ def valid_launch_options(environment, arguments):
 
 def install_helpers():
     HELPERS.mkdir(mode=0o700, exist_ok=True)
-    outpost_mcp_install.install(HELPERS)
+    mcp.install(HELPERS)
     for name in ('outpost-browser', 'outpost-signal'):
         path = HELPERS / name
         try:
@@ -259,13 +259,9 @@ def launch_script(session, executable, activity_generation=None, launch_argument
         )
     if environment:
         steps.append('export -- ' + ' '.join(key + '=' + shlex.quote(value) for key, value in environment.items()))
-    # Session routing is launcher-owned even when the user supplies other environment settings.
-    steps.append(
-        'export OUTPOST_SESSION_ID='
-        + shlex.quote(session['id'])
-        + ' OUTPOST_STATE_DIRECTORY='
-        + shlex.quote(str(STATE))
-    )
+    # The MCP binding is launcher-owned even when the user supplies other environment settings.
+    binding = mcp.context(STATE, session, 'terminal')
+    steps.append('export -- ' + ' '.join(key + '=' + shlex.quote(value) for key, value in binding.items()))
     adapter = CODING_ADAPTERS[session['tool']]
     # Integration options precede the adapter's native conversation selector;
     # user arguments remain a separate, guarded suffix.
@@ -517,7 +513,7 @@ def start_session(session, cols, rows):
     (STATE / 'terminals').mkdir(mode=0o700, exist_ok=True)
     Path(socket_name(session)).unlink(missing_ok=True)
     install_helpers()
-    integration_arguments = CODING_ADAPTERS[tool].prepare_launch(STATE, session)
+    integration_arguments = adapter.prepare_launch(STATE, session, mcp.servers(STATE, session, 'terminal'))
     observer = activity(session)
     observer.initialize()
     activity_generation, activity_arguments = observer.begin_launch(executable)
@@ -614,20 +610,9 @@ def start_chat(session):
     environment.pop('TMUX_PANE', None)
     environment.update(session['env'])
     environment.update(session['cliSessionEnv'])
-    environment.update(
-        PATH=str(HELPERS) + ':' + environment.get('PATH', ''),
-        OUTPOST_SESSION_ID=session['id'],
-        OUTPOST_STATE_DIRECTORY=str(STATE),
-    )
+    environment.update(PATH=str(HELPERS) + ':' + environment.get('PATH', ''), **mcp.context(STATE, session, 'chat'))
     try:
-        chat.start(
-            STATE,
-            session,
-            CODING_ADAPTERS[tool],
-            executable,
-            environment,
-            outpost_mcp_install.stdio_server(HELPERS / 'outpost-mcp'),
-        )
+        chat.start(STATE, session, CODING_ADAPTERS[tool], executable, environment, mcp.servers(STATE, session, 'chat'))
     except ValueError as error:
         fail(str(error), 409)
 
@@ -910,7 +895,7 @@ def main():
             install_helpers()
         respond(created)
         return
-    if action in ('files-list', 'files-remove', 'files-read'):
+    if action in ('files-list', 'files-remove', 'files-read', 'files-receive'):
         if not any(s['id'] == request.get('id') for s in read_registry()['sessions']):
             fail('Session not found', 404)
         try:
@@ -919,6 +904,11 @@ def main():
             elif action == 'files-remove':
                 outpost_files.remove(request['id'], request.get('fileId'))
                 respond({'ok': True})
+            elif action == 'files-receive':
+                # The raw body follows the operation on stdin; nothing else reads it.
+                respond(
+                    outpost_files.receive(request['id'], request.get('name'), request.get('size'), sys.stdin.buffer)
+                )
             else:
                 metadata, stream = outpost_files.read_file(request['id'], request.get('fileId'))
                 with stream:

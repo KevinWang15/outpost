@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ChatServerMessage, ChannelMessage, Delivery } from '../../shared/chatApi'
 import type { ChatHostMessage, ChatHostRequest } from '../../shared/chatHost'
+import { parseSessionFile } from '../../shared/sessionFiles'
 import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
 import type { Session } from '../../shared/model'
 import { LocalDeployment } from '../../backend/deployment'
@@ -39,7 +40,7 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
   const home = join(directory, 'claude')
   execFileSync(
     'python3',
-    ['-c', 'import sys, pathlib, outpost_mcp_install as m; m.install(pathlib.Path(sys.argv[1]))', state],
+    ['-c', 'import sys, pathlib, outpost_mcp_servers as m; m.install(pathlib.Path(sys.argv[1]))', state],
     { env: { ...process.env, PYTHONPATH: join(root, 'runtime') } },
   )
   const previous = process.cwd()
@@ -73,7 +74,7 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
             env: [
               { name: 'OUTPOST_SESSION_ID', value: session.id },
               { name: 'OUTPOST_STATE_DIRECTORY', value: state },
-              { name: 'OUTPOST_CHAT_SOCKET', value: `chats/${session.id}.sock` },
+              { name: 'OUTPOST_DRIVER', value: 'chat' },
             ],
           },
         ],
@@ -171,8 +172,41 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
 
   const hubs: ChatHub[] = []
   const received: ChatServerMessage[] = []
+  /** Session files through the target's own file store (runtime/outpost_files.py). */
+  const store = (script: string, args: string[], input?: Buffer) =>
+    execFileSync(
+      'python3',
+      [
+        '-c',
+        `import json, pathlib, sys, outpost_files as f; f.STATE = pathlib.Path(sys.argv[1]); ${script}`,
+        state,
+        ...args,
+      ],
+      { env: { ...process.env, PYTHONPATH: join(root, 'runtime') }, input },
+    )
+  const files = {
+    receive: async (_context: unknown, sessionId: string, name: string, data: Buffer) =>
+      parseSessionFile(
+        JSON.parse(
+          store(
+            'print(json.dumps(f.receive(sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.stdin.buffer)))',
+            [sessionId, name, String(data.length)],
+            data,
+          ).toString(),
+        ),
+      ),
+    read: async (_context: unknown, sessionId: string, fileId: string) => {
+      const output = store(
+        'm, s = f.read_file(sys.argv[2], sys.argv[3]); sys.stdout.buffer.write(json.dumps(m).encode() + b"\\n" + s.read())',
+        [sessionId, fileId],
+      )
+      const end = output.indexOf(10)
+      return { file: parseSessionFile(JSON.parse(output.subarray(0, end).toString())), bytes: output.subarray(end + 1) }
+    },
+  }
+
   async function startHub(timing: { promptMs?: number; probeMs?: number } = {}) {
-    const hub = new ChatHub({ deployment, resolve, list, connect: connector, ...timing })
+    const hub = new ChatHub({ deployment, resolve, list, files, connect: connector, ...timing })
     hubs.push(hub)
     await hub.start()
     await hub.attach({ owner, send: message => received.push(message) })
@@ -184,6 +218,7 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
     owner,
     target,
     sessions: created,
+    files,
     hosts,
     received,
     muted,

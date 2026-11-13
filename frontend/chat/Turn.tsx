@@ -1,10 +1,10 @@
-import { memo, useContext, useState, type ReactNode } from 'react'
+import { memo, useState, type ReactNode } from 'react'
 import { ChevronRight, Hash, Image, ImageOff, MessageSquareReply, Timer } from 'lucide-react'
 import type * as acp from '@agentclientprotocol/sdk'
+import { linkedFile } from '../../shared/chatHost'
 import { promptHeaderPattern, type TurnItem, type TurnView } from '../../shared/chatTranscript'
 import { elapsed } from './format'
 import { Markdown } from './Markdown'
-import { ConversationContext } from './context'
 import { PermissionCard, PlanView, StepGroup, type StepItem } from './Steps'
 import { TurnFile } from './Files'
 
@@ -83,24 +83,34 @@ export function Reply({ turn, open = false, steps = false }: { turn: TurnView; o
   )
 }
 
-function PromptText({ prompt, previews }: { prompt: acp.ContentBlock[]; previews: string[] }) {
-  let image = 0
+/** Session files a prompt attached, as cards. */
+function PromptFiles({ prompt }: { prompt: acp.ContentBlock[] }) {
+  const files = prompt.flatMap(block => linkedFile(block) ?? [])
+  if (!files.length) return null
+  return (
+    <div className="file-cards">
+      {files.map(file => (
+        <TurnFile key={file.id} file={file} />
+      ))}
+    </div>
+  )
+}
+
+function PromptText({ prompt }: { prompt: acp.ContentBlock[] }) {
   return (
     <>
       {prompt.map((block, index) => {
         if (block.type === 'text') return <p key={index}>{block.text}</p>
-        if (block.type === 'image') {
-          const url = previews[image++]
-          return url ? (
-            <img key={index} className="prompt-image" alt="" src={url} />
-          ) : (
+        // Replayed history keeps no image bytes.
+        if (block.type === 'image')
+          return (
             <span key={index} className="chip">
               <Image size={12} /> Image
             </span>
           )
-        }
         return null
       })}
+      <PromptFiles prompt={prompt} />
     </>
   )
 }
@@ -129,6 +139,7 @@ function ComposedPrompt({ turn }: { turn: TurnView }) {
         <ChevronRight size={13} className="chevron" />
       </button>
       {open && <pre className="composed-body">{body}</pre>}
+      <PromptFiles prompt={turn.prompt} />
     </div>
   )
 }
@@ -136,7 +147,6 @@ function ComposedPrompt({ turn }: { turn: TurnView }) {
 /** A turn renders again only when an entry changed it (its revision). */
 export const Turn = memo(
   function Turn({ turn, avatar }: { turn: TurnView; avatar: ReactNode }) {
-    const { previews } = useContext(ConversationContext)
     const composed = turn.label !== null
     const footer =
       turn.status === 'running'
@@ -152,7 +162,7 @@ export const Turn = memo(
           <ComposedPrompt turn={turn} />
         ) : turn.prompt.length > 0 ? (
           <div className="prompt">
-            <PromptText prompt={turn.prompt} previews={previews(turn.key)} />
+            <PromptText prompt={turn.prompt} />
           </div>
         ) : null}
         {(turn.items.length > 0 || turn.status === 'running') && (

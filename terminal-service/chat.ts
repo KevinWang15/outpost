@@ -3,8 +3,10 @@
 // and serves viewers on a private Unix socket (docs/CHAT.md).
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, unlinkSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import * as acp from '@agentclientprotocol/sdk'
 import type { SessionActivity } from '../shared/activity'
 import {
@@ -12,6 +14,7 @@ import {
   chatHost,
   ChatJournal,
   journalBlock,
+  linkedFile,
   type ChatEntryInput,
   type ChatHostMessage,
   type ChatHostStatus,
@@ -20,10 +23,9 @@ import {
   type ChatOrigin,
 } from '../shared/chatHost'
 import { FrameDecoder, maxTerminalFrame, terminalControl } from '../shared/node/terminalFrames'
-import { parseSessionFile } from '../shared/sessionFiles'
+import { parseSessionFile, previewImage, sessionFileId, type SessionFile } from '../shared/sessionFiles'
 import { terminalService } from '../shared/terminalService'
 
-const imageTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 const originKinds = new Set(['user', 'channel', 'session', 'reply', 'schedule'])
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value)
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -54,29 +56,19 @@ function validOrigin(value: unknown): value is ChatOrigin {
   return record(value) && originKinds.has(value.kind as string) && JSON.stringify(value).length <= chatHost.maxOrigin
 }
 
-/** Prompt content from a viewer: bounded text and supported images only. */
-export function validPrompt(value: unknown, images: boolean): acp.ContentBlock[] | string {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 64) return 'Invalid message.'
-  let text = 0,
-    pictures = 0
+/** Prompt content from a viewer: bounded text blocks and session file IDs. */
+export function validPrompt(value: unknown, files: unknown): { text: acp.ContentBlock[]; files: string[] } | string {
+  if (!Array.isArray(value) || value.length > 64) return 'Invalid message.'
+  if (!Array.isArray(files) || !files.every(sessionFileId)) return 'Invalid attachments.'
+  if (files.length > chatHost.maxFiles) return `Attach at most ${chatHost.maxFiles} files at once.`
+  let text = 0
   for (const block of value) {
-    if (!record(block)) return 'Invalid message.'
-    if (block.type === 'text') {
-      if (typeof block.text !== 'string') return 'Invalid message.'
-      text += block.text.length
-    } else if (block.type === 'image') {
-      if (!images) return 'This coding tool does not accept images.'
-      if (typeof block.data !== 'string' || !imageTypes.has(block.mimeType as string))
-        return 'Use a PNG, JPEG, GIF, or WebP image.'
-      if (block.data.length > Math.ceil((chatHost.maxImageBytes * 4) / 3) + 4)
-        return `Images must be ${chatHost.maxImageBytes / 1024 / 1024} MB or smaller.`
-      pictures++
-    } else return 'Invalid message.'
+    if (!record(block) || block.type !== 'text' || typeof block.text !== 'string') return 'Invalid message.'
+    text += block.text.length
   }
   if (text > 256 * 1024) return 'Messages must fit within 256 KiB of text.'
-  if (pictures > chatHost.maxImages) return `Send at most ${chatHost.maxImages} images at once.`
-  if (text === 0 && pictures === 0) return 'Write a message first.'
-  return value as acp.ContentBlock[]
+  if (text === 0 && files.length === 0) return 'Write a message first.'
+  return { text: value as acp.ContentBlock[], files: [...new Set(files)] }
 }
 
 interface Queued {
@@ -130,11 +122,14 @@ export class ChatHost {
   private infoTimer: NodeJS.Timeout | null = null
   private idleTimer: NodeJS.Timeout | null = null
   private loading = false
+  /** This session's file store, below the state directory (the working directory). */
+  private files: string
 
   constructor(
     private launch: ChatLaunch,
     private options: ChatHostOptions = {},
   ) {
+    this.files = resolve('files', launch.session)
     this.info = {
       state: 'starting',
       error: null,
@@ -230,8 +225,12 @@ export class ChatHost {
     }
     this.info.images = Boolean(capabilities.promptCapabilities?.image)
     this.info.instructions = !instructions ? 'none' : supportsInstructions ? 'applied' : 'unsupported'
+    // Attachments live in the session's file store; let the agent's own tools read it.
+    const directories = capabilities.sessionCapabilities?.additionalDirectories
+    if (directories) mkdirSync(this.files, { recursive: true, mode: 0o700 })
     const lifecycle: acp.NewSessionRequest = {
       cwd: this.launch.cwd,
+      ...(directories ? { additionalDirectories: [this.files] } : {}),
       mcpServers: this.launch.mcpServers,
       ...(instructions && supportsInstructions
         ? { systemPrompt: { mode: 'append', content: [{ type: 'text', text: instructions }] } }
@@ -380,10 +379,45 @@ export class ChatHost {
     this.record({ kind: 'started', turn: next.turn })
     this.activityChanged()
     const agent = this.connection.agent
-    agent.request('session/prompt', { sessionId: this.sessionId, prompt: next.prompt }).then(
+    agent.request('session/prompt', { sessionId: this.sessionId, prompt: this.inline(next.prompt) }).then(
       result => this.finish(next.turn, result.stopReason, null),
       error => this.finish(next.turn, 'error', describeError(error)),
     )
+  }
+
+  // Files ---------------------------------------------------------------------------
+
+  /** A resource link to one stored session file, which the agent reads with its own tools. */
+  private link(id: string): acp.ContentBlock {
+    let file: SessionFile
+    try {
+      file = parseSessionFile(JSON.parse(readFileSync(resolve(this.files, id, 'metadata.json'), 'utf8')))
+    } catch {
+      throw new Error('An attached file is no longer in this session. Attach it again.')
+    }
+    return {
+      type: 'resource_link',
+      name: file.name,
+      uri: pathToFileURL(resolve(this.files, id, 'content', file.name)).href,
+      size: file.size,
+      ...(previewImage(file) ? { mimeType: file.mediaType } : {}),
+      _meta: { outpost: { file } },
+    }
+  }
+
+  /** Images also go inline when the agent accepts them, read when the turn starts. */
+  private inline(prompt: acp.ContentBlock[]): acp.ContentBlock[] {
+    if (!this.info.images) return prompt
+    return prompt.flatMap(block => {
+      const file = linkedFile(block)
+      if (!file || !previewImage(file) || file.size > chatHost.maxImageBytes) return [block]
+      try {
+        const data = readFileSync(resolve(this.files, file.id, 'content', file.name)).toString('base64')
+        return [{ type: 'image', mimeType: file.mediaType, data } as acp.ContentBlock, block]
+      } catch {
+        return [block] // Removed since; the agent finds the link's file missing.
+      }
+    })
   }
 
   private finish(turn: string, stopReason: acp.StopReason | 'error', error: string | null) {
@@ -657,11 +691,11 @@ export class ChatHost {
         const key = message.key
         if (key !== null && !identifier(key)) return fail('Invalid message key.')
         if (!validOrigin(message.origin)) return fail('Invalid message origin.')
-        // Before initialization the agent's image support is unknown; it rejects what it cannot use.
-        const prompt = validPrompt(message.prompt, this.info.agent ? this.info.images : true)
+        const prompt = validPrompt(message.prompt, message.files)
         if (typeof prompt === 'string') return fail(prompt)
         try {
-          return this.reply(socket, id, true, undefined, this.enqueue(key, message.origin, prompt))
+          const content = [...prompt.text, ...prompt.files.map(file => this.link(file))]
+          return this.reply(socket, id, true, undefined, this.enqueue(key, message.origin, content))
         } catch (error) {
           return fail((error as Error).message)
         }

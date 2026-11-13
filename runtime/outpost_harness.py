@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Optional, Union
 
+from outpost_mcp_servers import acp_servers
+
 
 class LiveStatusUnavailable(ValueError):
     """The native status service does not own this CLI's conversation."""
@@ -154,13 +156,15 @@ class CodingSessionAdapter(ABC):
         """
 
     @abstractmethod
-    def prepare_launch(self, directory, session):
+    def prepare_launch(self, directory, session, servers):
         """Prepare required native integration once and return launch arguments.
 
         directory is Outpost's state directory; shared helpers are installed.
-        Configure MCP and any shared native plugin here. Persisted configuration
-        must never contain a managed session's identity or credentials. Returned
-        options precede arguments(session) and then user arguments.
+        servers are the launch's MCP servers (outpost_mcp_servers.servers);
+        configure exactly those, natively, plus any shared native plugin.
+        Persisted configuration must never contain a managed session's identity
+        or credentials. Returned options precede arguments(session) and then
+        user arguments.
         """
 
     @abstractmethod
@@ -185,9 +189,9 @@ class CodingSessionAdapter(ABC):
         starts it with session/new and records the agent's identity first."""
         return True
 
-    def chat_mcp_servers(self, directory, session, server):
-        """ACP mcpServers for chat mode; server is Outpost's stdio MCP server."""
-        return [server]
+    def chat_mcp_servers(self, directory, session, servers):
+        """ACP mcpServers for chat mode, from the launch's MCP servers."""
+        return acp_servers(servers)
 
 
 def adapters():

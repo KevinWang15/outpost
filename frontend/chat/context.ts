@@ -38,18 +38,16 @@ export function useChat() {
 export interface ConversationActions {
   answer(request: string, optionId: string | null): Promise<void>
   unqueue(turn: string): Promise<void>
-  previews(key: string | null): string[]
   /** Read-only views (a channel's member steps) offer no controls. */
   readOnly: boolean
 }
 export const ConversationContext = createContext<ConversationActions>({
   answer: async () => {},
   unqueue: async () => {},
-  previews: () => [],
   readOnly: true,
 })
 
-/** The session's published files, for file items in its turns. Separate from
+/** The session's files, for file items and attachments in its turns. Separate from
  * the actions so a file list refresh re-renders only file cards. */
 export interface ConversationFiles {
   access: SessionFiles

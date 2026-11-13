@@ -2,7 +2,7 @@
 // one WebSocket per page, `/api/chat`. Client messages are validated with
 // these schemas; server messages are typed below. See docs/CHAT.md.
 import Type, { type Static } from 'typebox'
-import type { ChatEntry, ChatInfo, ChatJournalSnapshot, ChatOrigin } from './chatHost'
+import { chatHost, type ChatEntry, type ChatInfo, type ChatJournalSnapshot, type ChatOrigin } from './chatHost'
 import type { Session } from './model'
 import { sessionInput } from './schemas'
 import type { SessionFile } from './sessionFiles'
@@ -61,7 +61,8 @@ export interface ChannelMessage {
   turn: (SessionRef & { turn: string }) | null
   /** The page's key for a user post; a resent draft with it is the same post. */
   key: string | null
-  /** Files the member's turn published; they stay in that session's files. */
+  /** A member reply: files its turn published, kept in that session's files.
+   * A user post: files attached to it, kept with the channel on the server. */
   files: SessionFile[]
 }
 export type DeliverySource =
@@ -78,6 +79,8 @@ export interface Delivery extends SessionRef {
   rerun: { root: string; hop: number } | null
   /** The composed prompt, kept until it is accepted so a restart can resend it. */
   prompt: string | null
+  /** Files sent with the prompt, already copied into the member's session files. */
+  files: string[]
   /** The chat host instance the prompt was sent to; a resend is safe only to the same one. */
   host: string | null
   origin: ChatOrigin | null
@@ -117,6 +120,7 @@ export interface ChannelView extends Channel {
 
 const id = Type.String({ pattern: '^[A-Za-z0-9_-]{1,80}$' })
 const uuid = Type.String({ pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' })
+const files = Type.Array(Type.String({ pattern: '^[0-9a-f]{32}$' }), { maxItems: chatHost.maxFiles })
 const targetId = Type.String({ minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
 const session = { targetId, sessionId: uuid }
 const strict = { additionalProperties: false } as const
@@ -154,7 +158,8 @@ export const chatClientMessage = Type.Union([
     ...session,
     key: id,
     text: text(chatLimits.text),
-    images: Type.Array(uuid, { maxItems: 8 }),
+    /** The session's files, uploaded first (POST /api/chat/files/…). */
+    files,
   }),
   message('cancel', { id, ...session }),
   message('unqueue', { id, ...session, turn: uuid }),
@@ -177,7 +182,8 @@ export const chatClientMessage = Type.Union([
   message('channel-save', { id, channel: channelInput }),
   message('channel-delete', { id, channelId: uuid }),
   message('channel-history', { id, channelId: uuid, before: Type.Union([uuid, Type.Null()]) }),
-  message('channel-post', { id, channelId: uuid, key: id, text: text(chatLimits.text) }),
+  /** `files` are uploads staged for this channel (POST /api/chat/channels/…/files). */
+  message('channel-post', { id, channelId: uuid, key: id, text: text(chatLimits.text), files }),
   message('channel-read', { channelId: uuid }),
   message('schedule-save', { id, schedule: scheduleInput }),
   message('schedule-delete', { id, scheduleId: uuid }),

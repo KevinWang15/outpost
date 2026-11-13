@@ -57,6 +57,7 @@ test('chat hub: channels pass the floor, sessions message each other, schedules 
       key: 'ask-reviewer',
       origin: { kind: 'user' },
       prompt: [{ type: 'text', text: 'message @reviewer: please review the release notes' }],
+      files: [],
     })
     assert.equal(sent.ok, true, sent.message)
     const back = await until(
@@ -138,6 +139,85 @@ test('a file the agent publishes appears in its turn and in its channel reply', 
     // The session's own transcript has the file in the turn that published it.
     const entry = chat.hosts.get(coder.id)!.journal.entries.find(item => item.kind === 'file')
     assert.ok(entry?.kind === 'file' && entry.turn === reply.turn?.turn && entry.file.id === reply.files[0].id)
+  } finally {
+    await chat.close()
+  }
+})
+
+test('files the user attaches reach the agent as links it can read, in its session and through a channel', async () => {
+  const chat = await chatHarness(['Coder', 'Writer'])
+  try {
+    const hub = await chat.startHub()
+    const [coder, writer] = chat.sessions
+    const { owner } = chat
+
+    // A session's own chat: the file is already in its files; the prompt links it.
+    const notes = await chat.files.receive(null, coder.id, 'notes v2.txt', Buffer.from('Ship on Friday\n'))
+    assert.equal(notes.source, 'received')
+    const link = await hub.link(owner, chat.ref(coder))
+    link.ensure(true)
+    await until(() => link.state === 'live', 'the coder link')
+    const sent = await link.request({
+      type: 'prompt',
+      key: 'with-file',
+      origin: { kind: 'user' },
+      prompt: [{ type: 'text', text: 'summarize' }],
+      files: [notes.id],
+    })
+    assert.equal(sent.ok, true, sent.message)
+    const turn = (sent.data as { turn: string }).turn
+    const queued = link.journal.entries.find(entry => entry.kind === 'queued' && entry.turn === turn)
+    const block = queued?.kind === 'queued' ? queued.prompt.find(item => item.type === 'resource_link') : undefined
+    assert.ok(block?.type === 'resource_link' && block.name === 'notes v2.txt' && block.uri.startsWith('file:///'))
+    const text = () =>
+      link.journal.entries
+        .flatMap(entry =>
+          entry.kind === 'update' &&
+          entry.turn === turn &&
+          entry.update.sessionUpdate === 'agent_message_chunk' &&
+          entry.update.content.type === 'text'
+            ? [entry.update.content.text]
+            : [],
+        )
+        .join('')
+    await until(() => text().includes('(read notes v2.txt: Ship on Friday)'), 'the agent reading the file')
+    const missing = await link.request({
+      type: 'prompt',
+      key: 'missing-file',
+      origin: { kind: 'user' },
+      prompt: [{ type: 'text', text: 'summarize' }],
+      files: ['0'.repeat(32)],
+    })
+    assert.equal(missing.ok, false)
+    assert.match(missing.message ?? '', /no longer in this session/)
+
+    // A channel post: the upload is kept with the channel, then copied into the
+    // mentioned member's own files and linked in its prompt.
+    const channel = await hub.saveChannel(owner, {
+      name: 'docs',
+      topic: '',
+      members: [chat.ref(coder), chat.ref(writer)],
+    })
+    const brief = await hub.stageFile(owner, channel.id, 'brief.md', Buffer.from('# Launch brief\n'))
+    await hub.post(owner, channel.id, 'post-brief', '@writer read this', [brief.id])
+    const post = chat.messages().find(message => message.key === 'post-brief')!
+    assert.deepEqual(
+      post.files.map(file => file.name),
+      ['brief.md'],
+    )
+    assert.deepEqual(
+      (await hub.channelFiles(owner, channel.id)).map(file => file.id),
+      [brief.id],
+    )
+    assert.equal((await hub.readChannelFile(owner, channel.id, brief.id)).bytes.toString(), '# Launch brief\n')
+    const reply = await until(
+      () => chat.messages().find(message => message.author.kind === 'session' && message.author.handle === 'writer'),
+      'the writer reply',
+    )
+    assert.match(reply.text, /\[attached: brief\.md\]/)
+    assert.match(reply.text, /\(read brief\.md: # Launch brief\)/)
+    // A staged upload is used once.
+    await assert.rejects(hub.post(owner, channel.id, 'post-again', '@writer again', [brief.id]), /expired/)
   } finally {
     await chat.close()
   }

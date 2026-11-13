@@ -26,7 +26,7 @@ class DeepSeekAdapter(CodingSessionAdapter):
     def arguments(self, session):
         raise ValueError('DeepSeek Harness has no bundled terminal UI. Open this session in Outpost Chat.')
 
-    def prepare_launch(self, directory, session):
+    def prepare_launch(self, directory, session, servers):
         return []
 
     def prepare_activity(self, directory, session, generation, executable):

@@ -77,7 +77,7 @@ function Message({
   message: ChannelMessage
   grouped: boolean
   channel: Channel
-  onOpenFile(ref: SessionRef, id: string): void
+  onOpenFile(owner: SessionRef | { channelId: string }, id: string): void
 }) {
   const { client, select } = useChat()
   const [steps, setSteps] = useState(false)
@@ -122,10 +122,15 @@ function Message({
           </div>
         )}
         <Markdown text={message.text} />
-        {author.kind === 'session' && message.files.length > 0 && (
+        {message.files.length > 0 && (
           <div className="file-cards">
             {message.files.map(file => (
-              <FileCard key={file.id} file={file} access={client.files(author)} onOpen={id => onOpenFile(author, id)} />
+              <FileCard
+                key={file.id}
+                file={file}
+                access={author.kind === 'session' ? client.files(author) : client.channelFiles(channel.id)}
+                onOpen={id => onOpenFile(author.kind === 'session' ? author : { channelId: channel.id }, id)}
+              />
             ))}
           </div>
         )}
@@ -149,7 +154,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
   const pinned = useRef(true)
   const [behind, setBehind] = useState(false)
   const handles = useMemo(() => channel?.members.map(member => member.handle) ?? [], [channel])
-  const [viewing, setViewing] = useState<{ ref: SessionRef; id: string } | null>(null)
+  const [viewing, setViewing] = useState<{ owner: SessionRef | { channelId: string }; id: string } | null>(null)
 
   useEffect(() => {
     pinned.current = true
@@ -273,7 +278,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
                     message={message}
                     grouped={grouped}
                     channel={channel}
-                    onOpenFile={(ref, id) => setViewing({ ref, id })}
+                    onOpenFile={(owner, id) => setViewing({ owner, id })}
                   />
                 </div>
               )
@@ -300,7 +305,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
           <Composer
             draftKey={`channel:${channelId}`}
             placeholder={`Message #${channel.name} — mention @${handles[0] ?? 'a member'} to ask it`}
-            images={false}
+            onUpload={file => client.upload({ channelId }, file)}
             mentions={[
               ...members.map(({ member, session }) => ({
                 value: member.handle,
@@ -310,15 +315,21 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
               { value: 'all', label: 'Everyone in this channel' },
             ]}
             disabled={channel.members.length ? null : 'Add members in channel settings first.'}
-            onSend={async (text, _images, key) => {
+            onSend={async (text, files, key) => {
               pinned.current = true
-              await client.call({ type: 'channel-post', channelId, key, text })
+              await client.call({ type: 'channel-post', channelId, key, text, files })
             }}
           />
         </footer>
       </section>
       {viewing && (
-        <SessionFileViewer access={client.files(viewing.ref)} selected={viewing.id} onClose={() => setViewing(null)} />
+        <SessionFileViewer
+          access={
+            'channelId' in viewing.owner ? client.channelFiles(viewing.owner.channelId) : client.files(viewing.owner)
+          }
+          selected={viewing.id}
+          onClose={() => setViewing(null)}
+        />
       )}
     </MarkdownContext.Provider>
   )

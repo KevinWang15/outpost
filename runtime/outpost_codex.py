@@ -6,7 +6,6 @@ from functools import cached_property
 from outpost_activity_install import hook_command
 from outpost_config import toml
 from outpost_harness import CodingSessionAdapter
-from outpost_mcp_install import stdio_server
 from outpost_rpc import JsonRpcProcess
 
 
@@ -25,10 +24,18 @@ class CodexAdapter(CodingSessionAdapter):
     def arguments(self, session):
         return ['resume', session['cliSessionId']]
 
-    def prepare_launch(self, directory, session):
-        server = stdio_server(directory / 'bin' / 'outpost-mcp')
-        server['env_vars'] = ['OUTPOST_SESSION_ID', 'OUTPOST_STATE_DIRECTORY']
-        return ['-c', 'mcp_servers.outpost=' + toml(server)]
+    def prepare_launch(self, directory, session, servers):
+        return [
+            option
+            for server in servers
+            for option in (
+                '-c',
+                'mcp_servers.'
+                + server['name']
+                + '='
+                + toml({'command': server['command'], 'args': server['args'], 'env': server['env']}),
+            )
+        ]
 
     def chat_command(self, directory, executable):
         # The pinned Codex ACP adapter is bundled in Outpost Terminal and drives

@@ -22,6 +22,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 variant = os.environ.get('FIXTURE_ACP_VARIANT', 'claude')
 lock = threading.Lock()
@@ -118,7 +119,12 @@ def config(session):
 
 def open_session(params, session_id):
     server = next((item for item in params.get('mcpServers', []) if item.get('name') == 'outpost'), None)
-    session = {'cwd': params['cwd'], 'mode': 'ask', 'mcp': server}
+    session = {
+        'cwd': params['cwd'],
+        'mode': 'ask',
+        'mcp': server,
+        'directories': params.get('additionalDirectories', []),
+    }
     sessions[session_id] = session
     system = params.get('systemPrompt')
     if system:
@@ -163,6 +169,8 @@ def run(identifier, params):
     session = sessions[session_id]
     text = ' '.join(block.get('text', '') for block in params['prompt'] if block.get('type') == 'text')
     images = sum(1 for block in params['prompt'] if block.get('type') == 'image')
+    # Attachments are links to files the agent reads with its own tools, within its directories.
+    links = [block for block in params['prompt'] if block.get('type') == 'resource_link']
     cancelled.clear()
     notify(session_id, {'sessionUpdate': 'agent_thought_chunk', 'content': {'type': 'text', 'text': 'Considering.'}})
     tool = 'tool-' + uuid.uuid4().hex[:8]
@@ -181,6 +189,12 @@ def run(identifier, params):
     reply = 'Fixture reply to: ' + re.sub(r'^\[Outpost: [^\]]*\]\n', '', text).strip()[:200].replace('@', '')
     if images:
         reply += ' (' + str(images) + ' image)'
+    for link in links:
+        path = unquote(urlparse(link['uri']).path)
+        allowed = any(path.startswith(directory.rstrip('/') + '/') for directory in session['directories'])
+        with open(path, 'rb') as attached:
+            first = attached.readline().decode(errors='replace').strip()[:80]
+        reply += ' (read ' + link['name'] + (': ' if allowed else ' outside its directories: ') + first + ')'
     if 'permission' in text:
         result = request(
             'session/request_permission',
@@ -277,7 +291,11 @@ def handle(message):
         return
     result = None
     if method == 'initialize':
-        capabilities = {'loadSession': True, 'promptCapabilities': {'image': True}, 'sessionCapabilities': {}}
+        capabilities = {
+            'loadSession': True,
+            'promptCapabilities': {'image': True},
+            'sessionCapabilities': {'additionalDirectories': {}},
+        }
         if variant == 'claude':
             capabilities['sessionCapabilities']['systemPrompt'] = {}
         if variant == 'deepseek':

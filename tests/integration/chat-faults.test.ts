@@ -96,6 +96,7 @@ test('an agent can message a session while the server reconnects', async () => {
       key: 'k1',
       origin: { kind: 'user' },
       prompt: [{ type: 'text', text: 'slow 2 message reviewer: please review' }],
+      files: [],
     })
     first.close()
     chat.received.length = 0
@@ -126,6 +127,7 @@ test('a session message survives a connection lost before the agent got its answ
       key: 'k1',
       origin: { kind: 'user' },
       prompt: [{ type: 'text', text: 'message reviewer: please review' }],
+      files: [],
     })
     assert.equal(result.ok, true)
     const turn = (result.data as { turn: string }).turn

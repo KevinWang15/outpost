@@ -1,10 +1,22 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { sessionFileId } from '../../shared/sessionFiles'
+import { sessionFileId, type SessionFile } from '../../shared/sessionFiles'
 import type { Owner } from '../deployment'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
 import { terminalGrant } from '../terminal/authorization'
+
+/** A stored file's bytes as a download, never rendered by the browser. */
+export const sendAttachment = (reply: FastifyReply, file: SessionFile, bytes: Buffer) =>
+  reply
+    .header('Cache-Control', 'no-store')
+    .header('X-Content-Type-Options', 'nosniff')
+    .header(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(file.name).replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16))}`,
+    )
+    .type(file.mediaType)
+    .send(bytes)
 
 /** A session file's bytes, as a download. Transfers are bounded per owner as
  * well as per file, so bulk reads cannot exhaust the server. */
@@ -30,17 +42,9 @@ export function sessionFileDownloads(services: Services) {
         const context = await services.resolve(owner, targetId)
         const { file, bytes } = await services.files.read(context, sessionId, fileId, signal)
         if (!services.active(owner)) throw new AppError('Sign-in ended. Connect again.', 401)
-        reply
-          .header('Cache-Control', 'no-store')
-          .header('X-Content-Type-Options', 'nosniff')
-          .header(
-            'Content-Disposition',
-            `attachment; filename*=UTF-8''${encodeURIComponent(file.name).replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16))}`,
-          )
-          .type(file.mediaType)
         // Keep the slot while a slow client is still receiving the buffered file.
         reply.raw.once('close', release)
-        return reply.send(bytes)
+        return sendAttachment(reply, file, bytes)
       } catch (error) {
         release()
         throw error

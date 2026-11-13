@@ -1,3 +1,17 @@
+# Outpost Terminal 1.4.0
+
+Chat attachments. Terminal sessions are unchanged (protocol 4); the chat host
+protocol is now 2.
+
+- A prompt carries session file IDs instead of image data. The chat host sends
+  each file to the agent as an ACP resource link to the stored file, and images
+  up to 5 MB also inline when the agent accepts images.
+- When the agent supports additional directories, the session's file store is
+  added to its session so its own tools can read attachments.
+
+Install the matching binary before deploying the server. Running chat hosts
+must be restarted (Terminate, then open the chat) to use the new protocol.
+
 # Outpost Terminal 1.3.0
 
 Adds chat mode's target side. Terminal sessions are unchanged (protocol 4).

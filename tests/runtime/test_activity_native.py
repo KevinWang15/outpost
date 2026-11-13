@@ -25,7 +25,8 @@ from outpost_activity_events import read_json, write_json
 from outpost_activity_state import Activity
 from outpost_config import toml
 from outpost_harness import adapters
-from outpost_mcp_install import install as install_mcp
+from outpost_mcp_servers import install as install_mcp
+from outpost_mcp_servers import servers as mcp_servers
 from outpost_rpc import JsonRpcProcess
 
 ID = '12345678-1234-4123-8123-123456789012'
@@ -366,8 +367,9 @@ class NativeActivityTests(unittest.TestCase):
         alternate.mkdir()
         env['HOME'] = str(alternate)
         provider = self.provider()
-        adapters()['kimi'].prepare_launch(directory.parent, session)
-        adapters()['kimi'].prepare_launch(directory.parent, session)
+        servers = mcp_servers(directory.parent, session, 'terminal')
+        adapters()['kimi'].prepare_launch(directory.parent, session, servers)
+        adapters()['kimi'].prepare_launch(directory.parent, session, servers)
         Path(env['KIMI_CODE_HOME'], 'config.toml').write_text(
             'defaultModel="fake"\n[models.fake]\nname="fake"\nprotocol="openai"\n'
             'baseUrl="' + provider.url + '"\napiKey="test-token"\nmaxContextSize=8192\n'

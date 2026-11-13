@@ -1,5 +1,6 @@
-// Files a session's agent published (Outpost MCP publish_file). They are stored
-// on the session's target, as in terminal mode; chat reads them with its grant.
+// A session's files: those its agent published (Outpost MCP publish_file) and
+// those sent to it in messages. They are stored on the session's target, as in
+// terminal mode; chat reads them with its grant.
 import { useContext, useEffect, useRef } from 'react'
 import { Download, Files, X } from 'lucide-react'
 import type { SessionFile } from '../../shared/sessionFiles'
@@ -10,7 +11,7 @@ import { fileSize, type SessionFiles } from '../terminal/sessionFiles'
 import { useSessionFiles, type SessionFilesState } from '../terminal/useSessionFiles'
 import { FilesContext } from './context'
 
-/** A published file where its turn or channel message shows it. */
+/** A file where its turn or channel message shows it. */
 export function FileCard({
   file,
   access,
@@ -115,6 +116,7 @@ export function FilesPanel({
                 <small>
                   {new Date(file.createdAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })} ·{' '}
                   {fileSize(file.size)}
+                  {file.source === 'received' && ' · Sent to the agent'}
                 </small>
               </span>
             </button>
@@ -124,7 +126,8 @@ export function FilesPanel({
       </ul>
       {state.loaded && !state.files.length && (
         <p className="muted files-empty">
-          Files the agent publishes appear here. Ask it to share a file, or it can use Outpost’s publish_file tool.
+          Files you attach and files the agent shares appear here. The agent shares a file with Outpost’s publish_file
+          tool.
         </p>
       )}
     </aside>

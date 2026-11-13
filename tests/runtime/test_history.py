@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'runtime'))
 
 import outpost_history as history
-import outpost_mcp_install
+import outpost_mcp_servers
 
 
 class HistoryTest(unittest.TestCase):
@@ -121,28 +121,41 @@ class HistoryTest(unittest.TestCase):
         (state / 'bin').mkdir(parents=True)
         identifier = str(uuid.uuid4())
         (state / 'registry.json').write_text(json.dumps({'sessions': [{'id': identifier}]}))
-        executable = outpost_mcp_install.install(state / 'bin')
+        executable = outpost_mcp_servers.install(state / 'bin')
         requests = [
             {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18'}},
             {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
         ]
-        for tool in ('claude', 'codex', 'kimi'):
+        common = {'publish_file', 'search_history', 'read_context', 'read_message', 'get_session', 'refresh_index'}
+        for driver, expected in (
+            ('terminal', common),
+            ('chat', common | {'list_sessions', 'message_session'}),
+            (None, set()),
+        ):
+            binding = outpost_mcp_servers.context(state, {'id': identifier}, driver) if driver else {}
+            environment = {key: value for key, value in os.environ.items() if not key.startswith('OUTPOST_')}
             result = subprocess.run(
                 [sys.executable, '-I', str(executable)],
                 input=''.join(json.dumps(r) + '\n' for r in requests),
                 text=True,
                 capture_output=True,
-                env={**os.environ, 'OUTPOST_SESSION_ID': identifier, 'OUTPOST_STATE_DIRECTORY': str(state)},
+                env={**environment, **binding},
                 check=True,
             )
             replies = [json.loads(line) for line in result.stdout.splitlines()]
             names = {item['name'] for item in replies[1]['result']['tools']}
-            self.assertEqual(
-                names,
-                {'publish_file', 'search_history', 'read_context', 'read_message', 'get_session', 'refresh_index'},
-                tool,
-            )
-            self.assertIn('untrusted', replies[0]['result']['instructions'])
+            self.assertEqual(names, expected, driver)
+            if driver:
+                self.assertIn('untrusted', replies[0]['result']['instructions'])
+        # A partial binding fails closed instead of serving without a session.
+        partial = subprocess.run(
+            [sys.executable, '-I', str(executable)],
+            input='',
+            text=True,
+            capture_output=True,
+            env={**os.environ, 'OUTPOST_SESSION_ID': identifier, 'OUTPOST_STATE_DIRECTORY': str(state)},
+        )
+        self.assertEqual(partial.returncode, 1)
 
     def test_appends_partial_utf8_and_replacements_preserve_or_reset_checkpoints(self):
         self.populate()

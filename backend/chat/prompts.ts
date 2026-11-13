@@ -3,6 +3,8 @@
 import { chatLimits, type Channel, type ChannelMessage } from '../../shared/chatApi'
 import { promptHeader } from '../../shared/chatTranscript'
 
+const fileNames = (message: ChannelMessage) =>
+  message.files.length ? ` [attached: ${message.files.map(file => file.name).join(', ')}]` : ''
 const authorName = (message: ChannelMessage) =>
   message.author.kind === 'user'
     ? 'the user'
@@ -10,13 +12,14 @@ const authorName = (message: ChannelMessage) =>
       ? `@${message.author.handle}`
       : 'Outpost'
 
-/** New channel messages since the member's last turn there, newest last. */
-export function channelPrompt(channel: Channel, handle: string, messages: ChannelMessage[]) {
+/** New channel messages since the member's last turn there, newest last.
+ * `missing` lists attached files that could not be given to the member. */
+export function channelPrompt(channel: Channel, handle: string, messages: ChannelMessage[], missing: string[] = []) {
   const lines: string[] = []
   let bytes = 0
   let omitted = 0
   for (const message of [...messages].reverse()) {
-    const line = `${authorName(message)}: ${message.text}`
+    const line = `${authorName(message)}: ${message.text}${fileNames(message)}`
     if (lines.length >= chatLimits.delta || bytes + line.length > chatLimits.deltaBytes) {
       omitted++
       continue
@@ -31,6 +34,7 @@ export function channelPrompt(channel: Channel, handle: string, messages: Channe
     '',
     ...lines,
     '',
+    ...(missing.length ? [`Files that could not be attached: ${missing.join('; ')}.`, ''] : []),
     'Your final message is posted to the channel. To hand work to a member, mention them, e.g. @name.',
   ].join('\n')
 }

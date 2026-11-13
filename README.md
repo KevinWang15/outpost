@@ -57,11 +57,16 @@ Switch the sidebar to **Chat** for a Slack-like view of the same sessions. Each
 session is a conversation: replies stream in, the steps the agent took fold into
 one line you can open (commands and their output, file edits as diffs), and
 permission requests appear as buttons. Choose the agent's mode and model in the
-header, paste images, and use its slash commands.
+header, attach files and images (paste, drop or the paperclip), and use its
+slash commands.
 
+- **Files go both ways.** What you attach is stored in the session's files on
+  its machine and handed to the agent, which reads it with its own tools.
+  Files the agent shares (`publish_file`) appear in its reply and in **Files**.
 - **Channels** bring sessions from any of your machines together. A session
   replies when you mention it (`@api`, or `@all`); a reply that mentions another
-  member passes the conversation on.
+  member passes the conversation on. Files attached in a channel are copied to
+  each member that receives them.
 - **Sessions message each other.** In chat, agents get Outpost tools to list
   your sessions and ask one of them for help; the answer comes back as a message.
 - **Schedules** send a session a message at set times, e.g. a weekday summary.
@@ -287,14 +292,16 @@ transfers while the file remains cached. Closing the file panel keeps the cache;
 closing the session clears it.
 
 Files are snapshots stored on the target, survive client disconnects, and
-appear again after reconnection. Removing an attachment leaves the original
-file alone. Deleting the managed session also deletes its attachments. Limits
+appear again after reconnection. The same list holds files you attach in chat.
+Removing a file leaves the original alone. Deleting the managed session also
+deletes its files. Limits
 are **32 MiB per file**, **100 files**, and **256 MiB total per session**.
 PNG, JPEG, GIF and WebP have previews; other formats are available to download.
 Local shell tabs do not have this session file list.
 
-The helper is installed automatically when Outpost starts a managed agent.
-Codex and Claude receive launch-specific MCP configuration. Kimi uses its native
+The helper is installed automatically when Outpost starts a managed agent, in
+a terminal or in chat. Codex and Claude receive launch-specific MCP
+configuration, and chat passes the same server over ACP. Kimi uses its native
 Outpost plugin, which also reports activity. Its MCP helper inherits the current
 process's session identity; ordinary Kimi launches outside Outpost expose no
 Outpost tools. No manual MCP setup is required, and existing user MCP servers

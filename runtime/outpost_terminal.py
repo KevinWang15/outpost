@@ -11,7 +11,7 @@ from pathlib import Path
 from outpost_frames import HEADER, control, header
 
 PROTOCOL = 4
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 MAX_COLS = 400
 MAX_ROWS = 200
 EXECUTABLE = Path.home() / '.outpost' / 'bin' / 'outpost-terminal'

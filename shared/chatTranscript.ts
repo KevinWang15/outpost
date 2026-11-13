@@ -48,8 +48,6 @@ export type TurnItem =
 export type TurnStatus = 'queued' | 'running' | 'done' | 'cancelled' | 'error' | 'removed' | 'history'
 export interface TurnView {
   id: string
-  /** The sender's message key, for its own image previews. */
-  key: string | null
   /** null for history replayed from the agent's own store. */
   origin: ChatOrigin | null
   /** Display label for an Outpost-composed prompt, live or replayed. */
@@ -192,7 +190,6 @@ function applyUpdate(turn: TurnView, update: acp.SessionUpdate, live: boolean, a
 
 const emptyTurn = (id: string, status: TurnStatus, at: string | null = null): TurnView => ({
   id,
-  key: null,
   origin: null,
   label: null,
   prompt: [],
@@ -241,7 +238,6 @@ export function transcript(entries: readonly ChatEntry[], truncated = false): Tr
       case 'queued': {
         const turn = emptyTurn(entry.turn, 'queued', entry.at)
         turn.origin = entry.origin
-        turn.key = entry.key
         turn.prompt = entry.prompt
         turn.label = labelOf(entry.origin, entry.prompt)
         byId.set(entry.turn, turn)

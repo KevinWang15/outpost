@@ -107,7 +107,7 @@ identically on both ends. A gap means resubscribe. The journal keeps 20,000
 entries or 16 MiB of UTF-8 JSON, so a snapshot always fits one 32 MiB relay
 frame, dropping the oldest like terminal scrollback; the native
 store still has the whole conversation. Tool reports and other agent data are
-bounded per field; prompt images are not journaled (only their metadata).
+bounded per field; image bytes are not journaled (only their metadata).
 Latest-value state (mode, config, commands, usage, title, activity) is `ChatInfo`,
 replaced rather than journaled.
 
@@ -138,8 +138,9 @@ A reply that mentions another member passes the conversation on; chains stop
 after 6 hops or 12 deliveries per user message, with a notice. A member mentioned
 again while working gets the newer messages after its turn.
 
-**Session messages.** Outpost's MCP server (`runtime/outpost_mcp.py`) adds
-`list_sessions` and `message_session` in chat mode. The call travels agent →
+**Session messages.** Outpost's MCP server (`runtime/outpost_mcp.py`) serves
+`list_sessions` and `message_session` to chat launches (`OUTPOST_DRIVER=chat`;
+see "Outpost MCP" in ARCHITECTURE.md). The call travels agent →
 MCP process → chat host socket → hub. The recipient works in its own chat; its
 final message returns to the sender as a new turn. A thread allows 6 messages.
 
@@ -167,15 +168,36 @@ final message returns to the sender as a new turn. A thread allows 6 messages.
   a session, and by the key stored with each channel post, also after a server
   restart.
 
-**Files.** An agent shares a file with Outpost's `publish_file` MCP tool (or
-`outpost-mcp publish FILE`), as in terminal mode: the file is copied into the
-session's store on its target (`~/.outpost/files/<session>`, at most 100 files
-and 256 MiB) and stays until removed. In chat, publishing also tells the chat
-host, which records a `file` journal entry in the running turn. The turn shows
-a card for it, the session header's Files panel lists all of the session's
-files, and a channel reply carries the files its turn published. Pages read
-files over HTTP with their chat grant (`/api/chat/files/:target/:session`);
-Outpost Desktop saves them through its save dialog.
+**Files.** Both directions use the session's file store on its target
+(`~/.outpost/files/<session>`, at most 100 files and 256 MiB, 32 MiB each);
+files stay until removed. The session header's Files panel lists all of them.
+Pages read files over HTTP with their chat grant
+(`/api/chat/files/:target/:session`); Outpost Desktop saves them through its
+save dialog.
+
+- *From the agent.* It shares a file with Outpost's `publish_file` MCP tool (or
+  `outpost-mcp publish FILE`), as in terminal mode. Publishing also tells the
+  chat host, which records a `file` journal entry in the running turn. The turn
+  shows a card for it, and a channel reply carries the files its turn published.
+- *To the agent.* The composer uploads each attached file (any type) on send:
+  `POST /api/chat/files/:target/:session?name=…` with the raw bytes, stored on
+  the target. The prompt carries the file IDs, at most 8. The chat host turns
+  each into an ACP `resource_link` to the stored file (`file://…/content/<name>`,
+  with the file's metadata in `_meta.outpost.file`), which every ACP agent
+  accepts; the agent reads it with its own tools. When the agent advertises
+  `sessionCapabilities.additionalDirectories`, the session's file store is added
+  to its session so those reads need no extra permission. Images up to 5 MB are
+  also sent inline, read when the turn starts, if the agent accepts images.
+  No upload goes through the model's context as text, and the server holds no
+  prompt bytes.
+- *In channels.* A post's attachments are uploaded first
+  (`POST /api/chat/channels/:channel/files?name=…`, staged for an hour) and kept
+  with the channel on the server (`<workspace>/chat/files/<channel>/`); members'
+  published files stay in their sessions. When a member is delivered messages
+  that carry files, the hub copies them into the member's own session files
+  (newest first, at most 8) and the delivery's prompt links them, so members on
+  other machines can read them. Its prompt names each message's files and lists
+  any that could not be copied.
 
 **Schedules.** Five-field cron in an IANA time zone (`shared/cron.ts`), fired at
 most once per matching minute while the server runs. A schedule's prompt runs in
@@ -185,8 +207,8 @@ its session's own chat.
 to the same origin checks as every route. Outpost Desktop's chat page has no
 login: its preload exchanges the app bearer (main process only) for a
 single-use, five-minute chat ticket (`POST /api/desktop/chat/connect`). The hello
-returns a 30-day resume grant bound to the login; prompt images are uploaded with
-it (`POST /api/chat/images`, 5 MiB, held in memory for ten minutes).
+returns a 30-day resume grant bound to the login; file uploads and reads use it.
+Uploads are buffered (at most two at a time per account) before they are stored.
 
 ## Limits and known gaps
 
@@ -197,7 +219,7 @@ it (`POST /api/chat/images`, 5 MiB, held in memory for ten minutes).
   model are chosen in the chat instead.
 - Sessions running in a terminal cannot receive channel or session messages
   until they are opened in chat.
-- Channel images and server-side Web Push are not implemented. Phones use the
+- Server-side Web Push is not implemented. Phones use the
   web app; there is no native mobile app.
 - A prompt whose host restarted before confirming it is reported as possibly not
   run; Outpost cannot tell whether the old process started it. A message typed in
@@ -206,6 +228,10 @@ it (`POST /api/chat/images`, 5 MiB, held in memory for ten minutes).
   draft again cannot run it twice unless the chat host also restarted.
 - An agent's Outpost tool call fails if no server connects within 45 s.
 - File cards are journal entries, so turns replayed from the native history
-  after a chat host restart show none; the Files panel still lists the files.
+  after a chat host restart show none (an attachment shows as the tool's own
+  link text); the Files panel still lists the files.
+- A file attached to a message is stored when the message is sent. If sending
+  then fails and the draft is dropped, the file stays in the session's files
+  until removed. Session-to-session messages (`message_session`) carry no files.
 - ACP v1 has no client-driven steering; a message sent while a turn runs waits
   in the queue.

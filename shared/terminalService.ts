@@ -1,6 +1,6 @@
 /** Release and protocol contract shared by the server, renderer and target binary. */
 export const terminalService = {
-  version: '1.3.0',
+  version: '1.4.0',
   protocol: 4,
   repository: 'KevinWang15/outpost',
   executable: 'outpost-terminal',

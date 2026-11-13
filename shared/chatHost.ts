@@ -8,7 +8,7 @@ import type { SessionActivity } from './activity'
 import type { SessionFile } from './sessionFiles'
 
 export const chatHost = {
-  protocol: 1,
+  protocol: 2,
   /** Journal bounds; older entries are dropped like terminal scrollback. Bytes
    * are UTF-8 JSON, so a welcome snapshot always fits one relay frame. */
   maxEntries: 20_000,
@@ -20,7 +20,10 @@ export const chatHost = {
   /** Retained tail of a command's streamed output. */
   maxOutput: 256 * 1024,
   maxQueue: 32,
-  maxImages: 8,
+  /** Session files attached to one prompt. */
+  maxFiles: 8,
+  /** Images up to this size are also sent inline, if the agent accepts images,
+   * and kept when the agent replies with one. */
   maxImageBytes: 5 * 1024 * 1024,
   maxOrigin: 4096,
   /** A bridge (MCP) call waits this long for Outpost to answer, including
@@ -116,7 +119,16 @@ export type ChatHostMessage =
 export type ChatHostRequest =
   | { type: 'hello'; protocol: number; role: 'viewer' | 'hub' }
   | { type: 'status' }
-  | { type: 'prompt'; id: string; key: string | null; origin: ChatOrigin; prompt: acp.ContentBlock[] }
+  /** `prompt` is text; `files` are session file IDs, sent as ACP resource links
+   * to the stored files (docs/CHAT.md, "Files"). */
+  | {
+      type: 'prompt'
+      id: string
+      key: string | null
+      origin: ChatOrigin
+      prompt: acp.ContentBlock[]
+      files: string[]
+    }
   | { type: 'cancel'; id: string }
   | { type: 'unqueue'; id: string; turn: string }
   | { type: 'permission'; id: string; request: string; optionId: string | null }
@@ -159,6 +171,13 @@ export function bounded(value: unknown, depth = 0): unknown {
   const result: Record<string, unknown> = {}
   for (const [key, item] of Object.entries(value).slice(0, 200)) result[key] = bounded(item, depth + 1)
   return result
+}
+
+/** The session file a prompt's resource link refers to. */
+export const linkedFile = (block: acp.ContentBlock): SessionFile | null => {
+  if (block.type !== 'resource_link') return null
+  const meta = block._meta?.outpost
+  return typeof meta === 'object' && meta !== null && 'file' in meta ? (meta.file as SessionFile) : null
 }
 
 /** Keep a prompt's text and image metadata; image bytes are not journaled. */

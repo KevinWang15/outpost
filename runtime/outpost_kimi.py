@@ -8,7 +8,6 @@ from functools import cached_property
 from outpost_activity_events import file_lock, read_json, write_json
 from outpost_activity_install import install_helper
 from outpost_harness import CodingSessionAdapter
-from outpost_mcp_install import stdio_server
 
 PLUGIN_ID = 'outpost-activity'
 
@@ -32,10 +31,10 @@ class KimiAdapter(CodingSessionAdapter):
     def chat_command(self, directory, executable):
         return [executable, 'acp'], {}
 
-    def chat_mcp_servers(self, directory, session, server):
+    def chat_mcp_servers(self, directory, session, servers):
         # The installed Outpost plugin supplies MCP; each Kimi process binds it
         # through its own environment, so ACP must not add a second server.
-        self.prepare_launch(directory, session)
+        self.prepare_launch(directory, session, servers)
         return []
 
     def activity_files(self, session):
@@ -46,33 +45,30 @@ class KimiAdapter(CodingSessionAdapter):
         # prepare_launch installs the native plugin's hooks together with MCP.
         return []
 
-    def prepare_launch(self, directory, session):
+    def prepare_launch(self, directory, session, servers):
         """One native plugin owns Kimi's hooks and MCP, with process-local binding.
 
         Kimi Code has no invocation-only MCP/hook configuration. The shared
-        plugin contains no session IDs; each Kimi process supplies its own
-        Outpost environment. Outside Outpost, MCP exposes an empty tool list.
+        plugin contains no session IDs: each Kimi process is launched with the
+        servers' binding in its environment, and their processes inherit it.
+        Outside Outpost, the Outpost server has no binding and lists no tools.
         """
         home = self.home(session['cliSessionEnv'], session['rootDir'])
         helper = install_helper(directory / 'bin')
-        server = stdio_server(directory / 'bin' / 'outpost-mcp')
         plugin = directory / 'integrations' / 'kimi-activity'
         command = shlex.join([sys.executable, '-I', str(helper), '--identity-only', '--environment', self.tool])
         manifest = {
             'name': PLUGIN_ID,
-            'version': '1.1.0',
-            'description': 'Session activity and file publishing for Outpost terminals.',
+            'version': '1.2.0',
+            'description': 'Session activity and Outpost tools for Outpost sessions.',
             'interface': {'displayName': 'Outpost'},
             'hooks': [
                 {'event': event, 'command': command, 'timeout': 2} for event in ('SessionStart', 'UserPromptSubmit')
             ],
+            # Plugin commands must be PATH names or plugin-relative paths. env
+            # executes the exact Python used by target management.
             'mcpServers': {
-                'outpost': {
-                    # Plugin commands must be PATH names or plugin-relative paths.
-                    # env executes the exact Python used by target management.
-                    'command': 'env',
-                    'args': [server['command'], *server['args'], '--optional-session'],
-                }
+                server['name']: {'command': 'env', 'args': [server['command'], *server['args']]} for server in servers
             },
         }
         registry = home / 'plugins' / 'installed.json'

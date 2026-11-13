@@ -4,14 +4,14 @@ import type { SessionFiles } from './sessionFiles'
 
 /** URLs belong to their displayed image; original bytes belong to the session cache. */
 export function useFileImage(file: SessionFile, access: SessionFiles, enabled: boolean, thumbnail = false) {
-  const { id, size, mediaType, name, createdAt } = file
+  const { id, size, mediaType, name, createdAt, source } = file
   const [attempt, setAttempt] = useState(0)
   const [image, setImage] = useState({ id: '', access, attempt, url: '', error: '' })
   useEffect(() => {
     if (!enabled) return
     let active = true
     let url = ''
-    const selected = { id, size, mediaType, name, createdAt }
+    const selected = { id, size, mediaType, name, createdAt, source }
     const load = thumbnail ? access.thumbnails.read(selected) : access.read(selected)
     void load
       .then(blob => {
@@ -26,7 +26,7 @@ export function useFileImage(file: SessionFile, access: SessionFiles, enabled: b
       active = false
       if (url) URL.revokeObjectURL(url)
     }
-  }, [enabled, id, size, mediaType, name, createdAt, access, thumbnail, attempt])
+  }, [enabled, id, size, mediaType, name, createdAt, source, access, thumbnail, attempt])
   const current =
     enabled && image.id === id && image.access === access && image.attempt === attempt ? image : { url: '', error: '' }
   return { ...current, retry: () => setAttempt(value => value + 1) }

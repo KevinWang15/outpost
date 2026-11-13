@@ -1,14 +1,13 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { validDesktopId, desktopSessionId, desktopOrigin, type DesktopSessionReference } from '../../shared/desktopAuth'
 import { isHarnessId, type HarnessId } from '../../shared/harnesses'
+import { writeJsonFile } from '../../shared/node/jsonFile'
 
 export interface RecentSessionSummary {
   id: string
   server: string
   title: string
-  /** Absent for entries saved before tools were recorded. */
-  tool?: HarnessId
+  tool: HarnessId
   lastConnectedAt: number
 }
 export interface RecentSession extends RecentSessionSummary, DesktopSessionReference {}
@@ -26,8 +25,7 @@ export class RecentSessions {
       const entries = new Map<string, RecentSession>()
       for (const item of data) {
         if (!item || typeof item !== 'object') continue
-        const { server, accountId, targetId, sessionId, title, lastConnectedAt } = item
-        const tool = isHarnessId(item.tool) ? item.tool : undefined
+        const { server, accountId, targetId, sessionId, title, tool, lastConnectedAt } = item
         if (
           typeof server !== 'string' ||
           !validDesktopId(accountId) ||
@@ -35,6 +33,7 @@ export class RecentSessions {
           !validDesktopId(sessionId) ||
           typeof title !== 'string' ||
           title.length > 512 ||
+          !isHarnessId(tool) ||
           typeof lastConnectedAt !== 'number' ||
           !Number.isFinite(lastConnectedAt) ||
           lastConnectedAt < 0
@@ -87,9 +86,7 @@ export class RecentSessions {
   private change(update: (entries: RecentSession[]) => RecentSession[]) {
     const write = this.writes.then(async () => {
       const next = update(this.entries)
-      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-      await writeFile(this.path + '.tmp', JSON.stringify(next), { mode: 0o600 })
-      await rename(this.path + '.tmp', this.path)
+      await writeJsonFile(this.path, next)
       this.entries = next
     })
     this.writes = write.catch(() => {})

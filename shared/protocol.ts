@@ -45,8 +45,7 @@ export type ServerMessage =
   | {
       type: 'hello'
       resume: string
-      /** `tool` is absent from servers older than this field. */
-      session: { id: string; name: string; tool?: HarnessId }
+      session: { id: string; name: string; tool: HarnessId }
       target: { id: string; name: string }
     }
   | { type: 'ready' }

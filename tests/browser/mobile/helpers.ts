@@ -48,7 +48,7 @@ export async function mockTerminal(page: Page, options: { acknowledgeSends?: boo
     send({
       type: 'hello',
       resume: 'mobile-resume',
-      session: { id: 'mobile-session', name: 'Mobile session' },
+      session: { id: 'mobile-session', name: 'Mobile session', tool: 'claude' },
       target: { id: 'mobile-target', name: 'Development' },
     })
     restoreEmptyTerminal(ws)

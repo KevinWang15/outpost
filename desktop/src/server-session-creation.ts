@@ -65,7 +65,13 @@ export function sessionCreationServer(summary: SessionCreatorServerSummary, requ
           targetId,
           sessionId: result.sessionId,
         }
-        return { ...reference, id: desktopSessionId(reference), title: result.title, detail: result.detail }
+        return {
+          ...reference,
+          id: desktopSessionId(reference),
+          title: result.title,
+          detail: result.detail,
+          tool: result.tool,
+        }
       } catch (error) {
         if (error instanceof ServerApiError && error.status >= 400 && error.status < 500 && error.status !== 408)
           throw error

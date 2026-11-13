@@ -48,7 +48,7 @@ const closedTitles: Record<CloseReason, string> = {
 type Props = {
   title: string
   onClose: () => void
-  onResume?: (token: string, title: string, tool?: HarnessId) => void | Promise<void>
+  onResume?: (token: string, title: string, tool: HarnessId) => void | Promise<void>
 } & ({ token: string; local?: never } | { token?: never; local: LocalTerminalBridge })
 
 const toolbarPreference = 'outpost.terminal.toolbar-hidden'

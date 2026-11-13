@@ -9,7 +9,7 @@ import { ServerApiError } from '../../desktop/src/server-api'
 
 const choice = (sessionId: string, targetId = 'target'): DesktopSessionChoice => {
   const reference = { server: 'https://example.com', accountId: 'account', targetId, sessionId }
-  return { ...reference, id: desktopSessionId(reference), title: sessionId, detail: '' }
+  return { ...reference, id: desktopSessionId(reference), title: sessionId, detail: '', tool: 'claude' }
 }
 function fixture(actions: Partial<SessionFinderActions> = {}) {
   let finished = 0
@@ -199,7 +199,7 @@ test('creation capability sends the request identity and validates display metad
   const calls: unknown[] = []
   const server = sessionCreationServer(summary, async (path, options) => {
     calls.push({ path, options })
-    return { sessionId: 'created', targetId: 'target', title: 'Created', detail: 'codex' }
+    return { sessionId: 'created', targetId: 'target', title: 'Created', detail: 'codex', tool: 'codex' }
   })
   const input = { name: 'Created', rootDir: '/tmp', tool: 'codex' as const }
   const result = await server.create('target', input, 'request-id')

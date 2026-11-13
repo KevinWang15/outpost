@@ -55,8 +55,7 @@ export interface DesktopSession {
   targetId: string
   title: string
   detail: string
-  /** Absent from servers older than this field. */
-  tool?: HarnessId
+  tool: HarnessId
 }
 export interface DesktopSessionReference {
   server: string
@@ -81,7 +80,7 @@ export function validDesktopSession(value: unknown, targetId: string): value is 
     text(session.title, 512) &&
     typeof session.detail === 'string' &&
     session.detail.length <= 4096 &&
-    (session.tool === undefined || isHarnessId(session.tool))
+    isHarnessId(session.tool)
   )
 }
 

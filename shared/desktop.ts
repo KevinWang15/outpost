@@ -3,7 +3,7 @@ import type { HarnessId } from './harnesses'
 import type { SessionFileBridge } from './sessionFiles'
 
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 9
+export const desktopBridgeVersion = 10
 export interface TerminalPreferences {
   fontSize: number
   sound: boolean
@@ -13,7 +13,7 @@ export interface TerminalHostState extends TerminalPreferences {
 }
 export interface TerminalPaneState {
   title: string
-  /** The session's coding tool; absent for local shells and older servers. */
+  /** The session's coding tool, once the server names it. Local shells have none. */
   tool?: HarnessId
   connection: 'connecting' | 'connected' | 'reconnecting' | 'closed'
   /** null only before the first observation or while disconnected. Failures are unknown. */
@@ -28,7 +28,7 @@ export interface DesktopBridge {
   /** Credential for this pane only, delivered in memory rather than a page URL. */
   ticket(): Promise<string | null>
   /** Called only after the server accepts a connection and issues a resume grant. */
-  saveResume(token: string, title: string, tool?: HarnessId): Promise<void>
+  saveResume(token: string, title: string, tool: HarnessId): Promise<void>
   openExternal(url: string): Promise<boolean>
   files: SessionFileBridge
   viewFiles(selected: string): Promise<void>

@@ -112,7 +112,9 @@ test.beforeEach(async () => {
           }
           if (loseCreateReply) response.destroy()
           else
-            response.writeHead(201).end(JSON.stringify({ ...session, targetId: 'target', detail: 'Created fixture' }))
+            response
+              .writeHead(201)
+              .end(JSON.stringify({ ...session, targetId: 'target', detail: 'Created fixture', tool: 'claude' }))
         })
         return
       }
@@ -134,8 +136,14 @@ test.beforeEach(async () => {
               targetId: 'target',
               title: entry.title,
               detail: 'Fixture',
+              tool: entry.tool,
             })),
-            ...createdSessions.map(entry => ({ ...entry, targetId: 'target', detail: 'Created fixture' })),
+            ...createdSessions.map(entry => ({
+              ...entry,
+              targetId: 'target',
+              detail: 'Created fixture',
+              tool: 'claude',
+            })),
           ]),
         )
       else {
@@ -176,6 +184,7 @@ test.beforeEach(async () => {
     targetId: 'target',
     sessionId: key,
     title: index ? 'Beta review' : 'Alpha project',
+    tool: 'claude' as const,
     lastConnectedAt: Date.now() - index,
   }))
   await mkdir(userData)

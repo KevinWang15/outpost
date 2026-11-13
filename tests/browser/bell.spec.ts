@@ -93,7 +93,7 @@ async function openTerminal(page: Page) {
       JSON.stringify({
         type: 'hello',
         resume: 'bell-resume',
-        session: { id: 'bell-session', name: 'Coding session' },
+        session: { id: 'bell-session', name: 'Coding session', tool: 'claude' },
         target: { id: 'bell-target', name: 'Dev box' },
       }),
     )
@@ -257,7 +257,7 @@ test('browser notifications request permission on click, group alerts, and retur
     JSON.stringify({
       type: 'hello',
       resume: 'bell-resume',
-      session: { id: 'bell-session', name: 'Renamed session' },
+      session: { id: 'bell-session', name: 'Renamed session', tool: 'claude' },
       target: { id: 'bell-target', name: 'Dev box' },
     }),
   )

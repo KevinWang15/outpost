@@ -11,6 +11,7 @@ const sessions = Array.from({ length: 10 }, (_, index) => ({
   accountId: 'fixture',
   targetId: 'target',
   detail: '',
+  tool: 'claude' as const,
 }))
 async function open(page: Page, entries = sessions) {
   await page.addInitScript(

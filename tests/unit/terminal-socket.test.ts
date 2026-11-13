@@ -132,7 +132,7 @@ test('a stale open socket is replaced after the probe deadline, preserving its r
     type: 'hello',
     resume: 'resume-ticket',
     target: { id: 't', name: 'Box' },
-    session: { id: 's', name: 'Session' },
+    session: { id: 's', name: 'Session', tool: 'claude' },
   })
   socket.ready()
   client.resume()
@@ -273,7 +273,7 @@ test('wake replaces a handshake suspended for hours and ignores late events from
     type: 'hello',
     resume: 'sleep-resume',
     target: { id: 't', name: 'Target' },
-    session: { id: 's', name: 'Session' },
+    session: { id: 's', name: 'Session', tool: 'claude' },
   })
   const lateMessage = socket.onmessage!
   t.mock.timers.setTime(Date.now() + 4 * 60 * 60_000)
@@ -304,7 +304,7 @@ function readyForImages(socket: FakeSocket) {
   socket.message({
     type: 'hello',
     resume: 'image-resume',
-    session: { id: 's', name: 'Session' },
+    session: { id: 's', name: 'Session', tool: 'claude' },
     target: { id: 't', name: 'Target' },
   })
   socket.ready()

@@ -26,7 +26,7 @@ test('chat mentions: known handles only, @all addresses everyone, emails are not
     handles: ['coder', 'writer'],
     everyone: false,
   })
-  assert.deepEqual(mentions('mail me@coder.dev; @all please', known), { handles: [], everyone: true })
+  assert.deepEqual(mentions('mail me@coder.example; @all please', known), { handles: [], everyone: true })
   assert.deepEqual(mentions('(@Coder) then @coder- again', known), { handles: ['coder'], everyone: false })
   assert.deepEqual(
     mentionParts('ask @coder now', known).map(part => part.mention),

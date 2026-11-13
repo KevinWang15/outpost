@@ -105,8 +105,8 @@ No signing credentials or automatic updater are used for previews.
 
 The existing **CI** workflow can also call this same packaging workflow with
 `suite=desktop` and `publish_preview=true`; its full checks are skipped in that
-mode. This entry works while `desktop.yml` exists only on the `v2` branch and
-GitHub has not registered it on the default branch yet.
+mode. This entry works before GitHub registers `desktop.yml` on the default
+branch.
 
 On each native platform, exercise cold/warm `outpost://` launches, local
 login/PowerShell/WSL profiles, offline startup, local shell exit/restart,

@@ -49,7 +49,7 @@ try {
     name: 'Workstation',
     tools: ['claude', 'codex', 'kimi'],
   })
-  await call('GET', `/targets/${target.id}/software`)
+  const { environment } = await call('GET', `/targets/${target.id}/software`)
   for (const [name, rootDir, tool] of [
     ['Billing API refactor', '~/projects/billing-api', 'claude'],
     ['Onboarding flow', '~/projects/web-app', 'codex'],
@@ -58,7 +58,19 @@ try {
     await call('POST', `/targets/${target.id}/sessions`, { name, rootDir, tool, createDirectory: true })
   }
   const browser = await chromium.launch()
+  // The fixture runs as whoever captures the images. Show a neutral account and
+  // home instead of the capturing machine's username and temporary directory.
+  const neutral = { username: 'dev', home: '/home/dev' }
+  const neutralize = async route => {
+    const response = await route.fetch()
+    if (!(response.headers()['content-type'] ?? '').includes('application/json')) return route.fulfill({ response })
+    const body = (await response.text())
+      .replaceAll(JSON.stringify(environment.home).slice(1, -1), neutral.home)
+      .replaceAll(`"username":${JSON.stringify(environment.username)}`, `"username":"${neutral.username}"`)
+    await route.fulfill({ response, body })
+  }
   const page = await browser.newPage({ viewport: { width: 1360, height: 820 }, deviceScaleFactor: 2 })
+  await page.route('**/api/**', neutralize)
   await page.setContent(
     (await readFile(new URL('./banner.html', import.meta.url), 'utf8')).replace(
       'src="/outpost.svg"',
@@ -73,8 +85,9 @@ try {
   await page.setViewportSize({ width: 1360, height: 820 })
   await page.goto(`http://127.0.0.1:${web}/?target=${target.id}`)
   await page.getByRole('row').filter({ hasText: 'Billing API refactor' }).waitFor()
+  await page.getByText('Ready', { exact: true }).waitFor()
   await page.screenshot({ path: new URL('workspace.png', images).pathname })
-  await page.getByRole('button', { name: 'Connect' }).first().click()
+  await page.getByRole('button', { name: 'Connect', exact: true }).first().click()
   const opened = page.waitForEvent('popup')
   await page.getByRole('button', { name: /Web terminal/ }).click()
   const terminal = await opened
@@ -82,8 +95,10 @@ try {
   await terminal.waitForTimeout(800)
   await terminal.screenshot({ path: new URL('web-terminal.png', images).pathname })
   const phone = await browser.newPage({ ...devices['iPhone 13'] })
+  await phone.route('**/api/**', neutralize)
   await phone.goto(`http://127.0.0.1:${web}/?target=${target.id}`)
   await phone.getByRole('row').filter({ hasText: 'Release notes' }).waitFor()
+  await phone.getByText('Ready', { exact: true }).waitFor()
   await phone.screenshot({ path: new URL('phone.png', images).pathname })
   await browser.close()
   console.log('Saved README images to docs/images/')

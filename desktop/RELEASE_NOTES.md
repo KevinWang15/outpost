@@ -1,7 +1,6 @@
 # Outpost Desktop 0.19.0 preview
 
-This preview adds a **Chat** window: Outpost's chat mode, from the
-experiment-20261110 branch.
+This preview adds a **Chat** window for Outpost's chat mode.
 
 ## What's changed
 
@@ -16,7 +15,7 @@ experiment-20261110 branch.
 
 ## Update
 
-Chat needs a server built from the same branch and **Outpost Terminal 1.3.0**
+Chat needs an Outpost server with chat mode and **Outpost Terminal 1.3.0**
 on its targets (Required Software installs it). With an older server, the Chat
 window cannot connect; terminal tabs work as before. Claude Code sessions in
 chat also need the **Claude Code chat adapter** from Required Software. The

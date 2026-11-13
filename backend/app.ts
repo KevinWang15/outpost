@@ -90,6 +90,7 @@ export async function createApp(options: AppOptions) {
     deployment,
     resolve,
     files: services.files,
+    terminals: sessions,
     list: async (context, signal) => (await sessions.list(context, signal)).sessions,
     connect: options.chatConnector ?? machineConnector(sessions),
   })

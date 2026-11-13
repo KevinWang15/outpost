@@ -10,6 +10,7 @@ import sys
 import time
 import tty
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 if Path('capture-input').exists():
@@ -56,8 +57,11 @@ if tool == 'dsh' and sys.argv[1:] == ['--profile', 'acp']:
     os.execve(sys.executable, [sys.executable, str(agent)], {**os.environ, 'FIXTURE_ACP_VARIANT': 'deepseek'})
 
 native_arguments = sys.argv[1:]
+settings = {}
 # Launches put integration options (MCP, activity hooks) before the conversation selector.
 while len(native_arguments) >= 2 and native_arguments[0] in ('--mcp-config', '--settings', '-c'):
+    if native_arguments[0] == '--settings':
+        settings = json.loads(native_arguments[1])
     native_arguments = native_arguments[2:]
 if tool == 'codex' and len(native_arguments) >= 2 and native_arguments[0] == 'resume':
     cli_session_id = native_arguments[1]
@@ -140,6 +144,44 @@ def ready(*_):
     print('OUTPOST_FIXTURE_READY ' + str(pid) + ' ' + str(size.columns) + 'x' + str(size.lines), flush=True)
 
 
+def hook(event):
+    for group in settings.get('hooks', {}).get(event, []):
+        for command in group.get('hooks', []):
+            subprocess.run(
+                command['command'],
+                shell=True,
+                input=json.dumps({'session_id': cli_session_id, 'hook_event_name': event}),
+                text=True,
+                timeout=10,
+            )
+
+
+def answer(prompt):
+    # Like Claude Code: hooks around the turn, and the reply in its transcript.
+    hook('UserPromptSubmit')
+    time.sleep(0.3)
+    body = [line for line in prompt.splitlines() if line.strip() and not line.startswith('[Outpost:')]
+    reply = 'Fixture reply to: ' + (body[0] if body else prompt.strip())
+    with open(history, 'a') as stream:
+        stream.write(
+            json.dumps(
+                {
+                    'type': 'assistant',
+                    'uuid': str(uuid.uuid4()),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'message': {
+                        'role': 'assistant',
+                        'stop_reason': 'end_turn',
+                        'content': [{'type': 'text', 'text': reply}],
+                    },
+                }
+            )
+            + '\n'
+        )
+    hook('Stop')
+
+
+typed = ''
 signal.signal(signal.SIGWINCH, ready)
 heartbeat = Path('heartbeat.json')
 temporary_heartbeat = Path('.heartbeat-' + str(pid) + '.tmp')
@@ -189,4 +231,11 @@ while True:
             break
         if received(b'ping'):
             ready()
+        # With answer-prompts, Enter after text is a prompt the fixture answers.
+        if tool == 'claude' and Path('answer-prompts').exists():
+            typed += command.decode('utf8', 'replace').replace('\x1b[200~', '').replace('\x1b[201~', '')
+            if '\r' in typed:
+                prompt, typed = typed.split('\r', 1)[0], ''
+                if prompt.strip():
+                    answer(prompt)
         input_tail = incoming[-(len(b'OUTPOST_KEYS_END') - 1) :]

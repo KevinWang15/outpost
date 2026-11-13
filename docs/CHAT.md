@@ -146,10 +146,13 @@ after 6 hops or 12 deliveries per user message, with a notice. A member mentione
 again while working gets the newer messages after its turn.
 
 **Session messages.** Outpost's MCP server (`machine/mcp.ts`) serves
-`list_sessions` and `message_session` to chat launches (`OUTPOST_DRIVER=chat`;
-see "Outpost MCP" in ARCHITECTURE.md). The call travels agent → MCP process →
-the session's node → the machine connection → hub. The recipient works in its own chat; its
-final message returns to the sender as a new turn. A thread allows 6 messages.
+`list_sessions`, `message_session` and `post_to_channel` to every session, in
+chat or in a terminal (see "Outpost MCP" in ARCHITECTURE.md). The call travels
+agent → MCP process → the session's node → the machine connection → hub. The
+recipient works in its own chat, or in its terminal, where the message is typed
+in when the agent is idle (see "Messages into terminals" in ARCHITECTURE.md);
+its final message returns to the sender as a new turn. A thread allows 6
+messages.
 
 **Under failures.** A delivery ends in exactly one reply or one visible notice
 (`tests/integration/chat-faults.test.ts` injects the faults below).
@@ -223,8 +226,6 @@ Uploads are buffered (at most two at a time per account) before they are stored.
   the chat starts it again and the conversation continues.
 - Terminal-mode arguments (`args`) do not apply to chat; the agent's mode and
   model are chosen in the chat instead.
-- Sessions running in a terminal cannot receive channel or session messages
-  until they are opened in chat.
 - Server-side Web Push is not implemented. Phones use the
   web app; there is no native mobile app.
 - A prompt whose host restarted before confirming it is reported as possibly not

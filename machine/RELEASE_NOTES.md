@@ -15,6 +15,12 @@ protocol 5, chat host protocol 3, node protocol 1.
   separate helpers.
 - Sessions keep a timeline of their native conversations and a revisioned
   configuration (environment, arguments, chat instructions).
+- Terminal sessions take messages from other sessions, channels and schedules:
+  the terminal service types them in when the agent is idle and nobody is
+  typing or drafting, or holds them for Deliver now.
+- Every session gets the same Outpost tools: `list_machines`, `list_sessions`,
+  `message_session`, `post_to_channel` and `fetch_file` join `publish_file` and
+  the history tools.
 
 The registry format changed: an earlier `~/.outpost/registry.json` is reported
 as invalid and left untouched; remove it to start over. Terminate sessions

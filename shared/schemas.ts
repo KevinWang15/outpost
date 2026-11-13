@@ -84,11 +84,16 @@ export const sessionInput = Type.Object(
  * keeps the revision it started with until the session restarts. */
 export const sessionConfig = Type.Object({ revision: Type.Integer({ minimum: 1 }), env, args, instructions }, strict)
 
+/** How messages from other sessions, channels and schedules reach a terminal:
+ * typed in when the agent is idle, or held until you deliver them. */
+const delivery = Type.Union([Type.Literal('auto'), Type.Literal('manual')])
+
 /** An edit names the revision it was based on; a concurrent edit is refused. */
 export const sessionUpdate = Type.Object(
   {
     revision: Type.Integer({ minimum: 1 }),
     name: Type.Optional(name),
+    delivery: Type.Optional(delivery),
     env: Type.Optional(env),
     args: Type.Optional(args),
     instructions: Type.Optional(instructions),
@@ -117,6 +122,7 @@ export const sessionRecord = Type.Object(
     createdAt: text(80),
     lastConnectedAt: Type.Union([text(80), Type.Null()]),
     storage,
+    delivery,
     config: sessionConfig,
     conversations: Type.Array(sessionConversation, { minItems: 1, maxItems: 200 }),
   },

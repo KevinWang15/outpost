@@ -67,8 +67,11 @@ slash commands.
   replies when you mention it (`@api`, or `@all`); a reply that mentions another
   member passes the conversation on. Files attached in a channel are copied to
   each member that receives them.
-- **Sessions message each other.** In chat, agents get Outpost tools to list
-  your sessions and ask one of them for help; the answer comes back as a message.
+- **Sessions message each other.** Agents get Outpost tools to list your
+  machines and sessions, ask one of them for help, post to their channels and
+  copy each other's files; the answer comes back as a message. A session running
+  in a terminal gets messages typed in when its agent is idle and you are not
+  typing, or holds them until you choose **Deliver now** (**Edit session**).
 - **Schedules** send a session a message at set times, e.g. a weekday summary.
 - **Instructions** give a session a role, added to the coding tool's own.
 

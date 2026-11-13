@@ -191,6 +191,7 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
       createdAt: now(),
       lastConnectedAt: null,
       storage,
+      delivery: 'auto',
       config: { revision: 1, env: input.env, args: input.args, instructions: input.instructions?.trim() || null },
       conversations: [{ id: conversation, startedAt: now(), movedTo: null }],
     }
@@ -261,6 +262,7 @@ export async function updateSession(id: unknown, update: SessionUpdate) {
       uniqueName(registry, update.name.trim(), record.id)
       record.name = update.name.trim()
     }
+    if (update.delivery !== undefined) record.delivery = update.delivery
     const env = update.env ?? record.config.env
     const args = update.args ?? record.config.args
     if (update.env !== undefined || update.args !== undefined) validLaunch(env, args)

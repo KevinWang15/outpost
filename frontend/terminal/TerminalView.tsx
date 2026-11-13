@@ -71,6 +71,8 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
   const [state, setState] = useState<TerminalState>({ kind: 'connecting' })
   const [mountAttempt, setMountAttempt] = useState(0)
   const [activity, setActivity] = useState<SessionActivity | null>(null)
+  /** Messages from other sessions, channels or schedules waiting to be typed in. */
+  const [waiting, setWaiting] = useState(0)
   const [name, setName] = useState(title)
   const [tool, setTool] = useState<HarnessId>()
   const [bellRinging, setBellRinging] = useState(false)
@@ -136,6 +138,11 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
       .catch(() => {})
   }, [name, tool, state.kind, activity, bellRinging, hasDraft])
 
+  // A message from another session never goes in over your draft.
+  useEffect(() => {
+    session.current?.connection.draft?.(hasDraft)
+  }, [hasDraft, state.kind])
+
   const notify = useCallback((message: string, sticky = false) => {
     setStatus(message)
     clearTimeout(statusTimer.current)
@@ -161,6 +168,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         source: local ? { kind: 'local', bridge: local } : { kind: 'remote', token: token! },
         state: setState,
         activity: setActivity,
+        deliveries: setWaiting,
         titleChanged: setName,
         toolChanged: setTool,
         bellChanged: setBellRinging,
@@ -394,6 +402,14 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
               </button>
               <button className="button small" onClick={() => setBlockedLink(null)}>
                 Dismiss
+              </button>
+            </div>
+          )}
+          {waiting > 0 && connected && (
+            <div className="terminal-notice" role="status">
+              <span>{waiting === 1 ? '1 message' : `${waiting} messages`} from other sessions waiting</span>
+              <button className="button small" onClick={() => session.current?.connection.deliverNow?.()}>
+                Deliver now
               </button>
             </div>
           )}

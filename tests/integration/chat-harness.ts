@@ -18,10 +18,11 @@ import type { ChatConnector } from '../../backend/chat/links'
 import { Machines } from '../../backend/machines'
 import { targetResolver } from '../../backend/services'
 import { ChatHost } from '../../machine/chat'
-import { readFile as storedFile, StoredFile } from '../../machine/files'
+import { listFiles, readFile as storedFile, StoredFile } from '../../machine/files'
 import { changeRegistry } from '../../machine/registry'
 import { listSessions } from '../../machine/sessions'
 import { state as machineState, statePath, writeJson } from '../../machine/state'
+import type { TerminalDelivery } from '../../backend/sessions'
 import { terminalBinary } from './helpers'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -40,7 +41,7 @@ export async function until<T>(check: () => T | undefined | null | false, label:
 }
 export const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-export async function chatHarness(names: string[], options: { idleMs?: number } = {}) {
+export async function chatHarness(names: string[], options: { idleMs?: number; terminal?: string[] } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'outpost-chat-hub-')))
   const state = join(directory, 'state')
   await mkdir(join(state, 'chats'), { recursive: true })
@@ -65,6 +66,7 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
     createdAt: new Date().toISOString(),
     lastConnectedAt: null,
     storage: { CLAUDE_CONFIG_DIR: home },
+    delivery: 'auto',
     config: { revision: 1, env: {}, args: '', instructions: null },
     conversations: [{ id: randomUUID(), startedAt: new Date().toISOString(), movedTo: null }],
   }))
@@ -160,13 +162,19 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
   const machines = new Machines('chat-harness')
   const resolve = targetResolver(deployment, machines, false)
   const owner = deployment.owner()
-  /** The session list as the machine describes it, asking running chat hosts. */
-  const list = () => listSessions()
+  /** The session list as the machine describes it, asking running chat hosts;
+   * sessions named in `terminal` run in a terminal instead. */
+  const inTerminal = new Set(options.terminal ?? [])
+  const list = async () =>
+    (await listSessions()).map(session =>
+      inTerminal.has(session.name) ? { ...session, driver: 'terminal' as const, status: 'attached' as const } : session,
+    )
 
   const hubs: ChatHub[] = []
   const received: ChatServerMessage[] = []
   /** Session files through the machine's own file store. */
   const files = {
+    list: async (_context: unknown, sessionId: string) => listFiles(sessionId),
     receive: async (_context: unknown, sessionId: string, name: string, data: Buffer) => {
       const stored = new StoredFile(sessionId, name, 'received')
       stored.write(data)
@@ -176,6 +184,21 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
       const { file, path } = storedFile(sessionId, fileId)
       return { file, bytes: readFileSync(path) }
     },
+  }
+
+  /** Messages for terminal sessions: what was handed to each, and its progress, which a test sets. */
+  const typed: { session: string; key: string; text: string }[] = []
+  const progress = new Map<string, TerminalDelivery>()
+  const terminals = {
+    async deliver(_context: unknown, session: string, key: string, text: string) {
+      if (!progress.has(key)) {
+        typed.push({ session, key, text })
+        progress.set(key, { key, state: 'waiting', reply: null, error: null })
+      }
+      return progress.get(key)!
+    },
+    deliveries: async (_context: unknown, _session: string, keys: string[]) =>
+      keys.flatMap(key => (progress.has(key) ? [progress.get(key)!] : [])),
   }
 
   /** The node's agent endpoint: agents' Outpost tool calls reach the open hub.
@@ -202,7 +225,16 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
 
   async function startHub(timing: { promptMs?: number; probeMs?: number } = {}) {
     endpoint?.close()
-    const hub = new ChatHub({ deployment, resolve, list, files, connect: connector, ...timing })
+    const hub = new ChatHub({
+      deployment,
+      resolve,
+      list,
+      files,
+      terminals,
+      connect: connector,
+      terminalPollMs: 100,
+      ...timing,
+    })
     const close = hub.close.bind(hub)
     hub.close = () => {
       close()
@@ -228,6 +260,11 @@ export async function chatHarness(names: string[], options: { idleMs?: number } 
     cutAfterPrompt,
     frozen,
     startHub,
+    terminal: {
+      typed,
+      /** The terminal session's agent answered message `key`. */
+      answer: (key: string, reply: string) => progress.set(key, { key, state: 'done', reply, error: null }),
+    },
     ref: (session: { id: string }) => ({ targetId: target.id, sessionId: session.id }),
     /** Break every connection to a session's chat host; the host keeps running. */
     drop(session: { id: string }) {

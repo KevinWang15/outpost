@@ -15,6 +15,14 @@ import type { MachineConnection, Stream } from './machines'
 import type { Transport } from './transport'
 import type { Workspace } from './workspace'
 
+/** A message's progress in a terminal session (machine/delivery.ts). */
+export interface TerminalDelivery {
+  key: string
+  state: 'waiting' | 'typed' | 'done' | 'failed'
+  reply: string | null
+  error: string | null
+}
+
 /** A target resolved for one owner: its settings and its machine connection. */
 export interface TargetContext {
   owner: Owner
@@ -63,6 +71,13 @@ export class SessionClient {
   }
   acknowledge({ machine }: TargetContext, id: string, completionId: string) {
     return machine.call<Session>('sessions.acknowledge', { id, completionId })
+  }
+  /** A message for a session running in a terminal; the key makes a resend harmless. */
+  deliver({ machine }: TargetContext, id: string, key: string, text: string) {
+    return machine.call<TerminalDelivery>('sessions.deliver', { id, key, text })
+  }
+  deliveries({ machine }: TargetContext, id: string, keys: string[]) {
+    return machine.call<TerminalDelivery[]>('sessions.deliveries', { id, keys })
   }
   terminate({ machine }: TargetContext, id: string) {
     return machine.call<Session>('sessions.terminate', { id }, { timeoutMs: 60_000 })

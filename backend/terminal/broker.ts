@@ -171,6 +171,9 @@ class Connection {
       for (const frame of pending) this.write(frame)
       this.send({ type: 'ready' })
       this.checkTarget()
+    } else if (message.type === 'deliveries') {
+      if (Number.isSafeInteger(message.waiting) && (message.waiting as number) >= 0)
+        this.send({ type: 'deliveries', waiting: message.waiting as number })
     } else if (message.type === 'files') {
       // The agent stored a file: every viewer of the session refreshes its list.
       this.broker.filesChanged(this.grant)
@@ -296,6 +299,11 @@ class Connection {
       case 'focus':
         if (typeof message.active === 'boolean') this.relay({ type: 'focus', active: message.active })
         return
+      case 'draft':
+        if (typeof message.active === 'boolean') this.relay({ type: 'draft', active: message.active })
+        return
+      case 'deliver-now':
+        return this.relay({ type: 'deliver-now' })
       case 'ack':
         if (Number.isSafeInteger(message.bytes) && message.bytes >= 0 && message.bytes <= this.unacked) {
           if (message.bytes) this.lastOutputProgress = Date.now()

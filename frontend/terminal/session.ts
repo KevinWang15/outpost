@@ -32,6 +32,7 @@ interface SessionOptions {
   source: { kind: 'remote'; token: string } | { kind: 'local'; bridge: LocalTerminalBridge }
   state(value: TerminalState): void
   activity(value: SessionActivity | null): void
+  deliveries(waiting: number): void
   titleChanged(value: string): void
   toolChanged(value: HarnessId): void
   bellChanged(value: boolean): void
@@ -133,6 +134,9 @@ export class TerminalSession {
               },
               activity: value => {
                 if (!this.disposed) this.activity.update(value)
+              },
+              deliveries: waiting => {
+                if (!this.disposed) options.deliveries(waiting)
               },
               signal: ({ signal }) => {
                 if (signal.type === 'files.changed') {

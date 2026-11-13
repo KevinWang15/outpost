@@ -416,6 +416,13 @@ kbd {
   color: var(--text);
   font-size: 13px;
 }
+.check:has(small) {
+  align-items: flex-start;
+  > span {
+    display: grid;
+    gap: 2px;
+  }
+}
 .segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;

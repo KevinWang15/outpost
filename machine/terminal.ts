@@ -11,6 +11,7 @@ import { terminalService, terminalSize } from '../shared/terminalService'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { isUserInput, TerminalActivity } from './activity'
 import { TerminalAttachment } from './attachment'
+import { Deliveries } from './delivery'
 import { endTree } from './drivers'
 import { harness } from './harnesses'
 import { readRegistry, session as findSession } from './registry'
@@ -87,7 +88,11 @@ export async function serveTerminal() {
     record,
     launch.conversation,
     harness(record.tool),
-    value => broadcast(terminalControl({ type: 'activity', activity: value })),
+    value => {
+      broadcast(terminalControl({ type: 'activity', activity: value }))
+      // A change may let a waiting message in, or settle the one in progress.
+      setImmediate(() => deliveries.tick())
+    },
     launch.problem,
   )
   const pty = new Bun.Terminal({
@@ -114,6 +119,42 @@ export async function serveTerminal() {
   term.onData(reply)
   headlessColors(term, reply)
   const child = Bun.spawn(launch.command, { cwd: launch.cwd, env: launch.env, terminal: pty })
+
+  // Messages from other sessions, channels and schedules.
+  /** While a message goes in, input from viewers waits so it cannot interleave. */
+  let held: (string | Buffer)[] | null = null
+  const write = (data: string | Buffer) => {
+    if (held) held.push(data)
+    else if (!childExited) pty.write(data)
+  }
+  const deliveries: Deliveries = new Deliveries(record.id, {
+    mode() {
+      // The setting changes while the session runs; it is read only while a message waits.
+      try {
+        return findSession(readRegistry(), record.id).delivery
+      } catch {
+        return 'manual'
+      }
+    },
+    activity: () => activity.current,
+    reply: () => activity.lastReply(),
+    changed: waiting => broadcast(terminalControl({ type: 'deliveries', waiting })),
+    type(text) {
+      if (childExited) return
+      pty.write(term.modes.bracketedPasteMode ? `\x1b[200~${text}\x1b[201~` : text)
+      held = []
+      // Enter on its own, after the paste, so the tool does not read it as pasted text.
+      setTimeout(() => {
+        const waiting = held ?? []
+        held = null
+        if (childExited) return
+        pty.write('\r')
+        for (const data of waiting) pty.write(data)
+      }, 150)
+    },
+  })
+  const deliveryTimer = setInterval(() => deliveries.tick(), 500)
+  deliveryTimer.unref()
   const resize = (cols: number, rows: number) => {
     if (!terminalSize(cols, rows)) throw new Error('Invalid terminal size')
     if (childExited) return
@@ -160,6 +201,23 @@ export async function serveTerminal() {
         void activity.hookEvent((message.payload ?? {}) as Record<string, unknown>)
         sendControl(socket, { type: 'result', ok: true })
         return socket.end()
+      case 'deliver': {
+        // From the node: a message for the agent, typed in when nothing is in the way.
+        if (
+          typeof message.key !== 'string' ||
+          !/^[A-Za-z0-9_-]{1,80}$/.test(message.key) ||
+          typeof message.text !== 'string' ||
+          !message.text.trim() ||
+          Buffer.byteLength(message.text) > 64 * 1024
+        )
+          throw new Error('Invalid message for the session')
+        sendControl(socket, { type: 'result', ok: true, delivery: deliveries.add(message.key, message.text) })
+        return socket.end()
+      }
+      case 'deliveries':
+        if (!Array.isArray(message.keys) || message.keys.length > 100) throw new Error('Invalid delivery query')
+        sendControl(socket, { type: 'result', ok: true, deliveries: deliveries.status(message.keys.map(String)) })
+        return socket.end()
       case 'files':
         // The agent stored a file; viewers refresh their list.
         broadcast(terminalControl({ type: 'files' }))
@@ -197,6 +255,7 @@ export async function serveTerminal() {
     socket.on('close', () => {
       sockets.delete(socket)
       clients.delete(socket)
+      deliveries.draft(socket, false)
       if (controller === socket) control(activeViewer() ?? [...clients.keys()].at(-1))
     })
     const decoder = new FrameDecoder()
@@ -209,9 +268,12 @@ export async function serveTerminal() {
           if (ended) return
           if (packet.kind === 'I') {
             if (!attached || packet.payload.length > 64 * 1024) throw new Error('Invalid terminal input')
-            if (!childExited) pty.write(packet.payload)
+            write(packet.payload)
             // Focus reports are automatic; anything else is the user typing.
-            if (isUserInput(packet.payload)) activity.input()
+            if (isUserInput(packet.payload)) {
+              activity.input()
+              deliveries.input(packet.payload)
+            }
             continue
           }
           if (packet.kind !== 'C') throw new Error('Invalid terminal frame')
@@ -257,6 +319,13 @@ export async function serveTerminal() {
                 restoring--
               })
             attachment.output(terminalControl({ type: 'activity', activity: activity.current }))
+            attachment.output(terminalControl({ type: 'deliveries', waiting: deliveries.count }))
+          } else if (message.type === 'draft') {
+            // The viewer's message box has text: messages wait until it is sent or cleared.
+            if (typeof message.active !== 'boolean') throw new Error('Invalid draft state')
+            deliveries.draft(socket, message.active)
+          } else if (message.type === 'deliver-now') {
+            deliveries.deliverNow()
           } else if (message.type === 'ping') {
             sendControl(socket, { type: 'result', id: message.id, ok: true })
           } else if (message.type === 'acknowledge') {
@@ -299,8 +368,9 @@ export async function serveTerminal() {
             if (childExited) {
               sendControl(socket, { type: 'result', id: message.id, ok: false, message: 'The coding tool exited.' })
             } else {
-              pty.write(data)
+              write(data)
               activity.input()
+              deliveries.input(message.data)
               sendControl(socket, { type: 'result', id: message.id, ok: true })
             }
           } else throw new Error('Unknown terminal operation')
@@ -322,7 +392,9 @@ export async function serveTerminal() {
     if (ended) return
     ended = true
     clearTimeout(drainTimer)
+    clearInterval(deliveryTimer)
     activity.exited()
+    deliveries.exited()
     for (const { socket, timer } of signals.values()) {
       clearTimeout(timer)
       sendControl(socket, { type: 'result', ok: false, message: 'The Outpost terminal disconnected.' })

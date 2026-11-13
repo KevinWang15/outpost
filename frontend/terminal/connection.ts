@@ -23,4 +23,8 @@ export interface TerminalConnection {
   networkChanged?(online: boolean): void
   activate?(token: string): Promise<void>
   acknowledge?(completionId: string): Promise<void>
+  /** The message box has text; messages from other sessions wait while it does. */
+  draft?(active: boolean): void
+  /** Type the next waiting message in once the agent is idle. */
+  deliverNow?(): void
 }

@@ -20,7 +20,7 @@ import { BoundedWriter } from '../shared/node/boundedWriter'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { chatHost } from '../shared/chatHost'
 import { terminalService, terminalSize } from '../shared/terminalService'
-import { driverStatus } from './drivers'
+import { driverStatus, request } from './drivers'
 import { checkImage, listFiles, readFile, removeFile, saveImage, StoredFile } from './files'
 import { catalog, readBatch, readMessage } from './history'
 import { chatSocket, startChat, startTerminal, terminalSocket } from './launch'
@@ -284,6 +284,26 @@ export async function serveNode(socketName: string) {
     },
     'sessions.terminate': args => terminateSession(args.id),
     'sessions.acknowledge': args => acknowledgeSession(args.id, args.completionId),
+    // Messages for a session running in a terminal, typed in by its terminal service.
+    'sessions.deliver': async args => {
+      const record = findSession(readRegistry(), args.id)
+      const reply = await request<{ delivery?: unknown }>(terminalSocket(record.id), {
+        type: 'deliver',
+        key: args.key,
+        text: args.text,
+      })
+      if (!reply) throw new RegistryError('The session is no longer running in a terminal.', 409)
+      return reply.delivery
+    },
+    'sessions.deliveries': async args => {
+      const record = findSession(readRegistry(), args.id)
+      const reply = await request<{ deliveries?: unknown }>(terminalSocket(record.id), {
+        type: 'deliveries',
+        keys: args.keys,
+      })
+      if (!reply) throw new RegistryError('The session is no longer running in a terminal.', 409)
+      return reply.deliveries
+    },
     directories: args => directories(args.path),
     'conversations.search': args => searchConversations(args.query, args.tool, sessions()),
     'files.list': args => (findSession(readRegistry(), args.session), listFiles(String(args.session))),

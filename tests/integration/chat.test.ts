@@ -1,6 +1,7 @@
 // The chat hub with real chat hosts and the scripted ACP agent (chat-harness.ts).
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { chatLimits } from '../../shared/chatApi'
 import { chatHarness, pause, until } from './chat-harness'
 
 test('chat hub: channels pass the floor, sessions message each other, schedules fire', async () => {
@@ -218,6 +219,98 @@ test('files the user attaches reach the agent as links it can read, in its sessi
     assert.match(reply.text, /\(read brief\.md: # Launch brief\)/)
     // A staged upload is used once.
     await assert.rejects(hub.post(owner, channel.id, 'post-again', '@writer again', [brief.id]), /expired/)
+  } finally {
+    await chat.close()
+  }
+})
+
+test('a chat agent messages a session running in a terminal, and its reply comes back', async () => {
+  const chat = await chatHarness(['Coder', 'Builder'], { terminal: ['Builder'] })
+  try {
+    const hub = await chat.startHub()
+    const [coder, builder] = chat.sessions
+    const link = await hub.link(chat.owner, chat.ref(coder))
+    link.ensure(true)
+    await until(() => link.state === 'live' && link.info?.state === 'ready', 'a ready chat')
+    const sent = await link.request({
+      type: 'prompt',
+      key: 'to-terminal',
+      origin: { kind: 'user' },
+      prompt: [{ type: 'text', text: 'message @builder: please run the tests' }],
+      files: [],
+    })
+    assert.equal(sent.ok, true, sent.message)
+    // The message goes to the terminal, marked with its sender.
+    const typed = await until(() => chat.terminal.typed.find(item => item.session === builder.id), 'the typed message')
+    assert.match(typed.text, /^\[Outpost: .*@coder.*\]\n/)
+    assert.match(typed.text, /please run the tests/)
+    const delivery = chat.deliveries().find(item => item.sessionId === builder.id)!
+    assert.equal(delivery.via, 'terminal')
+    chat.terminal.answer(typed.key, 'All 42 tests pass')
+    await until(() => chat.deliveries().find(item => item.sessionId === builder.id)?.state === 'done', 'its reply')
+    // The reply reaches the coder's chat as a new turn.
+    const reply = await until(
+      () => chat.deliveries().find(item => item.sessionId === coder.id && item.source.kind === 'session'),
+      'the reply delivery',
+    )
+    await until(() => chat.deliveries().find(item => item.id === reply.id)?.state === 'done', 'the reply turn')
+    assert.ok(
+      chat.hosts
+        .get(coder.id)!
+        .journal.entries.some(
+          entry => entry.kind === 'queued' && JSON.stringify(entry.prompt).includes('All 42 tests pass'),
+        ),
+    )
+  } finally {
+    await chat.close()
+  }
+})
+
+test("agents' tools: machines, channel posts within their channels, other sessions' files, and a send limit", async () => {
+  const chat = await chatHarness(['Coder', 'Writer'])
+  try {
+    const hub = await chat.startHub()
+    const [coder, writer] = chat.sessions
+    const call = (tool: string, args: Record<string, unknown> = {}) =>
+      hub.agent(chat.owner, chat.ref(coder), tool, args)
+    assert.deepEqual(await call('list_machines'), {
+      machines: [{ machine: 'Workstation', sessions: 2, reachable: true }],
+    })
+    const listed = (await call('list_sessions')) as { sessions: { handle: string }[]; channels: string[] }
+    assert.deepEqual(
+      listed.sessions.map(item => item.handle),
+      ['@writer'],
+    )
+
+    const channel = await hub.saveChannel(chat.owner, {
+      name: 'release',
+      topic: '',
+      members: [chat.ref(coder), chat.ref(writer)],
+    })
+    assert.deepEqual(((await call('list_sessions')) as { channels: string[] }).channels, ['#release'])
+    assert.deepEqual(await call('post_to_channel', { channel: '#release', message: 'Notes are drafted' }), {
+      posted: true,
+      channel: '#release',
+    })
+    await until(() => chat.messages().find(message => message.text === 'Notes are drafted'), 'the post')
+    const post = chat.messages().find(message => message.text === 'Notes are drafted')!
+    assert.equal(post.author.kind === 'session' && post.author.sessionId, coder.id)
+    assert.equal(post.channelId, channel.id)
+    await assert.rejects(call('post_to_channel', { channel: '#elsewhere', message: 'Hi' }), /not in #elsewhere/)
+
+    // A file the writer received, copied into the coder's session.
+    await chat.files.receive(null, writer.id, 'plan.txt', Buffer.from('The plan\n'))
+    const fetched = (await call('fetch_file', { session: '@writer', file: 'plan.txt' })) as {
+      file: { id: string; name: string }
+    }
+    assert.equal(fetched.file.name, 'plan.txt')
+    assert.deepEqual((await chat.files.read(null, coder.id, fetched.file.id)).bytes, Buffer.from('The plan\n'))
+    await assert.rejects(call('fetch_file', { session: '@writer', file: 'missing.txt' }), /has no file missing\.txt/)
+
+    // Posts and messages share a per-minute limit.
+    for (let index = 1; index < chatLimits.sendsPerMinute; index++)
+      await call('post_to_channel', { channel: 'release', message: `Update ${index}` })
+    await assert.rejects(call('post_to_channel', { channel: 'release', message: 'One too many' }), /Too many/)
   } finally {
     await chat.close()
   }

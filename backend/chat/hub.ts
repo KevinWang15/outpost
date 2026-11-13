@@ -26,7 +26,7 @@ import type { Session } from '../../shared/model'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
 import type { SessionFileClient } from '../sessionFiles'
-import type { TargetContext } from '../sessions'
+import type { SessionClient, TargetContext, TerminalDelivery } from '../sessions'
 import { ChannelFiles } from './files'
 import { ChatLink, type ChatConnector, type LinkEvent } from './links'
 import { channelPrompt, replyPrompt, schedulePrompt, sessionPrompt, summary } from './prompts'
@@ -64,12 +64,16 @@ interface Dependencies {
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
   list(context: TargetContext, signal?: AbortSignal): Promise<Session[]>
   /** Session files on targets, to give channel members the files a delivery carries. */
-  files: Pick<SessionFileClient, 'read' | 'receive'>
+  files: Pick<SessionFileClient, 'list' | 'read' | 'receive'>
+  /** Sessions running in a terminal take messages through their terminal service. */
+  terminals: Pick<SessionClient, 'deliver' | 'deliveries'>
   connect: ChatConnector
   /** How long a target may take to accept a composed prompt. */
   promptMs?: number
   /** How long a connected chat may stay silent (tests). */
   probeMs?: number
+  /** How often messages typed into terminals are checked on (tests). */
+  terminalPollMs?: number
 }
 
 const pollMs = 15_000
@@ -88,6 +92,8 @@ export class ChatHub {
   /** Deliveries with a prompt request in flight. */
   private sending = new Set<string>()
   private ticker: NodeJS.Timeout | null = null
+  private terminalTimer: NodeJS.Timeout | null = null
+  private polling = false
   private stopped = false
 
   constructor(private dependencies: Dependencies) {}
@@ -168,6 +174,7 @@ export class ChatHub {
   close() {
     this.stopped = true
     if (this.ticker) clearInterval(this.ticker)
+    if (this.terminalTimer) clearInterval(this.terminalTimer)
     for (const link of [...this.links.values()]) link.dispose()
     for (const pending of this.accounts.values())
       void pending.then(
@@ -374,6 +381,7 @@ export class ChatHub {
       prompt,
       files: [],
       host: null,
+      via: null,
       origin,
       error: null,
       createdAt: at,
@@ -385,6 +393,9 @@ export class ChatHub {
    * to the same host instance, so a resend after a lost answer cannot run twice. */
   private async send(account: Account, delivery: Delivery) {
     if (this.stopped || this.sending.has(delivery.id) || !notStopped(delivery)) return
+    // A session running in a terminal gets it typed in; any other one in its chat.
+    if (delivery.via === 'terminal' || (delivery.via === null && this.find(account, delivery)?.driver === 'terminal'))
+      return this.sendTerminal(account, delivery)
     this.sending.add(delivery.id)
     try {
       const link = await this.link(account.owner, delivery)
@@ -412,6 +423,89 @@ export class ChatHub {
     } finally {
       this.sending.delete(delivery.id)
     }
+  }
+
+  /** Hand the message to the session's terminal service, which types it in when
+   * the agent is idle and nobody is typing. The key makes a resend harmless. */
+  private async sendTerminal(account: Account, delivery: Delivery) {
+    this.sending.add(delivery.id)
+    try {
+      const context = await this.dependencies.resolve(account.owner, delivery.targetId)
+      const progress = await this.dependencies.terminals.deliver(
+        context,
+        delivery.sessionId,
+        promptKey(delivery),
+        delivery.prompt ?? '',
+      )
+      if (delivery.via !== 'terminal') await this.update(account, delivery, { state: 'sent', via: 'terminal' })
+      await this.progress(account, delivery, progress)
+      this.watchTerminals()
+    } catch (error) {
+      await this.failDelivery(account, delivery, (error as Error).message)
+    } finally {
+      this.sending.delete(delivery.id)
+    }
+  }
+
+  /** Check on messages typed into terminals until they are answered. */
+  private watchTerminals() {
+    if (this.terminalTimer || this.stopped) return
+    this.terminalTimer = setInterval(() => void this.pollTerminals(), this.dependencies.terminalPollMs ?? 2000)
+    this.terminalTimer.unref()
+  }
+
+  private async pollTerminals() {
+    if (this.polling) return
+    this.polling = true
+    let active = 0
+    try {
+      for (const pending of this.accounts.values()) {
+        const account = await pending.catch(() => null)
+        if (!account) continue
+        const bySession = new Map<string, Delivery[]>()
+        for (const delivery of account.store.deliveries.deliveries)
+          if (delivery.via === 'terminal' && notStopped(delivery) && !this.sending.has(delivery.id))
+            bySession.set(sessionKey(delivery), [...(bySession.get(sessionKey(delivery)) ?? []), delivery])
+        for (const deliveries of bySession.values()) {
+          active += deliveries.length
+          const [first] = deliveries
+          try {
+            const context = await this.dependencies.resolve(account.owner, first.targetId)
+            const found = await this.dependencies.terminals.deliveries(
+              context,
+              first.sessionId,
+              deliveries.map(promptKey),
+            )
+            for (const delivery of deliveries) {
+              const progress = found.find(item => item.key === promptKey(delivery))
+              if (progress) await this.progress(account, delivery, progress)
+              else await this.failDelivery(account, delivery, 'The session no longer has this message.')
+            }
+          } catch (error) {
+            // Unreachable for now: keep waiting. A session that left its terminal cannot answer.
+            if (error instanceof AppError && error.statusCode === 409)
+              for (const delivery of deliveries)
+                await this.failDelivery(account, delivery, 'The session stopped before replying.')
+          }
+        }
+      }
+    } finally {
+      this.polling = false
+      if (!active && this.terminalTimer) {
+        clearInterval(this.terminalTimer)
+        this.terminalTimer = null
+      }
+    }
+  }
+
+  private async progress(account: Account, delivery: Delivery, progress: TerminalDelivery) {
+    if (!notStopped(delivery)) return
+    if (progress.state === 'typed' && delivery.state !== 'running')
+      await this.update(account, delivery, { state: 'running' })
+    else if (progress.state === 'done')
+      await this.complete(account, delivery, { stopReason: 'end_turn', error: null }, progress.reply ?? '', [])
+    else if (progress.state === 'failed')
+      await this.failDelivery(account, delivery, progress.error ?? 'The session did not reply.')
   }
 
   /** The host accepted the delivery's prompt as `turn`. */
@@ -449,20 +543,34 @@ export class ChatHub {
     this.finishing.add(delivery.id)
     try {
       const ended = link.journal.entries.find(entry => entry.kind === 'ended' && entry.turn === delivery.turn)
-      const stop = ended?.kind === 'ended' ? ended : null
-      const text = replyText(link.journal.entries, delivery.turn)
-      await this.update(account, delivery, { state: 'done', error: stop?.error ?? null })
       link.release(delivery.id)
-      const { source } = delivery
-      if (source.kind === 'channel')
-        await this.channelReply(account, delivery, source, stop, text, turnFiles(link.journal.entries, delivery.turn))
-      else if (source.kind === 'session' && !source.reply)
-        await this.sessionReply(account, delivery, source, stop, text)
-      else if (source.kind === 'schedule')
-        await this.ran(account, source.scheduleId, stop?.stopReason === 'end_turn', stop?.error ?? null)
+      await this.complete(
+        account,
+        delivery,
+        ended?.kind === 'ended' ? ended : null,
+        replyText(link.journal.entries, delivery.turn),
+        turnFiles(link.journal.entries, delivery.turn),
+      )
     } finally {
       this.finishing.delete(delivery.id)
     }
+  }
+
+  /** The session's turn for this delivery ended: pass its reply on. */
+  private async complete(
+    account: Account,
+    delivery: Delivery,
+    stop: { stopReason: string; error: string | null } | null,
+    text: string,
+    files: SessionFile[],
+  ) {
+    if (!notStopped(delivery)) return
+    await this.update(account, delivery, { state: 'done', error: stop?.error ?? null, prompt: null })
+    const { source } = delivery
+    if (source.kind === 'channel') await this.channelReply(account, delivery, source, stop, text, files)
+    else if (source.kind === 'session' && !source.reply) await this.sessionReply(account, delivery, source, stop, text)
+    else if (source.kind === 'schedule')
+      await this.ran(account, source.scheduleId, stop?.stopReason === 'end_turn', stop?.error ?? null)
   }
 
   /** After a (re)connect: settle deliveries whose turns ended or vanished, and
@@ -471,6 +579,7 @@ export class ChatHub {
     const active = account.store.deliveries.deliveries.filter(
       item =>
         sessionKey(item) === sessionKey(ref) &&
+        item.via !== 'terminal' &&
         (item.state === 'sent' || item.state === 'running') &&
         !this.sending.has(item.id),
     )
@@ -498,6 +607,7 @@ export class ChatHub {
       item =>
         item.targetId === ref.targetId &&
         item.sessionId === ref.sessionId &&
+        item.via !== 'terminal' &&
         (item.state === 'sent' || item.state === 'running'),
     )
     for (const delivery of active) {
@@ -514,7 +624,8 @@ export class ChatHub {
           if (delivery.prompt) await this.send(account, delivery)
           else if (delivery.source.kind === 'channel') await this.deliverChannel(account, delivery)
           else await this.failDelivery(account, delivery, 'Outpost restarted before sending this message.')
-        } else {
+        } else if (delivery.via === 'terminal') this.watchTerminals()
+        else {
           const link = await this.link(account.owner, delivery)
           link.hold(delivery.id)
           link.ensure(false)
@@ -862,7 +973,7 @@ export class ChatHub {
         mentions: found.everyone ? known : found.handles,
         root: source.root,
         hop: source.hop + 1,
-        turn: { targetId: member.targetId, sessionId: member.sessionId, turn: delivery.turn! },
+        turn: delivery.turn ? { targetId: member.targetId, sessionId: member.sessionId, turn: delivery.turn } : null,
         key: null,
         files,
       }
@@ -929,7 +1040,36 @@ export class ChatHub {
           entry.kind === 'started' && !ended.has(entry.turn),
       )
     const queued = started && entries.find(entry => entry.kind === 'queued' && entry.turn === started.turn)
-    return queued?.kind === 'queued' ? queued.origin : null
+    if (queued?.kind === 'queued') return queued.origin
+    // A terminal's turn came from the message typed into it, if any.
+    return (
+      account.store.deliveries.deliveries.find(
+        item => item.via === 'terminal' && item.state === 'running' && sessionKey(item) === sessionKey(ref),
+      )?.origin ?? null
+    )
+  }
+
+  /** Agents' calls that send messages or posts, per session: at most this many a minute. */
+  private sends = new Map<string, number[]>()
+  private allowSend(ref: SessionRef) {
+    const key = sessionKey(ref)
+    const recent = (this.sends.get(key) ?? []).filter(at => Date.now() - at < 60_000)
+    if (recent.length >= chatLimits.sendsPerMinute) return false
+    this.sends.set(key, [...recent, Date.now()])
+    return true
+  }
+
+  /** A session by @handle or name, for an agent's tool call. */
+  private named(account: Account, wanted: unknown): { session: ChatSession } | { problem: string } {
+    if (typeof wanted !== 'string' || !wanted.trim()) return { problem: 'Name a session.' }
+    const key = wanted.trim().replace(/^@/, '').toLowerCase()
+    const matches = account.view.filter(item => item.handle === key || item.name.toLowerCase() === key)
+    if (!matches.length) return { problem: `No session named ${wanted}. Call list_sessions to see the names.` }
+    if (matches.length > 1)
+      return {
+        problem: `Several sessions are named ${wanted}; use one of: ${matches.map(item => `@${item.handle}`).join(', ')}.`,
+      }
+    return { session: matches[0] }
   }
 
   /** Outpost tools called by a session's agent (machine/mcp.ts), arriving on
@@ -950,75 +1090,147 @@ export class ChatHub {
     try {
       await this.fresh(account)
       const sender = this.find(account, ref)
-      if (tool === 'list_sessions') {
+      const self = (item: SessionRef) => item.targetId === ref.targetId && item.sessionId === ref.sessionId
+      if (tool === 'list_machines')
+        return answer(true, undefined, {
+          machines: account.targets.map(target => ({
+            machine: target.name,
+            sessions: account.view.filter(item => item.targetId === target.id).length,
+            reachable: target.error === null,
+            ...(target.error ? { problem: target.error } : {}),
+          })),
+        })
+      if (tool === 'list_sessions')
         return answer(true, undefined, {
           sessions: account.view
-            .filter(item => !(item.targetId === ref.targetId && item.id === ref.sessionId))
+            .filter(item => !self({ targetId: item.targetId, sessionId: item.id }))
             .map(item => ({
               handle: `@${item.handle}`,
               name: item.name,
+              ...(item.title && item.title !== item.name ? { title: item.title } : {}),
               tool: item.tool,
               machine: item.target,
               directory: item.rootDir,
               activity: item.activity.state,
-              canReceive: item.driver !== 'terminal',
+              runningIn: item.driver,
             })),
+          channels: account.store.channels.channels
+            .filter(channel => channel.members.some(member => self(member)))
+            .map(channel => `#${channel.name}`),
+        })
+      if (tool === 'message_session') {
+        const input = args as { session?: unknown; message?: unknown }
+        if (typeof input.message !== 'string' || !input.message.trim()) return answer(false, 'Write a message.')
+        if (input.message.length > chatLimits.text) return answer(false, 'The message is too long.')
+        const found = this.named(account, input.session)
+        if ('problem' in found) return answer(false, found.problem)
+        const recipient = found.session
+        if (self({ targetId: recipient.targetId, sessionId: recipient.id }))
+          return answer(false, 'That is this session.')
+        if (!this.allowSend(ref))
+          return answer(false, 'Too many messages this minute. Wait, or report back to the user.')
+        const origin = this.runningOrigin(account, ref)
+        const thread = origin && (origin.kind === 'session' || origin.kind === 'reply') ? origin.threadId : randomUUID()
+        const hops = (account.store.threads.threads[thread]?.hops ?? 0) + 1
+        if (hops > chatLimits.threadHops)
+          return answer(false, 'This conversation between sessions reached its limit. Report back to the user instead.')
+        await account.store.change(['threads'], () => {
+          account.store.threads.threads[thread] = { hops, at: account.store.threads.threads[thread]?.at ?? now() }
+        })
+        const from = {
+          targetId: ref.targetId,
+          sessionId: ref.sessionId,
+          name: sender?.name ?? 'session',
+          handle: sender?.handle ?? 'session',
+        }
+        const delivery = this.delivery(
+          { targetId: recipient.targetId, sessionId: recipient.id },
+          { kind: 'session', threadId: thread, hop: hops, from, reply: false },
+          sessionPrompt(from.handle, input.message),
+          {
+            kind: 'session',
+            from: { targetId: from.targetId, sessionId: from.sessionId, name: from.name },
+            threadId: thread,
+            summary: summary(input.message),
+          },
+        )
+        await this.add(account, delivery)
+        void this.send(account, delivery).catch(error => this.failDelivery(account, delivery, (error as Error).message))
+        return answer(true, undefined, {
+          sent: true,
+          to: `@${recipient.handle}`,
+          note:
+            recipient.driver === 'terminal' && recipient.delivery === 'manual'
+              ? 'That session takes messages when its user delivers them. The reply arrives here as a new message.'
+              : 'The reply arrives here later as a new message.',
         })
       }
-      if (tool !== 'message_session') return answer(false, 'Unknown Outpost tool.')
-      const input = args as { session?: unknown; message?: unknown }
-      if (typeof input?.session !== 'string' || typeof input.message !== 'string' || !input.message.trim())
-        return answer(false, 'Provide session and message.')
-      if (input.message.length > chatLimits.text) return answer(false, 'The message is too long.')
-      const wanted = input.session.trim().replace(/^@/, '').toLowerCase()
-      const matches = account.view.filter(item => item.handle === wanted || item.name.toLowerCase() === wanted)
-      if (!matches.length)
-        return answer(false, `No session named ${input.session}. Call list_sessions to see the names.`)
-      if (matches.length > 1)
-        return answer(
-          false,
-          `Several sessions are named ${input.session}; use one of: ${matches.map(item => `@${item.handle}`).join(', ')}.`,
+      if (tool === 'post_to_channel') {
+        const input = args as { channel?: unknown; message?: unknown }
+        if (typeof input.message !== 'string' || !input.message.trim()) return answer(false, 'Write a message.')
+        if (input.message.length > chatLimits.text) return answer(false, 'The message is too long.')
+        const name = typeof input.channel === 'string' ? input.channel.trim().replace(/^#/, '').toLowerCase() : ''
+        const channel = account.store.channels.channels.find(
+          item => item.name.toLowerCase() === name && item.members.some(member => self(member)),
         )
-      const recipient = matches[0]
-      if (recipient.targetId === ref.targetId && recipient.id === ref.sessionId)
-        return answer(false, 'That is this session.')
-      if (recipient.driver === 'terminal')
-        return answer(
-          false,
-          `@${recipient.handle} is open in a terminal and cannot receive messages until it is opened in chat.`,
+        const member = channel?.members.find(item => self(item))
+        if (!channel || !member)
+          return answer(false, `This session is not in #${name || '?'}. list_sessions shows its channels.`)
+        if (!this.allowSend(ref))
+          return answer(false, 'Too many messages this minute. Wait, or report back to the user.')
+        // A post during a channel turn continues that conversation, within its limits.
+        const origin = this.runningOrigin(account, ref)
+        const running = account.store.deliveries.deliveries.find(
+          item =>
+            notStopped(item) &&
+            item.source.kind === 'channel' &&
+            item.source.channelId === channel.id &&
+            sessionKey(item) === sessionKey(ref),
         )
-      const origin = this.runningOrigin(account, ref)
-      const thread = origin && (origin.kind === 'session' || origin.kind === 'reply') ? origin.threadId : randomUUID()
-      const hops = (account.store.threads.threads[thread]?.hops ?? 0) + 1
-      if (hops > chatLimits.threadHops)
-        return answer(false, 'This conversation between sessions reached its limit. Report back to the user instead.')
-      await account.store.change(['threads'], () => {
-        account.store.threads.threads[thread] = { hops, at: account.store.threads.threads[thread]?.at ?? now() }
-      })
-      const from = {
-        targetId: ref.targetId,
-        sessionId: ref.sessionId,
-        name: sender?.name ?? 'session',
-        handle: sender?.handle ?? 'session',
+        const source = running?.source.kind === 'channel' ? running.source : null
+        const id = randomUUID()
+        const known = channel.members.map(item => item.handle)
+        const found = mentions(input.message, known)
+        const message: ChannelMessage = {
+          id,
+          channelId: channel.id,
+          at: now(),
+          author: { kind: 'session', ...member },
+          text: input.message.trim(),
+          mentions: found.everyone ? known : found.handles,
+          root: source?.root ?? id,
+          hop: source ? source.hop + 1 : origin ? 1 : 0,
+          turn: null,
+          key: null,
+          files: [],
+        }
+        await account.store.append(message)
+        this.broadcast(account, { type: 'message', message })
+        await this.route(account, channel, message, member)
+        return answer(true, undefined, { posted: true, channel: `#${channel.name}` })
       }
-      const delivery = this.delivery(
-        { targetId: recipient.targetId, sessionId: recipient.id },
-        { kind: 'session', threadId: thread, hop: hops, from, reply: false },
-        sessionPrompt(from.handle, input.message),
-        {
-          kind: 'session',
-          from: { targetId: from.targetId, sessionId: from.sessionId, name: from.name },
-          threadId: thread,
-          summary: summary(input.message),
-        },
-      )
-      await this.add(account, delivery)
-      void this.send(account, delivery).catch(error => this.failDelivery(account, delivery, (error as Error).message))
-      return answer(true, undefined, {
-        sent: true,
-        to: `@${recipient.handle}`,
-        note: 'The reply will arrive as a new message in this chat.',
-      })
+      if (tool === 'fetch_file') {
+        const input = args as { session?: unknown; file?: unknown }
+        const found = this.named(account, input.session)
+        if ('problem' in found) return answer(false, found.problem)
+        const owner = found.session
+        if (typeof input.file !== 'string' || !input.file.trim()) return answer(false, 'Name the file or give its ID.')
+        const signal = AbortSignal.timeout(120_000)
+        const source = await this.dependencies.resolve(account.owner, owner.targetId)
+        const files = await this.dependencies.files.list(source, owner.id, signal)
+        const wanted = input.file.trim()
+        const file = files.find(item => item.id === wanted) ?? [...files].reverse().find(item => item.name === wanted)
+        if (!file)
+          return answer(
+            false,
+            `@${owner.handle} has no file ${wanted}. Its files: ${files.map(item => item.name).join(', ') || 'none'}.`,
+          )
+        const { bytes } = await this.dependencies.files.read(source, owner.id, file.id, signal)
+        const destination = await this.dependencies.resolve(account.owner, ref.targetId)
+        const stored = await this.dependencies.files.receive(destination, ref.sessionId, file.name, bytes, signal)
+        return answer(true, undefined, { stored: true, file: stored, from: `@${owner.handle}` })
+      }
+      return answer(false, 'Unknown Outpost tool.')
     } catch (error) {
       return answer(false, (error as Error).message)
     }

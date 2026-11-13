@@ -822,6 +822,30 @@ The current clear and health-check contract uses terminal service protocol 5 and
 Install the updated helper and explicitly restart existing service processes;
 older protocols are rejected instead of ignoring the operation.
 
+### Messages into terminals
+
+A message for a session running in a terminal (from another session, a
+channel or a schedule) goes to its terminal service, which types it in when
+that cannot get in your way (`machine/delivery.ts`): the agent is idle, as its
+hooks and transcript report; no viewer has a draft in the message box; no line
+you started typing in the tool is unfinished (no Enter, Ctrl+C or Ctrl+U since);
+and you have not typed for 3 seconds. The message is pasted (bracketed when the
+program asked for that) under its `[Outpost: …]` header, then Enter follows on
+its own; keys you press meanwhile wait until after it. One message goes in at a
+time. Its turn ending returns the agent's last transcript message as the reply;
+an interrupted or failed turn, or one that never starts within a minute, fails
+it with a notice. A session can hold messages instead (**Edit session**): they
+wait, the terminal shows how many, and **Deliver now** types the next one in once
+the agent is idle. The queue is kept in `~/.outpost/deliveries/<session>.json`
+and keyed by the server's delivery, so a resend after a reconnect or restart
+changes nothing; the server checks on typed messages through the node until
+they settle.
+
+Claude Code's channels could carry these natively, but a channel Outpost
+provides loads only with `--dangerously-load-development-channels`, which asks
+for confirmation at every start, and an unregistered channel drops messages
+without any error. Outpost types messages in for every tool instead.
+
 ### Signals
 
 Coding sessions run with `BROWSER=~/.outpost/bin/outpost-browser`, a wrapper for
@@ -862,11 +886,15 @@ binding lists no tools; a partial or invalid binding fails closed.
 
 `tools` in `machine/mcp.ts` is the one registry: each tool declares the drivers
 it serves and how it is answered, and `tools/list` and the server instructions
-derive from the tools the binding allows. `publish_file` is answered on the
-machine and serves both drivers. The history tools (both drivers) and
-`list_sessions` and `message_session` (chat only, docs/CHAT.md) are answered by
-the server, through the node bound to the session (see "Machine connection").
-Adding a tool is one registry entry. `outpost publish FILE` publishes from any
+derive from the tools the binding allows. Every session, in a terminal or in
+chat, gets the same tools. `publish_file` is answered on the machine. The others
+are answered by the server, through the node bound to the session (see "Machine
+connection"): the history tools; `list_machines` and `list_sessions`;
+`message_session`, whose reply arrives later as a new message; `post_to_channel`
+for channels the session belongs to; and `fetch_file`, which copies another
+session's file into this one and returns its local path. Messages and posts
+share a limit of 20 a minute per session, and a thread between sessions allows
+6 messages. Adding a tool is one registry entry. `outpost publish FILE` publishes from any
 shell in a managed session.
 
 Adapters only translate the descriptors into their tool's native form; they
@@ -1522,6 +1550,7 @@ current conversation.
 | Node endpoints and session bindings | `~/.outpost/run/node-<id>.sock`, `~/.outpost/bindings/<session>.json` |
 | Terminal services and chat hosts | `~/.outpost/terminals/<session>.sock`, `~/.outpost/chats/<session>.sock`, logs in `~/.outpost/logs/` |
 | Activity | `~/.outpost/activity/<session>.json` |
+| Messages waiting for a terminal | `~/.outpost/deliveries/<session>.json` |
 | Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Session files | `~/.outpost/files/<session>/<file-id>/` (`metadata.json`, `content/<name>`) |
 | Kimi Code plugin | `~/.outpost/integrations/kimi/` |

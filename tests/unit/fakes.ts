@@ -100,6 +100,7 @@ export class FakeSessions implements SessionService {
       createdAt: now,
       lastConnectedAt: null,
       storage: input.storage ?? { CLAUDE_CONFIG_DIR: '/home/dev/.claude' },
+      delivery: 'auto',
       config: { revision: 1, env: input.env ?? {}, args: input.args ?? '', instructions: input.instructions ?? null },
       conversations: [{ id: input.conversation ?? crypto.randomUUID(), title: '', startedAt: now, movedTo: null }],
       title: '',
@@ -128,6 +129,17 @@ export class FakeSessions implements SessionService {
   }
   async switch(context: TargetContext, id: string) {
     return this.find(context, id)
+  }
+  /** Messages typed into a terminal session, by key. */
+  delivered: { id: string; key: string; text: string }[] = []
+  async deliver(context: TargetContext, id: string, key: string, text: string) {
+    this.find(context, id)
+    this.delivered.push({ id, key, text })
+    return { key, state: 'waiting' as const, reply: null, error: null }
+  }
+  async deliveries(context: TargetContext, id: string, keys: string[]) {
+    this.find(context, id)
+    return keys.map(key => ({ key, state: 'waiting' as const, reply: null, error: null }))
   }
   async acknowledge(context: TargetContext, id: string) {
     return this.find(context, id)

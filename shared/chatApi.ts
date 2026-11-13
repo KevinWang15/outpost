@@ -20,6 +20,8 @@ export const chatLimits = {
   hops: 6,
   /** Deliveries started by one user message, across all hops. */
   chain: 12,
+  /** Messages and channel posts one session's agent may send a minute. */
+  sendsPerMinute: 20,
   /** Session-to-session messages within one thread. */
   threadHops: 6,
   page: 100,
@@ -82,6 +84,8 @@ export interface Delivery extends SessionRef {
   files: string[]
   /** The chat host instance the prompt was sent to; a resend is safe only to the same one. */
   host: string | null
+  /** How it reached the session: a chat prompt, or typed into its terminal. */
+  via: 'chat' | 'terminal' | null
   origin: ChatOrigin | null
   error: string | null
   createdAt: string

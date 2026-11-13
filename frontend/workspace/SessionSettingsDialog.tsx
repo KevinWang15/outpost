@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { Session, SessionUpdate } from '../../shared/model'
-import { harnessLabel } from '../../shared/harnesses'
+import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { Dialog } from '../ui/Dialog'
 import LaunchFields from './LaunchFields'
 import { readLaunch } from './launch'
@@ -35,10 +35,12 @@ export default function SessionSettingsDialog({
       const { args, env } = readLaunch(data)
       const name = String(data.get('name')).trim()
       const instructions = String(data.get('instructions')).trim() || null
+      const delivery = data.get('delivery') === 'on' ? 'auto' : 'manual'
       const { config } = session
       const update: SessionUpdate = {
         revision: config.revision,
         ...(name !== session.name ? { name } : {}),
+        ...(delivery !== session.delivery ? { delivery } : {}),
         ...(args !== config.args ? { args } : {}),
         ...(!sameEnv(env, config.env) ? { env } : {}),
         ...(instructions !== config.instructions ? { instructions } : {}),
@@ -103,6 +105,17 @@ export default function SessionSettingsDialog({
                 : 'Added to the coding tool’s own instructions in chat. Claude Code and Codex support this.'}
             </small>
           </label>
+          {supportsTerminal(session.tool) && (
+            <label className="check">
+              <input type="checkbox" name="delivery" defaultChecked={session.delivery === 'auto'} />
+              <span>
+                Type messages from other sessions into the terminal
+                <small className="hint">
+                  When the agent is idle and you are not typing. Otherwise they wait until you choose Deliver now.
+                </small>
+              </span>
+            </label>
+          )}
           <LaunchFields tool={session.tool} args={session.config.args} env={session.config.env} />
         </fieldset>
         {running && (

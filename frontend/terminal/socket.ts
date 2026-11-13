@@ -10,6 +10,8 @@ interface Handlers {
   hello(message: Extract<ServerMessage, { type: 'hello' }>): void
   signal(message: Extract<ServerMessage, { type: 'signal' }>): void
   activity(state: SessionActivity | null): void
+  /** Messages from other sessions waiting to be typed in. */
+  deliveries(waiting: number): void
 }
 
 /** The web client of the terminal protocol (shared/protocol.ts). Reconnects
@@ -28,6 +30,7 @@ export class TerminalSocket implements TerminalConnection {
   private online = typeof navigator === 'undefined' || navigator.onLine !== false
   private requestedSize: { cols: number; rows: number } | null = null
   private active = false
+  private drafting = false
   private heartbeat: ReturnType<typeof setTimeout> | undefined
   private probe: { id: string; deadline: number; timer: ReturnType<typeof setTimeout> } | null = null
   private cleanup: (() => void) | null = null
@@ -139,9 +142,12 @@ export class TerminalSocket implements TerminalConnection {
           const { cols, rows } = this.size()
           this.resize(cols, rows)
           this.send({ type: 'focus', active: this.active })
+          if (this.drafting) this.send({ type: 'draft', active: true })
         })
       } else if (message.type === 'activity') {
         this.handlers.activity(message.activity)
+      } else if (message.type === 'deliveries') {
+        this.handlers.deliveries(message.waiting)
       } else if (message.type === 'result') {
         if (message.id === this.probe?.id) {
           if (!message.ok) return this.unresponsive(socket)
@@ -358,6 +364,16 @@ export class TerminalSocket implements TerminalConnection {
     // still be in flight when the user resizes back to an earlier dimension.
     this.requestedSize = { cols, rows }
     this.send({ type: 'resize', cols, rows })
+  }
+
+  draft(active: boolean) {
+    if (this.drafting === active) return
+    this.drafting = active
+    if (this.connected) this.send({ type: 'draft', active })
+  }
+
+  deliverNow() {
+    if (this.connected) this.send({ type: 'deliver-now' })
   }
 
   setActive(active: boolean) {

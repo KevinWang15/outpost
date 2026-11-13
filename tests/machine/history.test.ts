@@ -214,10 +214,22 @@ test("Outpost's MCP server offers each driver its tools, and fails closed on a p
       encoding: 'utf8',
       env: { ...clean, HOME: home, ...env },
     })
-  const common = ['publish_file', 'search_history', 'read_context', 'read_message', 'get_session', 'refresh_index']
+  const every = [
+    'publish_file',
+    'search_history',
+    'read_context',
+    'read_message',
+    'get_session',
+    'refresh_index',
+    'list_machines',
+    'list_sessions',
+    'message_session',
+    'post_to_channel',
+    'fetch_file',
+  ]
   for (const [driver, expected] of [
-    ['terminal', common],
-    ['chat', [...common, 'list_sessions', 'message_session']],
+    ['terminal', every],
+    ['chat', every],
     [null, []],
   ] as const) {
     const result = run(

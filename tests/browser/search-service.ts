@@ -36,6 +36,7 @@ export async function searchService() {
           createdAt: now,
           lastConnectedAt: null,
           storage: { CLAUDE_CONFIG_DIR: join(directory, '.claude') },
+          delivery: 'auto',
           config: { revision: 1, env: {}, args: '', instructions: null },
           conversations: [{ id: conversation, startedAt: now, movedTo: null }],
         },

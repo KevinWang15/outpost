@@ -299,6 +299,32 @@ export class TerminalActivity {
     this.publish()
   }
 
+  /** The agent's newest message in the current conversation, from its transcript. */
+  lastReply(limit = 16_000) {
+    // The turn may have ended before the transcript was next read (a new one appears with its first prompt).
+    try {
+      this.read()
+    } catch {
+      /* Read what was found before. */
+    }
+    const path = this.followed?.path
+    if (!path) return null
+    let size: number
+    try {
+      size = lstatSync(path).size
+    } catch {
+      return null
+    }
+    let records = 0
+    for (const { record } of reverseRecords(path, completeEnd(path, size))) {
+      if (++records > 2000) break
+      for (const message of this.harness.historyMessages(record, ''))
+        if (message.role === 'assistant' && message.kind === 'message' && message.text.trim())
+          return message.text.slice(0, limit)
+    }
+    return null
+  }
+
   /** The user typed into the terminal: a shown reply is now seen. */
   input() {
     if (this.value.state === 'finished' && this.value.completionId) this.acknowledge(this.value.completionId)

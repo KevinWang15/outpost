@@ -40,6 +40,7 @@ export function record(
     createdAt: '2026-10-01T00:00:00.000Z',
     lastConnectedAt: null,
     storage: adapter.storage(join(home, tool)),
+    delivery: 'auto',
     config: { revision: 1, env: {}, args: '', instructions: null },
     conversations: [{ id: conversation, startedAt: '2026-10-01T00:00:00.000Z', movedTo: null }],
     ...overrides,

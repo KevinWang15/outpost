@@ -8,7 +8,7 @@ import type { Checkpoint } from './terminalState'
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 13
+export const protocolVersion = 14
 export const maxInputMessage = 64 * 1024
 // Interactive input only; binary image uploads use a separate HTTP request.
 export const maxInputQueue = 2 * 1024 * 1024
@@ -34,6 +34,10 @@ export type ClientMessage =
   | { type: 'send'; id: string; data: string }
   | { type: 'paste'; id: string; data: string }
   | { type: 'clear'; id: string }
+  /** The message box has text: messages from other sessions wait until it is sent or cleared. */
+  | { type: 'draft'; active: boolean }
+  /** Type the next waiting message in once the agent is idle. */
+  | { type: 'deliver-now' }
 
 // Only `error` is transient. Other reasons require an explicit user action.
 export type CloseReason = 'ended' | 'expired' | 'outdated' | 'unavailable' | 'error'
@@ -53,6 +57,8 @@ export type ServerMessage =
   | { type: 'geometry'; cols: number; rows: number }
   | { type: 'clear' }
   | { type: 'activity'; activity: SessionActivity }
+  /** Messages from other sessions, channels or schedules waiting to be typed in. */
+  | { type: 'deliveries'; waiting: number }
   | { type: 'result'; id: string; ok: boolean; message?: string }
   | { type: 'signal'; signal: SignalMessage }
   | { type: 'closed'; reason: CloseReason; message: string }

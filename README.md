@@ -360,9 +360,9 @@ remains searchable, with its availability reported in the response.
 
 Indexing starts automatically, continues in the background and resumes after
 server restarts. Large archives take time to ingest and embed; responses report
-partial coverage and offline/unreadable sources. Terminal and chat MCP calls use
-a persistent account-scoped SSH control connection, so closing the browser does
-not disable history search. Source transcripts are read-only. Conversation text
+partial coverage and offline/unreadable sources. Terminal and chat MCP calls
+travel on Outpost's connection to their machine, so closing the browser does not
+disable history search. Source transcripts are read-only. Conversation text
 and embeddings stay on the Outpost server; the first semantic index downloads
 model weights and does not send conversation text to an external service.
 
@@ -372,10 +372,18 @@ index in state backups. Search returns up to 20 results from bounded candidates;
 context and message readers have explicit page and character budgets. Text
 above 1 Mi characters in a message is retrieved from the source machine on
 demand, rather than all being kept in the index. Native JSONL records above
-8 MiB are skipped with a warning. Search/context refer to physical transcript
-files; native fork or revert files remain individually inspectable through
-`get_session`. Historical messages are data, not instructions for the current
-agent.
+8 MiB are skipped with a warning. Historical messages are data, not
+instructions for the current agent.
+
+History knows how conversations relate. When a coding tool forks or continues a
+conversation, it copies earlier messages into the new one; search reports each
+message once, in the conversation where it began, and lists the others that
+contain it (`alsoIn`). `read_context` shows where a conversation branched and
+where it came from, and `get_session` returns a conversation's lineage and the
+Outpost session it belongs to. Messages before a compaction are marked, because
+the agent now has only a summary of them; the summaries themselves are not
+searched while the messages they replaced are. Results group by Outpost session
+across all of its conversations.
 
 DeepSeek history reads `$DSH_HOME/sessions` on each target, including root and
 subagent logs in formats v0–v4, raw JSONL and concatenated Zstandard frames.

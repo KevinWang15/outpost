@@ -1468,6 +1468,23 @@ common rewrite/truncation cases; incomplete final records wait for a later
 append. Native configuration records are not indexed as conversation messages.
 Original transcripts remain read-only.
 
+**Lineage.** Every message has a logical identity: the tool's own ID where its
+store has one (Claude Code's `uuid`, Codex's item `id`), otherwise a hash of the
+message chained to the previous one's identity, carried across reads in the
+checkpoint. A fork or continuation copies messages with their IDs, so the index
+links a conversation to the one it continues: the one the tool names
+(`forked_from_id` in Codex), or else the conversation where its first message
+appears but not at the start (where that message first appeared), then the
+oldest. The fork point is the last of its leading messages the parent also
+has. Messages up to it are copies: search reports each logical message once,
+where it began, with the copies as `alsoIn`; `read_context` lists branches at a
+fork point and the origin of a branch. Summaries (Claude Code's compact summary,
+Codex's `compacted` items) mark compactions: earlier messages are flagged as
+before a compaction, and a summary is searched only when its conversation has
+nothing before it. The fixtures in `tests/fixtures/history/` follow the tools'
+own record shapes; an unrecognized record has no messages rather than failing
+the read.
+
 The server deduplicates documents and overlapping chunks, uses FTS5 trigram
 lookup for literal/keyword candidates and sqlite-vec cosine distance for semantic
 candidates, then combines ranks for mixed search. Results retain physical
@@ -1475,7 +1492,7 @@ machine/tool/session attribution. Short transactions yield during backfill, and
 file checkpoints advance only after their complete batches are durable.
 Account-signed cursors page through bounded context and message reads. Large
 message tails can be read online after verifying their full content hash.
-Native fork/revert files remain physical sources, not fabricated merged history.
+Each source stays a physical file; lineage links them, never merges them.
 
 The pinned quantized multilingual model runs on CPU, with two inference threads;
 its cache is below the server's data directory. Server installations should

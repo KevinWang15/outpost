@@ -304,6 +304,7 @@ test('history: hosted owners have separate indexes and cursors; offline machines
             messages: [
               {
                 position: 0,
+                identity: `${context.target.name}:0`,
                 role: 'user',
                 kind: 'message',
                 text: `private deployment plan for ${context.target.name}`,

@@ -29,6 +29,8 @@ export interface NativeConversation {
   storage: Record<string, string>
   /** Store format version, for adapters with several. */
   format: string
+  /** The conversation this one was forked from, where the tool records it. */
+  forkedFrom?: string | null
 }
 
 export interface HistoryMessage {
@@ -36,7 +38,10 @@ export interface HistoryMessage {
   text: string
   timestamp: string | null
   turnId: string | null
+  /** A summary replaces the messages before it (a compaction). */
   kind: 'message' | 'tool_result' | 'summary'
+  /** The tool's own ID for the message, which copies into forks keep. */
+  identity: string | null
 }
 
 /** A neutral stdio MCP server; `env` is the launch's binding. */
@@ -187,8 +192,16 @@ export function historyMessage(
   timestamp: string | null,
   turnId: unknown,
   kind: HistoryMessage['kind'] = 'message',
+  identity: unknown = null,
 ): HistoryMessage {
-  return { role, text, timestamp, turnId: typeof turnId === 'string' ? turnId : null, kind }
+  return {
+    role,
+    text,
+    timestamp,
+    turnId: typeof turnId === 'string' ? turnId : null,
+    kind,
+    identity: typeof identity === 'string' && identity && identity.length <= 200 ? identity : null,
+  }
 }
 
 /** A hook or record's turn identity, bounded. */

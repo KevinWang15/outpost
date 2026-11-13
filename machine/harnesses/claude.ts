@@ -54,11 +54,12 @@ export class Claude extends Harness {
     return foldLines(
       `claude-summary:${path}`,
       path,
-      () => ({ root: '', title: '', custom: '', created: null as string | null }),
+      () => ({ root: '', title: '', ai: '', custom: '', created: null as string | null }),
       (value, record) => {
         if (!value.root && typeof record.cwd === 'string') value.root = record.cwd
         value.created ??= timestamp(record.timestamp)
         if (record.type === 'custom-title') value.custom = clean(record.customTitle, 200)
+        else if (record.type === 'ai-title') value.ai = clean(record.aiTitle, 200)
         else if (!value.title && record.type === 'user' && isRecord(record.message))
           value.title = promptTitle([...strings(record.message.content)].join(' '))
         return value
@@ -78,7 +79,7 @@ export class Claude extends Harness {
     return {
       id,
       root: summary.root,
-      title: summary.custom || summary.title || id,
+      title: summary.custom || summary.ai || summary.title || id,
       created: summary.created,
       updated,
       // Subagent transcripts belong to this conversation.
@@ -120,7 +121,7 @@ export class Claude extends Harness {
     const path = this.transcript(session, conversation)
     if (!path) return null
     const summary = this.summary(path)
-    return summary.custom || summary.title || null
+    return summary.custom || summary.ai || summary.title || null
   }
 
   activity(record: Record<string, unknown>): NativeActivity | null {
@@ -201,6 +202,9 @@ export class Claude extends Harness {
         [...strings(record.message.content)].join('\n'),
         timestamp(record.timestamp),
         record.turnId,
+        // After a compact boundary, Claude Code's summary stands in for what came before.
+        record.isCompactSummary === true ? 'summary' : 'message',
+        record.uuid,
       )
   }
 

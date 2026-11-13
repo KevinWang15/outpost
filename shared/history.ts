@@ -17,6 +17,8 @@ export interface HistorySource {
   size: number
   modified: string
   format?: string
+  /** The native conversation this one was forked from, where the tool records it. */
+  forkedFrom?: string | null
   nativeTitle?: string
   managedSessionId?: string
 }
@@ -31,10 +33,16 @@ export interface HistoryCheckpoint {
   prefixSize: number
   tail: string
   tailSize: number
+  /** The identity of the last message read, which the next one's may derive from. */
+  identity?: string | null
 }
 export interface HistoryMessage {
   position: number
+  /** Logical identity: the tool's message ID where it has one, otherwise derived
+   * from the message and the one before it. Copies of a message in forks share it. */
+  identity: string
   role: 'user' | 'assistant' | 'tool'
+  /** `summary` replaces the messages before it (a compaction). */
   kind: string
   text: string
   timestamp: string | null

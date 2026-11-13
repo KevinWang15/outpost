@@ -30,7 +30,16 @@ function source(id: string, tool: HistorySource['tool'] = 'codex'): HistorySourc
     modified: '1000',
   }
 }
-function batch(s: HistorySource, texts: string[], generation = 'first', start = 0, reset = true): HistoryBatch {
+/** Messages are unique to their conversation unless `identities` says otherwise. */
+function batch(
+  s: HistorySource,
+  texts: string[],
+  generation = 'first',
+  start = 0,
+  reset = true,
+  identities: (string | null)[] = [],
+  kinds: string[] = [],
+): HistoryBatch {
   return {
     files: [
       {
@@ -49,8 +58,9 @@ function batch(s: HistorySource, texts: string[], generation = 'first', start = 
         pending: false,
         messages: texts.map((text, i) => ({
           position: start + i * 100,
+          identity: identities[i] ?? `${s.id}:${generation}:${start + i * 100}`,
           role: i % 2 ? 'assistant' : 'user',
-          kind: 'message',
+          kind: kinds[i] ?? 'message',
           text,
           timestamp: `2026-11-${String(1 + i).padStart(2, '0')}T12:00:00.000Z`,
           turnId: null,
@@ -243,4 +253,127 @@ test('history: initial semantic indexing reaches another machine before a long t
     reached.map(row => row.machine_id),
     ids,
   )
+})
+
+test('history: a fork or continuation shares messages with its origin; each is reported once, where it began', async t => {
+  const index = setup(t)
+  const original = { ...source('original', 'claude'), managedSessionId: 'outpost-a' }
+  // The continuation copied the original's last two messages, then went on.
+  index.ingest(
+    machines[0],
+    batch(original, ['Plan the migration', 'Use a staging table', 'Swap tables at night', 'Done'], 'g', 0, true, [
+      'u1',
+      'u2',
+      'u3',
+      'u4',
+    ]),
+  )
+  index.ingest(
+    machines[0],
+    batch(source('continued', 'claude'), ['Swap tables at night', 'Done', 'Now verify the indexes'], 'g', 0, true, [
+      'u3',
+      'u4',
+      'u5',
+    ]),
+  )
+  const result = await index.search({ query: 'swap tables', mode: 'keyword', groupBy: 'message' }, ids)
+  assert.equal(result.results.length, 1, 'one logical message')
+  assert.equal(result.results[0].nativeSessionId, 'native-original')
+  assert.equal(result.results[0].outpostSessionId, 'outpost-a')
+  assert.deepEqual(
+    result.results[0].alsoIn?.map(item => item.nativeSessionId),
+    ['native-continued'],
+  )
+  // The continuation's own message is attributed to it.
+  const own = await index.search({ query: 'verify the indexes', mode: 'keyword' }, ids)
+  assert.equal(own.results[0].nativeSessionId, 'native-continued')
+  // Reading the original shows where the continuation went; reading that, where it came from.
+  const around = index.context({ cursor: result.results[0].cursor, limit: 7 }, ids)
+  const fork = around.messages.find(message => message.text.startsWith('Done'))!
+  assert.deepEqual(
+    fork.branches?.map(branch => branch.nativeSessionId),
+    ['native-continued'],
+  )
+  const branch = index.context({ cursor: fork.branches![0].cursor! }, ids)
+  assert.equal(branch.forkedFrom?.nativeSessionId, 'native-original')
+  assert.match(index.context({ cursor: branch.forkedFrom!.cursor! }, ids).messages.at(-1)!.text, /Done/)
+  const lineage = index.session(String(own.results[0].sessionId), ids).lineage
+  assert.equal(lineage.forkedFrom?.nativeSessionId, 'native-original')
+  assert.deepEqual(
+    index.session(String(result.results[0].sessionId), ids).lineage.branches.map(item => item.nativeSessionId),
+    ['native-continued'],
+  )
+})
+
+test('history: a fork the tool records links even when ingested before its origin', async t => {
+  const index = setup(t)
+  const fork = { ...source('fork'), forkedFrom: 'native-root' }
+  index.ingest(machines[0], batch(fork, ['Shared start', 'Fork only'], 'g', 0, true, ['c1', 'c3']))
+  index.ingest(machines[0], batch(source('root'), ['Shared start', 'Root only'], 'g', 0, true, ['c1', 'c2']))
+  assert.equal(
+    index.session(String((await index.search({ query: 'fork only', mode: 'keyword' }, ids)).results[0].sessionId), ids)
+      .lineage.forkedFrom?.nativeSessionId,
+    'native-root',
+  )
+  const shared = await index.search({ query: 'shared start', mode: 'keyword', groupBy: 'message' }, ids)
+  assert.equal(shared.results.length, 1)
+  assert.equal(shared.results[0].nativeSessionId, 'native-root')
+})
+
+test('history: compactions mark what the agent now has only as a summary; summaries repeat nothing', async t => {
+  const index = setup(t)
+  index.ingest(
+    machines[0],
+    batch(
+      source('long', 'claude'),
+      ['Design the cache layer', 'Summary: the cache layer was designed', 'Continue with eviction'],
+      'g',
+      0,
+      true,
+      [],
+      ['message', 'summary', 'message'],
+    ),
+  )
+  const before = await index.search({ query: 'cache layer', mode: 'keyword', groupBy: 'message' }, ids)
+  assert.equal(before.results.length, 1, 'the summary is not searched while its originals are indexed')
+  assert.match(before.results[0].beforeCompaction ?? '', /only a summary/)
+  const after = await index.search({ query: 'eviction', mode: 'keyword' }, ids)
+  assert.equal(after.results[0].beforeCompaction, undefined)
+  const context = index.context({ cursor: after.results[0].cursor, direction: 'before' }, ids)
+  assert.ok(context.messages.some(message => message.kind === 'summary' && message.compaction))
+  // A conversation that starts from a summary (its originals are gone) is searched through it.
+  index.ingest(
+    machines[0],
+    batch(
+      source('resumed', 'claude'),
+      ['Summary: billing exports were rebuilt', 'Next step'],
+      'g',
+      0,
+      true,
+      [],
+      ['summary', 'message'],
+    ),
+  )
+  assert.equal((await index.search({ query: 'billing exports', mode: 'keyword' }, ids)).results.length, 1)
+})
+
+test('history: results group by Outpost session across its timeline, and sessionId accepts the Outpost session', async t => {
+  const index = setup(t)
+  index.ingest(machines[0], batch({ ...source('first'), managedSessionId: 'outpost-s' }, ['Rotate the keys']))
+  index.ingest(machines[0], batch({ ...source('second'), managedSessionId: 'outpost-s' }, ['Rotate the keys again']))
+  index.ingest(machines[0], batch(source('other'), ['Rotate the keys elsewhere']))
+  const grouped = await index.search({ query: 'rotate the keys', mode: 'keyword' }, ids)
+  assert.equal(grouped.results.length, 2)
+  const outpost = grouped.results.find(item => item.outpostSessionId === 'outpost-s')!
+  assert.equal(outpost.matchingMessages, 2)
+  assert.equal(
+    (await index.search({ query: 'rotate', mode: 'keyword', sessionId: 'outpost-s', groupBy: 'message' }, ids)).results
+      .length,
+    2,
+  )
+  const session = index.session(String(outpost.sessionId), ids)
+  assert.deepEqual(session.outpostSession?.conversations.map(item => item.nativeSessionId).sort(), [
+    'native-first',
+    'native-second',
+  ])
 })

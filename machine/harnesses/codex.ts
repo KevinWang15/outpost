@@ -100,6 +100,7 @@ export class Codex extends Harness {
       history: [path],
       storage: this.storage(home),
       format: '',
+      forkedFrom: this.validId(meta.forked_from_id) ? meta.forked_from_id : null,
     }
   }
 
@@ -190,11 +191,25 @@ export class Codex extends Harness {
     const at = timestamp(record.timestamp)
     if (record.type === 'response_item' && isRecord(payload)) {
       if (payload.type === 'message' && (payload.role === 'user' || payload.role === 'assistant'))
-        yield historyMessage(payload.role, [...strings(payload.content)].join('\n'), at, payload.turn_id)
+        yield historyMessage(
+          payload.role,
+          [...strings(payload.content)].join('\n'),
+          at,
+          payload.turn_id,
+          'message',
+          payload.id,
+        )
       else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output')
-        yield historyMessage('tool', [...strings(payload.output)].join('\n'), at, payload.call_id, 'tool_result')
-    } else if (record.type === 'compacted')
-      yield historyMessage('assistant', [...strings(record.message)].join('\n'), at, null, 'summary')
+        yield historyMessage(
+          'tool',
+          [...strings(payload.output)].join('\n'),
+          at,
+          payload.call_id,
+          'tool_result',
+          payload.id,
+        )
+    } else if (record.type === 'compacted' && isRecord(payload))
+      yield historyMessage('assistant', [...strings(payload.message)].join('\n'), at, null, 'summary')
   }
 
   /** Codex resumes by ID but has no new-ID flag, and defers writing an empty

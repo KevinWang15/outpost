@@ -76,6 +76,7 @@ function describe(
     path,
     title: clean(conversation.title, 200),
     cwd: conversation.root,
+    forkedFrom: conversation.forkedFrom ?? null,
     size: info.size,
     modified: statSync(path, { bigint: true }).mtimeNs.toString(),
     format: conversation.format,
@@ -184,18 +185,36 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
         if (reset) offset = 0
         const generation = reset || !previous ? randomUUID().replace(/-/g, '') : previous.generation
         const messages: HistoryBatch['files'][number]['messages'] = []
+        // Without the tool's own ID, a message's identity follows from it and the one before.
+        let last = reset ? null : (previous?.identity ?? null)
+        const identity = (message: { identity: string | null; role: string; kind: string; text: string }) =>
+          (last = message.identity
+            ? `${adapter.id}:${message.identity}`
+            : digest(`${source.nativeId}\0${last ?? ''}\0${message.role}\0${message.kind}\0${message.text}`).slice(
+                0,
+                40,
+              ))
         let position = offset
+        // A window of the file from `position`, read in blocks as lines need it.
+        let window = Buffer.alloc(0)
+        let windowStart = position
         // Complete lines only; a trailing record still being written waits for its append.
         while (position < reader.size && total < 8 * 1024 * 1024 && performance.now() < deadline) {
-          const chunk = reader.read(position, Math.min(maxLine + 1, reader.size - position))
-          const newline = chunk.indexOf(10)
+          let newline = window.indexOf(10, position - windowStart)
+          while (newline < 0 && window.length - (position - windowStart) <= maxLine) {
+            const more = reader.read(windowStart + window.length, 1024 * 1024)
+            if (!more.length) break
+            window = Buffer.concat([window.subarray(position - windowStart), more])
+            windowStart = position
+            newline = window.indexOf(10)
+          }
           if (newline < 0) {
-            if (chunk.length <= maxLine) break
+            if (window.length - (position - windowStart) <= maxLine) break // Still being written.
             warnings.push('An oversized native history record was skipped.')
             // Skip to the end of the oversized record.
-            let skip = position + chunk.length
+            let skip = windowStart + window.length
             for (;;) {
-              const more = reader.read(skip, 65536)
+              const more = reader.read(skip, 1024 * 1024)
               if (!more.length) break
               const at = more.indexOf(10)
               if (at >= 0) {
@@ -206,13 +225,15 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
             }
             position = skip
             offset = position
+            window = Buffer.alloc(0)
+            windowStart = position
             continue
           }
-          const line = chunk.subarray(0, newline)
+          const line = window.subarray(position - windowStart, newline)
           const start = position
-          position += newline + 1
+          total += newline - (position - windowStart) + 1
+          position = windowStart + newline + 1
           offset = position
-          total += newline + 1
           const record = decode(line)
           if (!record) continue
           try {
@@ -224,6 +245,7 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
                 )
               messages.push({
                 ...message,
+                identity: identity(message),
                 position: start,
                 text: message.text.slice(0, maxText),
                 truncated: message.text.length > maxText,
@@ -244,6 +266,7 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
             modified: reader.modified,
             generation,
             ...fingerprint(reader.read, offset),
+            identity: last,
           },
           reset,
           messages,

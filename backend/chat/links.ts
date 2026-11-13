@@ -17,7 +17,7 @@ export interface ChatTransportEvents {
   /** Bytes arrived; a large frame can take a while on a slow link. */
   progress(): void
   message(message: ChatHostMessage): void
-  /** `status` is the runtime's failure status before the stream started, if any. */
+  /** `status` is the node's failure status before the stream started, if any. */
   closed(message: string, status: number | null): void
 }
 export type ChatConnector = (

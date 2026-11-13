@@ -41,7 +41,7 @@ export function activityLabel(activity: SessionActivity) {
   return activity.observation === 'stale' ? `${label} (last known)` : label
 }
 
-/** Bound and copy data at the relay and native IPC boundaries. */
+/** Bound and copy data at the connection and native IPC boundaries. */
 export function parseSessionActivity(value: unknown): SessionActivity | null {
   if (!value || typeof value !== 'object') return null
   const item = value as SessionActivity

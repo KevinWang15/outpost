@@ -126,7 +126,7 @@ export class MachineConnection {
     if (this.closed) return Promise.reject(new MachineError('Outpost is restarting. Try again shortly.', 503))
     if (this.child && this.started) return Promise.resolve()
     this.starting ??= new Promise<void>((resolve, reject) => {
-      const command = this.transport.runtime(`exec "$HOME/.outpost/bin/outpost-terminal" node --socket ${this.socket}`)
+      const command = this.transport.login(`exec "$HOME/.outpost/bin/outpost-terminal" node --socket ${this.socket}`)
       const timer = setTimeout(
         () => this.lost('The machine did not answer in time. Check that it is reachable.'),
         30_000,

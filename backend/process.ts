@@ -50,7 +50,7 @@ function runCommandOnce(command: Command, input: string | Uint8Array, options: C
     const timeoutMs = options.timeoutMs ?? 30_000
     if (timeoutMs <= 0) return reject(timedOut())
     // Give short-lived workers their own process group. Terminal services are
-    // started independently by the runtime and never belong to these groups.
+    // started by the node and never belong to these groups.
     const child = spawn(command.executable, command.args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,

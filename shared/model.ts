@@ -19,7 +19,6 @@ export interface Environment {
 }
 
 export type SessionUpdate = Static<typeof schemas.sessionUpdate>
-export type SessionConfig = Static<typeof schemas.sessionConfig>
 export type SessionRecord = Static<typeof schemas.sessionRecord>
 export type SessionStatus = 'ready' | 'attached' | 'detached' | 'stopped'
 /** A conversation in a session's timeline, with the coding tool's own title for it. */

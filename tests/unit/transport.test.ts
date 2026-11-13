@@ -68,13 +68,13 @@ test('connection sharing never crosses owners or identities', () =>
   }))
 
 for (const platform of ['win32', 'linux', 'darwin'] as const) {
-  test(`${platform} backend applies the same sharing policy to management and runtime`, () =>
+  test(`${platform} backend applies the same sharing policy to management and login commands`, () =>
     onPlatform(platform, () => {
       const transport = transportFor(target, null, { scope: 'local', multiplex: '/data/ssh' })
       const commands = [
         transport.management('interactive'),
         transport.management('noninteractive'),
-        transport.runtime('command'),
+        transport.login('command'),
       ]
       for (const command of commands) {
         if (platform === 'win32') {
@@ -95,7 +95,7 @@ test('fresh-connection recovery preserves destination, identity, host checking a
   onPlatform('linux', () => {
     for (const identity of [null, { identityFile: '/account/key', knownHostsFile: '/account/known hosts' }]) {
       const transport = transportFor(target, identity, { scope: 'alice', multiplex: '/data/ssh' })
-      for (const command of [transport.runtime('original command'), transport.management('interactive')]) {
+      for (const command of [transport.login('original command'), transport.management('interactive')]) {
         const retry = command.retry!
         assert.equal(option(retry.args, 'ControlMaster'), 'ControlMaster=no')
         assert.equal(option(retry.args, 'ControlPath'), 'ControlPath=none')
@@ -108,14 +108,14 @@ test('fresh-connection recovery preserves destination, identity, host checking a
           )
         assert.deepEqual(withoutSharing(command.args), withoutSharing(retry.args))
       }
-      assert.equal(transportFor(target, identity, { scope: 'alice' }).runtime('command').retry, undefined)
+      assert.equal(transportFor(target, identity, { scope: 'alice' }).login('command').retry, undefined)
     }
   }))
 
 test('only unambiguous control-connection failures qualify for recovery', () => {
   const retry = onPlatform(
     'linux',
-    () => transportFor(target, null, { scope: 'local', multiplex: '/data/ssh' }).runtime('command').retry!,
+    () => transportFor(target, null, { scope: 'local', multiplex: '/data/ssh' }).login('command').retry!,
   )
   const mux = 'mux_client_request_session: read from master failed: Connection reset by peer'
   const accepts = (stderr: string, stdout = '', code: number | null = 255) => retry.when({ code, stdout, stderr })

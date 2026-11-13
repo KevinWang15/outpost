@@ -10,8 +10,6 @@ export default defineConfig([
     'dist',
     'test-results',
     'playwright-report',
-    'promo-v2/node_modules',
-    'promo-v2/output',
     'desktop/node_modules',
     'desktop/dist',
     'desktop/release',
@@ -38,12 +36,11 @@ export default defineConfig([
       'desktop/scripts/**/*.mjs',
       'tests/**/*.{js,ts}',
       'scripts/**/*.mjs',
-      'promo-v2/scripts/**/*.mjs',
     ],
     languageOptions: { globals: { ...globals.node, Bun: 'readonly' } },
   },
   {
-    files: ['promo-v2/src/**/*.js', 'desktop/src/workspace-ui.ts', 'desktop/src/preload.ts'],
+    files: ['desktop/src/workspace-ui.ts', 'desktop/src/preload.ts'],
     languageOptions: { globals: globals.browser },
   },
   {

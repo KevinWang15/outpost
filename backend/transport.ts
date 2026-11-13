@@ -14,11 +14,11 @@ export interface SshIdentity {
 }
 
 /** How commands reach a target. Software management reads a POSIX script on
- * stdin; runtime operations use a short command with their payload on stdin. */
+ * stdin; `login` runs a command in the target's login shell (Outpost's node). */
 export interface Transport {
   readonly label: string
   management(mode: LoginMode): Command
-  runtime(operation: string): Command
+  login(command: string): Command
 }
 
 export interface TransportOptions {
@@ -145,9 +145,9 @@ class SshTransport implements Transport {
   management(mode: LoginMode): Command {
     return this.command(`sh -c ${quote(loginScriptShell(mode))}`)
   }
-  runtime(operation: string): Command {
+  login(command: string): Command {
     const shell = this.target.environment ? quote(this.target.environment.shell) : 'bash'
-    return this.command(`${shell} -lic ${quote(operation)}`)
+    return this.command(`${shell} -lic ${quote(command)}`)
   }
 }
 
@@ -161,8 +161,8 @@ class LocalTransport implements Transport {
   management(mode: LoginMode): Command {
     return { executable: 'sh', args: ['-c', loginScriptShell(mode)], label: this.label }
   }
-  runtime(operation: string): Command {
-    return { executable: this.target.environment?.shell ?? 'bash', args: ['-lic', operation], label: this.label }
+  login(command: string): Command {
+    return { executable: this.target.environment?.shell ?? 'bash', args: ['-lic', command], label: this.label }
   }
 }
 

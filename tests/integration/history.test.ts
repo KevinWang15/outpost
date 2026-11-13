@@ -110,7 +110,7 @@ test(
         ],
         label: 'Fixture machine ' + id,
       })
-      const transport = { label: 'Fixture', runtime: command, management: () => command('exec sh -s') }
+      const transport = { label: 'Fixture', login: command, management: () => command('exec sh -s') }
       return {
         owner,
         target: await deployment.workspace().get(id),

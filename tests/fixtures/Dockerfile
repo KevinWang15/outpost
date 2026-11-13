@@ -1,5 +1,6 @@
-# A disposable SSH target with Python 3.10. Sessions run as the unprivileged
-# user `dev`; the fixture installs the built service in its home.
+# A disposable SSH target. Sessions run as the unprivileged user `dev`; the
+# test installs the built Outpost Terminal in its home. Python runs the
+# fixture coding tools.
 FROM ubuntu:22.04
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server python3 git ca-certificates \
     && rm -rf /var/lib/apt/lists/* && mkdir -p /run/sshd \

@@ -1,7 +1,7 @@
 import type { CloseReason } from '../../shared/protocol'
 import { AppError } from '../errors'
 
-/** Preserve setup failures across both API lookup and runtime startup. A retry
+/** Preserve setup failures across both API lookups and opening the terminal. A retry
  * can recover a transport failure, but cannot repair a missing dependency. */
 export function terminalFailure(error: unknown): { reason: CloseReason; message: string } {
   let reason: CloseReason = 'error'

@@ -508,7 +508,7 @@ interactive login environment to discover the same tools as session launches.
 Installation loads login profiles noninteractively, then runs the submitted
 script with `sh -s`. Batch installers have no controlling terminal and must not
 initialize interactive shell job control. Their stdout and stderr are streamed
-unchanged; the terminal helper installer reports its download and verification
+unchanged; the Outpost Terminal installer reports its download and verification
 stages explicitly.
 
 SSH connection sharing is a backend transport policy. Linux and macOS backends
@@ -925,8 +925,8 @@ formats and lifecycle setup live in each adapter in `machine/harnesses/`;
 shared code contains no harness dispatch. Existing agent processes need one
 explicit restart to acquire the integration.
 
-The auth boundary is unchanged: the helper trusts the remote OS account; file
-HTTP requests require an active resume grant scoped to owner, target and session.
+The MCP server trusts the machine's user account, like the rest of Outpost
+Terminal; file HTTP requests require an active resume grant scoped to owner, target and session.
 `SessionFileClient` reaches the machine over its connection: file bytes travel
 on their own streams, with cancellation and size checks, and are never
 base64-encoded into the model context or mixed with PTY output.
@@ -1145,7 +1145,7 @@ app close always ask for confirmation when tabs remain, and reload asks before
 restarting a running local shell. Single-tab confirmation names the tab and
 explains whether its shell ends or its remote session keeps running, including
 any unsent message in the same prompt. Cancel is the default action.
-Remote session lifetimes are unchanged.
+Closing a remote tab never ends its session.
 
 `scripts/build-desktop.mjs` bundles `frontend/terminal/local-entry.tsx` and the
 shared `TerminalView` into the app. Local terminals work offline, without a server

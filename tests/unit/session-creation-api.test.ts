@@ -20,8 +20,8 @@ for (const mode of ['local', 'hosted'] as const) {
     const sessions = new FakeSessions()
     const keys: (string | undefined)[] = []
     const create = sessions.create.bind(sessions)
-    // HTTP contract and capability boundary; durable replay/concurrency runs
-    // against real target processes in test_runtime.py.
+    // HTTP contract and capability boundary; durable replay and concurrency
+    // are tested on the machine in tests/machine/sessions.test.ts.
     sessions.create = async (context, input, key?: string) => {
       keys.push(key)
       return create(context, input)

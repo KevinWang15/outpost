@@ -103,7 +103,7 @@ async function fixture(
       createdAt: '',
     },
     workspace: new Workspace(directory),
-    transport: { label: command.label, runtime: () => command, management: () => command },
+    transport: { label: command.label, login: () => command, management: () => command },
   } as unknown as TargetContext
   return { command, records, waitFor, context }
 }

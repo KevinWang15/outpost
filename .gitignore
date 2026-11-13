@@ -31,13 +31,10 @@ dist-ssr
 
 /test-results/
 /playwright-report/
-__pycache__/
 
-# Local manager state and generated media
+# Local manager state
 /.outpost/
 /state/
-/promo-v2/assets/narration/*.mp3
-/promo-v2/assets/music/score.mp3
 
 # Pinned third-party agent adapters, fetched by scripts/vendor-agents.mjs
 /machine/vendor/*

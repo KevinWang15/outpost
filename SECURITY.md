@@ -41,8 +41,7 @@ travels inside the WebSocket; both are checked against the live login, so
 signing out closes open terminals within seconds and invalidates their tokens.
 Input rate, message size, unacknowledged output and terminals per account are
 bounded. Closing a terminal never stops its target-side PTY service. The service listens
-only on an owner-only Unix socket; management authenticates its PID and UID
-with Linux SO_PEERCRED. Checkpoints transfer terminal state without replaying
+only on an owner-only Unix socket. Checkpoints transfer terminal state without replaying
 clipboard writes, bells or browser requests. Target binaries are installed
 from a fixed release after checksum and version validation.
 
@@ -75,9 +74,11 @@ port. Sessions' terminal services and chat hosts keep running between
 connections. All their sockets and files are owner-only under `~/.outpost`, so
 the target's user account is the trust boundary. An agent's Outpost tools act
 only as its own session. Installation scripts run only as reviewed and
-submitted. Conversation search returns bounded
-metadata and excerpts; history files are never copied to the server. Pasted
-images are kept under `~/.outpost/clipboard/` (newest 20 per session).
+submitted. Find conversation returns bounded metadata and excerpts. The
+cross-machine history index keeps message text and embeddings on the Outpost
+server, in each account's own index; native history files are only read, never
+changed. Pasted images are kept under `~/.outpost/clipboard/` (newest 20 per
+session).
 
 **State.** The data directory (`~/.outpost` by default) holds the signing
 secret, workspaces, and in hosted mode the account database and SSH keys.

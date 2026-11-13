@@ -314,7 +314,7 @@ export class ChatHost {
 
   private fail(message: string) {
     if (this.ended) return
-    // The target runtime reports this log tail when no viewer saw the failure.
+    // The node reports this line from the log when the host fails while starting.
     process.stderr.write(`outpost: ${message}\n`)
     this.failure = message
     this.info.error = message

@@ -94,7 +94,7 @@ class Connection {
       return
     }
     this.probe = { id: randomUUID(), sentAt: now }
-    this.relay({ type: 'ping', id: this.probe.id })
+    this.toService({ type: 'ping', id: this.probe.id })
   }
 
   private pauseOutput() {
@@ -197,7 +197,7 @@ class Connection {
       })
     } else if (message.type === 'signal' && typeof message.id === 'string') {
       const reply = (ok: boolean, text?: string) =>
-        this.relay({ type: 'signal-result', id: message.id, ok, ...(text ? { message: text } : {}) })
+        this.toService({ type: 'signal-result', id: message.id, ok, ...(text ? { message: text } : {}) })
       const signal = message.signal as { type?: unknown; payload?: unknown } | undefined
       const validate =
         typeof signal?.type === 'string' && Object.hasOwn(signalValidators, signal.type)
@@ -217,13 +217,14 @@ class Connection {
       this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
       reply(true)
     } else if (message.type === 'exit' && message.reason === 'ended') {
-      // The terminal service owns the coding process. A relay/SSH process may
-      // linger during cleanup; it must not delay the client's recovery action.
+      // The terminal service owns the coding process: its exit ends the session
+      // at once, without waiting for the stream to close.
       this.close('ended', closedMessages.ended)
     }
   }
 
-  private relay(message: object) {
+  /** A control message for the terminal service. */
+  private toService(message: object) {
     this.write(terminalControl(message))
   }
 
@@ -234,7 +235,7 @@ class Connection {
       return
     }
     // Signal replies can precede restoration readiness. Keep their order with
-    // early input, but bound both bytes and object count until the relay is ready.
+    // early input, but bound both bytes and object count until the terminal is ready.
     if (this.pendingBytes + frame.length > maxInputMessage || this.pending.length >= 256)
       return this.close('unavailable', 'Too much input arrived before the terminal was ready.')
     this.pending.push(frame)
@@ -267,16 +268,16 @@ class Connection {
       return this.socket.close(1008, 'A terminal request ID is required')
     switch (message.type) {
       case 'ping':
-        return this.relay(message)
+        return this.toService(message)
       case 'clear':
         if (!this.started || !this.stream)
           return this.send({ type: 'result', id: message.id, ok: false, message: 'The terminal is not ready.' })
-        this.relay(message)
+        this.toService(message)
         return
       case 'acknowledge':
         if (typeof message.completionId !== 'string' || !/^[a-f0-9]{64}$/.test(message.completionId))
           return this.socket.close(1008, 'Invalid activity acknowledgement')
-        this.relay(message)
+        this.toService(message)
         return
       case 'activate': {
         const ok =
@@ -293,17 +294,17 @@ class Connection {
       }
       case 'resize':
         if (terminalSize(message.cols, message.rows)) {
-          this.relay({ type: 'resize', cols: message.cols, rows: message.rows })
+          this.toService({ type: 'resize', cols: message.cols, rows: message.rows })
         }
         return
       case 'focus':
-        if (typeof message.active === 'boolean') this.relay({ type: 'focus', active: message.active })
+        if (typeof message.active === 'boolean') this.toService({ type: 'focus', active: message.active })
         return
       case 'draft':
-        if (typeof message.active === 'boolean') this.relay({ type: 'draft', active: message.active })
+        if (typeof message.active === 'boolean') this.toService({ type: 'draft', active: message.active })
         return
       case 'deliver-now':
-        return this.relay({ type: 'deliver-now' })
+        return this.toService({ type: 'deliver-now' })
       case 'ack':
         if (Number.isSafeInteger(message.bytes) && message.bytes >= 0 && message.bytes <= this.unacked) {
           if (message.bytes) this.lastOutputProgress = Date.now()
@@ -333,7 +334,7 @@ class Connection {
             ok: false,
             message: 'The terminal is not ready. Your draft is kept.',
           })
-        this.relay(message)
+        this.toService(message)
         return
       }
       default:

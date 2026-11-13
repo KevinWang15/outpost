@@ -24,7 +24,7 @@ function transport(first: string[], retry?: string[]): Transport {
       ? { retry: { args: retry, when: result => result.code === 255 && result.stderr.includes('mux_client') } }
       : {}),
   }
-  return { label: 'Fixture', runtime: () => command, management: () => command } as unknown as Transport
+  return { label: 'Fixture', login: () => command, management: () => command } as unknown as Transport
 }
 const connection = (transport: Transport, agent = async (_call: AgentCall): Promise<unknown> => null) =>
   new MachineConnection('run/node-00000000000000000000000000000000.sock', transport, { agent })

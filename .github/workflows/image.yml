@@ -36,8 +36,8 @@ jobs:
           labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Build and publish v2 image
-        if: github.ref == 'refs/heads/v2'
+      - name: Build and publish v3 image
+        if: github.ref == 'refs/heads/v3'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -45,8 +45,8 @@ jobs:
           platforms: linux/amd64
           tags: |
             ghcr.io/kevinwang15/outpost:${{ github.sha }}
-            ghcr.io/kevinwang15/outpost:v2
-            ghcr.io/kevinwang15/outpost:v2-${{ github.sha }}
+            ghcr.io/kevinwang15/outpost:v3
+            ghcr.io/kevinwang15/outpost:v3-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

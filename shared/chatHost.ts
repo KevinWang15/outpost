@@ -10,7 +10,7 @@ import type { SessionFile } from './sessionFiles'
 export const chatHost = {
   protocol: 3,
   /** Journal bounds; older entries are dropped like terminal scrollback. Bytes
-   * are UTF-8 JSON, so a welcome snapshot always fits one relay frame. */
+   * are UTF-8 JSON, so a welcome snapshot always fits one frame. */
   maxEntries: 20_000,
   maxBytes: 16 * 1024 * 1024,
   /** A merged text chunk grows to this size before the next one starts. */
@@ -88,7 +88,7 @@ export interface ChatJournalSnapshot {
   entries: ChatEntry[]
 }
 
-/** The `status` reply, also read by the target runtime's session list. */
+/** The `status` reply, also read by the node's session list. */
 export interface ChatHostStatus {
   type: 'status'
   version: string
@@ -102,7 +102,7 @@ export interface ChatHostStatus {
   activity: SessionActivity
 }
 
-// Host → client frames (JSON in relay `C` frames).
+// Host → client frames (JSON in `C` frames).
 export type ChatHostMessage =
   /** `instance` identifies this host process; prompt keys deduplicate only within one. */
   | { type: 'welcome'; protocol: number; instance: string; info: ChatInfo; journal: ChatJournalSnapshot }
@@ -142,7 +142,7 @@ export type ChatHostRequest =
   /** One-shot from the node: end the coding tool and this host. */
   | { type: 'stop' }
 
-/** Launch configuration, written to `chat-serve` on stdin by the target runtime. */
+/** Launch configuration, written to `chat-serve` on stdin by the node. */
 export interface ChatLaunch {
   socket: string
   session: string

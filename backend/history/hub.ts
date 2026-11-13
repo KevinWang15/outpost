@@ -1,7 +1,7 @@
 import { Ajv } from 'ajv'
 import { createHmac } from 'node:crypto'
 import { join } from 'node:path'
-import definitions from '../../runtime/history-tools.json'
+import definitions from '../../runtime/history-tools.json' with { type: 'json' }
 import type { HistoryBatch, HistoryMachine, HistorySearchInput, HistorySource } from '../../shared/history'
 import type { Deployment, Owner } from '../deployment'
 import type { TargetContext } from '../sessions'

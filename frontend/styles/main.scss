@@ -576,7 +576,7 @@ kbd {
   letter-spacing: 0.4px;
   text-transform: uppercase;
 }
-.sidebar nav {
+.sidebar nav:not(.mode-switch) {
   display: grid;
   gap: 2px;
   overflow-y: auto;
@@ -2260,7 +2260,7 @@ kbd {
     padding-bottom: 8px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
-    nav {
+    nav:not(.mode-switch) {
       display: flex;
       overflow-x: auto;
     }

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { harnesses, supportsTerminal } from '../../shared/harnesses'
-import historyTools from '../../runtime/history-tools.json'
+import historyTools from '../../runtime/history-tools.json' with { type: 'json' }
 import { terminalService } from '../../shared/terminalService'
 import { FrameDecoder, terminalFrame, terminalControl, relayMagic } from '../../shared/node/terminalFrames'
 

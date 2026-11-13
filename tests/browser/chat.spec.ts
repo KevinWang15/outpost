@@ -102,3 +102,25 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
   await expect(page).toHaveURL(/\/(\?.*)?$/)
   await expect(page.getByRole('row').filter({ hasText: 'Coder' })).toBeVisible()
 })
+
+test('a remembered web terminal opens once, from the click that moves a chat session', async ({ page, context }) => {
+  await addClaudeTarget(page, 'Handoff box')
+  await page.evaluate(() => localStorage.setItem('outpost.connection.terminal', 'web'))
+  await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Chat' }).click()
+  await newSession(page, 'Handoff', '~/chat-handoff')
+  const popups: string[] = []
+  context.on('page', popup => popups.push(popup.url()))
+  await page.getByRole('button', { name: 'Actions for Handoff' }).click()
+  await page.getByRole('menuitem', { name: 'Open in terminal' }).click()
+  const dialog = page.getByRole('dialog', { name: /in a terminal/ })
+  const continueButton = dialog.getByRole('button', { name: 'Continue in a terminal' })
+  if (await continueButton.isVisible()) await continueButton.click()
+  const opened = context.waitForEvent('page')
+  await dialog.getByRole('button', { name: 'Open terminal' }).click()
+  const terminal = await opened
+  await expect(terminal).toHaveURL(/\/terminal\?.*session=/)
+  await expect(dialog).toBeHidden()
+  // StrictMode replays mount effects; the handoff must not open a second window.
+  await page.waitForTimeout(500)
+  expect(popups).toHaveLength(1)
+})

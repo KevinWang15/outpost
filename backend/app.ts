@@ -1,6 +1,8 @@
 import Fastify, { LogController } from 'fastify'
 import { readFile } from 'node:fs/promises'
+import type { IncomingMessage } from 'node:http'
 import { join } from 'node:path'
+import type { Duplex } from 'node:stream'
 import staticFiles from '@fastify/static'
 import cookies from '@fastify/cookie'
 import websocket from '@fastify/websocket'
@@ -27,6 +29,10 @@ import { ChatTokens } from './chat/tokens'
 import { chatRoutes } from './routes/chat'
 import { HistoryHub, type HistoryOptions } from './history/hub'
 import { Machines } from './machines'
+import { ActivityLog, logViewerMount } from './logs/activity'
+import { MachineEventLog } from './logs/machines'
+import { loggedSessions } from './logs/sessions'
+import { logRoutes } from './routes/logs'
 import historyToolDefinitions from '../shared/historyTools.json' with { type: 'json' }
 
 interface AppOptions {
@@ -59,7 +65,8 @@ export async function createApp(options: AppOptions) {
   await app.register(websocket, { options: { maxPayload: 512 * 1024, perMessageDeflate: false } })
 
   const machines = new Machines(deployment.secret, options.env)
-  const sessions = options.sessions ?? new SessionClient()
+  const log = new ActivityLog(deployment, header => app.parseCookie(header))
+  const sessions = loggedSessions(options.sessions ?? new SessionClient(), log)
   const software = options.software ?? new SoftwareClient(options.env)
   const resolveTarget = targetResolver(deployment, machines, options.multiplex ?? true)
   const history =
@@ -72,7 +79,13 @@ export async function createApp(options: AppOptions) {
   const tokens = new ConnectTokens(deployment.secret)
   const desktop = await DesktopAccess.open(deployment)
   const active = (owner: Owner) => desktop.active(owner)
-  const broker = new TerminalBroker({ tokens, active, sessions, resolve })
+  const broker = new TerminalBroker({
+    tokens,
+    active,
+    sessions,
+    resolve,
+    log: (owner, input) => log.record(owner, input),
+  })
   const services: Services = {
     deployment,
     sessions,
@@ -81,9 +94,10 @@ export async function createApp(options: AppOptions) {
     tokens,
     broker,
     machines,
+    log,
     active,
     resolve,
-    installations: new Installations(software),
+    installations: new Installations(software, (owner, input) => log.record(owner, input)),
     context: (request, targetId) => resolve(deployment.owner(request), targetId),
   }
   const hub = new ChatHub({
@@ -93,7 +107,15 @@ export async function createApp(options: AppOptions) {
     terminals: sessions,
     list: async (context, signal) => (await sessions.list(context, signal)).sessions,
     connect: options.chatConnector ?? machineConnector(sessions),
+    log: (owner, input) => log.record(owner, input),
   })
+  const machineEvents = new MachineEventLog({
+    deployment,
+    resolve: resolveTarget,
+    list: async context => (await sessions.list(context)).sessions,
+    log,
+  })
+  machines.events = (owner, targetId) => void machineEvents.read(owner, targetId)
   // Agents' Outpost tool calls arrive on their machine's connection.
   const historyTools = new Set(historyToolDefinitions.map(tool => tool.name))
   machines.agent = async (owner, targetId, call) => {
@@ -106,6 +128,16 @@ export async function createApp(options: AppOptions) {
   const chat = new ChatServer(hub, new ChatTokens(deployment.secret), services)
   await hub.start()
   await history?.start()
+  await log.start()
+  machineEvents.start()
+  // The log viewer's live updates share the server with Outpost's own sockets:
+  // each upgrade goes to the viewer or to Fastify, never both.
+  const upgrades = app.server.listeners('upgrade') as ((...args: unknown[]) => void)[]
+  app.server.removeAllListeners('upgrade')
+  app.server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    if (!log.handlesUpgrade(request, socket, head))
+      for (const listener of upgrades) listener.call(app.server, request, socket, head)
+  })
   app.addHook('preClose', async () => {
     machines.close()
     broker.close()
@@ -113,6 +145,8 @@ export async function createApp(options: AppOptions) {
     hub.close()
     await services.installations.close()
     await history?.close()
+    machineEvents.close()
+    await log.close()
   })
   app.addHook('onClose', async () => {
     desktop.close()
@@ -122,7 +156,13 @@ export async function createApp(options: AppOptions) {
   app.addHook('onRequest', async (request, reply) => {
     const rejection = deployment.admits(request)
     if (rejection) return reply.code(403).send({ message: rejection })
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers['x-outpost-request'] !== '1') {
+    // The log viewer's own pages cannot send Outpost's header; they need its other checks.
+    const viewer = request.url === logViewerMount || request.url.startsWith(`${logViewerMount}/`)
+    if (
+      !viewer &&
+      !['GET', 'HEAD', 'OPTIONS'].includes(request.method) &&
+      request.headers['x-outpost-request'] !== '1'
+    ) {
       return reply.code(403).send({ message: 'Missing request header' })
     }
     reply.header('Cache-Control', 'no-store')
@@ -157,6 +197,14 @@ export async function createApp(options: AppOptions) {
   const download = sessionFileDownloads(services)
   terminalRoutes(app, services, download)
   chatRoutes(app, services, chat, desktop, download)
+  logRoutes(app, services)
+  await app.register(async viewer => {
+    // The viewer reads its own request bodies.
+    viewer.removeAllContentTypeParsers()
+    viewer.addContentTypeParser('*', (_request, _payload, done) => done(null))
+    viewer.all(logViewerMount, (request, reply) => log.serve(request, reply))
+    viewer.all(`${logViewerMount}/*`, (request, reply) => log.serve(request, reply))
+  })
 
   if (options.frontendRoot) {
     const html = await readFile(join(options.frontendRoot, 'index.html'), 'utf8')

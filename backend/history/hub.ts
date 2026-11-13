@@ -79,9 +79,9 @@ export class HistoryHub {
   }
   async start() {
     if (this.dependencies.background === false) return
-    for (const owner of this.dependencies.deployment.historyOwners()) this.watch(owner)
+    for (const owner of this.dependencies.deployment.backgroundOwners()) this.watch(owner)
     this.timer = setInterval(() => {
-      for (const owner of this.dependencies.deployment.historyOwners())
+      for (const owner of this.dependencies.deployment.backgroundOwners())
         if (!this.accounts.has(owner.userId)) this.watch(owner)
       for (const [id, account] of this.accounts) {
         if (!this.dependencies.deployment.account(id)) {

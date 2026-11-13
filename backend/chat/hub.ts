@@ -28,6 +28,7 @@ import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
 import type { SessionFileClient } from '../sessionFiles'
 import type { SessionClient, TargetContext, TerminalDelivery } from '../sessions'
+import type { LogInput } from '../logs/activity'
 import { ChannelFiles } from './files'
 import { ChatLink, type ChatConnector, type LinkEvent } from './links'
 import { channelPrompt, replyPrompt, schedulePrompt, sessionPrompt, summary } from './prompts'
@@ -75,6 +76,8 @@ interface Dependencies {
   probeMs?: number
   /** How often messages typed into terminals are checked on (tests). */
   terminalPollMs?: number
+  /** Records what the hub did in the account's activity log. */
+  log?(owner: Owner, input: LogInput): void
 }
 
 const pollMs = 15_000
@@ -321,6 +324,15 @@ export class ChatHub {
   }
 
   private changed(account: Account, ref: SessionRef, link: ChatLink, event: LinkEvent) {
+    if (event.type === 'link' && event.state === 'unavailable')
+      this.log(account, {
+        level: 'error',
+        kind: 'session',
+        type: 'chat-unavailable',
+        message: `${this.sessionOf(account, ref).session.name} could not open in chat${event.message ? `: ${event.message}` : ''}`,
+        ...this.sessionOf(account, ref),
+        details: { error: event.message },
+      })
     if (event.type === 'entry') {
       const { entry } = event
       if (entry.kind === 'queued' && entry.key) {
@@ -357,9 +369,59 @@ export class ChatHub {
 
   /** Changes apply at once, so journal events that follow see them; saving follows. */
   private async update(account: Account, delivery: Delivery, change: Partial<Delivery>) {
+    const previous = delivery.state
     Object.assign(delivery, change, { updatedAt: now() })
+    if (delivery.state !== previous) this.logDelivery(account, delivery)
     this.broadcast(account, { type: 'delivery', delivery })
     await account.store.change(['deliveries'], () => {})
+  }
+
+  private log(account: Account, input: LogInput) {
+    this.dependencies.log?.(account.owner, input)
+  }
+
+  /** A message's progress in the activity log: who it is for, where it came from. */
+  private logDelivery(account: Account, delivery: Delivery) {
+    if (delivery.state === 'pending' || delivery.state === 'running') return
+    const { source } = delivery
+    const channel =
+      source.kind === 'channel' ? account.store.channels.channels.find(item => item.id === source.channelId) : undefined
+    const member = channel?.members.find(item => sessionKey(item) === sessionKey(delivery))
+    const session = this.find(account, delivery)
+    const name = session?.name ?? member?.name ?? 'A session'
+    const to = session ? `@${session.handle}` : member ? `@${member.handle}` : name
+    const from =
+      source.kind === 'channel'
+        ? `#${channel?.name ?? 'a channel'}`
+        : source.kind === 'session'
+          ? `@${source.from.handle}`
+          : `the schedule ${account.store.schedules.schedules.find(item => item.id === source.scheduleId)?.name ?? ''}`.trim()
+    const what = source.kind === 'session' && source.reply ? 'a reply' : 'a message'
+    const message =
+      delivery.state === 'sent'
+        ? `${to} received ${what} from ${from}`
+        : delivery.state === 'done'
+          ? source.kind === 'session' && source.reply
+            ? `${to} took the reply from ${from}`
+            : `${to} answered ${what} from ${from}`
+          : `${to} could not take ${what} from ${from}: ${delivery.error}`
+    this.log(account, {
+      level: delivery.state === 'failed' ? 'error' : 'info',
+      kind: 'message',
+      type: delivery.state === 'sent' ? 'delivered' : delivery.state === 'done' ? 'answered' : 'failed',
+      message,
+      machine: { id: delivery.targetId, name: account.machines.get(delivery.targetId)?.name ?? delivery.targetId },
+      session: { id: delivery.sessionId, name },
+      details: {
+        delivery: delivery.id,
+        source: source.kind,
+        from,
+        to,
+        via: delivery.via,
+        ...(channel ? { channel: channel.name } : {}),
+        ...(delivery.error ? { error: delivery.error } : {}),
+      },
+    })
   }
 
   private async add(account: Account, delivery: Delivery) {
@@ -693,13 +755,19 @@ export class ChatHub {
     })
     const view = await this.channelView(account, channel)
     this.broadcast(account, { type: 'channel', channel: view })
+    this.log(account, {
+      kind: 'channel',
+      type: existing ? 'edited' : 'created',
+      message: `#${channel.name} was ${existing ? 'edited' : 'created'} with ${members.map(member => `@${member.handle}`).join(', ') || 'no members'}`,
+      details: { channel: channel.name, members: members.map(member => member.handle).join(', ') },
+    })
     return view
   }
 
   async deleteChannel(owner: Owner, channelId: string) {
     const account = await this.account(owner)
-    if (!account.store.channels.channels.some(channel => channel.id === channelId))
-      throw new AppError('Channel not found.', 404)
+    const removed = account.store.channels.channels.find(channel => channel.id === channelId)
+    if (!removed) throw new AppError('Channel not found.', 404)
     await account.store.change(['channels', 'deliveries'], () => {
       const data = account.store.channels
       data.channels = data.channels.filter(channel => channel.id !== channelId)
@@ -716,6 +784,12 @@ export class ChatHub {
     await account.store.removeMessages(channelId)
     await account.files.removeChannel(channelId)
     this.broadcast(account, { type: 'channel-removed', channelId })
+    this.log(account, {
+      kind: 'channel',
+      type: 'deleted',
+      message: `#${removed.name} was deleted`,
+      details: { channel: removed.name },
+    })
   }
 
   async history(owner: Owner, channelId: string, before: string | null) {
@@ -795,6 +869,12 @@ export class ChatHub {
       account.posts.delete(key)
     }
     this.broadcast(account, { type: 'message', message })
+    this.log(account, {
+      kind: 'message',
+      type: 'posted',
+      message: `You posted in #${channel.name}${message.mentions.length ? ` for ${message.mentions.map(handle => `@${handle}`).join(', ')}` : ''}`,
+      details: { channel: channel.name, text: body.slice(0, 500), mentions: message.mentions.join(', ') },
+    })
     await this.markRead(owner, channelId)
     await this.route(account, channel, message, null)
     return { messageId: id, duplicate: false }
@@ -1270,16 +1350,41 @@ export class ChatHub {
       else list.push(schedule)
     })
     this.broadcast(account, { type: 'schedule', schedule })
+    this.log(account, {
+      kind: 'schedule',
+      type: existing ? 'edited' : 'created',
+      message: `Schedule ${schedule.name} was ${existing ? 'edited' : 'created'}`,
+      ...this.sessionOf(account, schedule),
+      details: { schedule: schedule.name, cron: schedule.cron, timeZone: schedule.timeZone, enabled: schedule.enabled },
+    })
     return schedule
+  }
+
+  /** The session and machine a schedule or delivery is for, as the log names them. */
+  private sessionOf(account: Account, ref: SessionRef) {
+    const session = this.find(account, ref)
+    return {
+      machine: { id: ref.targetId, name: account.machines.get(ref.targetId)?.name ?? ref.targetId },
+      session: { id: ref.sessionId, name: session?.name ?? ref.sessionId.slice(0, 8) },
+    }
   }
 
   async deleteSchedule(owner: Owner, scheduleId: string) {
     const account = await this.account(owner)
+    const removed = account.store.schedules.schedules.find(item => item.id === scheduleId)
     await account.store.change(['schedules'], () => {
       account.store.schedules.schedules = account.store.schedules.schedules.filter(item => item.id !== scheduleId)
       delete account.store.schedules.fired[scheduleId]
     })
     this.broadcast(account, { type: 'schedule-removed', scheduleId })
+    if (removed)
+      this.log(account, {
+        kind: 'schedule',
+        type: 'deleted',
+        message: `Schedule ${removed.name} was deleted`,
+        ...this.sessionOf(account, removed),
+        details: { schedule: removed.name },
+      })
   }
 
   async runSchedule(owner: Owner, scheduleId: string) {
@@ -1290,6 +1395,13 @@ export class ChatHub {
   }
 
   private async fire(account: Account, schedule: Schedule) {
+    this.log(account, {
+      kind: 'schedule',
+      type: 'fired',
+      message: `Schedule ${schedule.name} ran`,
+      ...this.sessionOf(account, schedule),
+      details: { schedule: schedule.name },
+    })
     const delivery = this.delivery(
       schedule,
       { kind: 'schedule', scheduleId: schedule.id },

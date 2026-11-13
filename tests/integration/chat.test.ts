@@ -33,6 +33,15 @@ test('chat hub: channels pass the floor, sessions message each other, schedules 
     )
     assert.deepEqual(reply.mentions, [])
     assert.equal(reply.hop, 1)
+    // The activity log follows the message from the post to the answer.
+    assert.deepEqual(
+      chat.logged.filter(entry => entry.kind === 'message').map(entry => [entry.type, entry.message]),
+      [
+        ['posted', 'You posted in #release for @coder'],
+        ['delivered', '@coder received a message from #release'],
+        ['answered', '@coder answered a message from #release'],
+      ],
+    )
     assert.ok(reply.turn)
     assert.equal(chat.deliveries().filter(item => item.sessionId === writer.id).length, 0)
     // The same post key is one post.

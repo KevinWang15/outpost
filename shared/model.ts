@@ -1,6 +1,6 @@
 import type { Static } from 'typebox'
 import type { SessionActivity } from './activity'
-import type { HarnessId } from './harnesses'
+import { harnesses, type HarnessId } from './harnesses'
 import type * as schemas from './schemas'
 
 // Inputs and stored records are derived from their validation schemas.
@@ -73,6 +73,13 @@ export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] =
   ...target.tools,
   ...(target.tools.includes('claude') ? (['claude-agent-acp'] as const) : []),
 ]
+const systemLabels: Record<string, string> = {
+  bash: 'Bash',
+  'outpost-terminal': 'Outpost Terminal',
+  'claude-agent-acp': 'Claude Code chat adapter',
+}
+/** Software as the interface names it. */
+export const softwareLabel = (id: SoftwareId) => harnesses.find(harness => harness.id === id)?.label ?? systemLabels[id]
 export interface SoftwareStatus {
   id: SoftwareId
   status: 'installed' | 'missing' | 'broken'

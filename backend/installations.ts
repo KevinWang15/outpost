@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { PassThrough } from 'node:stream'
 import type { Installation, InstallationEvent, SoftwareId } from '../shared/model'
-import { requiredSoftware } from '../shared/model'
+import { requiredSoftware, softwareLabel } from '../shared/model'
 import type { Owner } from './deployment'
+import type { LogInput } from './logs/activity'
 import { AppError } from './errors'
 import type { TargetContext } from './sessions'
 import type { SoftwareService } from './software'
@@ -25,7 +26,10 @@ export class Installations {
   private jobs = new Map<string, Job>()
   private queues = new Map<string, Promise<void>>()
   private closed = false
-  constructor(private software: SoftwareService) {}
+  constructor(
+    private software: SoftwareService,
+    private log: (owner: Owner, input: LogInput) => void = () => {},
+  ) {}
   latest(owner: Owner, targetId: string) {
     return this.jobs.get(key(owner, targetId))?.installation ?? null
   }
@@ -79,6 +83,15 @@ export class Installations {
         completion: Promise.resolve(),
       }
       this.jobs.set(id, job)
+      const machine = { id: context.target.id, name: context.target.name }
+      const label = softwareLabel(softwareId)
+      this.log(context.owner, {
+        kind: 'machine',
+        type: 'installing',
+        message: `Installing ${label} on ${machine.name}`,
+        machine,
+        details: { software: softwareId },
+      })
       const emit = (event: InstallationEvent) => {
         // A slow viewer must not accumulate unbounded output or block an installer.
         for (const stream of job.subscribers) if (!stream.write(`${JSON.stringify(event)}\n`)) stream.destroy()
@@ -102,6 +115,17 @@ export class Installations {
           installation.error = (error as Error).message
         } finally {
           installation.finishedAt = new Date().toISOString()
+          this.log(context.owner, {
+            level: installation.status === 'succeeded' ? 'info' : 'error',
+            kind: 'machine',
+            type: installation.status === 'succeeded' ? 'installed' : 'install-failed',
+            message:
+              installation.status === 'succeeded'
+                ? `Installed ${label} on ${machine.name}`
+                : `Could not install ${label} on ${machine.name}: ${installation.error}`,
+            machine,
+            details: { software: softwareId, exitCode: installation.exitCode, error: installation.error },
+          })
           emit({ type: 'complete', installation })
           for (const stream of job.subscribers) stream.end()
           job.subscribers.clear()

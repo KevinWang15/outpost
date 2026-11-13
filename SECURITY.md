@@ -63,6 +63,15 @@ before rendering, and resume tickets remain in window-scoped session storage.
 Removing server trust closes its windows; signing out revokes the underlying
 grants. These first installers are unsigned previews with manual updates.
 
+**Logs and webhooks.** The activity log is served by an embedded log viewer
+under `/log-viewer`, behind the same admission checks as the rest of Outpost.
+Each account can read only its own log; nothing outside Outpost can write to
+it, open files through it, or create the viewer's own outbound rules. Webhooks
+send events, with header values that stay on the server, only to the URL the
+account configured, without following redirects. A hosted server resolves the
+address before each request and sends only to public addresses, connecting to
+the address it checked.
+
 **Signals.** Programs in a session can ask the attached client to open a link
 (`outpost-browser`). The helper talks to the session's terminal service over an
 owner-only Unix socket; the broker validates each request, limits it to 120 per

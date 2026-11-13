@@ -1,12 +1,14 @@
-# Outpost Terminal 2.0.0
+# Outpost Terminal 2.1.0
 
 Everything Outpost runs on a machine, as one executable. Terminal service
-protocol 5, chat host protocol 3, node protocol 1.
+protocol 5, chat host protocol 3, node protocol 2.
 
 - `outpost-terminal node`: the machine end of the one connection Outpost keeps
   to each machine an account uses. It answers session, file, search and history
   operations, carries terminal and chat attachments and file transfers as
-  streams, and forwards agents' calls to Outpost's tools to the server.
+  streams, and forwards agents' calls to Outpost's tools to the server. It also
+  serves the machine's event log, so Outpost's Logs show when sessions start,
+  work, finish and stop, including while Outpost was not connected.
 - `outpost-terminal serve` and `chat-serve`: a session's terminal service (its
   coding tool in a persistent PTY) and chat host (its ACP client). Both keep the
   session's activity, and the terminal service types in messages from other

@@ -17,6 +17,7 @@ default Outpost MCP tools and cross-machine history search.
 - **Local tool or hosted service.** Run it on your own computer with your SSH config, or host it for a team with accounts and per-user SSH keys.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
 - **Find any conversation.** Search the coding tools' history on all your machines, including conversations started outside Outpost, and resume them as sessions.
+- **See what happened.** Logs records when agents start, work, finish or fail, every message passed between sessions, channels and schedules, and errors, and sends what you choose to your own webhooks.
 - **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code and DeepSeek Harness histories across all configured machines using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
 
 ![Outpost's Machines view: a machine with three sessions and their activity](docs/images/workspace.png)
@@ -133,6 +134,51 @@ searches the coding tools' history on all your machines or one of them,
 including conversations started outside Outpost. A conversation that already
 belongs to a session opens it; any other can be linked as a new session that
 resumes it.
+
+## Logs and webhooks
+
+**Logs and webhooks** in the sidebar opens your account's activity log in an
+embedded [log-viewer](https://github.com/KevinWang15/log-viewer): agent status
+changes, messages between you, channels, sessions and schedules, sessions created,
+edited, started and stopped, machines added, unreachable or updated, terminal
+connections, and errors. The sidebar's views filter it (Agent status, Messages,
+Warnings and errors); the viewer itself filters by level, text and the fields
+each event carries (`machine`, `session`, `state`, `channel`, `error`).
+**Open the full viewer** adds its reports, search and export. Status changes are
+recorded on the machine as they happen, so changes while Outpost was not
+connected appear when it reconnects, at the time they happened. The log keeps
+the newest 50,000 events.
+
+A **webhook** sends matching events to a URL as they happen: one POST each, with
+a JSON body Outpost defines and the headers you set (for example
+`Authorization`). Choose which kinds of events it receives and the lowest level
+(everything, warnings and errors, or errors only). Header values are stored on
+the server and never shown again. Deliveries are retried on network errors,
+429 and 5xx responses; redirects are not followed. A hosted server only sends to
+public addresses. **Send a test** posts a sample event.
+
+```json
+{
+  "version": 1,
+  "webhook": { "id": "…", "name": "Team alerts" },
+  "event": {
+    "id": "…",
+    "time": "2026-11-14T09:30:00.000Z",
+    "level": "info",
+    "kind": "agent",
+    "type": "status",
+    "message": "Billing API finished its turn",
+    "machine": { "id": "…", "name": "Workstation" },
+    "session": { "id": "…", "name": "Billing API" },
+    "details": { "state": "finished", "previous": "working", "detail": null }
+  }
+}
+```
+
+`kind` is one of `agent`, `message`, `session`, `machine`, `channel`,
+`schedule`, `terminal` and `webhook`; `level` is `info`, `warning` or `error`.
+New fields may be added to `event` and `details`; existing ones keep their
+meaning while `version` is 1.
 
 ## Fork a session
 

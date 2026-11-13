@@ -28,13 +28,19 @@ retain the license notices supplied with their distributions in `node_modules`.
 - The Claude Code chat adapter, [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp)
   (Apache License 2.0), depends on Anthropic's Claude Agent SDK, which is
   subject to Anthropic's terms. Outpost does not redistribute it: Required
-  Software downloads the official release onto your target.
+  software downloads the official release onto your machine.
 
 - Session avatars are drawn by [Boring Avatars](https://github.com/boringdesigners/boring-avatars)
   (`boring-avatars`, MIT License).
 - The Claude Code, Codex, Kimi Code and DeepSeek marks (`shared/harnessMarks.ts`) are the
   monochrome icons from [Lobe Icons](https://github.com/lobehub/lobe-icons)
   (MIT License). The marks themselves belong to their owners.
+
+## Logs
+
+The Logs page embeds [log-viewer](https://github.com/KevinWang15/log-viewer)
+(`@kevinwang15/log-viewer`, MIT License), served by the Outpost server with its
+bundled web UI. It depends on Express, `ws` and `cors` (MIT Licenses).
 
 ## History search
 

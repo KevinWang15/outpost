@@ -1,13 +1,6 @@
-import type { Session, SoftwareId, Target } from '../../shared/model'
-import { harnesses } from '../../shared/harnesses'
+import type { Session, Target } from '../../shared/model'
 import { pagePaths } from '../../shared/pages'
 
-const systemLabels: Record<string, string> = {
-  bash: 'Bash',
-  'outpost-terminal': 'Outpost Terminal',
-  'claude-agent-acp': 'Claude Code chat adapter',
-}
-export const softwareLabel = (id: SoftwareId) => harnesses.find(harness => harness.id === id)?.label ?? systemLabels[id]
 export const shortVersion = (version: string | null) => version?.match(/\d+(?:\.\d+)+[a-z]?/)?.[0] ?? version ?? ''
 
 export function relativeTime(value: string | null) {

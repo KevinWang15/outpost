@@ -9,6 +9,7 @@ const DesktopDownloadPage = lazy(() => import('./desktop/DesktopDownloadPage'))
 const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
 const DesktopAuthorizePage = lazy(() => import('./desktop/DesktopAuthorizePage'))
 const ChatApp = lazy(() => import('./chat/ChatApp'))
+const LogsPage = lazy(() => import('./logs/LogsPage'))
 const DesktopChatPage = lazy(() => import('./chat/DesktopChatPage'))
 
 if (window.location.pathname === pagePaths.workspace && !window.location.search && rememberedMode() === 'chat')
@@ -41,6 +42,8 @@ export default function Root() {
             <TerminalPage />
           ) : window.location.pathname === pagePaths.chat ? (
             <ChatApp />
+          ) : window.location.pathname === pagePaths.logs ? (
+            <LogsPage />
           ) : (
             <App />
           )}

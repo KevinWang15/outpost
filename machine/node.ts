@@ -2,7 +2,7 @@
 // one connection Outpost keeps to it. It runs for as long as that connection
 // (stdio) is open. Drivers it starts outlive it.
 import { randomUUID } from 'node:crypto'
-import { createReadStream, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch } from 'node:fs'
 import { connect, createServer, type Socket } from 'node:net'
 import {
   machineProtocol,
@@ -21,6 +21,7 @@ import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/ter
 import { chatHost } from '../shared/chatHost'
 import { terminalService, terminalSize } from '../shared/terminalService'
 import { driverStatus, request } from './drivers'
+import { eventsDirectory, readEvents } from './events'
 import { checkImage, listFiles, readFile, removeFile, saveImage, StoredFile } from './files'
 import { catalog, readBatch, readMessage } from './history'
 import { chatSocket, startChat, startTerminal, terminalSocket } from './launch'
@@ -315,6 +316,7 @@ export async function serveNode(socketName: string) {
     'history.catalog': args => catalog(sessions(), args.after ?? null, args.limit ?? 100),
     'history.read': args => readBatch(sessions(), args.sources),
     'history.message': args => readMessage(sessions(), args),
+    events: args => readEvents(args.after),
   }
 
   const call = (op: string, args: unknown) =>
@@ -418,6 +420,17 @@ export async function serveNode(socketName: string) {
     })
   }
 
+  // What drivers record: Outpost reads it when told the log grew.
+  mkdirSync(eventsDirectory(), { recursive: true, mode: 0o700 })
+  let notifying: NodeJS.Timeout | null = null
+  const events = watch(eventsDirectory(), () => {
+    notifying ??= setTimeout(() => {
+      notifying = null
+      send({ type: 'events' })
+    }, 250)
+  })
+  events.on('error', () => {})
+
   // The connection -------------------------------------------------------------------
 
   const decoder = new FrameDecoder()
@@ -437,6 +450,7 @@ export async function serveNode(socketName: string) {
   // Outpost disconnected: end this node. Sessions keep running.
   const shutdown = () => {
     endpoint.close()
+    events.close()
     try {
       // Remove the endpoint only if a newer node has not replaced it.
       if (statSync(statePath(socketName)).ino === endpointInode) rmSync(statePath(socketName), { force: true })

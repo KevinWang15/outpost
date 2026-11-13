@@ -480,6 +480,7 @@ the messages:
 | `open {stream, kind, args}` / `opened {stream, data}` | server → node / node → server | Open a `terminal`, `chat`, `file-read`, `file-receive` or `image` stream |
 | `close {stream, error?, data?}` | both | End a stream; a receiving node's final answer travels with it |
 | `credit {stream, bytes}` | both | Grant the sender more of its 4 MiB stream window |
+| `events` | node → server | The machine's event log grew; the server reads it with the `events` call |
 
 Errors keep their HTTP status, so a missing session is still a 404 through the
 connection. Calls have a deadline (30 seconds unless the operation sets one) and
@@ -610,7 +611,7 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract uses Outpost Terminal 2.0.0 / protocol 5 and client protocol 14.
+This contract uses Outpost Terminal 2.1.0 / protocol 5 and client protocol 14.
 Publish the matching Outpost Terminal before deploying the server. Replacing the
 executable does not alter a running PTY service: after a service protocol
 change, existing sessions restart explicitly to use it.
@@ -1552,6 +1553,7 @@ current conversation.
 | Terminal services and chat hosts | `~/.outpost/terminals/<session>.sock`, `~/.outpost/chats/<session>.sock`, logs in `~/.outpost/logs/` |
 | Activity | `~/.outpost/activity/<session>.json` |
 | Messages waiting for a terminal | `~/.outpost/deliveries/<session>.json` |
+| Event log (activity changes, driver starts and exits) | `~/.outpost/events/events.ndjson`, rotated once at 4 MiB to `events.1.ndjson` |
 | Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Session files | `~/.outpost/files/<session>/<file-id>/` (`metadata.json`, `content/<name>`) |
 | Kimi Code plugin | `~/.outpost/integrations/kimi/` |
@@ -1566,6 +1568,50 @@ registry lock and replaces the file atomically. Records are validated
 strictly; invalid data is reported, never rewritten. Outpost reads only its
 current workspace and registry schemas. A missing current file starts an empty
 store; there is no automatic import of earlier layouts.
+
+## Activity log
+
+`backend/logs/` keeps each account's activity log in one stream of an embedded
+[log-viewer](https://github.com/KevinWang15/log-viewer), mounted at
+`/log-viewer` and spooled to `<data>/logs/`. The stream is named by an HMAC of
+the server secret and account. Events (`shared/logs.ts`) have a kind, a type, a
+level, a sentence and fields; the viewer shows the kind as the logger, the
+machine as the thread, and the rest as structured fields.
+
+- **On machines**, `saveActivity` records each change of a session's state, and
+  terminal services and chat hosts record their starts and exits
+  (`machine/events.ts`). Each driver appends whole lines; the node serves them
+  by cursor (`events` call, `inode:offset`) and announces growth with an
+  `events` frame. The server reads after every connection, on every
+  announcement, and once a minute for each machine of `backgroundOwners()`,
+  saving each machine's cursor in the account's `log-cursors.json`. A first
+  read starts at the end, so a new server does not replay a machine's history;
+  later reads catch up with what happened while it was away, at the time it
+  happened there. A machine that stops answering is logged once, and again when
+  it answers.
+- **On the server**, the chat hub logs posts and each delivery's progress, the
+  session service wrapper (`backend/logs/sessions.ts`) logs creations, edits,
+  conversation changes and deletions, routes log machine changes, installations
+  log their start and outcome, and the broker logs terminal connections.
+
+The viewer authorizes every request itself: an account reads and keeps filters
+and bookmarks on its own stream only, and every `open`, `ingest` and `configure`
+action is refused, so no one can write to a log, open files, or create the
+viewer's own rule webhooks. HTTP requests pass the app's admission checks and
+are handed to the viewer without body parsing; `/log-viewer/ws` upgrades are
+routed to the viewer before Fastify's WebSocket plugin sees them. Its pages may
+be framed only by Outpost's own Logs page, which embeds `embed.html` and sets
+its filter over the `postMessage` bridge.
+
+**Webhooks** (`backend/logs/webhooks.ts`) are stored per account in
+`webhooks.json`. Each event that matches a webhook's kinds and level is queued
+for it (at most 200 waiting, oldest dropped) and sent one at a time as a POST
+with Outpost's JSON body and the owner's headers. Network errors, 429 and 5xx
+are retried after 2, 15 and 60 seconds; other answers are final, and redirects
+are not followed. A failed delivery is logged as a `webhook` event that is not
+sent to the webhook that failed. A hosted server resolves the address first,
+refuses loopback, private, link-local and other non-public addresses, and
+connects to the address it checked.
 
 ## Security model
 
@@ -1585,6 +1631,9 @@ store; there is no automatic import of earlier layouts.
   another session or account.
 - Images are limited to 16 MB, signals to 32 KiB and 120 per minute per
   connection, clipboard text to 1 MiB.
+- The activity log is readable only by its account; webhooks are the only
+  outbound requests an account configures, and a hosted server sends them only
+  to public addresses (see Activity log).
 
 ## Extending Outpost
 

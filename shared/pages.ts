@@ -2,6 +2,7 @@
 export const pagePaths = {
   workspace: '/',
   chat: '/chat',
+  logs: '/logs',
   desktopChat: '/chat/desktop',
   terminal: '/terminal',
   desktopTerminal: '/terminal/desktop',

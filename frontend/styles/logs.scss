@@ -1,0 +1,48 @@
+/* Logs: the embedded log viewer fills the page beside the sidebar. */
+.logs-app {
+  height: 100dvh;
+  .sidebar-body {
+    overflow-y: auto;
+    > nav {
+      flex-shrink: 0;
+      overflow: visible;
+    }
+  }
+}
+.logs-webhooks-heading {
+  margin-top: 16px;
+}
+.logs-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  .page-header {
+    flex-shrink: 0;
+  }
+}
+.log-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 420px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.webhook-example {
+  overflow: auto;
+  max-height: 260px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .logs-app {
+    height: auto;
+  }
+  .log-frame {
+    min-height: 70dvh;
+  }
+}

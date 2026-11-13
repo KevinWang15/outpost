@@ -36,6 +36,7 @@
     "@fastify/static": "^10.1.5",
     "@fastify/websocket": "^11.3.3",
     "@huggingface/transformers": "4.3.2",
+    "@kevinwang15/log-viewer": "0.3.0",
     "@lezer/highlight": "^1.2.5",
     "@radix-ui/react-context-menu": "^2.3.7",
     "@radix-ui/react-dropdown-menu": "^2.1.24",

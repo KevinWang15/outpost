@@ -26,8 +26,11 @@ function transport(first: string[], retry?: string[]): Transport {
   }
   return { label: 'Fixture', login: () => command, management: () => command } as unknown as Transport
 }
-const connection = (transport: Transport, agent = async (_call: AgentCall): Promise<unknown> => null) =>
-  new MachineConnection('run/node-00000000000000000000000000000000.sock', transport, { agent })
+const connection = (
+  transport: Transport,
+  agent = async (_call: AgentCall): Promise<unknown> => null,
+  events = () => {},
+) => new MachineConnection('run/node-00000000000000000000000000000000.sock', transport, { agent, events })
 
 test('the connection skips login noise, then carries calls and their errors', async t => {
   const machine = connection(transport(node.slice(1)))
@@ -46,6 +49,16 @@ test("the node's agent calls are answered by the server", async t => {
   void machine.call('ask', {}, { timeoutMs: 500 }).catch(() => {})
   await new Promise(resolve => setTimeout(resolve, 300))
   assert.deepEqual(calls, [{ session: 's', tool: 'list_sessions', arguments: {} }])
+})
+
+test('a machine says it has events when it connects and when its event log grows', async t => {
+  let told = 0
+  const machine = connection(transport(node.slice(1)), undefined, () => told++)
+  t.after(() => machine.close())
+  await machine.call('echo', 1)
+  assert.equal(told, 1, 'once connected')
+  await machine.call('grow')
+  assert.equal(told, 2)
 })
 
 test('a stale shared SSH connection is retried once without sharing', async t => {

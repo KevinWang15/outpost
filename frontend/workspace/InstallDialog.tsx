@@ -1,8 +1,13 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import type { Installation, InstallationEvent, InstallationPlan, SoftwareId } from '../../shared/model'
+import {
+  softwareLabel,
+  type Installation,
+  type InstallationEvent,
+  type InstallationPlan,
+  type SoftwareId,
+} from '../../shared/model'
 import { api, streamInstallation } from '../api'
 import { Dialog } from '../ui/Dialog'
-import { softwareLabel } from './labels'
 
 const ScriptEditor = lazy(() => import('./ScriptEditor'))
 const logLimit = 256 * 1024

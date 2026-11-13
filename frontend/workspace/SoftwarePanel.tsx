@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Check, ChevronDown, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
-import type { Installation, SoftwareId } from '../../shared/model'
+import { softwareLabel, type Installation, type SoftwareId } from '../../shared/model'
 import type { useSoftware } from './useSoftware'
 import InstallDialog from './InstallDialog'
-import { shortVersion, softwareLabel } from './labels'
+import { shortVersion } from './labels'
 
 /** Required software, checked live on the machine. Collapsed to one line when everything is ready. */
 export default function SoftwarePanel({

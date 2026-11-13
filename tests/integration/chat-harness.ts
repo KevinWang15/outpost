@@ -14,6 +14,7 @@ import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
 import type { SessionRecord } from '../../shared/model'
 import { LocalDeployment } from '../../backend/deployment'
 import { ChatHub } from '../../backend/chat/hub'
+import type { LogInput } from '../../backend/logs/activity'
 import type { ChatConnector } from '../../backend/chat/links'
 import { Machines } from '../../backend/machines'
 import { targetResolver } from '../../backend/services'
@@ -172,6 +173,7 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
 
   const hubs: ChatHub[] = []
   const received: ChatServerMessage[] = []
+  const logged: LogInput[] = []
   /** Session files through the machine's own file store. */
   const files = {
     list: async (_context: unknown, sessionId: string) => listFiles(sessionId),
@@ -233,6 +235,7 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
       terminals,
       connect: connector,
       terminalPollMs: 100,
+      log: (_owner, input) => logged.push(input),
       ...timing,
     })
     const close = hub.close.bind(hub)
@@ -253,6 +256,8 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
     owner,
     target,
     sessions: created,
+    /** What the hub recorded in the activity log. */
+    logged,
     files,
     hosts,
     received,

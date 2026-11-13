@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { LogOut, MessagesSquare, Monitor, Server, Settings2, UserRound } from 'lucide-react'
+import { LogOut, MessagesSquare, Monitor, ScrollText, Server, Settings2, UserRound } from 'lucide-react'
 import { pagePaths } from '../../shared/pages'
 import AccountDialog from '../auth/AccountDialog'
 import { useAuth } from '../auth/useAuth'
@@ -22,14 +22,15 @@ export function AppSidebar({
   embedded = false,
   children,
 }: {
-  mode: AppMode
+  /** The mode shown; null on pages of neither, such as Logs. */
+  mode: AppMode | null
   embedded?: boolean
   children: ReactNode
 }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
-        <a className="brand" href={modes.find(item => item.mode === mode)!.href}>
+        <a className="brand" href={modes.find(item => item.mode === mode)?.href ?? pagePaths.workspace}>
           <img src="/outpost.svg" width="26" height="26" alt="" />
           <span>Outpost</span>
           {!embedded && <DeploymentBadge />}
@@ -50,7 +51,7 @@ export function AppSidebar({
         )}
       </div>
       <div className="sidebar-body">{children}</div>
-      {!embedded && <SidebarFooter />}
+      {!embedded && <SidebarFooter logs={mode === null} />}
     </aside>
   )
 }
@@ -60,7 +61,7 @@ function DeploymentBadge() {
   return <span className="mode">{mode === 'hosted' ? 'Hosted' : 'Local'}</span>
 }
 
-function SidebarFooter() {
+function SidebarFooter({ logs }: { logs: boolean }) {
   const { mode, user, signOut } = useAuth()
   const toast = useToast()
   const openDesktop = useDesktopEntry()
@@ -68,6 +69,14 @@ function SidebarFooter() {
     [preferences, setPreferences] = useState(false)
   return (
     <div className="sidebar-footer">
+      <a
+        className={`sidebar-link ${logs ? 'active' : ''}`}
+        href={pagePaths.logs}
+        aria-current={logs ? 'page' : undefined}
+      >
+        <ScrollText size={16} />
+        Logs and webhooks
+      </a>
       <button
         className="sidebar-link desktop-entry"
         onClick={() => {

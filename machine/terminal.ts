@@ -14,6 +14,7 @@ import { TerminalAttachment } from './attachment'
 import { Deliveries } from './delivery'
 import { endTree } from './drivers'
 import { harness } from './harnesses'
+import { recordEvent } from './events'
 import { readRegistry, session as findSession } from './registry'
 import { Sequences } from './sequences'
 import { socketAddress, statePath } from './state'
@@ -170,7 +171,10 @@ export async function serveTerminal() {
     if (client && !ended) resize(client.cols, client.rows)
   }
   const activeViewer = () => [...clients].reverse().find(([, client]) => client.active)?.[0]
+  /** Outpost asked the session to stop: its exit is not the tool's own. */
+  let stopping = false
   const stop = async () => {
+    stopping = true
     if (!childExited && child.pid) await endTree(child.pid)
     close()
   }
@@ -422,13 +426,20 @@ export async function serveTerminal() {
   process.on('SIGTERM', () => void stop())
   process.on('SIGINT', () => void stop())
   listening = true
+  recordEvent({ type: 'started', session: record.id, driver: 'terminal' })
   if (ptyEnded) close()
   // A reusable Bun.Terminal retains its slave descriptor; its exit callback
   // reports stream closure, not child exit. The coding process owns session
   // lifetime. Drain pending output briefly, but never wait for PTY EOF or an
   // inherited descriptor held by a background descendant.
-  void child.exited.then(() => {
+  void child.exited.then(code => {
     childExited = true
+    recordEvent({
+      type: 'exited',
+      session: record.id,
+      driver: 'terminal',
+      code: stopping || typeof code !== 'number' ? null : code,
+    })
     activity.exited()
     if (ended) return
     lastOutputAt = performance.now()

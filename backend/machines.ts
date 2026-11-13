@@ -98,6 +98,8 @@ interface Options {
   env?: NodeJS.ProcessEnv
   /** An agent on this machine called an Outpost tool. */
   agent(call: AgentCall): Promise<unknown>
+  /** The machine has events to read: it connected, or its event log grew. */
+  events(): void
 }
 
 export class MachineConnection {
@@ -209,6 +211,7 @@ export class MachineConnection {
         }
         this.startFailed = null
         ready()
+        this.options.events()
         continue
       }
       this.receive(message)
@@ -246,6 +249,8 @@ export class MachineConnection {
         this.streams.delete(message.stream)
         return stream?.finish(error, message.data)
       }
+      case 'events':
+        return this.options.events()
       case 'call': {
         // The node asks on behalf of an agent; answer like any other call.
         const answer = (result: { ok: true; data: unknown } | { ok: false; error: RemoteError }) =>
@@ -354,6 +359,8 @@ export class Machines {
   agent: (owner: Owner, targetId: string, call: AgentCall) => Promise<unknown> = async () => {
     throw new Error('Outpost is starting. Try again shortly.')
   }
+  /** Reads a machine's events when it has some; set once the activity log exists. */
+  events: (owner: Owner, targetId: string) => void = () => {}
 
   constructor(
     private secret: string,
@@ -370,6 +377,7 @@ export class Machines {
       connection = new MachineConnection(socket, transport, {
         env: this.env,
         agent: call => this.agent(owner, targetId, call),
+        events: () => this.events(owner, targetId),
       })
       this.connections.set(key, connection)
     }

@@ -4,7 +4,9 @@
 //   C  control message (JSON)
 //   D  stream data: a 4-byte stream number, then bytes
 
-export const machineProtocol = 1
+import type { ActivityState } from './activity'
+
+export const machineProtocol = 2
 /** Printed by the node before its first frame; login shells may print before it. */
 export const nodeMagic = '\0OUTPOST-NODE-1\0'
 /** Bytes a stream may send before the receiver grants more. */
@@ -29,6 +31,28 @@ export type MachineMessage =
   /** Either side ends a stream. A receiver's final answer travels with it. */
   | { type: 'close'; stream: number; error?: RemoteError; data?: unknown }
   | { type: 'credit'; stream: number; bytes: number }
+  /** node → server: the machine's event log grew; read it with the `events` call. */
+  | { type: 'events' }
+
+/** What sessions' drivers did on a machine, from its event log (machine/events.ts). */
+export type MachineEvent =
+  | {
+      type: 'activity'
+      at: string
+      session: string
+      state: ActivityState
+      previous: ActivityState | null
+      detail: string | null
+    }
+  | { type: 'started'; at: string; session: string; driver: 'terminal' | 'chat' }
+  /** `code` is the tool's exit status; null when Outpost stopped it. */
+  | { type: 'exited'; at: string; session: string; driver: 'terminal' | 'chat'; code: number | null }
+/** Events after a cursor; `cursor` continues from the last one returned. */
+export interface MachineEvents {
+  events: MachineEvent[]
+  cursor: string
+  more: boolean
+}
 
 /** An Outpost MCP tool call an agent made on this machine, answered by the server. */
 export interface AgentCall {

@@ -8,6 +8,7 @@ import type { ActivityState, SessionActivity } from '../shared/activity'
 import type { SessionRecord } from '../shared/model'
 import type { Harness, Marker } from './harnesses/harness'
 import { turnId } from './harnesses/harness'
+import { recordEvent } from './events'
 import { changeRegistry, switchConversation } from './registry'
 import { readJson, statePath, writeJson } from './state'
 import { lines, reverseRecords, timestamp } from './stores'
@@ -29,8 +30,13 @@ export function readActivity(session: string): ActivityRecord | null {
     return null // Derived state; a damaged file reads as no record.
   }
 }
-export const saveActivity = (session: string, record: ActivityRecord) =>
+/** Save the session's activity; a change of state is also recorded for Outpost. */
+export function saveActivity(session: string, record: ActivityRecord) {
+  const previous = readActivity(session)?.last.state ?? null
   writeJson(recordPath(session), { ...record, seen: record.seen.slice(-64) })
+  if (record.last.state !== previous)
+    recordEvent({ type: 'activity', session, state: record.last.state, previous, detail: record.last.detail })
+}
 
 export function activity(
   state: ActivityState,

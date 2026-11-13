@@ -10,6 +10,7 @@ import type { Owner } from '../deployment'
 import { terminalFailure } from './failures'
 import type { Stream } from '../machines'
 import type { SessionService, TargetContext } from '../sessions'
+import type { LogInput } from '../logs/activity'
 import type { ConnectTokens, Grant } from './tokens'
 
 const highWater = 256 * 1024
@@ -31,6 +32,8 @@ interface Dependencies {
   active(owner: Owner): boolean
   sessions: SessionService
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
+  /** Records terminal connections in the account's activity log. */
+  log?(owner: Owner, input: LogInput): void
 }
 
 /** One client socket attached to one terminal stream on the machine connection.
@@ -53,6 +56,9 @@ class Connection {
   private probe: { id: string; sentAt: number } | null = null
   private alive = true
   readonly abort = new AbortController()
+  /** Its session and machine, once known, and why it closed. */
+  named: { machine: { id: string; name: string }; session: { id: string; name: string } } | null = null
+  closing: { reason: CloseReason; message: string } | null = null
 
   constructor(
     readonly grant: Grant,
@@ -170,6 +176,7 @@ class Connection {
       this.pendingBytes = 0
       for (const frame of pending) this.write(frame)
       this.send({ type: 'ready' })
+      this.broker.logged(this, 'opened')
       this.checkTarget()
     } else if (message.type === 'deliveries') {
       if (Number.isSafeInteger(message.waiting) && (message.waiting as number) >= 0)
@@ -344,6 +351,7 @@ class Connection {
 
   close(reason: CloseReason, message: string) {
     if (this.finished) return
+    this.closing = { reason, message }
     this.send({ type: 'closed', reason, message })
     if (this.socket.readyState === WebSocket.OPEN) this.socket.close(1000, reason)
     this.finish()
@@ -359,6 +367,7 @@ class Connection {
     this.pendingBytes = 0
     this.broker.forget(this)
     this.stream?.end()
+    if (this.started) this.broker.logged(this, 'closed')
   }
 }
 
@@ -376,6 +385,23 @@ export class TerminalBroker {
   }
   forget(connection: Connection) {
     this.connections.delete(connection)
+  }
+
+  logged(connection: Connection, change: 'opened' | 'closed') {
+    const { named, closing } = connection
+    if (!named) return
+    const problem = closing && (closing.reason === 'error' || closing.reason === 'unavailable') ? closing : null
+    this.dependencies.log?.(connection.grant.owner, {
+      level: problem ? 'warning' : 'info',
+      kind: 'terminal',
+      type: change === 'opened' ? 'connected' : 'disconnected',
+      message:
+        change === 'opened'
+          ? `A terminal connected to ${named.session.name}`
+          : `A terminal disconnected from ${named.session.name}${problem ? `: ${problem.message}` : ''}`,
+      ...named,
+      details: closing ? { reason: closing.reason } : {},
+    })
   }
 
   /** A fresh Connect can focus an existing tab without attaching another PTY. */
@@ -415,6 +441,10 @@ export class TerminalBroker {
       if (connection.abort.signal.aborted) return
       const session = await this.dependencies.sessions.get(context, grant.sessionId, connection.abort.signal)
       if (socket.readyState !== WebSocket.OPEN) return
+      connection.named = {
+        machine: { id: context.target.id, name: context.target.name },
+        session: { id: session.id, name: session.name },
+      }
       connection.send({
         type: 'hello',
         resume: this.dependencies.tokens.resume(redeemed.id, grant),

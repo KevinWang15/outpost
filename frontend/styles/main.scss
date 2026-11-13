@@ -662,8 +662,13 @@ kbd {
   background: transparent;
   color: var(--text);
   text-align: left;
+  text-decoration: none;
   &:hover {
     background: var(--sidebar-hover);
+  }
+  &.active {
+    background: var(--accent-soft);
+    color: var(--accent-hover);
   }
 }
 .account-button {

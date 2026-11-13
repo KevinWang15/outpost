@@ -12,7 +12,7 @@ import { inspectTargetSoftware } from '../session-actions'
 type Params = { targetId: string }
 
 export function workspaceRoutes(app: FastifyInstance, services: Services) {
-  const { deployment, installations } = services
+  const { deployment, installations, log } = services
   app.get('/api/environment', async request => {
     deployment.owner(request)
     return { mode: deployment.mode, localTargets: deployment.localTargets } satisfies Environment
@@ -27,17 +27,32 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
     }
-    return reply.code(201).send(await deployment.workspace(owner).add(target))
+    const added = await deployment.workspace(owner).add(target)
+    log.record(owner, {
+      kind: 'machine',
+      type: 'added',
+      message: `${added.name} was added`,
+      machine: { id: added.id, name: added.name },
+      details: { address: added.kind === 'ssh' ? `${added.user}@${added.host}` : 'this computer' },
+    })
+    return reply.code(201).send(added)
   })
   app.patch<{ Params: Params; Body: TargetUpdate }>(
     '/api/targets/:targetId',
     { schema: { body: targetUpdate } },
     async request => {
-      const { workspace, target } = await services.context(request, request.params.targetId)
-      return workspace.edit(target.id, {
+      const { owner, workspace, target } = await services.context(request, request.params.targetId)
+      const edited = await workspace.edit(target.id, {
         ...request.body,
         ...(request.body.name ? { name: request.body.name.trim() } : {}),
       })
+      log.record(owner, {
+        kind: 'machine',
+        type: 'edited',
+        message: `${edited.name} was edited`,
+        machine: { id: edited.id, name: edited.name },
+      })
+      return edited
     },
   )
   app.delete<{ Params: Params }>('/api/targets/:targetId', async (request, reply) => {
@@ -45,6 +60,12 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
     await installations.removeTarget(owner, target.id, () => workspace.remove(target.id))
     services.broker.closeTarget(owner, target.id)
     services.machines.forget(owner, target.id)
+    log.record(owner, {
+      kind: 'machine',
+      type: 'removed',
+      message: `${target.name} was removed`,
+      machine: { id: target.id, name: target.name },
+    })
     return reply.code(204).send()
   })
   app.get<{ Params: Params }>('/api/targets/:targetId/software', async (request, reply) =>

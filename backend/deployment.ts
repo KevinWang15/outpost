@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { IncomingHttpHeaders } from 'node:http'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { TargetInput } from '../shared/model'
 import type { DesktopAccount } from '../shared/desktopAuth'
@@ -22,18 +23,26 @@ export interface AccountIdentity {
 }
 
 /** The only place where local and hosted installations differ ("Modes differ only in identity"). */
+/** What a deployment reads from a request: a Fastify request has it, and a raw
+ * WebSocket upgrade can provide it. */
+export interface Caller {
+  ip: string
+  headers: IncomingHttpHeaders
+  cookies: Record<string, string | undefined>
+}
+
 export interface Deployment {
   readonly mode: 'local' | 'hosted'
   readonly directory: string
   readonly secret: string
   readonly localTargets: boolean
   /** Returns a rejection message for requests outside this deployment's network policy. */
-  admits(request: FastifyRequest): string | null
-  owner(request: FastifyRequest): Owner
+  admits(request: Caller): string | null
+  owner(request: Caller): Owner
   active(owner: Owner): boolean
   account(userId: string): AccountIdentity | null
-  /** Verified owners whose configured targets can be indexed in the background. */
-  historyOwners(): Owner[]
+  /** Verified owners whose machines Outpost watches in the background (history, activity). */
+  backgroundOwners(): Owner[]
   workspace(owner: Owner): Workspace
   identity(owner: Owner): Promise<SshIdentity | null>
   /** Public origin used in links that leave the browser, e.g. outpost:// URLs. */
@@ -81,7 +90,7 @@ export class LocalDeployment implements Deployment {
   static async open(directory: string) {
     return new LocalDeployment(directory, await serverSecret(directory))
   }
-  admits(request: FastifyRequest) {
+  admits(request: Caller) {
     if (!isLoopbackAddress(request.ip))
       return 'Outpost only accepts connections from this computer. Use an SSH tunnel for remote access.'
     if (!loopbackHost(hostname(request.headers.host))) return 'Use the configured Outpost address.'
@@ -107,7 +116,7 @@ export class LocalDeployment implements Deployment {
       ? { account: { id: 'local', name: 'Local workspace', email: null }, revision: 'local' }
       : null
   }
-  historyOwners() {
+  backgroundOwners() {
     return [LocalDeployment.owner]
   }
   workspace() {

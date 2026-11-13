@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { FastifyRequest } from 'fastify'
 import type { Deployment, Owner } from './deployment'
 import type { Installations } from './installations'
+import type { ActivityLog } from './logs/activity'
 import type { Machines } from './machines'
 import type { SessionService, TargetContext } from './sessions'
 import type { SessionFileClient } from './sessionFiles'
@@ -21,6 +22,7 @@ export interface Services {
   tokens: ConnectTokens
   broker: TerminalBroker
   machines: Machines
+  log: ActivityLog
   active(owner: Owner): boolean
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
   context(request: FastifyRequest, targetId: string): Promise<TargetContext>

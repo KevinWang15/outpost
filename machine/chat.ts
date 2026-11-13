@@ -24,6 +24,7 @@ import {
 import { FrameDecoder, maxTerminalFrame, terminalControl } from '../shared/node/terminalFrames'
 import { parseSessionFile, previewImage, sessionFileId } from '../shared/sessionFiles'
 import { readActivity, saveActivity } from './activity'
+import { recordEvent } from './events'
 import { changeRegistry, switchConversation } from './registry'
 import { contentPath, filesDirectory, readFile } from './files'
 import { socketAddress, statePath } from './state'
@@ -151,6 +152,7 @@ export class ChatHost {
 
   async start() {
     await this.listen()
+    recordEvent({ type: 'started', session: this.launch.session, driver: 'chat' })
     try {
       await this.open()
     } catch (error) {
@@ -797,6 +799,7 @@ export class ChatHost {
   private shutdown(code: number) {
     if (this.ended) return
     this.ended = true
+    recordEvent({ type: 'exited', session: this.launch.session, driver: 'chat', code })
     if (this.infoTimer) clearTimeout(this.infoTimer)
     if (this.idleTimer) clearTimeout(this.idleTimer)
     this.broadcast({ type: 'info', info: this.info })

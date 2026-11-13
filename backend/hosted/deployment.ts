@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AccountUser } from '../../shared/auth'
 import type { TargetInput } from '../../shared/model'
 import { isLoopbackAddress } from '../../shared/loopback'
-import type { Deployment, Owner } from '../deployment'
+import type { Caller, Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
 import { Workspace } from '../workspace'
 import { AccountStore, type AccountSession } from './store'
@@ -112,7 +112,7 @@ export class HostedDeployment implements Deployment {
       return false
     }
   }
-  admits(request: FastifyRequest) {
+  admits(request: Caller) {
     // Simulated development email stays on loopback.
     if (!this.production && !isLoopbackAddress(request.ip))
       return 'This development instance only accepts loopback connections.'
@@ -121,12 +121,12 @@ export class HostedDeployment implements Deployment {
       return 'Cross-origin requests are not allowed'
     return null
   }
-  private session(request: FastifyRequest): AccountSession {
+  private session(request: Caller): AccountSession {
     const session = this.store.session(request.cookies[COOKIE] ?? '')
     if (!session) throw new AppError('Sign in to continue.', 401)
     return session
   }
-  owner(request: FastifyRequest): Owner {
+  owner(request: Caller): Owner {
     const session = this.session(request)
     return { userId: session.user.id, loginId: session.id }
   }
@@ -149,7 +149,7 @@ export class HostedDeployment implements Deployment {
     }
     return workspace
   }
-  historyOwners(): Owner[] {
+  backgroundOwners(): Owner[] {
     return this.store.verifiedUserIds().map(userId => ({ userId, loginId: 'background' }))
   }
   identity(owner: Owner) {

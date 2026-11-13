@@ -33,7 +33,7 @@ export interface NativeConversation {
   forkedFrom?: string | null
 }
 
-export interface HistoryMessage {
+interface HistoryMessage {
   role: 'user' | 'assistant' | 'tool'
   text: string
   timestamp: string | null

@@ -19,7 +19,7 @@ export interface ChatApp {
   bridge: ChatBridge | null
   openLink(url: string): void
 }
-export interface ChatShell {
+interface ChatShell {
   select(selection: Selection): void
   open(dialog: ChatDialog): void
 }
@@ -49,14 +49,14 @@ export const ConversationContext = createContext<ConversationActions>({
 
 /** The session's files, for file items and attachments in its turns. Separate from
  * the actions so a file list refresh re-renders only file cards. */
-export interface ConversationFiles {
+interface ConversationFiles {
   access: SessionFiles
   state: SessionFilesState
   open(id: string): void
 }
 export const FilesContext = createContext<ConversationFiles | null>(null)
 
-export interface MarkdownOptions {
+interface MarkdownOptions {
   /** Handles to highlight as @mentions. */
   handles: readonly string[]
   openLink: (url: string) => void

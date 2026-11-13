@@ -26,7 +26,7 @@ import type {
   SessionTarget,
 } from './workspace-model'
 
-export interface WorkspaceHost {
+interface WorkspaceHost {
   shells(): ShellProfile[]
   newLocal(source: WorkspaceWindow, profile?: string, placement?: PanePlacement): void
   recentSessions(): RecentSessionSummary[]

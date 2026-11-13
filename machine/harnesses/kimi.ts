@@ -1,13 +1,12 @@
 // Kimi Code: wire transcripts, ACP allocation, and one installed Outpost plugin
 // for hooks and MCP (Kimi has no invocation-only configuration).
 import { createHash } from 'node:crypto'
-import { statSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import type { SessionRecord } from '../../shared/model'
 import { shellJoin } from '../../shared/shell'
 import { withRpc } from '../rpc'
 import { locked, readJson, statePath, writeJson } from '../state'
-import { clean, foldLines, glob, isRecord, lines, promptTitle, strings, timestamp, type Scan } from '../stores'
+import { clean, foldLines, glob, isRecord, lines, newest, promptTitle, strings, timestamp, type Scan } from '../stores'
 import {
   Harness,
   historyMessage,
@@ -88,16 +87,7 @@ export class Kimi extends Harness {
   }
 
   transcript(session: SessionRecord, conversation: string) {
-    let newest: { path: string; mtime: number } | null = null
-    for (const path of glob(this.storeOf(session), `sessions/*/${conversation}/agents/main/wire.jsonl`)) {
-      try {
-        const mtime = statSync(path).mtimeMs
-        if (!newest || mtime > newest.mtime) newest = { path, mtime }
-      } catch {
-        /* Removed meanwhile. */
-      }
-    }
-    return newest?.path ?? null
+    return newest(glob(this.storeOf(session), `sessions/*/${conversation}/agents/main/wire.jsonl`))
   }
 
   title(session: SessionRecord, conversation: string, scan: Scan) {

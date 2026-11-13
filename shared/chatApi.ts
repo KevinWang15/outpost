@@ -128,7 +128,7 @@ const targetId = Type.String({ minLength: 1, maxLength: 80, pattern: '^[^\\u0000
 const session = { targetId, sessionId: uuid }
 const strict = { additionalProperties: false } as const
 const text = (maxLength: number) => Type.String({ maxLength, pattern: '^[^\\u0000]*$' })
-export const channelName = Type.String({ pattern: '^[a-z0-9][a-z0-9_-]{0,39}$' })
+const channelName = Type.String({ pattern: '^[a-z0-9][a-z0-9_-]{0,39}$' })
 const channelInput = Type.Object(
   {
     id: Type.Optional(uuid),

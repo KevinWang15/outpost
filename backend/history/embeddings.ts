@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-export const embeddingModel = 'Xenova/multilingual-e5-small'
-export const embeddingRevision = '761b726dd34fb83930e26aab4e9ac3899aa1fa78'
+const embeddingModel = 'Xenova/multilingual-e5-small'
+const embeddingRevision = '761b726dd34fb83930e26aab4e9ac3899aa1fa78'
 export const embeddingDimensions = 384
 export const embeddingIdentity = `${embeddingModel}@${embeddingRevision}:q8:mean:normalized:query-passage:v1`
 export type Embed = (text: string, kind: 'query' | 'passage') => Promise<Float32Array>

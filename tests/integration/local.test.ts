@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import test from 'node:test'
+import test, { type TestContext } from 'node:test'
 import type { Session, SoftwareReport, Target } from '../../shared/model'
 import type { TerminalTicket } from '../../shared/protocol'
 import { createApp } from '../../backend/app'
@@ -11,24 +11,28 @@ import { LocalDeployment } from '../../backend/deployment'
 import { api, fixtureHome, removeHome, TerminalClient } from './helpers'
 
 const execute = promisify(execFile)
+/** An Outpost server on loopback whose local target is a fixture home. */
+async function localApp(t: TestContext) {
+  const { directory, home, env } = await fixtureHome('outpost-local-')
+  const deployment = await LocalDeployment.open(join(directory, 'data'))
+  const app = await createApp({ history: false, deployment, env, multiplex: false })
+  await app.listen({ host: '127.0.0.1', port: 0 })
+  const port = (app.server.address() as { port: number }).port
+  const clients: TerminalClient[] = []
+  t.after(async () => {
+    for (const client of clients) client.socket.terminate()
+    await app.close()
+    await removeHome(directory, home)
+  })
+  return { home, env, port, request: api(`http://127.0.0.1:${port}`), clients }
+}
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)])
 
 test(
   'local target: create, connect from a web client, paste, signal, reconnect, detach, terminate',
   { timeout: 120_000, skip: process.platform !== 'linux' },
   async t => {
-    const { directory, home, env } = await fixtureHome('outpost-local-')
-    const deployment = await LocalDeployment.open(join(directory, 'data'))
-    const app = await createApp({ history: false, deployment, env, multiplex: false })
-    await app.listen({ host: '127.0.0.1', port: 0 })
-    const port = (app.server.address() as { port: number }).port
-    const request = api(`http://127.0.0.1:${port}`)
-    const clients: TerminalClient[] = []
-    t.after(async () => {
-      for (const client of clients) client.socket.terminate()
-      await app.close()
-      await removeHome(directory, home)
-    })
+    const { home, env, port, request, clients } = await localApp(t)
 
     const target = await request<Target>(
       'POST',
@@ -261,22 +265,7 @@ test(
   'local sessions connect without a prior software check',
   { timeout: 60_000, skip: process.platform !== 'linux' },
   async t => {
-    const { directory, home, env } = await fixtureHome('outpost-local-')
-    const app = await createApp({
-      history: false,
-      deployment: await LocalDeployment.open(join(directory, 'data')),
-      env,
-      multiplex: false,
-    })
-    await app.listen({ host: '127.0.0.1', port: 0 })
-    const port = (app.server.address() as { port: number }).port
-    const request = api(`http://127.0.0.1:${port}`)
-    const clients: TerminalClient[] = []
-    t.after(async () => {
-      for (const client of clients) client.socket.terminate()
-      await app.close()
-      await removeHome(directory, home)
-    })
+    const { port, request, clients } = await localApp(t)
     const target = await request<Target>('POST', '/targets', { kind: 'local', name: 'Fresh', tools: ['codex'] }, 201)
     assert.equal(target.environment, undefined)
     const session = await request<Session>(

@@ -1,6 +1,6 @@
 import { paneIds } from './layout'
 import type { TabGroup, WindowLayoutState, WorkspaceItem, PanePlacement } from './workspace-model'
-export interface PaneTransferWindow {
+interface PaneTransferWindow {
   captureLayout(): WindowLayoutState
   restoreLayout(state: WindowLayoutState): void
   selection(item: WorkspaceItem): number[]

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
+import type { TestContext } from 'node:test'
+import type { Target } from '../../shared/model'
 import type { ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
 import { quote } from '../../shared/shell'
@@ -11,6 +13,9 @@ import { stopDriver } from '../../machine/drivers'
 import { state } from '../../machine/state'
 import headless from '@xterm/headless'
 import { CheckpointReader } from '../../shared/terminalCheckpoint'
+import { Machines, type Stream } from '../../backend/machines'
+import type { TargetContext } from '../../backend/sessions'
+import { transportFor } from '../../backend/transport'
 
 export const terminalBinary = fileURLToPath(
   new URL(`../../machine/dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
@@ -52,6 +57,29 @@ export async function fixtureHome(prefix: string) {
   // A test must never inherit the binding of the session it runs in.
   for (const key of Object.keys(env)) if (key.startsWith('OUTPOST_')) delete env[key]
   return { directory, home, bin, env }
+}
+
+/** A local target in a fixture home, reached through its machine's node as the server does.
+ * Streams pushed to `streams` are ended when the test finishes. */
+export async function localMachine(t: TestContext, prefix: string, settings: Target) {
+  const { directory, home, env } = await fixtureHome(prefix)
+  const machines = new Machines(settings.id, env)
+  const owner = { userId: 'local', loginId: 'local' }
+  const transport = transportFor(settings, null, { scope: 'local' })
+  const context = {
+    owner,
+    target: settings,
+    transport,
+    machine: machines.get(owner, settings.id, transport),
+    workspace: null,
+  } as unknown as TargetContext
+  const streams: Stream[] = []
+  t.after(async () => {
+    for (const stream of streams) stream.end()
+    machines.close()
+    await removeHome(directory, home)
+  })
+  return { home, env, machines, context, streams }
 }
 
 export function api(base: string) {

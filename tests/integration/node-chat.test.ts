@@ -8,11 +8,10 @@ import type { AgentCall } from '../../shared/machine'
 import { chatHost, type ChatEntry, type ChatHostMessage, type ChatHostRequest } from '../../shared/chatHost'
 import { currentConversation, type SessionInput, type Target } from '../../shared/model'
 import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
-import { Machines, type Stream } from '../../backend/machines'
+import type { Stream } from '../../backend/machines'
 import { SessionFileClient } from '../../backend/sessionFiles'
-import { SessionClient, type TargetContext } from '../../backend/sessions'
-import { transportFor } from '../../backend/transport'
-import { fixtureHome, removeHome } from './helpers'
+import { SessionClient } from '../../backend/sessions'
+import { localMachine } from './helpers'
 
 const settings: Target = {
   kind: 'local',
@@ -91,29 +90,13 @@ class ChatClient {
 }
 
 async function machine(t: TestContext) {
-  const { directory, home, env } = await fixtureHome('outpost-node-chat-')
+  const { home, machines, context, streams } = await localMachine(t, 'outpost-node-chat-', settings)
   const calls: AgentCall[] = []
-  const machines = new Machines('node-chat', env)
   machines.agent = async (_owner, _target, call) => {
     calls.push(call)
     return { sessions: [{ name: 'Other', handle: '@other' }] }
   }
-  const owner = { userId: 'local', loginId: 'local' }
-  const transport = transportFor(settings, null, { scope: 'local' })
-  const context = {
-    owner,
-    target: settings,
-    transport,
-    machine: machines.get(owner, settings.id, transport),
-    workspace: null,
-  } as unknown as TargetContext
   const sessions = new SessionClient()
-  const streams: Stream[] = []
-  t.after(async () => {
-    for (const stream of streams) stream.end()
-    machines.close()
-    await removeHome(directory, home)
-  })
   const project = join(home, 'project')
   const create = (input: Partial<SessionInput> = {}) =>
     sessions.create(context, { name: 'Chat', rootDir: '~/project', tool: 'claude', createDirectory: true, ...input })

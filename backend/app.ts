@@ -29,7 +29,7 @@ import { HistoryHub, type HistoryOptions } from './history/hub'
 import { Machines } from './machines'
 import historyToolDefinitions from '../shared/historyTools.json' with { type: 'json' }
 
-export interface AppOptions {
+interface AppOptions {
   deployment: Deployment
   sessions?: SessionService
   software?: SoftwareService

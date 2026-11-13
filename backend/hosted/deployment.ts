@@ -32,7 +32,7 @@ const body = (properties: Record<string, unknown>) => ({
 const loopbackName = (hostname: string) =>
   hostname === 'localhost' || isLoopbackAddress(hostname.replace(/^\[|\]$/g, ''))
 
-export interface HostedOptions {
+interface HostedOptions {
   directory: string
   publicUrl: string
   production?: boolean

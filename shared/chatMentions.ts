@@ -12,9 +12,9 @@ const slug = (text: string) =>
     .replace(/-+$/, '')
 
 /** Mentions that address every member of a channel. */
-export const everyone = ['all', 'channel', 'here'] as const
+const everyone = ['all', 'channel', 'here'] as const
 
-export interface Handled {
+interface Handled {
   sessionId: string
   targetId: string
   name: string

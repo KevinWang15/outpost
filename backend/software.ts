@@ -130,7 +130,7 @@ const packages = `install_packages() {
 }`
 
 /** Editable presets: shown to the user, and run only as submitted. */
-export function installationScript(id: SoftwareId): string {
+function installationScript(id: SoftwareId): string {
   if (id === 'outpost-terminal')
     return `#!/bin/sh
 set -eu

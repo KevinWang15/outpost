@@ -1,6 +1,6 @@
 // Bounded, read-only access to coding tools' native stores: JSONL records,
 // JSON documents, path patterns and conversation text. Nothing here writes.
-import { closeSync, lstatSync, openSync, readSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { closeSync, lstatSync, openSync, readSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { promptHeaderPattern } from '../shared/chatTranscript'
 
@@ -232,6 +232,20 @@ export function* strings(value: unknown, depth = 0): Generator<string> {
     if (binaryTypes.has(value.type as string)) return
     for (const [key, item] of Object.entries(value)) if (!metadataKeys.has(key)) yield* strings(item, depth + 1)
   }
+}
+
+/** The most recently modified of `paths`, or null. */
+export function newest(paths: Iterable<string>) {
+  let found: { path: string; mtime: number } | null = null
+  for (const path of paths) {
+    try {
+      const mtime = statSync(path).mtimeMs
+      if (!found || mtime > found.mtime) found = { path, mtime }
+    } catch {
+      /* Removed meanwhile. */
+    }
+  }
+  return found?.path ?? null
 }
 
 /** Paths below `root` matching `pattern` ('*' within a name, '**' for any

@@ -6,7 +6,7 @@ interface Host<Pane extends { id: number }> {
   dispose(pane: Pane): void
   settled(): void
 }
-export type CloseResult = 'closed' | 'cancelled' | 'busy' | 'empty'
+type CloseResult = 'closed' | 'cancelled' | 'busy' | 'empty'
 
 /** One confirmation policy for pane, tab and window lifetimes. Consent applies
  * only to the captured terminals that still belong to that exact scope. */

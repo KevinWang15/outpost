@@ -52,7 +52,7 @@ function hostname(value: string | undefined) {
   }
 }
 
-export async function serverSecret(directory: string) {
+async function serverSecret(directory: string) {
   await mkdir(directory, { recursive: true, mode: 0o700 })
   await chmod(directory, 0o700)
   const path = join(directory, 'secret')

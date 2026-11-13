@@ -9,7 +9,7 @@ const fields = [
   { name: 'day of week', min: 0, max: 7 },
 ] as const
 
-export interface Cron {
+interface Cron {
   sets: Set<number>[]
   /** Whether day-of-month / day-of-week were restricted (cron's OR rule). */
   restricted: [boolean, boolean]

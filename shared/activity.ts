@@ -12,7 +12,7 @@ export interface SessionActivity {
   observedAt: string | null
 }
 
-export const activityLabels = {
+const activityLabels = {
   working: 'Working',
   waiting: 'Waiting for you',
   idle: 'Idle',

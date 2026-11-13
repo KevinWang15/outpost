@@ -5,10 +5,8 @@ import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import type { Target } from '../../shared/model.ts'
 import { currentConversation } from '../../shared/model.ts'
-import { Machines } from '../../backend/machines.ts'
-import { SessionClient, type TargetContext } from '../../backend/sessions.ts'
-import { transportFor } from '../../backend/transport.ts'
-import { fixtureHome, removeHome } from './helpers.ts'
+import { SessionClient } from '../../backend/sessions.ts'
+import { localMachine } from './helpers.ts'
 
 // Conversation discovery and native identity, run by the machine's node on a local target.
 const settings: Target = {
@@ -20,23 +18,9 @@ const settings: Target = {
 }
 const jsonl = (records: unknown[]) => records.map(record => JSON.stringify(record)).join('\n') + '\n'
 async function fixture(t: TestContext) {
-  const { directory, home, env } = await fixtureHome('outpost-coding-')
+  const { home, env, context: target } = await localMachine(t, 'outpost-coding-', settings)
   const root = join(home, "project 'quotes' é")
   await mkdir(root)
-  const machines = new Machines('conversations', env)
-  const owner = { userId: 'local', loginId: 'local' }
-  const transport = transportFor(settings, null, { scope: 'local' })
-  const target = {
-    owner,
-    target: settings,
-    transport,
-    machine: machines.get(owner, settings.id, transport),
-    workspace: null,
-  } as unknown as TargetContext
-  t.after(async () => {
-    machines.close()
-    await removeHome(directory, home)
-  })
   const service = new SessionClient()
   const put = async (path: string, content: string) => {
     await mkdir(join(path, '..'), { recursive: true })

@@ -5,7 +5,7 @@
 import type { SessionActivity } from '../shared/activity'
 import { readJson, statePath, writeJson } from './state'
 
-export interface Delivery {
+interface Delivery {
   /** The server's key for it; adding the same key again changes nothing. */
   key: string
   text: string

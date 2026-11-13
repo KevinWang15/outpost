@@ -2,7 +2,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Ellipsis } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-export interface MenuItem {
+interface MenuItem {
   label: string
   icon?: ReactNode
   danger?: boolean

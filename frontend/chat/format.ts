@@ -26,7 +26,7 @@ export function elapsed(from: string | null, to: string | null = null) {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
 }
 
-export type Presence = ActivityState | 'stopped' | 'terminal'
+type Presence = ActivityState | 'stopped' | 'terminal'
 
 /** One status for dots and labels: what the session is doing, or where it runs. */
 export function presence(session: ChatSession): Presence {

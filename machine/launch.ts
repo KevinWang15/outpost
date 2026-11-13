@@ -12,18 +12,18 @@ import { current, readRegistry, RegistryError } from './registry'
 import { machineExecutable, state, statePath, writeFile } from './state'
 import { driverStatus } from './drivers'
 
-export type Driver = 'terminal' | 'chat'
+type Driver = 'terminal' | 'chat'
 export const terminalSocket = (session: string) => `terminals/${session}.sock`
 export const chatSocket = (session: string) => `chats/${session}.sock`
 
 /** The launch's binding, read by every Outpost process the tool starts. */
-export const binding = (session: SessionRecord, driver: Driver) => ({
+const binding = (session: SessionRecord, driver: Driver) => ({
   OUTPOST_SESSION_ID: session.id,
   OUTPOST_STATE_DIRECTORY: state.directory,
   OUTPOST_DRIVER: driver,
 })
 
-export const servers = (session: SessionRecord, driver: Driver): McpServer[] => [
+const servers = (session: SessionRecord, driver: Driver): McpServer[] => [
   { name: 'outpost', command: machineExecutable(), args: ['mcp'], env: binding(session, driver) },
 ]
 

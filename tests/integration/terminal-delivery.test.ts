@@ -7,10 +7,9 @@ import { join } from 'node:path'
 import test from 'node:test'
 import type { Target } from '../../shared/model'
 import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
-import { Machines, type Stream } from '../../backend/machines'
-import { SessionClient, type TargetContext, type TerminalDelivery } from '../../backend/sessions'
-import { transportFor } from '../../backend/transport'
-import { fixtureHome, removeHome } from './helpers'
+import type { Stream } from '../../backend/machines'
+import { SessionClient, type TerminalDelivery } from '../../backend/sessions'
+import { localMachine } from './helpers'
 
 const settings: Target = {
   kind: 'local',
@@ -45,24 +44,8 @@ function viewer(stream: Stream) {
 }
 
 test('a terminal session takes messages only when nothing is in the way, once each', { timeout: 120_000 }, async t => {
-  const { directory, home, env } = await fixtureHome('outpost-delivery-')
-  const machines = new Machines('delivery', env)
-  const owner = { userId: 'local', loginId: 'local' }
-  const transport = transportFor(settings, null, { scope: 'local' })
-  const context = {
-    owner,
-    target: settings,
-    transport,
-    machine: machines.get(owner, settings.id, transport),
-    workspace: null,
-  } as unknown as TargetContext
+  const { home, context, streams } = await localMachine(t, 'outpost-delivery-', settings)
   const sessions = new SessionClient()
-  const streams: Stream[] = []
-  t.after(async () => {
-    for (const stream of streams) stream.end()
-    machines.close()
-    await removeHome(directory, home)
-  })
   const session = await sessions.create(context, {
     name: 'Builder',
     rootDir: '~/builder',

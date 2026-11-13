@@ -21,7 +21,7 @@ export interface Transport {
   login(command: string): Command
 }
 
-export interface TransportOptions {
+interface TransportOptions {
   /** Directory for OpenSSH connection sharing on supported hosts; omit to disable. */
   multiplex?: string
   /** Distinguishes owners so connection sharing never crosses accounts. */

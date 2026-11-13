@@ -13,7 +13,7 @@ import { maxSessionFileBytes } from '../../shared/sessionFiles'
 import { fileSize } from '../terminal/sessionFiles'
 import { newKey } from './client'
 
-export interface Suggestion {
+interface Suggestion {
   value: string
   label: string
   detail?: string

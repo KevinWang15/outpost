@@ -23,7 +23,7 @@ import {
 import { locked, now, statePath } from './state'
 import { Scan } from './stores'
 
-export async function describe(record: SessionRecord, registry: Registry): Promise<Session> {
+async function describe(record: SessionRecord, registry: Registry): Promise<Session> {
   const { terminal, chat } = await driverStatus(record.id)
   const running = terminal ?? chat
   const adapter = harness(record.tool)

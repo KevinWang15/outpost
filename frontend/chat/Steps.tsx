@@ -72,7 +72,7 @@ function Lines({ text, limit = 40 }: { text: string; limit?: number }) {
 }
 
 /** A unified line diff of an ACP diff block; large changes show old and new. */
-export function Diff({ diff }: { diff: Extract<acp.ToolCallContent, { type: 'diff' }> }) {
+function Diff({ diff }: { diff: Extract<acp.ToolCallContent, { type: 'diff' }> }) {
   const before = diff.oldText?.split('\n') ?? []
   const after = diff.newText.split('\n')
   let start = 0

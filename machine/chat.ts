@@ -34,7 +34,7 @@ const identifier = (value: unknown): value is string => typeof value === 'string
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-export function validLaunch(value: unknown): value is ChatLaunch {
+function validLaunch(value: unknown): value is ChatLaunch {
   if (!record(value)) return false
   const launch = value as unknown as ChatLaunch
   return (

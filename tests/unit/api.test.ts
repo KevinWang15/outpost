@@ -36,7 +36,23 @@ async function setup(t: test.TestContext) {
       headers: response.headers,
     }
   }
-  return { app, port, sessions, call, deployment }
+  /** An SSH target with one session on it. */
+  const addSession = async () => {
+    const { body: target } = (await call('POST', '/targets', {
+      kind: 'ssh',
+      name: 'dev',
+      host: 'dev.example.com',
+      user: 'dev',
+      tools: ['claude'],
+    })) as { body: Target }
+    const { body: session } = (await call('POST', `/targets/${target.id}/sessions`, {
+      name: 'Build',
+      rootDir: '~/p',
+      tool: 'claude',
+    })) as { body: Session }
+    return { target, session }
+  }
+  return { app, port, sessions, call, addSession, deployment }
 }
 
 test('requests are limited to loopback, the configured host, same origin, and marked writes', async t => {
@@ -152,19 +168,8 @@ test('targets and sessions are validated strictly', async t => {
 })
 
 test('web connections issue scoped tickets and reject terminal-choice payloads', async t => {
-  const { call } = await setup(t)
-  const { body: target } = (await call('POST', '/targets', {
-    kind: 'ssh',
-    name: 'dev',
-    host: 'dev.example.com',
-    user: 'dev',
-    tools: ['claude'],
-  })) as { body: Target }
-  const { body: session } = (await call('POST', `/targets/${target.id}/sessions`, {
-    name: 'Build',
-    rootDir: '~/p',
-    tool: 'claude',
-  })) as { body: Session }
+  const { call, addSession } = await setup(t)
+  const { target, session } = await addSession()
   const path = `/targets/${target.id}/sessions/${session.id}/connect`
   assert.equal((await call('POST', path, { terminal: 'kitty' })).status, 400)
   const web = (await call('POST', path, {})).body as TerminalTicket
@@ -205,19 +210,8 @@ test('fork validates input, resolves the source on its target, and inherits laun
 })
 
 test('the broker relays a terminal and reports attach failures', async t => {
-  const { port, call, sessions } = await setup(t)
-  const { body: target } = (await call('POST', '/targets', {
-    kind: 'ssh',
-    name: 'dev',
-    host: 'dev.example.com',
-    user: 'dev',
-    tools: ['claude'],
-  })) as { body: Target }
-  const { body: session } = (await call('POST', `/targets/${target.id}/sessions`, {
-    name: 'Build',
-    rootDir: '~/p',
-    tool: 'claude',
-  })) as { body: Session }
+  const { port, call, sessions, addSession } = await setup(t)
+  const { target, session } = await addSession()
   const connect = async () =>
     (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, {})).body as TerminalTicket
   const { token } = await connect()
@@ -265,18 +259,7 @@ test('the broker relays a terminal and reports attach failures', async t => {
 
   const failing = await setup(t)
   failing.sessions.failAttach = true
-  const { body: other } = (await failing.call('POST', '/targets', {
-    kind: 'ssh',
-    name: 'dev',
-    host: 'dev',
-    user: 'dev',
-    tools: ['claude'],
-  })) as { body: Target }
-  const { body: otherSession } = (await failing.call('POST', `/targets/${other.id}/sessions`, {
-    name: 'x',
-    rootDir: '~/p',
-    tool: 'claude',
-  })) as { body: Session }
+  const { target: other, session: otherSession } = await failing.addSession()
   const failed = (await failing.call('POST', `/targets/${other.id}/sessions/${otherSession.id}/connect`, {}))
     .body as TerminalTicket
   const broken = new TerminalClient(
@@ -287,19 +270,8 @@ test('the broker relays a terminal and reports attach failures', async t => {
 })
 
 test('clients speaking another protocol version are told to update, without spending the launch token', async t => {
-  const { port, call } = await setup(t)
-  const { body: target } = (await call('POST', '/targets', {
-    kind: 'ssh',
-    name: 'dev',
-    host: 'dev.example.com',
-    user: 'dev',
-    tools: ['claude'],
-  })) as { body: Target }
-  const { body: session } = (await call('POST', `/targets/${target.id}/sessions`, {
-    name: 'Build',
-    rootDir: '~/p',
-    tool: 'claude',
-  })) as { body: Session }
+  const { port, call, addSession } = await setup(t)
+  const { target, session } = await addSession()
   const { token } = (await call('POST', `/targets/${target.id}/sessions/${session.id}/connect`, {}))
     .body as TerminalTicket
   const base = `ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(token)}`

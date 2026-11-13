@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, sep } from 'node:path'
 import type { SessionRecord } from '../../shared/model'
 import { shellJoin } from '../../shared/shell'
 import { statePath } from '../state'
-import { clean, foldLines, glob, isRecord, promptTitle, strings, timestamp, type Scan } from '../stores'
+import { clean, foldLines, glob, isRecord, newest, promptTitle, strings, timestamp, type Scan } from '../stores'
 import {
   Harness,
   historyMessage,
@@ -105,16 +105,7 @@ export class Claude extends Harness {
   }
 
   transcript(session: SessionRecord, conversation: string) {
-    let newest: { path: string; mtime: number } | null = null
-    for (const path of glob(this.storeOf(session), `projects/*/${conversation}.jsonl`)) {
-      try {
-        const mtime = statSync(path).mtimeMs
-        if (!newest || mtime > newest.mtime) newest = { path, mtime }
-      } catch {
-        /* Removed meanwhile. */
-      }
-    }
-    return newest?.path ?? null
+    return newest(glob(this.storeOf(session), `projects/*/${conversation}.jsonl`))
   }
 
   title(session: SessionRecord, conversation: string) {

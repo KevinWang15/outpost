@@ -77,7 +77,7 @@ export type LinkEvent =
 
 /** `unknown`: the request reached a host but no answer came back, so it may have
  * taken effect. Without it, a failed result means the host never acted. */
-export interface LinkResult {
+interface LinkResult {
   ok: boolean
   message?: string
   data?: unknown

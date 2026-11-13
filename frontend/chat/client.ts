@@ -1,6 +1,5 @@
 // The chat page's connection and state: one WebSocket to /api/chat, the session
 // list across targets, one journal per open session, and channel messages.
-import type * as acp from '@agentclientprotocol/sdk'
 import {
   chatProtocol,
   sessionKey,
@@ -20,7 +19,7 @@ import { transcript, type Transcript } from '../../shared/chatTranscript'
 import { parseSessionFile } from '../../shared/sessionFiles'
 import { SessionFiles } from '../terminal/sessionFiles'
 
-export interface Conversation {
+interface Conversation {
   journal: ChatJournal | null
   info: ChatInfo | null
   link: LinkState
@@ -30,15 +29,15 @@ export interface Conversation {
   /** An open asked to start the tool before the socket could carry it. */
   start: boolean
 }
-export interface ChannelState {
+interface ChannelState {
   messages: ChannelMessage[]
   more: boolean
   loading: boolean
 }
 type Status = 'connecting' | 'live' | 'closed'
 type Request = Extract<ChatClientMessage, { id: string }>
-export type ChatRequest = Request extends infer R ? (R extends Request ? Omit<R, 'id'> : never) : never
-export interface Result {
+type ChatRequest = Request extends infer R ? (R extends Request ? Omit<R, 'id'> : never) : never
+interface Result {
   ok: boolean
   message?: string
   data?: unknown
@@ -411,9 +410,7 @@ export class ChatClient {
   }
 }
 
-export const refOf = (key: string): SessionRef => {
+const refOf = (key: string): SessionRef => {
   const index = key.lastIndexOf('/')
   return { targetId: key.slice(0, index), sessionId: key.slice(index + 1) }
 }
-
-export type ContentBlock = acp.ContentBlock

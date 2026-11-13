@@ -14,7 +14,7 @@ export function chatNavigationAllowed(origin: string, url: string) {
   }
 }
 
-export interface ChatTicketResponse {
+interface ChatTicketResponse {
   server: string
   accountId: string
   ticket: string

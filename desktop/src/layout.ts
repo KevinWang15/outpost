@@ -11,7 +11,7 @@ import type {
 export const tabBarHeight = 36
 // The visible divider is 1px; reserve a forgiving native mouse target around it.
 export const splitGap = 6
-export const paneHeaderHeight = 28
+const paneHeaderHeight = 28
 
 export interface PaneBounds {
   x: number
@@ -19,7 +19,7 @@ export interface PaneBounds {
   width: number
   height: number
 }
-export interface PaneGeometry {
+interface PaneGeometry {
   id: number
   bounds: PaneBounds
   content: PaneBounds

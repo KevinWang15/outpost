@@ -1,16 +1,14 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
 import { parseSessionActivity, unavailableActivity } from '../../shared/activity'
 import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, maxInputQueue, protocolVersion, terminalConnectionPolicy } from '../../shared/protocol'
-import { BoundedWriter } from '../../shared/node/boundedWriter'
-import { FrameDecoder, relayMagic, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
+import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
 import { signalValidators } from '../../shared/signals'
 import { terminalService, terminalSize } from '../../shared/terminalService'
 import type { Owner } from '../deployment'
 import { terminalFailure } from './failures'
-import { protocolResult } from '../process'
+import type { Stream } from '../machines'
 import type { SessionService, TargetContext } from '../sessions'
 import type { ConnectTokens, Grant } from './tokens'
 
@@ -33,18 +31,16 @@ interface Dependencies {
   active(owner: Owner): boolean
   sessions: SessionService
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
-  env?: NodeJS.ProcessEnv
 }
 
-/** One client socket attached to one relay process. Stateless by design
- * Closing either end ends both; the target terminal service keeps the session. */
+/** One client socket attached to one terminal stream on the machine connection.
+ * Closing either end ends both; the machine's terminal service keeps the session. */
 class Connection {
-  private child: ChildProcessWithoutNullStreams | null = null
+  private stream: Stream | null = null
   private decoder = new FrameDecoder()
-  private prelude: Buffer = Buffer.alloc(0)
-  private stderr = ''
   private started = false
-  private writer: BoundedWriter | null = null
+  /** Output waits for the viewer to acknowledge what it has. */
+  private paused = false
   private pending: Buffer[] = []
   private pendingBytes = 0
   private unacked = 0
@@ -86,7 +82,7 @@ class Connection {
     const now = Date.now()
     // The response shares stdout with output. A viewer deliberately applying
     // backpressure must drain before we can judge the target's responsiveness.
-    if (this.child?.stdout.isPaused()) {
+    if (this.paused) {
       if (now - this.lastOutputProgress >= terminalConnectionPolicy.outputStallMs)
         return this.close('error', 'The terminal viewer stopped processing output.')
       if (this.probe) this.probe.sentAt = now
@@ -102,61 +98,31 @@ class Connection {
   }
 
   private pauseOutput() {
-    if (!this.child?.stdout.isPaused()) this.lastOutputProgress = Date.now()
-    this.child?.stdout.pause()
+    if (!this.paused) this.lastOutputProgress = Date.now()
+    this.paused = true
+    this.stream?.pause()
   }
 
   send(message: ServerMessage) {
     if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message))
   }
 
-  start(child: ChildProcessWithoutNullStreams, input?: Buffer) {
-    if (this.finished) {
-      child.kill()
-      return
-    }
-    this.child = child
-    this.writer = new BoundedWriter(child.stdin, maxInputQueue, terminalConnectionPolicy.inputStallMs, message =>
-      this.close('unavailable', message),
-    )
-    child.stdin.on('error', () => this.close('error', 'The connection to the target stopped accepting input.'))
-    child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (text: string) => {
-      this.stderr = (this.stderr + text).slice(-4096)
-    })
-    child.stdout.on('data', (chunk: Buffer) => this.output(chunk))
-    child.on('error', error => this.close('error', `Could not reach the target: ${error.message}`))
-    child.on('close', () => {
+  start(stream: Stream) {
+    if (this.finished) return stream.end()
+    this.stream = stream
+    stream.onData(chunk => this.output(chunk))
+    stream.onClose(error => {
       if (this.finished) return
-      if (!this.started) {
-        const message = this.stderr.trim().split('\n').at(-1) || 'Could not attach to the session.'
-        let result: ReturnType<typeof protocolResult> = null
-        try {
-          result = protocolResult(this.prelude.toString('utf8'))
-        } catch {
-          /* Keep the transport's own message. */
-        }
-        if (result && !result.ok) {
-          const failure = terminalFailure(result.error)
-          return this.close(failure.reason, failure.message)
-        }
-        return this.close('error', message)
+      if (error && !this.started) {
+        const failure = terminalFailure(error)
+        return this.close(failure.reason, failure.message)
       }
-      this.close('error', 'The connection to the target was lost.')
+      this.close('error', error?.message ?? 'The connection to the machine was lost.')
     })
-    if (input) this.writer.write(input)
   }
 
   private output(chunk: Buffer) {
     if (this.finished) return
-    if (!this.started && !this.prelude.includes(relayMagic)) {
-      // Login shells may print before the relay starts; keep a bounded tail for errors.
-      this.prelude = Buffer.concat([this.prelude, chunk]).subarray(-64 * 1024)
-      const start = this.prelude.indexOf(relayMagic)
-      if (start < 0) return
-      chunk = this.prelude.subarray(start + relayMagic.length)
-      this.prelude = Buffer.from(relayMagic)
-    }
     let frames
     try {
       frames = this.decoder.feed(chunk)
@@ -205,6 +171,9 @@ class Connection {
       for (const frame of pending) this.write(frame)
       this.send({ type: 'ready' })
       this.checkTarget()
+    } else if (message.type === 'files') {
+      // The agent stored a file: every viewer of the session refreshes its list.
+      this.broker.filesChanged(this.grant)
     } else if (message.type === 'activity') {
       this.send({
         type: 'activity',
@@ -242,8 +211,7 @@ class Connection {
         return reply(false, (error as Error).message)
       }
       if (this.socket.readyState !== WebSocket.OPEN) return reply(false, 'The Outpost terminal disconnected.')
-      if (signal!.type === 'files.changed') this.broker.filesChanged(this.grant)
-      else this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
+      this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
       reply(true)
     } else if (message.type === 'exit' && message.reason === 'ended') {
       // The terminal service owns the coding process. A relay/SSH process may
@@ -258,8 +226,8 @@ class Connection {
 
   private write(frame: Buffer) {
     if (this.finished) return
-    if (this.started && this.writer) {
-      this.writer.write(frame)
+    if (this.started && this.stream) {
+      this.stream.write(frame)
       return
     }
     // Signal replies can precede restoration readiness. Keep their order with
@@ -298,7 +266,7 @@ class Connection {
       case 'ping':
         return this.relay(message)
       case 'clear':
-        if (!this.started || !this.child?.stdin.writable)
+        if (!this.started || !this.stream)
           return this.send({ type: 'result', id: message.id, ok: false, message: 'The terminal is not ready.' })
         this.relay(message)
         return
@@ -331,11 +299,11 @@ class Connection {
       case 'ack':
         if (Number.isSafeInteger(message.bytes) && message.bytes >= 0 && message.bytes <= this.unacked) {
           if (message.bytes) this.lastOutputProgress = Date.now()
-          const paused = this.child?.stdout.isPaused()
           this.unacked = Math.max(0, this.unacked - message.bytes)
-          if (this.unacked <= highWater / 2) {
-            if (paused && this.probe) this.probe.sentAt = Date.now()
-            this.child?.stdout.resume()
+          if (this.unacked <= highWater / 2 && this.paused) {
+            if (this.probe) this.probe.sentAt = Date.now()
+            this.paused = false
+            this.stream?.resume()
           }
         }
         return
@@ -350,7 +318,7 @@ class Connection {
           })
         if ((this.window.bytes += Buffer.byteLength(message.data)) > 1024 * 1024)
           return this.socket.close(1008, 'Input rate exceeded')
-        if (!this.started || !this.child?.stdin.writable)
+        if (!this.started || !this.stream)
           return this.send({
             type: 'result',
             id: message.id,
@@ -378,18 +346,10 @@ class Connection {
     clearInterval(this.heartbeat)
     clearTimeout(this.attachTimer)
     this.abort.abort()
-    this.writer?.dispose()
-    this.writer = null
     this.pending = []
     this.pendingBytes = 0
     this.broker.forget(this)
-    const child = this.child
-    if (child && child.exitCode === null && child.signalCode === null) {
-      // EOF closes the relay's socket; force it if the transport hangs.
-      child.stdin.destroy()
-      const timer = setTimeout(() => child.kill('SIGKILL'), 5000).unref()
-      child.once('close', () => clearTimeout(timer))
-    }
+    this.stream?.end()
   }
 }
 
@@ -452,17 +412,15 @@ export class TerminalBroker {
         session: { id: session.id, name: session.name, tool: session.tool },
         target: { id: context.target.id, name: context.target.name },
       })
-      const command = this.dependencies.sessions.attach(
+      const stream = await this.dependencies.sessions.attach(
         context,
         grant.sessionId,
         Number.isInteger(cols) ? Math.min(terminalService.maxCols, Math.max(2, cols)) : 80,
         Number.isInteger(rows) ? Math.min(terminalService.maxRows, Math.max(2, rows)) : 24,
         query.start === '1',
+        connection.abort.signal,
       )
-      connection.start(
-        spawn(command.executable, command.args, { stdio: 'pipe', env: this.dependencies.env ?? process.env }),
-        command.input,
-      )
+      connection.start(stream)
     } catch (error) {
       const failure = terminalFailure(error)
       connection.close(failure.reason, failure.message)

@@ -192,8 +192,13 @@ class Connection implements ChatClient {
         return { ok: true }
       }
       case 'instructions': {
+        // Instructions are session configuration; they apply when the chat next starts.
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
-        await this.server.services.sessions.chatSettings(context, ref!.sessionId, message.instructions)
+        const session = await this.server.services.sessions.get(context, ref!.sessionId)
+        await this.server.services.sessions.update(context, ref!.sessionId, {
+          revision: session.config.revision,
+          instructions: message.instructions,
+        })
         await hub.refreshFor(this.owner)
         return { ok: true }
       }
@@ -238,8 +243,6 @@ class Connection implements ChatClient {
       case 'session-create': {
         const context = await this.server.services.resolve(this.owner, message.targetId)
         const session = await createSession(this.server.services, context, message.input, message.requestId)
-        if (message.instructions?.trim())
-          await this.server.services.sessions.chatSettings(context, session.id, message.instructions)
         await hub.refreshFor(this.owner)
         return { ok: true, data: { targetId: context.target.id, sessionId: session.id } }
       }

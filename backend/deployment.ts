@@ -21,7 +21,7 @@ export interface AccountIdentity {
   revision: string
 }
 
-/** The only place where local and hosted installations differ (principle 3). */
+/** The only place where local and hosted installations differ ("Modes differ only in identity"). */
 export interface Deployment {
   readonly mode: 'local' | 'hosted'
   readonly directory: string

@@ -67,8 +67,7 @@ export interface ChannelMessage {
 }
 export type DeliverySource =
   | { kind: 'channel'; channelId: string; root: string; hop: number; through: string | null }
-  /** `call`: the agent's Outpost tool call that sent it; null for a reply. */
-  | { kind: 'session'; threadId: string; hop: number; from: ChannelMember; reply: boolean; call: string | null }
+  | { kind: 'session'; threadId: string; hop: number; from: ChannelMember; reply: boolean }
   | { kind: 'schedule'; scheduleId: string }
 export interface Delivery extends SessionRef {
   id: string
@@ -202,7 +201,6 @@ export const chatClientMessage = Type.Union([
     targetId,
     requestId: uuid,
     input: sessionInput,
-    instructions: Type.Union([text(32_000), Type.Null()]),
   }),
 ])
 export type ChatClientMessage = Static<typeof chatClientMessage>

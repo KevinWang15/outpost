@@ -21,11 +21,13 @@ import { pageHtml } from '../shared/pageHtml'
 import { DesktopAccess } from './desktop-access'
 import { desktopRoutes } from './routes/desktop'
 import { ChatHub } from './chat/hub'
-import { relayConnector, type ChatConnector } from './chat/links'
+import { machineConnector, type ChatConnector } from './chat/links'
 import { ChatServer } from './chat/socket'
 import { ChatTokens } from './chat/tokens'
 import { chatRoutes } from './routes/chat'
 import { HistoryHub, type HistoryOptions } from './history/hub'
+import { Machines } from './machines'
+import historyToolDefinitions from '../shared/historyTools.json' with { type: 'json' }
 
 export interface AppOptions {
   deployment: Deployment
@@ -56,37 +58,29 @@ export async function createApp(options: AppOptions) {
   // Allow JSON escaping of a 64 KiB input message, plus its control envelope.
   await app.register(websocket, { options: { maxPayload: 512 * 1024, perMessageDeflate: false } })
 
-  const sessions = options.sessions ?? new SessionClient(options.env)
+  const machines = new Machines(deployment.secret, options.env)
+  const sessions = options.sessions ?? new SessionClient()
   const software = options.software ?? new SoftwareClient(options.env)
-  const resolveTarget = targetResolver(deployment, options.multiplex ?? true)
+  const resolveTarget = targetResolver(deployment, machines, options.multiplex ?? true)
   const history =
-    options.history === false
-      ? null
-      : new HistoryHub({
-          deployment,
-          resolve: resolveTarget,
-          env: options.env,
-          ...options.history,
-        })
+    options.history === false ? null : new HistoryHub({ deployment, resolve: resolveTarget, ...options.history })
   const resolve = async (owner: Owner, targetId: string) => {
     const context = await resolveTarget(owner, targetId)
-    if (history) {
-      history.watch(owner)
-      context.historySocket = history.socket(owner, targetId)
-    }
+    history?.watch(owner)
     return context
   }
   const tokens = new ConnectTokens(deployment.secret)
   const desktop = await DesktopAccess.open(deployment)
   const active = (owner: Owner) => desktop.active(owner)
-  const broker = new TerminalBroker({ tokens, active, sessions, resolve, env: options.env })
+  const broker = new TerminalBroker({ tokens, active, sessions, resolve })
   const services: Services = {
     deployment,
     sessions,
-    files: new SessionFileClient(options.env),
+    files: new SessionFileClient(),
     software,
     tokens,
     broker,
+    machines,
     active,
     resolve,
     installations: new Installations(software),
@@ -97,12 +91,22 @@ export async function createApp(options: AppOptions) {
     resolve,
     files: services.files,
     list: async (context, signal) => (await sessions.list(context, signal)).sessions,
-    connect: options.chatConnector ?? relayConnector(sessions, options.env),
+    connect: options.chatConnector ?? machineConnector(sessions),
   })
+  // Agents' Outpost tool calls arrive on their machine's connection.
+  const historyTools = new Set(historyToolDefinitions.map(tool => tool.name))
+  machines.agent = async (owner, targetId, call) => {
+    if (historyTools.has(call.tool)) {
+      if (!history) throw new Error('Cross-machine history is turned off on this Outpost server.')
+      return history.call(owner, call.tool, call.arguments)
+    }
+    return hub.agent(owner, { targetId, sessionId: call.session }, call.tool, call.arguments)
+  }
   const chat = new ChatServer(hub, new ChatTokens(deployment.secret), services)
   await hub.start()
   await history?.start()
   app.addHook('preClose', async () => {
+    machines.close()
     broker.close()
     chat.close()
     hub.close()

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,12 +6,14 @@ import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
 import type { ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
-import { quote } from '../../backend/shell'
+import { quote } from '../../shared/shell'
+import { stopDriver } from '../../machine/drivers'
+import { state } from '../../machine/state'
 import headless from '@xterm/headless'
 import { CheckpointReader } from '../../shared/terminalCheckpoint'
 
 export const terminalBinary = fileURLToPath(
-  new URL(`../../terminal-service/dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
+  new URL(`../../machine/dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
 )
 
 export const fixtures = fileURLToPath(new URL('../fixtures/', import.meta.url))
@@ -48,6 +49,8 @@ export async function fixtureHome(prefix: string) {
     PATH: `${bin}:${process.env.PATH}`,
   }
   delete env.TMUX
+  // A test must never inherit the binding of the session it runs in.
+  for (const key of Object.keys(env)) if (key.startsWith('OUTPOST_')) delete env[key]
   return { directory, home, bin, env }
 }
 
@@ -64,21 +67,17 @@ export function api(base: string) {
   }
 }
 
-/** Stop every fixture terminal service under a disposable home, then remove it. */
+/** Stop every fixture session's driver under a disposable home, then remove it. */
 export async function removeHome(directory: string, home: string) {
   const registry = JSON.parse(
     await readFile(join(home, '.outpost', 'registry.json'), 'utf8').catch(() => '{"sessions":[]}'),
   )
-  for (const session of registry.sessions) {
-    const request = Buffer.from(JSON.stringify({ action: 'terminate', id: session.id })).toString('base64')
-    await new Promise(resolve =>
-      execFile(
-        'python3',
-        [fileURLToPath(new URL('../../runtime/outpost_runtime.py', import.meta.url)), request],
-        { env: { ...process.env, HOME: home } },
-        resolve,
-      ),
-    )
+  const previous = state.directory
+  state.directory = join(home, '.outpost')
+  try {
+    for (const session of registry.sessions) await stopDriver(session.id)
+  } finally {
+    state.directory = previous
   }
   await rm(directory, { recursive: true, force: true })
 }

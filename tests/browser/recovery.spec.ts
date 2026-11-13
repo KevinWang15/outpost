@@ -26,12 +26,21 @@ for (const mode of ['web', 'desktop'] as const) {
     ).json()
     await writeFile(join(session.rootDir, 'capture-input'), '')
     const sockets: string[] = []
+    /** The size each connection last reported, starting with its URL's. */
+    const sizes: string[] = []
     let blocked = -1
     await page.routeWebSocket(/\/api\/terminal\?/, ws => {
       const index = sockets.push(ws.url()) - 1
+      const url = new URL(ws.url()).searchParams
+      sizes[index] = `${url.get('cols')}x${url.get('rows')}`
       const server = ws.connectToServer()
       ws.onMessage(message => {
-        if (index !== blocked) server.send(message)
+        if (index === blocked) return
+        if (typeof message === 'string') {
+          const parsed = JSON.parse(message)
+          if (parsed.type === 'resize') sizes[index] = `${parsed.cols}x${parsed.rows}`
+        }
+        server.send(message)
       })
       server.onMessage(message => {
         if (index !== blocked) ws.send(message)
@@ -75,9 +84,10 @@ for (const mode of ['web', 'desktop'] as const) {
     await expect(field).toHaveValue('Preserve me; never submit automatically')
     expect(await readFile(join(session.rootDir, 'starts.log'), 'utf8')).toBe(starts)
     expect(await readFile(join(session.rootDir, 'input.bin')).catch(() => Buffer.alloc(0))).toEqual(beforeInput)
-    const current = new URL(sockets[1]).searchParams
+    // The recovered connection's size reaches the PTY. Its URL may predate the
+    // new layout; the size it reports once ready is what counts.
     await expect
       .poll(async () => (await readFile(join(session.rootDir, 'sizes.log'), 'utf8')).trim().split('\n').at(-1))
-      .toBe(`${current.get('cols')}x${current.get('rows')}`)
+      .toBe(sizes[1])
   })
 }

@@ -41,7 +41,6 @@ test(
       report.software.map(item => [item.id, item.status]),
       [
         ['bash', 'installed'],
-        ['python3', 'installed'],
         ['outpost-terminal', 'installed'],
         ['claude', 'installed'],
         ['codex', 'installed'],
@@ -72,7 +71,7 @@ test(
     )
     assert.equal(deepseek.tool, 'deepseek')
     assert.equal(deepseek.name, 'DeepSeek session')
-    assert.equal(deepseek.cliSessionEnv.DSH_HOME, join(home, '.dsh'))
+    assert.equal(deepseek.storage.DSH_HOME, join(home, '.dsh'))
     await writeFile(join(project, 'capture-input'), '')
 
     const connect = async () => {
@@ -157,14 +156,24 @@ test(
 
     await t.test('browser links from the session reach the attached client', async () => {
       const helper = execute(join(home, '.outpost', 'bin', 'outpost-browser'), ['https://example.com/docs'], {
-        env: { ...env, OUTPOST_SESSION_ID: session.id },
+        env: {
+          ...env,
+          OUTPOST_SESSION_ID: session.id,
+          OUTPOST_DRIVER: 'terminal',
+          OUTPOST_STATE_DIRECTORY: join(home, '.outpost'),
+        },
       })
       const signal = await client.take('signal')
       assert.deepEqual(signal.signal, { type: 'browser.open', payload: { url: 'https://example.com/docs' } })
       await helper
       await assert.rejects(
         execute(join(home, '.outpost', 'bin', 'outpost-browser'), ['file:///etc/passwd'], {
-          env: { ...env, OUTPOST_SESSION_ID: session.id },
+          env: {
+            ...env,
+            OUTPOST_SESSION_ID: session.id,
+            OUTPOST_DRIVER: 'terminal',
+            OUTPOST_STATE_DIRECTORY: join(home, '.outpost'),
+          },
         }),
         /HTTP or HTTPS/,
       )

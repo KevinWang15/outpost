@@ -1,62 +1,55 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile, appendFile, utimes } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, readdir, stat, symlink, writeFile, appendFile, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
-import test from 'node:test'
-import { SessionClient } from '../../backend/sessions.ts'
-import { quote } from '../../backend/shell.ts'
+import test, { type TestContext } from 'node:test'
+import type { Target } from '../../shared/model.ts'
+import { currentConversation } from '../../shared/model.ts'
+import { Machines } from '../../backend/machines.ts'
+import { SessionClient, type TargetContext } from '../../backend/sessions.ts'
 import { transportFor } from '../../backend/transport.ts'
+import { fixtureHome, removeHome } from './helpers.ts'
 
-// Conversation discovery and native identity, run by the real runtime on a local target.
-const settings = {
+// Conversation discovery and native identity, run by the machine's node on a local target.
+const settings: Target = {
   kind: 'local',
   id: 'coding',
   name: 'Coding',
   tools: ['codex', 'kimi', 'claude'],
   createdAt: '2026-09-30T00:00:00Z',
 }
-const target = {
-  owner: { userId: 'local', loginId: 'local' },
-  target: settings,
-  transport: transportFor(settings, null, { scope: 'local' }),
-  workspace: null,
-}
-const fixtureSource = new URL('../fixtures/coding-tool-fixture.py', import.meta.url)
-const acpFixtureSource = new URL('../fixtures/acp-agent-fixture.py', import.meta.url)
-const jsonl = records => records.map(record => JSON.stringify(record)).join('\n') + '\n'
-async function fixture(t) {
-  const home = await mkdtemp(join(tmpdir(), 'outpost-coding-'))
-  const bin = join(home, 'bin')
+const jsonl = (records: unknown[]) => records.map(record => JSON.stringify(record)).join('\n') + '\n'
+async function fixture(t: TestContext) {
+  const { directory, home, env } = await fixtureHome('outpost-coding-')
   const root = join(home, "project 'quotes' é")
-  await mkdir(bin)
   await mkdir(root)
-  for (const tool of settings.tools) await writeFile(join(bin, tool), await readFile(fixtureSource), { mode: 0o700 })
-  // `kimi acp` runs the scripted ACP agent installed beside the fixture.
-  await writeFile(join(bin, 'acp-agent-fixture'), await readFile(acpFixtureSource), { mode: 0o700 })
-  await writeFile(join(home, '.bash_profile'), `export PATH=${quote(bin)}:"$PATH"\n`)
-  const env = {
-    ...process.env,
-    HOME: home,
-    PATH: `${bin}:${process.env.PATH}`,
-    CODEX_HOME: join(home, '.codex'),
-    CLAUDE_CONFIG_DIR: join(home, '.claude'),
-    KIMI_CODE_HOME: join(home, '.kimi-code'),
-  }
-  t.after(() => rm(home, { recursive: true, force: true }))
-  const service = new SessionClient(env)
-  const put = async (path, content) => {
+  const machines = new Machines('conversations', env)
+  const owner = { userId: 'local', loginId: 'local' }
+  const transport = transportFor(settings, null, { scope: 'local' })
+  const target = {
+    owner,
+    target: settings,
+    transport,
+    machine: machines.get(owner, settings.id, transport),
+    workspace: null,
+  } as unknown as TargetContext
+  t.after(async () => {
+    machines.close()
+    await removeHome(directory, home)
+  })
+  const service = new SessionClient()
+  const put = async (path: string, content: string) => {
     await mkdir(join(path, '..'), { recursive: true })
     await writeFile(path, content)
   }
-  return { home, root, env, service, put }
+  return { home, root, env: env as Record<string, string>, service, put, target }
 }
 
 test(
   'search reads all three CLI stores on the target, including tool output, reasoning, Unicode, and subagents',
   { skip: process.platform !== 'linux' },
   async t => {
-    const { home, root, env, service, put } = await fixture(t)
+    const { home, root, env, service, put, target } = await fixture(t)
     const ids = { codex: randomUUID(), claude: randomUUID(), kimi: 'session_search_fixture' }
     const needle = 'Needle 项目 [literal].*'
     await put(
@@ -126,13 +119,12 @@ test(
     )
     const result = await service.search(target, { query: needle.toLowerCase() })
     assert.equal(result.sessions.length, 3)
-    assert.deepEqual(new Set(result.sessions.map(session => session.cliSessionId)), new Set(Object.values(ids)))
+    assert.deepEqual(new Set(result.sessions.map(session => session.conversation)), new Set(Object.values(ids)))
     for (const session of result.sessions) {
       assert.equal(session.rootDir, root)
-      assert.ok(session.excerpt.includes(needle))
+      assert.ok(session.excerpt?.includes(needle))
       assert.deepEqual(session.managedSessionIds, [])
-      assert.ok(session.excerpt.length <= 280)
-      assert.equal(session.history, undefined)
+      assert.ok(session.excerpt!.length <= 280)
     }
     assert.equal(result.truncated, false)
     assert.ok(
@@ -142,19 +134,22 @@ test(
     )
     assert.deepEqual(
       (await service.search(target, { query: 'subagent_only_keyword', tool: 'kimi' })).sessions.map(
-        session => session.cliSessionId,
+        session => session.conversation,
       ),
       [ids.kimi],
     )
     assert.deepEqual(
       (await service.search(target, { query: 'CLAUDE_SUBAGENT_ONLY_KEYWORD', tool: 'claude' })).sessions.map(
-        session => session.cliSessionId,
+        session => session.conversation,
       ),
       [ids.claude],
     )
     assert.equal((await service.search(target, { query: 'HIDDEN_IMAGE_KEYWORD' })).sessions.length, 0)
-    assert.equal((await service.search(target, { query: 'Auth investigation' })).sessions[0].cliSessionId, ids.codex)
-    assert.ok(!(await readdir(home)).includes('.outpost'), 'search never initializes a manager registry or local index')
+    assert.equal((await service.search(target, { query: 'Auth investigation' })).sessions[0].conversation, ids.codex)
+    assert.ok(
+      !(await readdir(join(home, '.outpost'))).includes('registry.json'),
+      'search never initializes a session registry',
+    )
   },
 )
 
@@ -162,7 +157,7 @@ test(
   'a fresh target stays untouched, queries are literal, search is live, and escaping symlinks are ignored',
   { skip: process.platform !== 'linux' },
   async t => {
-    const { home, root, env, service, put } = await fixture(t)
+    const { home, root, env, service, put, target } = await fixture(t)
     assert.deepEqual(await service.search(target, { query: 'nothing' }), {
       sessions: [],
       truncated: false,
@@ -206,35 +201,34 @@ test(
   'new and imported sessions have native IDs, preserve storage scope, prevent duplicate links, and keep conversation content out of the registry',
   { skip: process.platform !== 'linux' },
   async t => {
-    const { home, root, env, service, put } = await fixture(t)
+    const { home, root, env, service, put, target } = await fixture(t)
     for (const tool of settings.tools) {
       const created = await service.create(target, { name: tool, tool, rootDir: root })
-      assert.ok(created.cliSessionId)
-      assert.notEqual(created.cliSessionId, created.id)
+      assert.notEqual(currentConversation(created), created.id)
       assert.equal(created.status, 'ready')
-      assert.ok(Object.values(created.cliSessionEnv).every(path => path.startsWith(home)))
+      assert.ok(Object.values(created.storage).every(path => path.startsWith(home)))
     }
-    const cliSessionId = randomUUID()
+    const conversation = randomUUID()
     const claudeHome = join(home, 'custom claude store')
-    const history = join(claudeHome, 'projects', 'project', cliSessionId + '.jsonl')
+    const history = join(claudeHome, 'projects', 'project', conversation + '.jsonl')
     await put(history, jsonl([{ type: 'user', cwd: root, message: { content: 'PRIVATE_CONVERSATION_CONTENT' } }]))
     const input = {
       name: 'Imported Claude',
-      tool: 'claude',
+      tool: 'claude' as const,
       rootDir: root,
-      cliSessionId,
-      cliSessionEnv: { CLAUDE_CONFIG_DIR: claudeHome },
+      conversation,
+      storage: { CLAUDE_CONFIG_DIR: claudeHome },
     }
     const previousMode = (await stat(history)).mode
     const linked = await service.create(target, input)
-    assert.equal(linked.cliSessionId, cliSessionId)
-    assert.deepEqual(linked.cliSessionEnv, input.cliSessionEnv)
+    assert.equal(currentConversation(linked), conversation)
+    assert.deepEqual(linked.storage, input.storage)
     const found = await service.search(target, { query: 'PRIVATE_CONVERSATION_CONTENT' })
     assert.equal(found.sessions.length, 1)
     assert.deepEqual(found.sessions[0].managedSessionIds, [linked.id])
     await assert.rejects(service.create(target, { ...input, name: 'Duplicate' }), /already has an Outpost session/)
     await assert.rejects(service.create(target, { ...input, name: 'Wrong root', rootDir: home }), /working directory/)
-    await assert.rejects(service.create(target, { ...input, name: 'Missing', cliSessionId: randomUUID() }), /not found/)
+    await assert.rejects(service.create(target, { ...input, name: 'Missing', conversation: randomUUID() }), /not found/)
     const saved = JSON.parse(await readFile(join(home, '.outpost', 'registry.json'), 'utf8'))
     assert.equal(JSON.stringify(saved).includes('PRIVATE_CONVERSATION_CONTENT'), false)
     assert.equal(
@@ -246,7 +240,7 @@ test(
       (await stat(join(env.CODEX_HOME, 'sessions', ...new Date().toISOString().slice(0, 10).split('-')))).isDirectory(),
       true,
     )
-    assert.equal((await new SessionClient(env).get(target, linked.id)).cliSessionId, cliSessionId)
+    assert.equal(currentConversation(await service.get(target, linked.id)), conversation)
     await service.remove(target, linked.id)
     assert.equal(
       await readFile(history, 'utf8'),
@@ -259,7 +253,7 @@ test(
   'broad searches are bounded and mark partial results, while malformed neighboring sessions do not hide valid matches',
   { skip: process.platform !== 'linux' },
   async t => {
-    const { root, env, service, put } = await fixture(t)
+    const { root, env, service, put, target } = await fixture(t)
     for (let index = 0; index < 61; index++) {
       await put(
         join(env.CLAUDE_CONFIG_DIR, 'projects', 'project', randomUUID() + '.jsonl'),
@@ -292,12 +286,15 @@ test(
   'fresh Codex allocation resolves a real provider and template selection isolates the new conversation',
   { skip: process.platform !== 'linux' },
   async t => {
-    const { root, env, service, put, home } = await fixture(t)
-    const readMeta = async session => {
+    const { root, env, service, put, home, target } = await fixture(t)
+    const readMeta = async (session: Parameters<typeof currentConversation>[0]) => {
       const date = new Date().toISOString().slice(0, 10).split('-')
       const directory = join(env.CODEX_HOME, 'sessions', ...date)
-      const name = (await readdir(directory)).find(name => name.endsWith(session.cliSessionId + '.jsonl'))
-      const records = (await readFile(join(directory, name), 'utf8')).trim().split('\n').map(JSON.parse)
+      const name = (await readdir(directory)).find(name => name.endsWith(currentConversation(session) + '.jsonl'))!
+      const records = (await readFile(join(directory, name), 'utf8'))
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line))
       assert.equal(records.length, 1, 'allocation does not copy conversation turns')
       return records[0].payload
     }
@@ -371,8 +368,8 @@ test(
       'native-shape',
       'manager-created or malformed neighbors do not crowd out a real template',
     )
-    assert.equal(meta.id, next.cliSessionId)
-    assert.equal(meta.session_id, next.cliSessionId)
+    assert.equal(meta.id, currentConversation(next))
+    assert.equal(meta.session_id, currentConversation(next))
     assert.equal(meta.model_provider, 'fixture')
     assert.equal(meta.cli_version, '0.159.2-fixture')
     assert.equal(meta.cwd, root)

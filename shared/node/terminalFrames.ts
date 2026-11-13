@@ -1,10 +1,10 @@
 import { Buffer } from 'node:buffer'
 
-/** One codec for the broker, relay and terminal service byte streams. */
-export const relayMagic = Buffer.from('\0OUTPOST-RELAY-2\0', 'latin1')
+/** One codec for every Outpost byte stream: the node connection (C, D), and
+ * terminal service and chat host sockets (I input, O output, C control). */
 export const maxTerminalFrame = 32 * 1024 * 1024
-type FrameKind = 'I' | 'O' | 'C'
-const validKind = (kind: string): kind is FrameKind => kind === 'I' || kind === 'O' || kind === 'C'
+type FrameKind = 'I' | 'O' | 'C' | 'D'
+const validKind = (kind: string): kind is FrameKind => kind === 'I' || kind === 'O' || kind === 'C' || kind === 'D'
 
 export function terminalFrame(kind: FrameKind, payload: Buffer) {
   if (!validKind(kind) || payload.length > maxTerminalFrame) throw new Error('Invalid terminal frame')

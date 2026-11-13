@@ -25,10 +25,10 @@ default Outpost MCP tools and cross-machine history search.
 
 | Where | What you need |
 | --- | --- |
-| Targets — where sessions run | Linux with Bash, Python 3.9+ and Outpost Terminal, reachable over SSH as any user you choose (no root access needed). The computer running Outpost can be a target too when it runs Linux (including WSL). Outpost can install missing software for you. |
+| Targets — where sessions run | Linux with Bash and Outpost Terminal, reachable over SSH as any user you choose (no root access needed). The computer running Outpost can be a target too when it runs Linux (including WSL). Outpost can install missing software for you. |
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Web terminal | Any current browser, including on phones. |
-| Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Bundles Electron; no browser, Python or WSL installation needed. |
+| Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Bundles Electron; no browser or WSL installation needed. |
 
 ## Run the local tool
 
@@ -242,7 +242,7 @@ terminal semantics. Full-screen applications can still provide their own
 conversation/history viewer. Outpost does not force Codex into inline mode.
 
 The target must stay running: this preserves sessions across browser, app, SSH,
-and Outpost server disconnects/restarts, not target reboots or terminal-service
+and Outpost server disconnects/restarts, not target reboots or machine
 crashes. Closing a tab disconnects; **Terminate** explicitly stops the session.
 
 When the coding tool rings the terminal bell, the page and tab title show
@@ -307,9 +307,9 @@ process's session identity; ordinary Kimi launches outside Outpost expose no
 Outpost tools. No manual MCP setup is required, and existing user MCP servers
 remain configured.
 
-After updating Outpost, finish or save current work and restart an existing
-agent session once to load its MCP integration. This does not require a new
-Outpost Terminal binary. Update the server and desktop app together for native
+After updating Outpost, install the matching Outpost Terminal when Required
+Software asks, then finish or save current work and restart an existing agent
+session once to load its MCP integration. Update the server and desktop app together for native
 file downloads.
 
 ### Cross-machine history MCP
@@ -363,13 +363,13 @@ agent.
 DeepSeek history reads `$DSH_HOME/sessions` on each target, including root and
 subagent logs in formats v0–v4, raw JSONL and concatenated Zstandard frames.
 Only the highest retained generation is scanned. Native files remain unchanged;
-compressed input is decoded locally with the target's Node runtime into a
-temporary seekable stream, capped at 256 MiB per file. An incomplete final frame
+compressed input is decoded in memory by Outpost Terminal on the target, capped
+at 256 MiB per file. An incomplete final frame
 is retried after the native log changes. Use `tool: "deepseek"` to filter it.
 
 Existing coding-tool processes need their MCP connection reloaded or the coding
 tool restarted once to discover the newly registered tools. New sessions have
-them by default. No Outpost Terminal binary update is needed for this feature.
+them by default.
 
 ### Outpost Desktop
 
@@ -627,13 +627,16 @@ instance per data directory.
 ## How it works
 
 ```text
-web terminal / Outpost Desktop ⇄ WebSocket ⇄ Outpost ⇄ SSH or local shell ⇄ relay ⇄ Outpost Terminal ⇄ PTY ⇄ coding tool
+web terminal / Outpost Desktop ⇄ WebSocket ⇄ Outpost ⇄ SSH or local shell ⇄ Outpost Terminal node ⇄ terminal service ⇄ PTY ⇄ coding tool
 ```
 
-Every connection takes this one path. A dedicated `outpost-terminal` process
-owns each session's PTY and terminal state on the target. Python management
-operations and the disposable relay still travel through the existing SSH or
-local-shell transport. The helper has no public listening port.
+Every connection takes this one path. Outpost keeps one connection to each
+machine an account uses, running `outpost-terminal node` over SSH or the local
+shell; everything on that machine travels on it, including agents' calls to
+Outpost's tools. Machines never connect to Outpost or to each other: if Outpost
+can reach a machine, everything works there. A dedicated `outpost-terminal`
+process owns each session's PTY and terminal state on the target, and another
+one each chat. Outpost Terminal has no listening network port.
 
 **Required Software → Outpost Terminal → Install** downloads the matching Linux
 executable into `~/.outpost/bin`, verifies its SHA-256 checksum and installs it
@@ -644,15 +647,15 @@ their running helper when its executable is upgraded.
 
 The **Linux terminal service** GitHub Actions workflow is manual. Enable
 **Publish** to create the versioned dependency release used by the installer.
-See [terminal-service/RELEASE_NOTES.md](terminal-service/RELEASE_NOTES.md) for
+See [machine/RELEASE_NOTES.md](machine/RELEASE_NOTES.md) for
 upgrade instructions, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 protocol and ownership model.
 
 ## Development
 
 ```sh
-npm run build:terminal   # build the target helper before runtime/browser tests
-npm run check            # lint, typecheck, build, unit and Python tests
+npm run build:terminal   # build Outpost Terminal before machine, integration and browser tests
+npm run check            # lint, typecheck, build, unit and machine tests
 npm run test:integration # persistent PTYs: local targets and SSH in Docker
 npx playwright install chromium webkit
 npm run test:ui          # browser tests against a real backend

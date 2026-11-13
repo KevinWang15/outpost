@@ -18,36 +18,37 @@ export interface Environment {
   localTargets: boolean
 }
 
-export interface SessionLaunchOptions {
-  env: Record<string, string>
-  args: string
-}
+export type SessionUpdate = Static<typeof schemas.sessionUpdate>
+export type SessionConfig = Static<typeof schemas.sessionConfig>
+export type SessionRecord = Static<typeof schemas.sessionRecord>
 export type SessionStatus = 'ready' | 'attached' | 'detached' | 'stopped'
-export interface Session extends SessionLaunchOptions {
+/** A conversation in a session's timeline, with the coding tool's own title for it. */
+export interface Conversation {
   id: string
-  name: string
-  tool: HarnessId
-  rootDir: string
-  cliSessionId: string
-  cliSessionEnv: Record<string, string>
-  createdAt: string
-  lastConnectedAt: string | null
+  startedAt: string
+  /** The session that resumed this conversation since; it belongs there now. */
+  movedTo: { id: string; name: string } | null
+  title: string | null
+}
+/** A session as Outpost shows it: its stored record, the coding tool's view, and what runs it now. */
+export interface Session extends Omit<SessionRecord, 'conversations'> {
+  /** Oldest first; the last is the current conversation. */
+  conversations: Conversation[]
+  /** The tool's title for the current conversation. */
+  title: string | null
   status: SessionStatus
-  /** What drives the native conversation now: a terminal, chat, or nothing. */
+  /** What drives the current conversation now: a terminal, chat, or nothing. */
   driver: 'terminal' | 'chat' | null
+  /** The configuration revision the running driver started with. */
+  runningRevision: number | null
   activity: SessionActivity
-  /** Chat-mode session instructions, appended to the agent's system prompt. */
-  instructions: string | null
 }
-export interface SessionList {
-  sessions: Session[]
-  registryPath: string
-}
+export const currentConversation = (session: { conversations: { id: string }[] }) => session.conversations.at(-1)!.id
 
 export interface ConversationMatch {
   tool: HarnessId
-  cliSessionId: string
-  cliSessionEnv: Record<string, string>
+  conversation: string
+  storage: Record<string, string>
   rootDir: string
   title: string
   createdAt: string | null
@@ -69,7 +70,6 @@ export interface DirectorySuggestions {
  * bundled in Outpost Terminal; Kimi Code and DeepSeek Harness serve ACP themselves. */
 export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => [
   'bash',
-  'python3',
   'outpost-terminal',
   ...target.tools,
   ...(target.tools.includes('claude') ? (['claude-agent-acp'] as const) : []),

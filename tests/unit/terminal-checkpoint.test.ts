@@ -9,7 +9,7 @@ import {
   remoteTerminalReplies,
   writeHeadless,
 } from '../../shared/terminalCheckpoint'
-import { Sequences } from '../../terminal-service/sequences'
+import { Sequences } from '../../machine/sequences'
 
 function terminal(cols = 20, rows = 5) {
   const term = new headless.Terminal({ cols, rows, scrollback: 10_000, allowProposedApi: true, logLevel: 'off' })

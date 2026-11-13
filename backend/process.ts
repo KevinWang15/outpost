@@ -12,8 +12,6 @@ export interface Command {
   executable: string
   args: string[]
   label: string
-  /** Bytes sent before ordinary stdin (a script, image, or live relay frames). */
-  input?: Buffer
   /** One alternate invocation, available only to explicitly read-only callers.
    * The executable, input bytes, environment and deadline remain unchanged. */
   retry?: { args: string[]; when(result: CommandResult): boolean }
@@ -28,43 +26,23 @@ interface CommandOptions {
   maxOutputBytes?: number
 }
 
+/** Run a bounded command. A transport-provided recovery is attempted once,
+ * only for explicitly read-only callers with buffered output. */
 export async function runCommand(
   command: Command,
   input: string | Uint8Array,
   options: CommandOptions = {},
 ): Promise<CommandResult> {
-  const result = await runCommandBytes(command, input, options)
-  return { ...result, stdout: result.stdout.toString('utf8') }
-}
-
-/** Bounded binary reads share command deadlines, cancellation and SSH recovery. */
-export async function runCommandBytes(
-  command: Command,
-  input: string | Uint8Array,
-  options: CommandOptions = {},
-): Promise<Omit<CommandResult, 'stdout'> & { stdout: Buffer }> {
   const deadline = performance.now() + (options.timeoutMs ?? 30_000)
   const result = await runCommandOnce(command, input, options)
-  // Streaming output cannot be retracted. Only buffered, explicitly safe reads
-  // can use a transport-provided recovery, and there is never a retry loop.
-  if (
-    !options.readOnly ||
-    result.stdout.length !== 0 ||
-    options.onOutput ||
-    !command.retry?.when({ ...result, stdout: result.stdout.toString('utf8') })
-  )
-    return result
+  if (!options.readOnly || result.stdout.length !== 0 || options.onOutput || !command.retry?.when(result)) return result
   return runCommandOnce({ ...command, args: command.retry.args }, input, {
     ...options,
     timeoutMs: deadline - performance.now(),
   })
 }
 
-function runCommandOnce(
-  command: Command,
-  input: string | Uint8Array,
-  options: CommandOptions,
-): Promise<Omit<CommandResult, 'stdout'> & { stdout: Buffer }> {
+function runCommandOnce(command: Command, input: string | Uint8Array, options: CommandOptions): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const aborted = () => new AppError(`${command.label} operation aborted`, 502)
     const timedOut = () => new AppError(`${command.label} operation timed out. Check the target and retry.`, 504)
@@ -133,56 +111,8 @@ function runCommandOnce(
       settled = true
       cleanup()
       if (options.onOutput) options.onOutput(decoder.end())
-      resolve({ code, stdout: Buffer.concat(stdout), stderr })
+      resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr })
     })
-    if (command.input) child.stdin.write(command.input)
     child.stdin.end(input)
   })
-}
-
-/** Parse the runtime's `OUTPOST_RESULT:` envelope from a command's output. */
-export function protocolResult<T>(stdout: string): { ok: true; data: T } | { ok: false; error: AppError } | null {
-  const line = stdout
-    .split('\n')
-    .reverse()
-    .find(line => line.startsWith('OUTPOST_RESULT:'))
-  if (!line) return null
-  let result
-  try {
-    result = JSON.parse(line.slice('OUTPOST_RESULT:'.length))
-  } catch {
-    throw new AppError('Invalid response from target', 502)
-  }
-  if (!result || typeof result !== 'object' || Array.isArray(result) || Object.keys(result).length !== 2) {
-    throw new AppError('Invalid response from target', 502)
-  }
-  if (
-    result.ok === false &&
-    result.error &&
-    typeof result.error === 'object' &&
-    Object.keys(result.error).length === 2 &&
-    typeof result.error.message === 'string' &&
-    Number.isInteger(result.error.status) &&
-    result.error.status >= 400 &&
-    result.error.status <= 599
-  ) {
-    return { ok: false, error: new AppError(result.error.message, result.error.status) }
-  }
-  if (result.ok !== true || !Object.hasOwn(result, 'data')) throw new AppError('Invalid response from target', 502)
-  return { ok: true, data: result.data }
-}
-
-export async function runProtocol<T>(
-  command: Command,
-  input: string | Uint8Array,
-  options: CommandOptions = {},
-): Promise<T> {
-  const { code, stdout, stderr } = await runCommand(command, input, options)
-  const result = protocolResult<T>(stdout)
-  if (result && !result.ok) throw result.error
-  if (result?.ok && code === 0) return result.data
-  throw new AppError(
-    `${command.label} failed (${code ?? 'disconnected'}). ${stderr.trim() || 'No response. Check access and Required Software.'}`,
-    502,
-  )
 }

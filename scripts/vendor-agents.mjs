@@ -7,7 +7,7 @@ import { gunzipSync } from 'node:zlib'
 
 const pins = JSON.parse(await readFile(new URL('../shared/chatAgents.json', import.meta.url), 'utf8'))
 const { package: name, version, integrity } = pins.codex
-const directory = new URL('../terminal-service/vendor/', import.meta.url)
+const directory = new URL('../machine/vendor/', import.meta.url)
 const destination = new URL('codex-acp.js', directory)
 const stamp = new URL('codex-acp.version', directory)
 

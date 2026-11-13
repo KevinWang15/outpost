@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import type { ConversationSearch, SessionForkInput, SessionInput } from '../../shared/model'
+import type { ConversationSearch, SessionForkInput, SessionInput, SessionUpdate } from '../../shared/model'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
@@ -10,7 +10,9 @@ import {
   directoryQuery,
   sessionInput,
   sessionForkInput,
+  sessionUpdate,
 } from '../../shared/schemas'
+import Type from 'typebox'
 
 type Params = { targetId: string; sessionId: string }
 export function sessionRoutes(app: FastifyInstance, services: Services) {
@@ -40,6 +42,31 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
         throw new AppError('Add this coding tool to the target before creating a session.', 400)
       return reply.code(201).send(await sessions.fork(context, source.id, request.body))
     },
+  )
+  // Name changes apply at once; launch settings when the session next starts.
+  app.patch<{ Params: Params; Body: SessionUpdate }>(
+    `${base}/:sessionId`,
+    { schema: { body: sessionUpdate } },
+    async request =>
+      sessions.update(await services.context(request, request.params.targetId), request.params.sessionId, request.body),
+  )
+  // Make an earlier conversation of the session current again.
+  app.post<{ Params: Params; Body: { conversation: string } }>(
+    `${base}/:sessionId/switch`,
+    {
+      schema: {
+        body: Type.Object(
+          { conversation: Type.String({ minLength: 1, maxLength: 128 }) },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async request =>
+      sessions.switch(
+        await services.context(request, request.params.targetId),
+        request.params.sessionId,
+        request.body.conversation,
+      ),
   )
   app.delete<{ Params: Params }>(`${base}/:sessionId`, async (request, reply) => {
     const context = await services.context(request, request.params.targetId)

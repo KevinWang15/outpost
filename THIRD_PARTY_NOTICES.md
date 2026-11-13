@@ -28,7 +28,7 @@ retain the license notices supplied with their distributions in `node_modules`.
   (`@agentclientprotocol/sdk`) is distributed under the Apache License 2.0.
 - Outpost Terminal bundles [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp)
   (Apache License 2.0), fetched at build time at the version and integrity in
-  `shared/chatAgents.json`; its license is kept beside it in `terminal-service/vendor/`.
+  `shared/chatAgents.json`; its license is kept beside it in `machine/vendor/`.
   Codex itself is not bundled.
 - The Claude Code chat adapter, [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp)
   (Apache License 2.0), depends on Anthropic's Claude Agent SDK, which is

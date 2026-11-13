@@ -1,92 +1,38 @@
-// Contracts that exist in both TypeScript and Python, checked against each
-// other so a change on one side cannot silently break the other.
+// Contracts between Outpost's server and the code it runs on machines.
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
 import test from 'node:test'
-import { harnesses, supportsTerminal } from '../../shared/harnesses'
-import historyTools from '../../runtime/history-tools.json' with { type: 'json' }
-import { chatHost } from '../../shared/chatHost'
-import { terminalService } from '../../shared/terminalService'
-import { FrameDecoder, terminalFrame, terminalControl, relayMagic } from '../../shared/node/terminalFrames'
+import { harnessIds } from '../../shared/harnesses'
+import historyTools from '../../shared/historyTools.json' with { type: 'json' }
+import { FrameDecoder, terminalFrame, terminalControl } from '../../shared/node/terminalFrames'
+import { allHarnesses } from '../../machine/harnesses'
 
-const runtime = fileURLToPath(new URL('../../runtime/', import.meta.url))
-function python(code: string, input?: Buffer) {
-  return execFileSync('python3', ['-c', `import json, sys\n${code}`], {
-    env: { ...process.env, PYTHONPATH: runtime, PYTHONDONTWRITEBYTECODE: '1' },
-    input,
-  })
-}
-const json = (code: string) => JSON.parse(python(code).toString())
-
-test('terminal service: Python and TypeScript agree on the installed contract', () => {
-  const service = json(`import outpost_terminal as t
-print(json.dumps({'version': t.VERSION, 'protocol': t.PROTOCOL, 'maxCols': t.MAX_COLS, 'maxRows': t.MAX_ROWS, 'executable': t.EXECUTABLE.name}))`)
-  for (const key of ['version', 'protocol', 'maxCols', 'maxRows', 'executable'] as const)
-    assert.equal(service[key], terminalService[key], key)
-})
-
-test('chat host: the runtime checks the same protocol the host speaks', () => {
-  assert.equal(json(`import outpost_chat\nprint(outpost_chat.PROTOCOL)`), chatHost.protocol)
-})
-
-test('coding harnesses: shared/harnesses.ts matches the runtime adapters', () => {
-  const adapters = json(
-    `from outpost_harness import adapters
-print(json.dumps({tool: {'storage': a.storage_key, 'id': a.id_pattern, 'command': a.command or a.tool, 'terminal': a.terminal_supported} for tool, a in adapters().items()}))`,
+test('every registered coding harness has a machine adapter', () => {
+  assert.deepEqual(
+    allHarnesses().map(harness => harness.id),
+    harnessIds,
   )
-  assert.deepEqual(Object.keys(adapters).sort(), harnesses.map(harness => harness.id).sort())
-  for (const harness of harnesses) {
-    assert.equal(adapters[harness.id].storage, harness.storageKey, harness.id)
-    assert.equal(`^${adapters[harness.id].id}$`, harness.nativeId, harness.id)
-    assert.equal(adapters[harness.id].command, harness.command, harness.id)
-    assert.equal(adapters[harness.id].terminal, supportsTerminal(harness.id), harness.id)
-  }
 })
 
 test('history MCP advertises every registered coding harness', () => {
   const search = historyTools.find(tool => tool.name === 'search_history')!
-  assert.deepEqual(
-    search.inputSchema.properties.tool!.enum,
-    harnesses.map(harness => harness.id),
-  )
+  assert.deepEqual(search.inputSchema.properties.tool!.enum, harnessIds)
 })
 
-test('relay protocol: broker and relay agree on the marker and frames', () => {
-  const relay = json(
-    `import outpost_frames as relay
-print(json.dumps({'magic': list(relay.MAGIC)}))`,
-  )
-  assert.deepEqual(Buffer.from(relay.magic), relayMagic)
-  // Broker frames decode in Python, split at every byte boundary.
+test('frames decode identically however the bytes are split', () => {
   const frames = Buffer.concat([
     terminalFrame('I', Buffer.from([0, 1, 255])),
     terminalControl({ type: 'resize', cols: 80, rows: 24 }),
+    terminalFrame('D', Buffer.from([0, 0, 0, 7, 27])),
   ])
-  const output = JSON.parse(
-    python(
-      `from outpost_frames import FrameDecoder
-data, decoder, frames = sys.stdin.buffer.read(), FrameDecoder(), []
-for index in range(len(data)):
-    frames += decoder.feed(data[index:index + 1])
-print(json.dumps([[kind.decode(), list(payload)] for kind, payload in frames]))`,
-      frames,
-    ).toString(),
-  )
-  assert.deepEqual(output, [
-    ['I', [0, 1, 255]],
-    ['C', [...Buffer.from('{"type":"resize","cols":80,"rows":24}')]],
-  ])
-  // Relay frames decode in the broker.
-  const encoded = python(
-    `import outpost_frames as relay
-sys.stdout.buffer.write(relay.encode(b'O', bytes([0, 27, 255])) + relay.control({'type': 'ready'}))`,
-  )
+  const decoder = new FrameDecoder()
+  const decoded = []
+  for (let index = 0; index < frames.length; index++) decoded.push(...decoder.feed(frames.subarray(index, index + 1)))
   assert.deepEqual(
-    new FrameDecoder().feed(encoded).map(frame => [frame.kind, [...frame.payload]]),
+    decoded.map(frame => [frame.kind, [...frame.payload]]),
     [
-      ['O', [0, 27, 255]],
-      ['C', [...Buffer.from('{"type":"ready"}')]],
+      ['I', [0, 1, 255]],
+      ['C', [...Buffer.from('{"type":"resize","cols":80,"rows":24}')]],
+      ['D', [0, 0, 0, 7, 27]],
     ],
   )
 })

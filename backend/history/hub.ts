@@ -1,12 +1,10 @@
 import { Ajv } from 'ajv'
-import { createHmac } from 'node:crypto'
 import { join } from 'node:path'
-import definitions from '../../runtime/history-tools.json' with { type: 'json' }
+import definitions from '../../shared/historyTools.json' with { type: 'json' }
 import type { HistoryBatch, HistoryMachine, HistorySearchInput, HistorySource } from '../../shared/history'
 import type { Deployment, Owner } from '../deployment'
 import type { TargetContext } from '../sessions'
-import { HistoryBridge } from './bridge'
-import { HistoryClient, type HistoryReader } from './client'
+import { machineHistory, type HistoryReader } from './client'
 import { localEmbeddings, type Embed } from './embeddings'
 import { HistoryIndex } from './index'
 
@@ -14,8 +12,6 @@ interface MachineState {
   after: string | null
   pending: Map<string, HistorySource>
   refreshing: Promise<void> | null
-  bridge: HistoryBridge | null
-  reconnectAt: number
   checkedAt: string | null
   error: string | null
   warnings: string[]
@@ -35,13 +31,12 @@ interface Account {
 export interface HistoryOptions {
   reader?: HistoryReader
   embed?: Embed
-  /** Tests can drive refreshes explicitly without opening background SSH channels. */
+  /** Tests can drive refreshes explicitly, without background refreshes. */
   background?: boolean
 }
 interface Dependencies extends HistoryOptions {
   deployment: Deployment
   resolve(owner: Owner, id: string): Promise<TargetContext>
-  env?: NodeJS.ProcessEnv
 }
 const validate = new Map(
   definitions.map(tool => [tool.name, new Ajv({ strict: false, allErrors: true }).compile(tool.inputSchema)]),
@@ -55,15 +50,8 @@ export class HistoryHub {
   private reader: HistoryReader
   private embed: Embed
   constructor(private dependencies: Dependencies) {
-    this.reader = dependencies.reader ?? new HistoryClient(dependencies.env)
+    this.reader = dependencies.reader ?? machineHistory
     this.embed = dependencies.embed ?? localEmbeddings(dependencies.deployment.directory)
-  }
-  socket(owner: Owner, targetId: string) {
-    const key = createHmac('sha256', this.dependencies.deployment.secret)
-      .update(`history\0${owner.userId}\0${targetId}`)
-      .digest('hex')
-      .slice(0, 32)
-    return `run/history-${key}.sock`
   }
   private account(owner: Owner) {
     let account = this.accounts.get(owner.userId)
@@ -99,7 +87,6 @@ export class HistoryHub {
         if (!this.dependencies.deployment.account(id)) {
           account.closed = true
           if (account.continuation) clearTimeout(account.continuation)
-          for (const state of account.states.values()) state.bridge?.close()
           // An in-flight refresh is drained before its private index closes.
           void Promise.resolve(account.syncing).finally(() => account.index.close())
           this.accounts.delete(id)
@@ -120,11 +107,7 @@ export class HistoryHub {
       name: target.name,
       host: target.kind === 'ssh' ? target.host : 'localhost',
     }))
-    for (const [id, state] of account.states)
-      if (!targets.some(target => target.id === id)) {
-        state.bridge?.close()
-        account.states.delete(id)
-      }
+    for (const id of account.states.keys()) if (!targets.some(target => target.id === id)) account.states.delete(id)
     return account.machines
   }
   private state(account: Account, id: string) {
@@ -134,8 +117,6 @@ export class HistoryHub {
         after: null,
         pending: new Map(),
         refreshing: null,
-        bridge: null,
-        reconnectAt: 0,
         checkedAt: null,
         error: null,
         warnings: [],
@@ -149,20 +130,6 @@ export class HistoryHub {
     state.refreshing ??= (async () => {
       try {
         const context = await this.dependencies.resolve(account.owner, machine.id)
-        if (this.dependencies.background !== false && !state.bridge && Date.now() >= state.reconnectAt) {
-          state.bridge = new HistoryBridge(
-            this.reader.bridge(context, this.socket(account.owner, machine.id)),
-            this.dependencies.env,
-            async (tool, args) => {
-              await this.dependencies.deployment.workspace(account.owner).get(machine.id)
-              return this.call(account.owner, tool, args)
-            },
-            () => {
-              state.bridge = null
-              state.reconnectAt = Date.now() + 10000
-            },
-          )
-        }
         const signal = AbortSignal.timeout(20000)
         const catalog = await this.reader.catalog(context, state.after, signal)
         if (this.stopped || account.closed) return
@@ -347,7 +314,6 @@ export class HistoryHub {
       const source = account.index.messageSource(pageInput.cursor, ids)
       const cached = account.index.readMessage(pageInput, ids)
       if (source.truncated && (pageInput.offset ?? 0) >= source.length) {
-        if (!this.reader.message) throw new Error('This source message needs an online machine to read further.')
         const context = await this.dependencies.resolve(owner, source.machineId)
         const page = await this.reader.message(
           context,
@@ -381,7 +347,6 @@ export class HistoryHub {
   async close() {
     this.stopped = true
     if (this.timer) clearInterval(this.timer)
-    for (const account of this.accounts.values()) for (const state of account.states.values()) state.bridge?.close()
     for (const account of this.accounts.values()) if (account.continuation) clearTimeout(account.continuation)
     await Promise.allSettled(
       [...this.accounts.values()].flatMap(account => [

@@ -3,7 +3,7 @@ import type { Services } from './services'
 import type { Session, SessionInput } from '../shared/model'
 import type { DesktopSession } from '../shared/desktopAuth'
 import { AppError } from './errors'
-import { launchOptions, type TargetContext } from './sessions'
+import { launchSize, type TargetContext } from './sessions'
 
 /** Creation is a durable operation with the same policy for browser and app owners. */
 export async function createSession(
@@ -16,7 +16,7 @@ export async function createSession(
   if (!services.active(owner)) throw new AppError('Sign in again to create a session.', 401)
   if (!context.target.tools.includes(input.tool))
     throw new AppError('Add this coding tool to the target before creating a session.', 400)
-  launchOptions(input)
+  launchSize(input)
   // Bind the retry identity to the authenticated owner and target. The target
   // commits this receipt atomically with the session, so SSH/HTTP response loss
   // and server restarts cannot turn a retry into another creation.

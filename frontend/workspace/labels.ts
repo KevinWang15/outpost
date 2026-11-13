@@ -3,7 +3,6 @@ import { harnesses } from '../../shared/harnesses'
 
 const systemLabels: Record<string, string> = {
   bash: 'Bash',
-  python3: 'Python 3',
   'outpost-terminal': 'Outpost Terminal',
   'claude-agent-acp': 'Claude Code chat adapter',
 }

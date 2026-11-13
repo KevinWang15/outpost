@@ -1,5 +1,3 @@
-export const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
-
 export const supportingPath =
   'export PATH="$PATH:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin"'
 
@@ -7,7 +5,7 @@ export type LoginMode = 'interactive' | 'noninteractive'
 
 // Inspection needs the attachment's interactive PATH. Installers are batch jobs:
 // load login profiles without interactive job control on their pipe-only transport.
-// POSIX sh remains usable before Bash or Python is installed.
+// POSIX sh remains usable before Bash is installed.
 export function loginScriptShell(mode: LoginMode) {
   const flags = mode === 'interactive' ? '-lic' : '-lc'
   return `${supportingPath}

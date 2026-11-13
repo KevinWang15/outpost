@@ -94,7 +94,7 @@ async function lifecycle(
   })
   assert.equal(fork.rootDir, `/home/dev/work-${session.id}`)
   assert.equal(fork.tool, session.tool)
-  assert.notEqual(fork.cliSessionId, session.cliSessionId)
+  assert.notEqual(fork.conversations.at(-1)!.id, session.conversations.at(-1)!.id)
   assert.equal(fork.status, 'ready')
   await call('DELETE', `/targets/${added.id}/sessions/${fork.id}`)
   const client = new TerminalClient(

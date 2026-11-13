@@ -5,14 +5,14 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
 import { AppError } from '../../backend/errors'
-import { runCommand, runProtocol, type Command } from '../../backend/process'
-import { SessionClient, type TargetContext } from '../../backend/sessions'
+import { runCommand, type Command } from '../../backend/process'
+import type { TargetContext } from '../../backend/sessions'
 import { SoftwareClient } from '../../backend/software'
 import { Workspace } from '../../backend/workspace'
 import { requiredSoftware } from '../../shared/model'
 
 const muxError = 'mux_client_request_session: read from master failed: Connection reset by peer\n'
-const success = 'OUTPOST_RESULT:{"ok":true,"data":{"recovered":true}}\n'
+const success = 'recovered\n'
 
 interface Attempt {
   code: number
@@ -91,7 +91,7 @@ async function fixture(
     }
     assert.fail(`Child never reached ${phase}`)
   }
-  const context: TargetContext = {
+  const context = {
     owner: { userId: 'local', loginId: 'local' },
     target: {
       id: 'target',
@@ -104,24 +104,23 @@ async function fixture(
     },
     workspace: new Workspace(directory),
     transport: { label: command.label, runtime: () => command, management: () => command },
-  }
+  } as unknown as TargetContext
   return { command, records, waitFor, context }
 }
 
 const status = (code: number) => (error: unknown) => error instanceof AppError && error.statusCode === code
 
-test('recovery replays the exact binary prefix, stdin and environment once', async t => {
+test('recovery replays the exact stdin and environment once', async t => {
   const { command, records } = await fixture(t)
-  command.input = Buffer.from([0, 1, 255, 128])
   const stdin = Buffer.from('payload 🦊\0with binary data')
   const env = { ...process.env, OUTPOST_RETRY_FIXTURE: 'original environment' }
-  const result = await runProtocol(command, stdin, { readOnly: true, env })
-  assert.deepEqual(result, { recovered: true })
+  const result = await runCommand(command, stdin, { readOnly: true, env })
+  assert.equal(result.stdout, success)
   assert.deepEqual(
     await records(),
     ['first', 'second'].map(phase => ({
       phase,
-      input: Buffer.concat([command.input!, stdin]).toString('base64'),
+      input: stdin.toString('base64'),
       environment: env.OUTPOST_RETRY_FIXTURE,
     })),
   )
@@ -129,7 +128,7 @@ test('recovery replays the exact binary prefix, stdin and environment once', asy
 
 test('a second failure surfaces its error and cannot start a third attempt', async t => {
   const { command, records } = await fixture(t, undefined, { code: 255, stderr: 'fresh connection failed' })
-  await assert.rejects(runProtocol(command, '', { readOnly: true }), /fresh connection failed/)
+  assert.match((await runCommand(command, '', { readOnly: true })).stderr, /fresh connection failed/)
   assert.deepEqual(
     (await records()).map(record => record.phase),
     ['first', 'second'],
@@ -138,7 +137,7 @@ test('a second failure surfaces its error and cannot start a third attempt', asy
 
 test('successful operations do not recover', async t => {
   const { command, records } = await fixture(t, { code: 0, stdout: success })
-  assert.deepEqual(await runProtocol(command, '', { readOnly: true }), { recovered: true })
+  assert.equal((await runCommand(command, '', { readOnly: true })).stdout, success)
   assert.equal((await records()).length, 1)
 })
 
@@ -243,54 +242,6 @@ test('a timed-out or unlaunchable command never consults the recovery policy', a
     }),
     /Could not launch Fixture/,
   )
-})
-
-test('session reads opt into recovery and replay the runtime payload', async t => {
-  const sessions = new SessionClient()
-  const reads = {
-    list: (context: TargetContext) => sessions.list(context),
-    get: (context: TargetContext) => sessions.get(context, 'session'),
-    directories: (context: TargetContext) => sessions.directories(context, '/work'),
-    search: (context: TargetContext) => sessions.search(context, { query: 'hello' }),
-  }
-  for (const [name, read] of Object.entries(reads)) {
-    await t.test(name, async t => {
-      const { context, records } = await fixture(t)
-      assert.deepEqual(await read(context), { recovered: true })
-      const attempts = await records()
-      assert.deepEqual(
-        attempts.map(record => record.phase),
-        ['first', 'second'],
-      )
-      assert.ok(Buffer.from(attempts[0].input, 'base64').length > 1000, 'Runtime prefix must be uploaded')
-      assert.equal(attempts[0].input, attempts[1].input)
-    })
-  }
-})
-
-test('every session mutation preserves the single-attempt contract', async t => {
-  const sessions = new SessionClient()
-  const input = { name: 'Session', rootDir: '/work', tool: 'claude' as const }
-  const mutations = {
-    create: (context: TargetContext) => sessions.create(context, input),
-    'idempotent create': (context: TargetContext) => sessions.create(context, input, 'a'.repeat(64)),
-    fork: (context: TargetContext) => sessions.fork(context, 'session', { branch: 'feature', rootDir: '/fork' }),
-    acknowledge: (context: TargetContext) => sessions.acknowledge(context, 'session', 'completion'),
-    terminate: (context: TargetContext) => sessions.terminate(context, 'session'),
-    remove: (context: TargetContext) => sessions.remove(context, 'session'),
-    upload: (context: TargetContext) =>
-      sessions.uploadImage(context, 'session', Buffer.from([1]), 'image/png', t.signal),
-  }
-  for (const [name, mutate] of Object.entries(mutations)) {
-    await t.test(name, async t => {
-      const { context, records } = await fixture(t)
-      await assert.rejects(mutate(context), /Fixture failed \(255\)/)
-      assert.deepEqual(
-        (await records()).map(record => record.phase),
-        ['first'],
-      )
-    })
-  }
 })
 
 test('software inspection can recover while installation streams only one invocation', async t => {

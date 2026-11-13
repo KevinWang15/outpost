@@ -17,7 +17,7 @@ import {
   type ScheduleInput,
   type SessionRef,
 } from '../../shared/chatApi'
-import { chatHost, type ChatHostMessage, type ChatOrigin } from '../../shared/chatHost'
+import { chatHost, type ChatOrigin } from '../../shared/chatHost'
 import { replyText, turnFiles } from '../../shared/chatTranscript'
 import type { SessionFile } from '../../shared/sessionFiles'
 import { handles, mentions } from '../../shared/chatMentions'
@@ -87,8 +87,6 @@ export class ChatHub {
   private finishing = new Set<string>()
   /** Deliveries with a prompt request in flight. */
   private sending = new Set<string>()
-  /** Outpost MCP calls by ID: a host forwards a call again after a lost connection. */
-  private calls = new Map<string, Promise<{ ok: boolean; message?: string; data?: unknown }>>()
   private ticker: NodeJS.Timeout | null = null
   private stopped = false
 
@@ -299,7 +297,6 @@ export class ChatHub {
       key,
       (start, events) => this.dependencies.connect(context, ref.sessionId, start, events),
       {
-        call: (from, message) => void this.call(account, ref, from, message),
         changed: (from, event) => this.changed(account, ref, from, event),
         disposed: from => {
           if (this.links.get(key) === from) this.links.delete(key)
@@ -908,7 +905,6 @@ export class ChatHub {
         hop: source.hop,
         from: { targetId: delivery.targetId, sessionId: delivery.sessionId, name: member?.name ?? handle, handle },
         reply: true,
-        call: null,
       },
       replyPrompt(handle, body),
       {
@@ -922,35 +918,39 @@ export class ChatHub {
     await this.send(account, reply).catch(error => this.failDelivery(account, reply, (error as Error).message))
   }
 
-  /** Outpost MCP tools called by a session's agent (outpost_mcp.py). A call the
-   * host forwards again, after a lost connection, gets the first one's answer. */
-  private async call(
-    account: Account,
-    ref: SessionRef,
-    link: ChatLink,
-    message: Extract<ChatHostMessage, { type: 'call' }>,
-  ) {
-    const key = `${account.userId}/${message.id}`
-    let work = this.calls.get(key)
-    if (!work) {
-      work = this.handleCall(account, ref, message)
-      this.calls.set(key, work)
-      if (this.calls.size > 256) this.calls.delete(this.calls.keys().next().value!)
-    }
-    const result = await work
-    link.answer(message.id, result.ok, result.message, result.data)
+  /** The prompt origin of the turn a session is running now, if any. */
+  private runningOrigin(account: Account, ref: SessionRef) {
+    const entries = this.links.get(this.linkKey(account.userId, ref))?.journal.entries ?? []
+    const ended = new Set(entries.flatMap(entry => (entry.kind === 'ended' ? [entry.turn] : [])))
+    const started = [...entries]
+      .reverse()
+      .find(
+        (entry): entry is Extract<typeof entry, { kind: 'started' }> =>
+          entry.kind === 'started' && !ended.has(entry.turn),
+      )
+    const queued = started && entries.find(entry => entry.kind === 'queued' && entry.turn === started.turn)
+    return queued?.kind === 'queued' ? queued.origin : null
+  }
+
+  /** Outpost tools called by a session's agent (machine/mcp.ts), arriving on
+   * its machine's connection. */
+  async agent(owner: Owner, ref: SessionRef, tool: string, args: Record<string, unknown>) {
+    const result = await this.handleCall(await this.account(owner), ref, tool, args)
+    if (!result.ok) throw new Error(result.message ?? 'Outpost did not accept this request.')
+    return result.data
   }
 
   private async handleCall(
     account: Account,
     ref: SessionRef,
-    message: Extract<ChatHostMessage, { type: 'call' }>,
+    tool: string,
+    args: Record<string, unknown>,
   ): Promise<{ ok: boolean; message?: string; data?: unknown }> {
     const answer = (ok: boolean, text?: string, data?: unknown) => ({ ok, message: text, data })
     try {
       await this.fresh(account)
       const sender = this.find(account, ref)
-      if (message.tool === 'list_sessions') {
+      if (tool === 'list_sessions') {
         return answer(true, undefined, {
           sessions: account.view
             .filter(item => !(item.targetId === ref.targetId && item.id === ref.sessionId))
@@ -965,8 +965,8 @@ export class ChatHub {
             })),
         })
       }
-      if (message.tool !== 'message_session') return answer(false, 'Unknown Outpost tool.')
-      const input = message.arguments as { session?: unknown; message?: unknown }
+      if (tool !== 'message_session') return answer(false, 'Unknown Outpost tool.')
+      const input = args as { session?: unknown; message?: unknown }
       if (typeof input?.session !== 'string' || typeof input.message !== 'string' || !input.message.trim())
         return answer(false, 'Provide session and message.')
       if (input.message.length > chatLimits.text) return answer(false, 'The message is too long.')
@@ -987,17 +987,7 @@ export class ChatHub {
           false,
           `@${recipient.handle} is open in a terminal and cannot receive messages until it is opened in chat.`,
         )
-      // Sent before a restart lost the answer: report it, do not send it again.
-      const earlier = account.store.deliveries.deliveries.find(
-        item => item.source.kind === 'session' && item.source.call === message.id,
-      )
-      if (earlier)
-        return answer(true, undefined, {
-          sent: true,
-          to: `@${recipient.handle}`,
-          note: 'The reply will arrive as a new message in this chat.',
-        })
-      const origin = message.origin
+      const origin = this.runningOrigin(account, ref)
       const thread = origin && (origin.kind === 'session' || origin.kind === 'reply') ? origin.threadId : randomUUID()
       const hops = (account.store.threads.threads[thread]?.hops ?? 0) + 1
       if (hops > chatLimits.threadHops)
@@ -1013,7 +1003,7 @@ export class ChatHub {
       }
       const delivery = this.delivery(
         { targetId: recipient.targetId, sessionId: recipient.id },
-        { kind: 'session', threadId: thread, hop: hops, from, reply: false, call: message.id },
+        { kind: 'session', threadId: thread, hop: hops, from, reply: false },
         sessionPrompt(from.handle, input.message),
         {
           kind: 'session',

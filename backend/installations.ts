@@ -93,6 +93,8 @@ export class Installations {
           const code = await this.software.install(context, script, output, job.controller.signal)
           installation.exitCode = code
           installation.status = code === 0 ? 'succeeded' : 'failed'
+          // A new Outpost Terminal takes effect on the next connection.
+          if (code === 0) context.machine.restart()
           if (code !== 0)
             installation.error = `Installation exited with ${code === null ? 'a disconnected process' : `status ${code}`}.`
         } catch (error) {

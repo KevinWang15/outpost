@@ -1,7 +1,7 @@
 # Outpost architecture
 
-Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code) running in persistent PTYs
-on Linux machines, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
+Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code, DeepSeek Harness)
+running on Linux machines, in persistent PTYs or as chats, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
 
 This document is the source of truth for how Outpost behaves and why. Code
 comments refer back to the principles below by name.
@@ -10,36 +10,42 @@ comments refer back to the principles below by name.
 
 1. **The target owns the terminal.** A dedicated `outpost-terminal` process
    owns each coding session's PTY, screen and 10,000-line in-memory scrollback.
-   Clients and relays are disposable. Reconnect restores a checkpoint and then
+   Clients and connections are disposable. Reconnect restores a checkpoint and then
    follows live output; disconnect never terminates the session.
 2. **One managed connection path.** Every managed Outpost terminal — browser or Electron —
    uses the same chain:
 
    ```text
-   client ⇄ WebSocket ⇄ Outpost broker ⇄ transport (SSH or local shell) ⇄ relay ⇄ terminal service ⇄ PTY
+   client ⇄ WebSocket ⇄ Outpost broker ⇄ machine connection (SSH or local shell) ⇄ node ⇄ terminal service ⇄ PTY
    ```
 
    Hosted and local server installations run the same code. Desktop local shells
    use a native PTY on the user's computer; they have no broker, authentication,
    remote dependency, or persistence daemon. Both use the same terminal UI.
-3. **Modes differ only in identity.** A *deployment* answers four questions:
+3. **Outpost is the hub.** The server connects to each machine; machines never
+   connect to the server or to each other. Everything between the server and a
+   machine, including an agent's call to Outpost's tools, travels on the one
+   connection the server keeps to it. If the server can reach a machine, every
+   feature works there; if it cannot, none is expected to.
+4. **Modes differ only in identity.** A *deployment* answers four questions:
    who owns this request, where is their workspace stored, which SSH identity
    do they use, and may they use this computer as a target. Everything else —
    sessions, software, terminals, the UI — is mode-agnostic.
-4. **One installed target dependency.** Required Software installs a versioned,
-   self-contained Linux executable in `~/.outpost/bin`. Python management code
-   is still sent with each operation. The terminal service opens only a private
-   Unix socket and runs as the execution user; no network daemon or system-wide
-   service is needed.
-5. **The client shims the platform.** Making a remote session feel native
+5. **One installed machine dependency.** Required Software installs Outpost
+   Terminal, a versioned, self-contained Linux executable in `~/.outpost/bin`.
+   It is everything Outpost runs on a machine: the node, terminal services, chat
+   hosts, the MCP server and hooks. Its processes run as the machine's user and
+   open only private Unix sockets; no network listener or system-wide service
+   is needed.
+6. **The client shims the platform.** Making a remote session feel native
    (paste an image with the usual shortcut, Shift+Enter for a newline, copying
    to your clipboard, opening links on your computer) is the client's job.
    Electron owns a narrow native capability bridge; renderer and connection
    code stay in the shared frontend.
-6. **Explicit gestures only.** The local clipboard is read only on a paste
+7. **Explicit gestures only.** The local clipboard is read only on a paste
    gesture, never polled. Remote programs can copy to your clipboard (OSC 52)
    and ask to open `http(s)` links, but can never read your clipboard.
-7. **Extensible at the edges, small in the middle.** Desktop capabilities, coding
+8. **Extensible at the edges, small in the middle.** Desktop capabilities, coding
    harnesses, signal types and transports are registries or interfaces. The
    data path between them stays a dumb, well-specified pipe.
 
@@ -56,28 +62,30 @@ comments refer back to the principles below by name.
                  │  deployment · workspace · sessions    │
                  │  software · terminal broker           │
                  └───────────────┬───────────────────────┘
-                                 │ OpenSSH or local bash (relay protocol)
+                                 │ OpenSSH or local bash (node protocol)
                  ┌───────────────┴───────────────────────┐
-                 │ Linux target                          │
-                 │  runtime (per operation) · relay      │
-                 │  terminal service per session · harness    │
+                 │ Linux machine                         │
+                 │  node: one per account's connection   │
+                 │  terminal service or chat host per    │
+                 │  session · the coding tool            │
                  └───────────────────────────────────────┘
 ```
 
 | Directory | Runs on | Role |
 | --- | --- | --- |
 | `frontend/` | Browser | Workspace UI, Connect dialog, web terminal client |
-| `backend/` | Outpost server | HTTP API, deployments, transports, terminal broker |
-| `terminal-service/` | Linux target | Self-contained persistent PTY executable, headless xterm engine |
-| `runtime/` | Targets | Session registry, service control, relay, harness adapters |
+| `backend/` | Outpost server | HTTP API, deployments, transports, machine connections, terminal broker, chat and history hubs |
+| `machine/` | Linux machines | Outpost Terminal: node, session registry, terminal service, chat host, MCP server, harness adapters |
 | `desktop/` | Your computer | Electron shell, native capabilities, server accounts, trust and installers |
 | `shared/` | Browser + desktop + server | Schemas, harness registry, terminal protocol, desktop bridge contract |
 
 **One definition per contract.** Request and stored-record shapes are TypeBox
-schemas in `shared/schemas.ts`; the server validates with them and the types in
-`shared/model.ts` are derived from them. Contracts that also exist in Python —
-the harness registry and relay framing — are checked against
-each other by `tests/unit/contracts.test.ts`. Browser entry paths live in
+schemas in `shared/schemas.ts`; the server and the machine validate with them,
+and the types in `shared/model.ts` are derived from them. The server and
+Outpost Terminal share the rest of `shared/` too: framing, the node protocol
+(`shared/machine.ts`), the chat host protocol and the harness registry.
+`tests/unit/contracts.test.ts` checks that every registered harness has a
+machine adapter. Browser entry paths live in
 `shared/pages.ts`, shared by navigation and the production SPA fallback. A new
 browser page must be registered there so development and production agree.
 
@@ -85,10 +93,10 @@ browser page must be registered there so development and production agree.
 
 | Role | Supported |
 | --- | --- |
-| Targets (where sessions run) | Linux with Bash, Python 3.9+ and Outpost Terminal. SSH as the user named for the target (root is not required), or the Outpost computer itself when the server runs on Linux (including WSL). |
+| Targets (where sessions run) | Linux with Bash, `setsid` (util-linux) and Outpost Terminal; Git for forks. SSH as the user named for the target (root is not required), or the Outpost computer itself when the server runs on Linux (including WSL). |
 | Outpost server | Node.js 24+ with OpenSSH, on Linux (including WSL) or macOS. Hosted deployments run on Linux. |
 | Web terminal | Any current browser, including phones. |
-| Outpost Desktop | Packaged Electron for macOS arm64/x64 and Windows x64. No Python, WSL or installed browser required. |
+| Outpost Desktop | Packaged Electron for macOS arm64/x64 and Windows x64. No WSL or installed browser required. |
 
 The web terminal pins a built package from the `outpost-6.0` branch of
 [KevinWang15/xterm.js](https://github.com/KevinWang15/xterm.js/tree/outpost-6.0).
@@ -260,13 +268,15 @@ of a bounded snapshot of the visible xterm rows, joining wrapped lines. Opening
 it sends no PTY input and the live terminal continues rendering behind it. This
 is a clipboard aid, not retained history; the snapshot is discarded on close.
 
-The relay retains a bounded FIFO for typed input, composer drafts and pasted
+The broker keeps a bounded FIFO for typed input, composer drafts and pasted
 references. The service wraps a paste in bracketed-paste delimiters only when
 the application requested that mode. Image bytes never enter this FIFO.
 Drafts are confirmed only after the terminal service accepts their bytes into its PTY write queue; no queued
 input is replayed across reconnects.
-The browser and broker each cap queued transport input at 2 MiB. The broker's `BoundedWriter` stops writing when the SSH pipe
-applies backpressure, resumes on drain, and fails after 30 seconds without drain.
+The browser and broker each cap queued transport input at 2 MiB. The machine
+connection's `BoundedWriter` stops writing when the SSH pipe applies
+backpressure, resumes on drain, and drops the connection after 30 seconds
+without drain.
 Overflow closes the attachment with an explicit error and discards queued input.
 Binary input, composer drafts and pasted references share the 1 MiB/s input
 budget. These are transport bounds;
@@ -283,9 +293,10 @@ using its existing session-scoped resume token in the Authorization header.
 The route accepts resume tokens only and checks the originating login before
 buffering the bounded body. Launch tickets and workspace cookies cannot authorize
 an upload. Both web and desktop terminals use this same endpoint. `SessionClient`
-passes the bytes over the existing runtime-operation stdin transport, without
-Base64. The runtime reads a bounded body outside the registry lock, atomically
-saves the image, and returns its harness-specific reference; it sends no PTY input.
+sends the bytes on an `image` stream of the machine connection, without Base64.
+The node checks the type and declared size before accepting bytes, saves the
+image atomically once all of them arrived, and returns its reference; it sends
+no PTY input and holds no registry lock while bytes arrive.
 
 The client then sends `paste {id, data}` on the original terminal connection and
 waits for acknowledgement. Disconnect cancels the HTTP request; a reconnect
@@ -298,7 +309,7 @@ quoted local/WSL path with the owning shell generation checked before insertion.
 
 `TerminalSocket` owns recovery for both web and desktop remote terminals. Every
 15 seconds after readiness or a successful health check, it sends an authenticated
-`ping` through the broker and relay to the terminal service. The service replies
+`ping` through the broker and machine connection to the terminal service. The service replies
 without writing bytes to the coding process. A missing reply after 30 seconds
 replaces the attachment, including when an idle socket still claims to be OPEN.
 Returning to a visible page, browser focus, `pageshow`, or `online` checks it
@@ -326,8 +337,8 @@ asks the user to check before retrying. Ended, expired, outdated, setup-error,
 renderer-error, and input-congested connections still require explicit action.
 This cannot recover an expired/revoked credential or a machine that lost the remote
 PTY automatically. Initial connections and explicit Reconnect include `start=1`;
-automatic attachments use `start=0`. The target checks that intent under the registry
-lock, so a process that exited while the client was offline is reported as ended,
+automatic attachments use `start=0`. The node checks that intent when it opens
+the terminal stream, so a process that exited while the client was offline is reported as ended,
 even when its original exit event never reached the client. A single-use launch lost before the client receives its first resume grant
 requires a fresh Connect from Outpost. Browser/OS suspension delays JavaScript;
 recovery begins when the page can run again.
@@ -388,11 +399,11 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `resize {cols, rows}` | Client geometry |
 | → server | `focus {active}` | Whether this viewer is active; the latest active viewer controls PTY dimensions |
 | → server | `ack {bytes}` | Output rendered; flow control |
-| → server | `ping {id}` | Probe the remote terminal service through the relay without sending terminal input |
+| → server | `ping {id}` | Probe the remote terminal service without sending terminal input |
 | → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
 | → server | `clear {id}` | Clear the shared screen and scrollback, keeping the current cursor line |
 | → server | `paste {id, data}` | Paste text using the running application’s bracketed-paste mode |
-| → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without starting another relay |
+| → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without opening another stream |
 | → server | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
 | ← client | `hello {resume, session, target}` | Connection accepted |
 | ← client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
@@ -410,7 +421,7 @@ is independently scheduled by xterm's renderer.
 
 Only `error` permits automatic reconnection. `unavailable` means setup requires
 user action, such as installing a missing helper or restarting an incompatible
-service. The broker preserves runtime HTTP error status through a single failure
+service. The broker preserves the node's HTTP error status through a single failure
 classifier, shared with API lookup failures. A missing session or exited process is `ended`;
 authentication errors are `expired`; other permanent request/setup errors are
 `unavailable`. Transport failures, timeouts and target RPC throttling remain retryable.
@@ -425,7 +436,7 @@ until 50 ms of quiet, with a one-second ceiling so background descendants cannot
 hold the session open. Each viewer flushes its snapshot and pending output before
 the `exit` frame and EOF, with a 30-second shutdown deadline for slow viewers.
 The service removes its socket, so management reports the session as stopped.
-The broker handles `exit` immediately, independent of SSH process cleanup.
+The broker handles `exit` immediately, independent of stream cleanup.
 Reconnect starts the coding tool with the same native conversation ID; it never
 automatically restarts a tool that deliberately exited.
 
@@ -440,22 +451,65 @@ Version checks reject unsupported input; there are no protocol
 translators or historical readers. Connection grants authorize an owner/login,
 target and session independently of the selected UI.
 
-### Relay protocol (broker ⇄ relay, stdio)
+### Machine connection (server ⇄ node)
 
-All session operations use one runtime upload path. The process arguments carry
-only a short Python bootstrap and the byte lengths of the compressed runtime
-and request. The runtime and request travel on stdin, avoiding operating-system
-command-line limits (including Windows' 32,767-character limit). The bootstrap
-uses exact, unbuffered reads, leaving subsequent stdin bytes for image data or
-live relay frames. It creates no temporary runtime files or persistent agent.
+`backend/machines.ts` keeps one connection per account and machine, opened on
+first use. It runs `outpost-terminal node` through the target's transport
+(`ssh -T … "$SHELL -lic …"`, or the login shell locally) and carries every
+operation on that machine: session calls, terminal and chat attachments, file
+and image transfers, history reads, and agents' calls to Outpost's tools.
+Login shells may print first; the node then prints the marker
+`\0OUTPOST-NODE-1\0` and a `hello` with its version and protocol. A machine
+running another Outpost Terminal version is asked to reinstall it from
+Required Software, before any operation runs.
+
+Frames are length-prefixed as everywhere in Outpost (one type byte, a 4-byte
+big-endian length, the payload): `C` carries a JSON control message and `D`
+stream data (a 4-byte stream number, then bytes). `shared/machine.ts` defines
+the messages:
+
+| Message | Direction | Meaning |
+| --- | --- | --- |
+| `hello {version, protocol, pid}` | node → server | Once, before anything else |
+| `call {id, op, args}` / `result {id, ok, data \| error}` | both | A request and its answer. The server calls session, file, directory, search and history operations; the node calls `agent` for an agent's Outpost tool call |
+| `open {stream, kind, args}` / `opened {stream, data}` | server → node / node → server | Open a `terminal`, `chat`, `file-read`, `file-receive` or `image` stream |
+| `close {stream, error?, data?}` | both | End a stream; a receiving node's final answer travels with it |
+| `credit {stream, bytes}` | both | Grant the sender more of its 4 MiB stream window |
+
+Errors keep their HTTP status, so a missing session is still a 404 through the
+connection. Calls have a deadline (30 seconds unless the operation sets one) and
+can be cancelled. A stream's sender may have 4 MiB unacknowledged; the receiver
+grants credit as it consumes, so a paused WebSocket stops its terminal stream
+without stalling others. When the connection ends, every pending call and stream
+fails at once with a retryable error and the next use reconnects. Terminal
+services and chat hosts run detached from the node, so they and their coding
+tools keep running; only their streams close.
+
+Terminal and chat streams carry their driver's own protocol unchanged: the node
+connects the stream to `~/.outpost/terminals/<id>.sock` or
+`~/.outpost/chats/<id>.sock`, starting the driver first when the attachment
+asks to. Closing a stream closes only that socket.
+
+**Agents' tool calls.** The node also listens on `~/.outpost/run/node-<id>.sock`.
+Its name is an HMAC of the server secret, account and machine, so accounts
+sharing one Linux user do not collide; a newer node of the same account
+replaces it atomically. When the node creates, attaches or starts a session,
+it writes `~/.outpost/bindings/<session>.json` naming its endpoint. Outpost's
+MCP server reads that binding on each call, sends one line
+`{session, tool, arguments}`, and the node forwards it to the server as an
+`agent` call after checking that the session is bound to it. The server routes
+history tools to the history hub and the others to the chat hub. While the
+server reconnects, the endpoint is missing and the MCP server retries for
+20 seconds before reporting that Outpost is unreachable.
+
 Software inspection and installation use the separate POSIX script transport,
-which can run before Python is installed.
-Inspection loads the interactive login environment to discover the same tools as
-session launches. Installation loads login profiles noninteractively, then runs
-the submitted script with `sh -s`. Batch installers have no controlling terminal
-and must not initialize interactive shell job control. Their stdout and stderr
-are streamed unchanged; the terminal helper installer reports its download and
-verification stages explicitly.
+which runs before Outpost Terminal is installed. Inspection loads the
+interactive login environment to discover the same tools as session launches.
+Installation loads login profiles noninteractively, then runs the submitted
+script with `sh -s`. Batch installers have no controlling terminal and must not
+initialize interactive shell job control. Their stdout and stderr are streamed
+unchanged; the terminal helper installer reports its download and verification
+stages explicitly.
 
 SSH connection sharing is a backend transport policy. Linux and macOS backends
 use owner/identity-scoped control sockets with a 120-second idle lifetime.
@@ -463,53 +517,36 @@ Windows backends always use independent connections: the transport explicitly
 sets `ControlMaster=no`, `ControlPath=none` and `ControlPersist=no`, overriding
 user SSH configuration. `OUTPOST_SSH_MULTIPLEX=0` applies the same policy on
 other platforms. This depends on the backend host, not the desktop or SSH target.
+SSH keepalives (`ServerAliveInterval=15`, three misses) end a connection whose
+network went away.
 
 The transport supplies one alternate invocation without sharing when sharing is
-enabled. The process runner uses it only for explicitly read-only, buffered
-operations: session list/get, conversation search, directory suggestions and
-software inspection. Recovery requires exit 255, no stdout, and stderr containing
-only recognized control-connection failures. Mixed or unknown diagnostics prevent
+enabled. Starting a node uses it when the first attempt exits 255 before the
+node's marker, with no output and only recognized control-connection
+diagnostics on stderr; starting a node twice is harmless. Read-only, buffered
+software inspection uses it the same way. Mixed or unknown diagnostics prevent
 retry, including authentication or configuration failures alongside an earlier
 control-connection error. Both attempts share the original deadline,
-cancellation signal, credentials and input bytes. There is no retry for generic
-network/authentication errors or partial responses. Mutations, streamed
-installations and live terminal relays do not opt in; creation recovery remains
-governed by its durable request receipt. Recovery never kills a master or removes
-its socket, so other connected terminals are left alone.
-
-The broker starts the relay through the target's transport exactly like any
-other runtime operation (`ssh -T … "$SHELL -lic …"`, or the login shell
-locally). Login shells may print first; the relay then prints a magic marker
-and exchanges length-prefixed frames: one type byte, a 4-byte big-endian
-length, and the payload. If the runtime fails before the marker (a missing
-session, missing terminal service), its `OUTPOST_RESULT` error becomes the client's
-`closed` message.
-
-| Type | Direction | Payload |
-| --- | --- | --- |
-| `I` | broker → relay | Input bytes for the persistent PTY |
-| `O` | relay → broker | Live PTY output |
-| `C` | both | JSON control: `resize`, `focus`, `send`, `clear`, `paste`, `acknowledge`, `signal-result` / `restore`, `geometry`, `clear`, `ready`, `activity`, `result`, `signal`, `exit` |
-
-Framing separates terminal bytes from control messages. The relay connects to
-`~/.outpost/terminals/<id>.sock` and forwards complete frames, adding activity
-and signal messages only between frames. SSH needs no PTY. Closing the relay
-closes only that socket, leaving the service and harness running.
+cancellation signal, credentials and input bytes. Streamed installations never
+retry. Recovery never kills a master or removes its socket, so other
+connections are left alone.
 
 `shared/node/terminalFrames.ts` owns encoding and incremental decoding for the
-broker and terminal service. `runtime/outpost_frames.py` implements the same
-bounded format for the relay and lifecycle RPCs. Framing validates the type and
-length before accepting a payload; the connection owner interprets its controls.
+server, the node and the drivers. Framing validates the type and length before
+accepting a payload; the connection owner interprets its controls.
 
 ### Persistent terminal service
 
 `outpost-terminal serve` receives launch configuration on stdin, starts a PTY
 with Bun's native terminal API, and runs a pinned `@xterm/headless` engine.
-Python starts it in a new OS session with independent log files and no inherited
-SSH stdio. Each session has its own process; a failure cannot take down every
-session. The service never needs Node or Bun installed separately on the target.
-The helper and its sockets have owner-only permissions. Control RPC authenticates
-the daemon PID and user using Linux `SO_PEERCRED` before lifecycle operations.
+The node starts it detached, in its own process group, with its log in
+`~/.outpost/logs/<id>.log` and no inherited SSH stdio, so it outlives the node
+and its connection. Each session has its own process; a failure cannot take
+down every session. The service never needs Node or Bun installed separately on
+the target. Its socket is owner-only (mode 0600, in the owner-only state
+directory): the machine's user account is the trust boundary. Besides viewers,
+it answers one-shot requests on the same socket: `status`, `stop`,
+`acknowledge`, hook events, `files` hints and signals.
 
 The normal buffer retains 10,000 rows in memory. There is no raw output journal,
 copy mode, prefix key, status bar or keyboard negotiation shim. The service
@@ -539,7 +576,7 @@ additional viewers receive a transient error and retry. A maximum-size snapshot
 holds about 50 MiB of raw cells plus metadata before streaming releases them.
 Checkpoint schema 2 encodes each row's repeated final cell once,
 preserving its character and style as well as combined characters and links.
-`terminal-service/attachment.ts` encodes and streams this immutable snapshot in
+`machine/attachment.ts` encodes and streams this immutable snapshot in
 4 ms slices, honoring socket backpressure. The live PTY keeps running; each
 restoring attachment queues subsequent output and geometry in order. Readiness
 follows the complete snapshot, enabling input (including Ctrl+C) while queued
@@ -568,7 +605,7 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract uses terminal service 1.2.0 / protocol 4 and client protocol 13.
+This contract uses Outpost Terminal 2.0.0 / protocol 5 and client protocol 13.
 Publish the matching helper before deploying the server. A service protocol
 change requires explicitly restarting existing service processes after installing
 the dependency; replacing the executable does not alter a running PTY service.
@@ -577,29 +614,26 @@ The headless engine alone answers terminal queries, even when disconnected.
 The browser forwards user input, mouse and focus events, suppressing duplicate
 terminal-generated replies. Palette queries use the same shared terminal theme.
 Resizing updates both engine geometry and the PTY, delivering normal SIGWINCH.
-`outpost_terminal.child_command` wraps the harness command in a short Python
-bootstrap: create a child session, claim stdin's PTY as its controlling terminal,
-set the foreground process group, restore terminal signal defaults, and exec the
-original command. The service retains the PTY master and its independent lifetime;
-the bootstrap does not remain as a supervisor. Assigning PTY stdio alone does not
-establish a foreground process group and therefore cannot deliver resize signals.
-The existing Python dependency provides this setup without a new target package.
-Sessions started before this setup need an explicit Terminate/Connect to restart the
-CLI and resume its conversation; reconnecting a viewer cannot establish terminal
-ownership for an already-running process.
+The coding tool runs under `setsid -c`, which starts a new session with the PTY
+as its controlling terminal and its process group in the foreground. Bun's PTY
+API assigns the PTY as stdio only, which establishes no foreground process group
+and therefore cannot deliver resize signals. Bash then runs the launch script,
+so the session's arguments keep their shell syntax. `setsid` does not remain as
+a supervisor; the service retains the PTY master and its independent lifetime.
 Ctrl+C and other application keys pass directly through the PTY.
 
 The terminal service persists across client, SSH and Outpost server restarts.
 Its in-memory state and running processes do not survive a target reboot or
-service crash. Explicit Terminate walks the authenticated service's process
-tree using PID/start-time checks (and pidfds where available). Updating the
-installed executable atomically leaves already-running sessions alone.
+service crash. Explicit Terminate asks the driver to stop; if it does not
+answer, the node ends its process tree, children first, after checking that the
+PID still runs an Outpost driver. Updating the installed executable atomically
+leaves already-running sessions alone.
 
 ### Building and installing the dependency
 
 `shared/terminalService.ts` defines the executable version, service protocol,
-and terminal bounds. `runtime/outpost_terminal.py` mirrors the service contract.
-The manual `.github/workflows/terminal.yml` builds baseline x86_64 and ARM64
+and terminal bounds; the node protocol has its own version in
+`shared/machine.ts`. The manual `.github/workflows/terminal.yml` builds baseline x86_64 and ARM64
 binaries for glibc and musl, plus SHA256SUMS. Publishing creates an immutable
 `terminal-v<version>` release. The Required Software installer selects the
 architecture/libc, downloads that exact release, checks SHA-256 and `--version`,
@@ -607,19 +641,21 @@ and renames the verified executable into `~/.outpost/bin/outpost-terminal`.
 It uses the existing editable installation plan, SSH/local transport and log UI.
 Minimal musl targets also receive the `libstdc++` system package.
 
-**Creation and forking** share a process-owned `creation.lock`, serializing
+**Creation and forking** share the `creation` lock, serializing
 allocations without blocking operations on existing sessions. Lock order is
 creation → registry; other operations never take the creation lock. The
 registry lock is held only to snapshot settings and to commit a new record;
 Git and harness allocation run outside it. Registration re-reads the latest
 registry and rechecks unique names and conversation identities, preserving
-concurrent deletes and attachment timestamps. A failed process releases the
-allocation lock automatically, with no persistent reservations to recover.
+concurrent deletes and attachment timestamps. Locks are files in
+`~/.outpost/locks/` holding their holder's PID; a lock whose holder died is
+broken, with a check that a new holder did not take it meanwhile, so a failed
+process leaves no reservation to recover.
 Forking uses a snapshot of the source settings, so deleting the source record
 during allocation does not cancel an already-started fork.
 
 Retryable creates carry a request key scoped by the server to its deployment,
-account and target. The runtime hashes the creation input and commits a receipt
+account and target. The node hashes the creation input and commits a receipt
 (`creation key → input fingerprint + session ID`) in the registry's `creations`
 map in the same atomic write as the session. Replays under the creation lock
 return the existing session; different input with the same key is rejected.
@@ -627,148 +663,107 @@ Receipts survive session deletion so a stale retry reports deletion instead of
 recreating the session. Operations without a retry key allocate no receipt.
 These small receipts contain hashes and IDs, not a second copy of session settings.
 
-The runtime creates a new branch from the source directory’s `HEAD` with
+The node creates a new branch from the source directory’s `HEAD` with
 `git worktree add -b`, then allocates a fresh harness conversation and saves
 its session. It inherits the source tool and launch settings. Git receives
 the branch and path as argument values; its failures stop before conversation
-allocation or registration. SSH and local targets use their existing
-management transports. If harness allocation fails after Git succeeds, the
+allocation or registration. If harness allocation fails after Git succeeds, the
 error identifies the created worktree so it can be reused or removed manually.
 
 ### Shared session activity
 
-`Activity.describe()` in the target runtime is the single source for the session
-list and terminal streams. `shared/activity.ts` defines `working | waiting | idle |
-finished | error | unknown`, display labels, attention semantics, and the bounded
-wire parser. `finished` means an unread completion; `waiting` means native
-approval/input is required. Only completions are dismissible. Terminal output
-rate, silence and keyboard input never infer whether the agent is working.
+A session's driver owns its activity: the terminal service for a terminal, the
+chat host for a chat. The session list asks a running driver (its `status`
+reply) and viewers receive `activity` messages as it changes; with no driver,
+the last saved state is shown. `shared/activity.ts` defines `working | waiting |
+idle | finished | error | unknown`, display labels, attention semantics, and the
+bounded wire parser. `finished` means an unread completion; `waiting` means
+native approval/input is required. Only completions are dismissible. Terminal
+output rate, silence and keyboard input never infer whether the agent is working.
 
-**Identity and native observations.** Every managed launch installs a small
-Python observer through the harness's own hooks. SessionStart and human submission
-select the current native conversation, including in-CLI resume/new/clear actions.
-Codex defers SessionStart until the first turn. Restarts resume the last observed
-conversation. The native store remains pinned; neither terminal text nor another
-conversation's modification time can select an identity.
+**Hooks.** Every terminal launch configures the tool's own lifecycle hooks to
+run `outpost-terminal hook`, which passes only the fields activity reads
+(`session_id`, `hook_event_name`, `agent_id`, `isSidechain`, `source`, `turn_id`,
+`notification_type`, `is_interrupt`) to the session's terminal service. Hooks
+never block or fail the tool: they emit no output or decisions, and a hook with
+no running service does nothing. Each harness adapter (`machine/harnesses/`)
+owns its native configuration:
 
-Each harness adapter owns its native hook events and configuration. Shared native
-plugins are installed once in `prepare_launch`; invocation-only activity setup
-runs through `prepare_activity` after the launch generation is allocated.
-`outpost_activity_install.py` only packages the shared event writer and builds
-its command; the framework dispatches through the adapter registry:
-
-- Codex uses invocation-only `-c` hooks. A short-lived app-server reads `hooks/list`
-  to obtain the native identities and hashes, then the launch trusts exactly these
-  generated commands. It does not change config.toml, grant blanket hook trust,
-  start a thread, or invoke a model. The launch's native hooks own live state;
-  the shared daemon is never queried once a lifecycle snapshot is available.
-  Without a hook observation, `thread/read` on the existing `app-server-control`
-  socket can provide state and the selected rollout. Its Idle response cannot
-  overwrite Working or Waiting from an embedded CLI's hooks.
 - Claude uses invocation-only `--settings` hooks for selection, submission, tools,
   permission/elicitation waits, completion and failure. An interrupted tool means
-  Idle; an ordinary tool failure leaves the turn Working. Recovery reads explicit
-  transcript completions/interruptions and respects native timestamp ordering.
+  Idle; an ordinary tool failure leaves the turn Working.
+- Codex uses invocation-only `-c` hooks. A short-lived app-server reads
+  `hooks/list` to obtain the native identities and hashes, then the launch
+  trusts exactly these generated commands. It does not change config.toml,
+  grant blanket hook trust, start a thread, or invoke a model.
 - Kimi uses an additive local plugin in its installed-plugin registry, preserving
   other entries and leaving config.toml alone. Its hooks only select the main
   conversation; they are inert outside an Outpost launch. Main-agent wire records
   determine state because Kimi's generic turn hooks do not reliably identify
   subagents. Pending interactions remain Waiting until all are resolved; failed
   turns become Error.
+- DeepSeek Harness runs only in chat.
 
-The helper persists only a launch generation, native ID, state, event/turn IDs
-and timestamps in `~/.outpost/activity/<id>.events.json`. Atomic replacement and
-separate locks serialize writers. Old-launch events, subagents, late completions
-from another conversation and identifiable old-turn completions cannot overwrite
-the current turn. A read checks its identity again before publishing or checking
-completion. The helper accepts explicit launch arguments or `--environment HARNESS`
-with an optional `--identity-only` flag; adapter configuration chooses the mode.
-Environment binding checks the launching harness, so an unrelated coding tool
-cannot update its activity. Hook commands emit no output or decisions, and failures
-in optional activity setup do not prevent the terminal starting. Existing agent processes need a
-managed-session restart to install hooks; reconnecting a client does not restart
-its agent. Native formats and hook configuration are owned by harness adapters.
-Status hooks use no model calls, additional context, prompts or status MCP tools.
+A failed hook setup is shown on the session and does not prevent the terminal
+starting. Hooks use no model calls, additional context, prompts or MCP tools.
 
-**Source precedence and recovery.** A valid lifecycle snapshot is sufficient to
-report current state, including an unread completion. Auxiliary daemon, index or
-transcript failures cannot erase it. A Working/Waiting snapshot is periodically
-reconciled against explicit, strictly newer completion/interruption/failure records
-from that conversation's native transcript. When the hook provides a turn ID,
-the record must match it too. Only terminal transitions can recover hook state;
-transcript output and daemon Idle cannot infer them. Recovery commits
-to the same durable lifecycle snapshot under its writer lock, only if no new hook
-has arrived. Reads recheck the snapshot before publishing. This prevents a later
-read failure from resurrecting the old active state. A late Stop confirms an
-already recovered completion without minting another notification. Process exit
-clears Working/Waiting while preserving unread completion and error state.
-Recovery checks the transcript watermark and commits under the same lock as
-input acknowledgement, so typing while recovery is pending cannot revive an
-already seen completion. Lock order is checkpoint, lifecycle, then seen IDs.
+**Conversation identity.** SessionStart and prompt submission name the tool's
+current native conversation. When it differs from the session's (the user ran
+new, clear or resume inside the tool), it becomes the session's current
+conversation in the session timeline; if another session held it, it moves
+here and that session shows where it went. Later events from the conversation
+left behind are ignored, as are subagent events and compaction's SessionStart.
+Neither terminal text nor another conversation's modification time can select
+a conversation.
 
-**Transcript indexing.** `outpost_activity_transcript.py` stores only a state,
-timestamp, optional native turn ID and integrity checkpoints. A cold read walks
-backwards to a native marker with bounded record memory; there is no 4 MiB distance cutoff that loses
-a long-running turn. Subsequent reads incrementally consume appended records in
-4 MiB batches. Partial JSON lines wait for completion; malformed records are
-skipped. Individual records are limited to 16 MiB. Corrupt derived indexes are
-rebuilt. File identity, offsets, anchors and rewrite metadata invalidate an index
-on replacement/truncation. Claude owns timestamp ordering; Kimi owns unresolved
-interaction reduction. Warm polls with no appended data do not rescan transcripts.
-Harnesses return the shared `NativeActivity` record; fields are named in the
-observer and validated/reconstructed when loading the derived JSON index.
+**Transcripts.** The service also follows the current conversation's native
+transcript, which the adapter locates inside the session's pinned store:
+Claude's newest `projects/*/<id>.jsonl`, the rollout Codex's `state_5.sqlite`
+names for the thread, Kimi's main-agent `wire.jsonl`. Paths that leave the
+store or symlinks are not read. The first read walks backwards from the last
+complete line to the newest state marker; later reads, every second, consume
+only appended complete lines. A replaced or truncated file is read again from
+its end. Records over 8 MiB are skipped in both directions. Claude orders by
+native timestamp, because it can flush an older prompt after its reply; Kimi
+keeps an approval Waiting until every open one is resolved; Codex's review mode
+is Unknown until it exits.
 
-For Codex, read-only bounded queries of `state_5.sqlite` select the rollout for
-recovery and input checkpoints; the fallback live API also supplies its selected
-rollout. Reverts can retain obsolete rollout files, so globs/mtime are never
-a substitute. Paths remain inside the pinned native store. Unresolved native
-review state remains Unknown until the CLI supplies an authoritative transition.
+**Precedence.** For Claude and Codex, hooks are the primary source. A newer
+transcript end (idle, finished or error) in the same turn recovers a missed hook
+only while the hooks still say Working or Waiting, so the transcript's late copy
+of a reply already seen is not a new completion. For Kimi the transcript alone
+determines state. A marker present at launch, or when the conversation changes,
+is not new activity: an old reply counts as seen, an old prompt as Idle. When
+the tool exits, Working and Waiting become Idle while an unread completion or
+an error stays.
 
-**Freshness and completion.** Observation health is independent of agent state:
-`current`, `stale`, or `unavailable`, with an `observedAt` timestamp. A transient
-failure of the primary source retains the last observation for at most 15 seconds,
-visibly labeled “last known” with animation stopped. Further failures never extend that deadline.
-Then it becomes Unknown with a diagnostic. Cached observations cannot cross launch
-or conversation identities. There is no fabricated Idle during a read failure.
+**Completions.** A completion's ID is a hash of the session, the conversation
+and its source (the hook event or the transcript record). The driver saves the
+last state and the IDs the user has seen (newest 64) in
+`~/.outpost/activity/<session>.json`; that file is derived and holds no
+conversation content. Typing into the terminal, sending a draft or a paste, and
+an explicit acknowledgement mark the displayed completion seen; focus reports
+and attaching do not. An acknowledgement names its completion, so an old one
+cannot clear a newer completion. With no driver running, the saved unread
+completion or error is still shown and can be acknowledged.
 
-Native transcript baseline/checkpoints and bounded hook-completion IDs implement
-shared acknowledgement. Live work/waiting/errors do not depend on those watermarks.
-Late transcript flushes of a hook completion retain the same completion identity.
-Actual terminal input, explicit list checks and terminal acknowledgements update
-seen state; focus escape sequences and attachment do not. Old acknowledgements
-cannot clear newer completions or roll a watermark backward.
-
-`TerminalActivity` acknowledges the displayed completion on activation or a local
+The terminal view acknowledges the displayed completion on activation or a local
 interaction. Pending/confirmed IDs give immediate local feedback; a failed request
 restores the notice, and connection generations discard old replies. Activation
 before fresh metadata waits for a current observation. Stale completions are not
 automatically acknowledged. Later completions require a new interaction.
-
-`outpost_activity_stream.py` reads lifecycle state immediately and reconciles every
-two seconds, with one reader independent of terminal I/O. Each attachment watches
-atomic lifecycle/acknowledgement updates with Linux inotify; a change wakes its
-reader without waiting for the reconciliation interval. Watches target the parent
-directory and filter out derived caches and lock files, avoiding feedback loops.
-Every connected client gets its own wakeups. Notifications carry no state and
-don't need a network listener; reconnects reread durable metadata. Queue overflow
-requests a reread, and periodic reads remain available when watches cannot be
-installed or the directory disappears. Slow reads show stale/unavailable metadata;
-they never start replacement workers or block terminal shutdown. The latest result
-slot and a 32-request acknowledgement bound prevent backpressure from accumulating
-work. Meaningful metadata changes use the existing relay/WebSocket, without another
-SSH connection; successful timestamp-only refreshes do not restart UI animations.
 
 The app and list share all states. Unknown has a diagnostic; `null` means no
 observation yet. Server and app must use the same `desktopBridgeVersion`. Terminal
 bells remain a separate renderer-owned signal; the desktop does not independently
 rewrite agent state. Local shell tabs have no coding-agent badge.
 
-Tests include deterministic lifecycle/race/corruption/large-transcript regressions,
-shared controller tests and DOM badge checks. Run native integration tests with
-`OUTPOST_TEST_NATIVE_ACTIVITY=1 python3 -m unittest discover -s tests/runtime -p
- test_activity_native.py`: installed Codex, Claude and Kimi run in disposable homes
-against a local HTTP model fixture, exercising real hooks and completion records
-without paid model calls or modifying the user's native stores.
+Tests in `tests/machine/activity.test.ts` drive the activity model with native
+records and hook payloads. `OUTPOST_TEST_NATIVE_ACTIVITY=1 node --import tsx
+--test tests/machine/native.test.ts` runs the installed Claude Code, Codex and
+Kimi Code in disposable homes against a local HTTP model fixture, exercising
+their real hooks and transcripts without paid model calls or touching the
+user's native stores.
 
 ### Terminal search
 
@@ -823,23 +818,23 @@ direct buffer changes after clear, local reset and completed remote checkpoint
 restoration. Search invalidates cached lines and decorations at those barriers
 too, without waiting for a later PTY write or scrolling to a result.
 
-The current clear and health-check contract uses terminal service protocol 4 and client protocol 13.
+The current clear and health-check contract uses terminal service protocol 5 and client protocol 13.
 Install the updated helper and explicitly restart existing service processes;
 older protocols are rejected instead of ignoring the operation.
 
 ### Signals
 
-Coding sessions run with `BROWSER=~/.outpost/bin/outpost-browser`. The helper
-talks to the most recently attached relay over a Unix socket in
-`~/.outpost/run/`. The relay forwards a `signal` control message; the broker
-validates it (`browser.open` accepts only `http(s)` URLs without credentials)
-and passes it to the client on that connection, which opens the link on your
-computer. Delivery is at most once. With no attached terminal, the helper
-fails with a clear message.
+Coding sessions run with `BROWSER=~/.outpost/bin/outpost-browser`, a wrapper for
+`outpost-terminal open URL`. It sends the signal to the session's terminal
+service, which forwards it to its most recently attached viewer and waits up to
+12 seconds for that viewer's answer. The broker validates the signal
+(`browser.open` accepts only `http(s)` URLs without credentials) and passes it
+to the client, which opens the link on your computer. Delivery is at most once.
+With no attached terminal, the helper fails with a clear message.
 
 ### Session files
 
-`outpost_files.py` owns immutable session files in
+`machine/files.ts` owns immutable session files in
 `~/.outpost/files/<session>/<file-id>/`, in both directions: files the agent
 publishes for the user (`source: published`) and files sent to the agent in a
 message (`source: received`). Each holds `metadata.json` beside
@@ -850,31 +845,29 @@ atomic rename. Per-session locks serialize quota checks and removal without
 holding the session registry lock through file transfer. Limits are 32 MiB per
 file and 100 files / 256 MiB per managed session. File IDs are random
 identifiers; clients never provide remote filesystem paths for download or
-removal. The `files-receive` operation stores exactly the declared number of
-bytes that follow it on stdin. Removing a file leaves its source alone; deleting
-a managed session removes its store.
+removal. A `file-receive` stream stores exactly the declared number of bytes;
+a `file-read` stream sends one file's metadata, then its bytes. Removing a file
+leaves its source alone; deleting a managed session removes its store.
 
 ### Outpost MCP
 
 Every launch, whichever driver (terminal or chat) and harness runs it, gets
-the same MCP servers from `outpost_mcp_servers.servers(state, session, driver)`:
+the same MCP servers from `servers(session, driver)` in `machine/launch.ts`:
 neutral `{name, command, args, env}` descriptors. Today that is the one Outpost
-server, a self-contained Python zipapp (`outpost-mcp`, built from
-`outpost_mcp.py` and the file store) speaking MCP 2025-06-18 over stdio. Its
-binding is the launch's environment, `outpost_mcp_servers.context`:
-`OUTPOST_SESSION_ID`, `OUTPOST_STATE_DIRECTORY` and `OUTPOST_DRIVER`. The
-launcher sets it, also in the coding tool's own environment, and a tool call
-can never select a session. A process with no binding lists no tools; a
-partial or invalid binding fails closed.
+server, `outpost-terminal mcp`, speaking MCP 2025-06-18 over stdio. Its binding
+is the launch's environment: `OUTPOST_SESSION_ID`, `OUTPOST_STATE_DIRECTORY` and
+`OUTPOST_DRIVER`. The launcher sets it, also in the coding tool's own
+environment, and a tool call can never select a session. A process with no
+binding lists no tools; a partial or invalid binding fails closed.
 
-`TOOLS` in `outpost_mcp.py` is the one registry: each tool declares the drivers
+`tools` in `machine/mcp.ts` is the one registry: each tool declares the drivers
 it serves and how it is answered, and `tools/list` and the server instructions
-derive from the tools the binding allows. `publish_file` and the history tools
-serve both drivers; `list_sessions` and `message_session` serve chat only
-(docs/CHAT.md). Adding a tool is one registry entry. Bindings that can change
-while a process runs stay server-side: the history socket a reconnect assigns is
-read from the session's history binding file on each call. `outpost-mcp publish
-FILE` publishes from any shell in a managed session.
+derive from the tools the binding allows. `publish_file` is answered on the
+machine and serves both drivers. The history tools (both drivers) and
+`list_sessions` and `message_session` (chat only, docs/CHAT.md) are answered by
+the server, through the node bound to the session (see "Machine connection").
+Adding a tool is one registry entry. `outpost publish FILE` publishes from any
+shell in a managed session.
 
 Adapters only translate the descriptors into their tool's native form; they
 never construct Outpost's server:
@@ -884,37 +877,36 @@ never construct Outpost's server:
   `env`. The native conversation selector follows integration options so the
   variadic MCP flag cannot consume a prompt.
 - **Chat (all harnesses):** the same servers as ACP `mcpServers` on
-  `session/new` and `session/load` (`chat_mcp_servers`).
+  `session/new` and `session/load` (`chatServers`).
 - **Kimi Code:** one Outpost plugin declares both activity hooks and the
   servers, for terminal and chat alike (Kimi has no invocation-only option, so
   its chat passes no ACP servers). The plugin contains no session IDs: each
   server process inherits its Kimi process's binding. Installation is atomic,
   idempotent, and preserves plugin order, unrelated records and per-server
   preferences. Only a missing registry is initialized; malformed registry data
-  is rejected. Plugin command restrictions are handled by using `env` to execute
-  the exact target Python interpreter. An ordinary Kimi launch loads the
-  installed plugin with no binding and sees no Outpost tools.
+  is rejected. Plugin commands must be names on the PATH, so the plugin runs
+  `env` with the exact `outpost-terminal` path. An ordinary Kimi launch loads
+  the installed plugin with no binding and sees no Outpost tools.
 
 Native configuration references: [Claude MCP](https://code.claude.com/docs/en/mcp)
 and [Kimi plugin MCP servers](https://moonshotai.github.io/kimi-code/en/customization/plugins.html#mcp-servers-in-plugins).
 
 MCP configuration is additive; Codex/Claude user configuration and Kimi's
 `config.toml` and `mcp.json` are not rewritten. Harness-specific flags, plugin
-formats and lifecycle setup live in `outpost_codex.py`, `outpost_claude.py` and
-`outpost_kimi.py`; shared installers contain no harness dispatch. Existing agent
-processes need one explicit restart to acquire the integration. Python is already
-required on all targets; no additional interpreter, HTTP listener or terminal-helper
-release is needed.
+formats and lifecycle setup live in each adapter in `machine/harnesses/`;
+shared code contains no harness dispatch. Existing agent processes need one
+explicit restart to acquire the integration.
 
 The auth boundary is unchanged: the helper trusts the remote OS account; file
 HTTP requests require an active resume grant scoped to owner, target and session.
-`SessionFileClient` reaches the target over the same management transport. Its
-binary reads reuse command cancellation, bounded output and safe SSH recovery;
-bytes are never base64-encoded into the model context or mixed with PTY output.
+`SessionFileClient` reaches the machine over its connection: file bytes travel
+on their own streams, with cancellation and size checks, and are never
+base64-encoded into the model context or mixed with PTY output.
 Downloads are capped at two per owner and four globally, with slots retained
 until the HTTP response closes. Grants are not placed in download URLs.
 
-After committing a file, the helper sends `files.changed` as a best-effort hint.
+After committing a file, the MCP server sends the session's driver a
+best-effort hint, which the driver passes to its viewers.
 The broker validates it and broadcasts to every viewer of that owner's target
 and managed session. The receipt means **stored**, not delivered to a viewer.
 The files themselves are durable; they can be published with no attached client.
@@ -1447,7 +1439,7 @@ background updater for these previews. See [desktop development](../CONTRIBUTING
 
 Chat drives the same managed sessions through each tool's Agent Client Protocol
 server instead of a PTY. A persistent `outpost-terminal chat-serve` process per
-session is the ACP client on the target; one session has one driver at a time
+session is the ACP client on the machine; one session has one driver at a time
 (terminal service or chat host). The server keeps one link per chat host and
 routes channels, session messages and schedules. See [CHAT.md](CHAT.md).
 
@@ -1455,32 +1447,26 @@ routes channels, session messages and schedules. See [CHAT.md](CHAT.md).
 
 The built-in Outpost MCP registers `search_history`, `read_context`,
 `read_message`, `get_session` and `refresh_index` alongside `publish_file`.
-`runtime/history-tools.json` is the single tool/schema definition used by the
-server and packaged Python helper; the uploaded runtime loader also supplies it
-as a resource. Unmanaged CLI launches still expose no Outpost tools.
+`shared/historyTools.json` is the single tool/schema definition used by the
+server and the MCP server. Unmanaged CLI launches still expose no Outpost tools.
 
 `backend/history/` owns an account-private SQLite index, local multilingual
-embeddings, background backfill and one persistent SSH control connection per
-account/target. `Deployment.historyOwners()` supplies verified owners without
-history code branching on deployment mode. Calls enumerate the owner's current
-workspace each time, so removed targets and other accounts cannot be read through
-cached results or cursors. Offline targets retain explicitly identified cached
-history. The embedding model is shared; conversation indexes are not.
+embeddings and background backfill. It reads each machine through its machine
+connection (`history.catalog`, `history.read`, `history.message`), and agents'
+history tool calls arrive on the same connections. `Deployment.historyOwners()`
+supplies verified owners without history code branching on deployment mode.
+Calls enumerate the owner's current workspace each time, so removed targets and
+other accounts cannot be read through cached results or cursors. Offline
+targets retain explicitly identified cached history. The embedding model is
+shared; conversation indexes are not.
 
-`outpost_history_bridge.py` listens on an owner-only Unix socket whose name is
-derived from the server secret, owner and target. The session launcher writes
-the private binding used by its MCP helper; tool arguments cannot select an
-account or forge a binding. The bridge uses the existing framed SSH transport,
-survives viewer disconnects, bounds pending calls and output, and is recreated
-after server/SSH restarts. It does not own or interrupt a PTY or chat process.
-
-History reads use per-harness native-store adapters and Python's standard
-library on targets. Catalog pages include normal/archived Codex rollouts,
-Claude transcripts and subagents, and Kimi agents. Byte checkpoints, prefix/tail
-fingerprints and generations distinguish append from common rewrite/truncation
-cases; incomplete final records wait for a later append. Native configuration
-records are not indexed as conversation messages. Original transcripts remain
-read-only.
+History reads use the harness adapters' native-store readers on the machine
+(`machine/history.ts`). Catalog pages include normal/archived Codex rollouts,
+Claude transcripts and subagents, Kimi agents and DeepSeek generations. Byte
+checkpoints, prefix/tail fingerprints and generations distinguish append from
+common rewrite/truncation cases; incomplete final records wait for a later
+append. Native configuration records are not indexed as conversation messages.
+Original transcripts remain read-only.
 
 The server deduplicates documents and overlapping chunks, uses FTS5 trigram
 lookup for literal/keyword candidates and sqlite-vec cosine distance for semantic
@@ -1502,30 +1488,37 @@ untrusted data, never instructions for the current session.
 
 `shared/harnesses.ts` lists harnesses for the UI and validation (id, label,
 command, installer, native ID pattern, storage variable).
-`runtime/outpost_harness.py` defines the adapter contract; each harness has an
-adapter (identity, launch arguments, MCP and activity configuration) and a store (discovery,
-search text, allocation, turn markers). Session records pin the native
-conversation ID and storage directory, so a session always resumes the same
-conversation. Adapters also say how the tool serves ACP for chat mode
-(`chat_command`, `chat_resumable`, `chat_mcp_servers`).
+`machine/harnesses/harness.ts` defines the adapter contract, one class per
+harness: its native store (discovery, search text, transcripts, titles,
+history messages), conversation allocation, activity markers, launch arguments
+(resume, MCP servers, hooks) and how the tool serves ACP for chat (`chat`,
+`chatResumable`, `chatServers`). Session records pin the storage directory, and
+their timeline names the native conversations, so a session resumes its
+current conversation.
 
 ## Target state
 
 | Data | Location |
 | --- | --- |
 | Session registry | `~/.outpost/registry.json` |
-| Terminal service sockets | `~/.outpost/terminals/<session>.sock` |
-| Activity checkpoints | `~/.outpost/activity/<session>.json` |
+| Locks | `~/.outpost/locks/<name>.lock` |
+| Node endpoints and session bindings | `~/.outpost/run/node-<id>.sock`, `~/.outpost/bindings/<session>.json` |
+| Terminal services and chat hosts | `~/.outpost/terminals/<session>.sock`, `~/.outpost/chats/<session>.sock`, logs in `~/.outpost/logs/` |
+| Activity | `~/.outpost/activity/<session>.json` |
 | Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Session files | `~/.outpost/files/<session>/<file-id>/` (`metadata.json`, `content/<name>`) |
-| Chat hosts and settings | `~/.outpost/chats/<session>.sock`, `~/.outpost/chats/<session>.json` |
+| Kimi Code plugin | `~/.outpost/integrations/kimi/` |
 | Claude Code chat adapter | `~/.outpost/agents/claude-agent-acp-<version>/`, linked from `~/.outpost/bin/` |
-| Signal helpers and sockets | `~/.outpost/bin/`, `~/.outpost/run/` |
+| Outpost Terminal and helpers | `~/.outpost/bin/` |
 
-Registry writes take `flock` and replace the file atomically. Records are
-validated strictly; invalid data is reported, never rewritten. Outpost reads
-only its current workspace and registry schemas. A missing current file starts
-an empty store; there is no automatic import of earlier layouts.
+A session record holds its name, tool, directory, pinned native store, its
+configuration (environment, arguments and chat instructions, with a revision)
+and its conversation timeline; the last conversation is current, and one that
+another session resumed names where it moved. Every registry write holds the
+registry lock and replaces the file atomically. Records are validated
+strictly; invalid data is reported, never rewritten. Outpost reads only its
+current workspace and registry schemas. A missing current file starts an empty
+store; there is no automatic import of earlier layouts.
 
 ## Security model
 
@@ -1538,6 +1531,11 @@ an empty store; there is no automatic import of earlier layouts.
 - Desktop confirms unknown server origins before contacting them. Accepted trust
   persists independently of login and has no management UI; declining cancels
   only the current attempt. Only HTTPS and localhost HTTP qualify.
+- On a machine, the Linux account is the trust boundary: Outpost's sockets and
+  files are owner-only, and anything running as that account may use them. An
+  agent's Outpost tools act only as its own session (the launch's binding),
+  through the node of the account that launched it; tool arguments cannot name
+  another session or account.
 - Images are limited to 16 MB, signals to 32 KiB and 120 per minute per
   connection, clipboard text to 1 MiB.
 
@@ -1548,34 +1546,32 @@ expose one method in the preload and validate the sender and all arguments in
 the main process. Keep terminal behavior in the frontend; do not create another
 broker, authentication scheme or desktop copy of `TerminalView`.
 
-**Add a coding harness.** Add an entry to `shared/harnesses.ts`, then
-`runtime/outpost_<id>.py` (adapter) and `runtime/outpost_<id>_store.py`
-(store), and register the adapter in `outpost_harness.py`. Implement the adapter's
-`prepare_launch` and `prepare_activity` methods using that harness's native interfaces;
-the runtime and shared helper installers must not branch on harness names.
+**Add a coding harness.** Add an entry to `shared/harnesses.ts`, then a
+`Harness` subclass in `machine/harnesses/<id>.ts`, registered in
+`machine/harnesses/index.ts`. Implement it with that harness's native
+interfaces; shared machine code must not branch on harness names.
 
 The DeepSeek adapter uses `command: dsh` independently of its `deepseek` harness
 ID, with `DSH_HOME` pinned per session. Its official package exposes ACP rather
 than a bundled terminal UI, so registry capability metadata routes connections
-to Chat and excludes it from the desktop terminal creator. The runtime also
-refuses a terminal driver before launching a process. A small target-side ACP
-transport maps the advertised `session/resume` capability to `session/load` for
-the existing chat host, forwarding all other requests, permissions, updates and
-invocation-scoped MCP descriptors. It requires no terminal-service release and
-does not add replay or system-prompt capabilities the native server lacks.
+to Chat and excludes it from the desktop terminal creator. The node also
+refuses a terminal driver before launching a process. `outpost-terminal agent
+deepseek` (`machine/agents/deepseek.ts`) maps the chat host's `session/load` to
+the advertised `session/resume`, forwarding all other requests, permissions,
+updates and invocation-scoped MCP descriptors. It does not add replay or
+system-prompt capabilities the native server lacks.
 
 Native DeepSeek session stores select the highest JSONL generation per session,
-including `.jsonl.zstd`. The store's `history_stream` supplies a seekable logical
-stream and the original physical revision. Complete Zstandard frame boundaries
-are checked before Node's built-in decoder runs; truncated tails are retried on
-append. Checkpoints use decoded byte positions, so added frames retain cursors.
-The default stores use ordinary native file handles through the same interface.
+including `.jsonl.zstd`. The adapter's `historyBytes` decodes a file with the
+runtime's built-in Zstandard decoder, frame by frame, so a truncated final frame
+waits for its append; search reads the same decoded records. Checkpoints use
+decoded byte positions, so added frames retain cursors. The other stores are
+read as plain files.
 
-**Add an Outpost MCP tool.** Add an entry to `TOOLS` in `runtime/outpost_mcp.py`
-with the drivers it serves, and an instruction sentence if the agent needs one.
-Harness configuration does not change. A tool another process must answer goes
-through the chat host (chat) or a server-side binding (history), never a path or
-identity in its arguments.
+**Add an Outpost MCP tool.** Add an entry to `tools` in `machine/mcp.ts` with
+the drivers it serves, and an instruction sentence if the agent needs one.
+Harness configuration does not change. A tool the server answers goes through
+the session's bound node, never a path or identity in its arguments.
 
 **Add a signal type.** Define a validator in `shared/signals.ts`, allow it in
 the broker, and handle it in the shared client, delegating native actions through the bridge.
@@ -1584,15 +1580,15 @@ the broker, and handle it in the shared client, delegating native actions throug
 
 | Layer | Tests |
 | --- | --- |
-| Runtime and relay | `tests/runtime/` — real terminal service in a disposable home: lifecycle, framing, resize, image paste, signals, activity semantics |
-| Server | `tests/unit/` — tokens, workspace, API validation and network policy, hosted isolation and revocation, broker against a fake relay, TypeScript ⇄ Python contracts |
-| Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with the built service in both modes; conversation discovery |
+| Machine | `tests/machine/` — the machine's modules in a disposable state directory: registry, creation receipts, forks, edits and switching, images, activity from hooks and transcripts, native stores and history reads, DeepSeek decoding, store readers, locks; opt-in real Claude Code, Codex and Kimi Code hooks |
+| Server | `tests/unit/` — tokens, workspace, API validation and network policy, hosted isolation and revocation, the machine connection against a fake node, the broker against a fake terminal stream, contracts |
+| Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with the built service in both modes; conversation discovery and history over real machine connections; chat through the node |
 | Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout; mobile WebGL rendering, real clipboard copying, and GPU context-loss fallback |
 | Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
 | Desktop model | `tests/unit/desktop-panes.test.ts` — split-tree invariants, small-window geometry, transfer/rollback and destroyed views, platform shortcuts and dimming races |
 | Workspace DOM | `tests/desktop/workspace-dom.spec.ts` — packaged chrome, real layout model, pane focus/zoom, divider input, drag cancellation, stable DOM identity, error actions and shortcut guide |
 | Native desktop | `tests/desktop/` via `npm run test:desktop` — Linux Electron, real preload/IPC/node-pty, native keyboard/mouse, cross-window pane/tab transfers, hover cancellation, drafts, dimming, PTY resize, close confirmation, wake recovery and image clipboard/cleanup |
-| Chat | `tests/unit/chat-*.test.ts` (journal, transcript, mentions, cron, prompts, desktop policy); `tests/runtime/test_chat.py` (chat host, identity, one driver, MCP bridge, queue); `tests/integration/chat.test.ts` (hub with real chat hosts: channels, floor passing, session messages, schedules); `tests/browser/chat.spec.ts`; `tests/desktop/chat.spec.ts`. A scripted ACP agent (`tests/fixtures/acp-agent-fixture.py`) stands in for the tools; no model is called |
+| Chat | `tests/unit/chat-*.test.ts` (journal, transcript, mentions, cron, prompts, desktop policy); `tests/integration/node-chat.test.ts` (chat host through the node: conversation timeline, one driver, Outpost tools, files, queue, DeepSeek and Kimi); `tests/integration/chat.test.ts` (hub with real chat hosts: channels, floor passing, session messages, schedules); `tests/browser/chat.spec.ts`; `tests/desktop/chat.spec.ts`. A scripted ACP agent (`tests/fixtures/acp-agent-fixture.py`) stands in for the tools; no model is called |
 | Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |
 
 Mobile automation uses real browser engines with emulated device sizes. Android swipes use Chromium's trusted
@@ -1611,7 +1607,7 @@ input/resize recorders; it exercises real OS pointer capture and menu/input rout
 macOS/Windows accelerator definitions are unit-tested, but native window management,
 scaling and keyboard behavior still need checks on those operating systems.
 Browser image checks compare saved
-bytes and exact bracketed-paste input, including no automatic Enter; API/runtime
+bytes and exact bracketed-paste input, including no automatic Enter; API and machine
 checks cover 16 MiB boundaries, authorization/revocation, cancellation, retention,
 and uploads that must not hold the session registry lock. Native Windows/macOS
 clipboard and WSL path conversion still require those operating systems.

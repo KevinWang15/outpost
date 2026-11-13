@@ -10,17 +10,15 @@ import { requiredSoftware } from '../shared/model'
 import { harnesses } from '../shared/harnesses'
 import { AppError } from './errors'
 import { runCommand } from './process'
-import { quote, supportingPath } from './shell'
+import { quote } from '../shared/shell'
+import { supportingPath } from './shell'
 import type { TargetContext } from './sessions'
 import { terminalService } from '../shared/terminalService'
 import chatAgents from '../shared/chatAgents.json' with { type: 'json' }
 
-const versionFlags: Record<string, string> = { bash: '--version', python3: '--version' }
-const minimums: Partial<Record<SoftwareId, { pattern: RegExp; version: [number, number]; label: string }>> = {
-  python3: { pattern: /Python (\d+)\.(\d+)/, version: [3, 9], label: 'Python 3.9' },
-}
+const versionFlags: Record<string, string> = { bash: '--version' }
 
-// Read-only, POSIX sh: it must work before Bash or Python are installed.
+// Read-only, POSIX sh: it must work before Bash is installed.
 function inspectionScript(ids: SoftwareId[], marker: string) {
   return `set -eu
 ${supportingPath}
@@ -97,7 +95,6 @@ function status(id: SoftwareId, path: string, code: number, output: string): Sof
       : !version
         ? 'The version command returned no version.'
         : null
-  const minimum = minimums[id]
   if (
     !detail &&
     id === 'outpost-terminal' &&
@@ -106,12 +103,6 @@ function status(id: SoftwareId, path: string, code: number, output: string): Sof
     detail = `Outpost Terminal ${terminalService.version} is required. Install the matching version.`
   if (!detail && id === 'claude-agent-acp' && version !== chatAgents.claude.version)
     detail = `The Claude Code chat adapter ${chatAgents.claude.version} is required. Install the matching version.`
-  if (!detail && minimum) {
-    const match = version!.match(minimum.pattern)
-    const [major, minor] = match ? [Number(match[1]), Number(match[2])] : [0, 0]
-    if (major < minimum.version[0] || (major === minimum.version[0] && minor < minimum.version[1]))
-      detail = `${minimum.label} or newer is required.`
-  }
   return { id, status: detail ? 'broken' : 'installed', path, version, detail }
 }
 

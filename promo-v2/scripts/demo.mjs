@@ -51,7 +51,7 @@ export function demoSessions() {
 }
 
 export function softwareReport() {
-  const ids = ['bash', 'python3', 'outpost-terminal', ...requirements.tools]
+  const ids = ['bash', 'outpost-terminal', ...requirements.tools]
   return {
     environment, checkedAt: demoDate, installation: null,
     software: ids.map(id => ({ id,

@@ -43,42 +43,87 @@ export const targetUpdate = Type.Object(
 )
 
 // Sessions --------------------------------------------------------------------
-const session = {
-  name,
-  rootDir: Type.String({ minLength: 1, maxLength: 4096, pattern: '^(~/|/)[^\\u0000-\\u001f\\u007f]*$' }),
-  createDirectory: Type.Optional(Type.Boolean()),
-  args: Type.Optional(Type.String({ maxLength: 8192, pattern: '^[^\\u0000]*$' })),
-  env: Type.Optional(
-    Type.Record(Type.String(), Type.String({ maxLength: 4096, pattern: '^[^\\u0000]*$' }), {
-      maxProperties: 32,
-      propertyNames: { maxLength: 128, pattern: '^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])' },
-    }),
-  ),
-}
+const rootDir = Type.String({ minLength: 1, maxLength: 4096, pattern: '^(~/|/)[^\\u0000-\\u001f\\u007f]*$' })
+const args = Type.String({ maxLength: 8192, pattern: '^[^\\u0000]*$' })
+const env = Type.Record(Type.String(), Type.String({ maxLength: 4096, pattern: '^[^\\u0000]*$' }), {
+  maxProperties: 32,
+  propertyNames: { maxLength: 128, pattern: '^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])' },
+})
+const instructions = Type.Union([Type.String({ maxLength: 32_000 }), Type.Null()])
+/** Native store location, e.g. { CLAUDE_CONFIG_DIR: '/home/me/.claude' }. */
+const storage = Type.Record(Type.String(), absolutePath, { minProperties: 1, maxProperties: 1 })
 // Each harness pins its own native conversation ID format and storage variable.
+const perHarness = (conversation: boolean) =>
+  harnesses.map(harness => ({
+    if: { properties: { tool: { const: harness.id } } },
+    then: {
+      properties: {
+        ...(conversation ? { conversation: { type: 'string', pattern: harness.nativeId } } : {}),
+        storage: { type: 'object', propertyNames: { const: harness.storageKey } },
+      },
+    },
+  }))
+
+/** A new session; `conversation` links an existing native conversation instead of starting one. */
 export const sessionInput = Type.Object(
   {
-    ...session,
+    name,
+    rootDir,
+    createDirectory: Type.Optional(Type.Boolean()),
     tool: harnessId,
-    cliSessionId: Type.Optional(Type.String({ maxLength: 128 })),
-    cliSessionEnv: Type.Optional(Type.Record(Type.String(), absolutePath, { minProperties: 1, maxProperties: 1 })),
+    args: Type.Optional(args),
+    env: Type.Optional(env),
+    instructions: Type.Optional(instructions),
+    conversation: Type.Optional(Type.String({ maxLength: 128 })),
+    storage: Type.Optional(storage),
   },
-  {
-    ...strict,
-    dependencies: { cliSessionEnv: ['cliSessionId'] },
-    allOf: harnesses.map(harness => ({
-      if: { properties: { tool: { const: harness.id } } },
-      then: {
-        properties: {
-          cliSessionId: { type: 'string', pattern: harness.nativeId },
-          cliSessionEnv: { type: 'object', propertyNames: { const: harness.storageKey } },
-        },
-      },
-    })),
-  },
+  { ...strict, dependencies: { storage: ['conversation'] }, allOf: perHarness(true) },
 )
 
-export const sessionForkInput = Type.Object({ branch: text(256), rootDir: session.rootDir }, strict)
+/** What a session runs with. Each change is a new revision; a running driver
+ * keeps the revision it started with until the session restarts. */
+export const sessionConfig = Type.Object({ revision: Type.Integer({ minimum: 1 }), env, args, instructions }, strict)
+
+/** An edit names the revision it was based on; a concurrent edit is refused. */
+export const sessionUpdate = Type.Object(
+  {
+    revision: Type.Integer({ minimum: 1 }),
+    name: Type.Optional(name),
+    env: Type.Optional(env),
+    args: Type.Optional(args),
+    instructions: Type.Optional(instructions),
+  },
+  { ...strict, minProperties: 2 },
+)
+
+/** One native conversation in a session's timeline. `movedTo` names the
+ * session that resumed it since; it then belongs there. */
+export const sessionConversation = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    startedAt: text(80),
+    movedTo: Type.Union([Type.String(), Type.Null()]),
+  },
+  strict,
+)
+
+/** A session as its machine stores it. The last conversation is the current one. */
+export const sessionRecord = Type.Object(
+  {
+    id: Type.String({ pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' }),
+    name,
+    tool: harnessId,
+    rootDir: absolutePath,
+    createdAt: text(80),
+    lastConnectedAt: Type.Union([text(80), Type.Null()]),
+    storage,
+    config: sessionConfig,
+    conversations: Type.Array(sessionConversation, { minItems: 1, maxItems: 200 }),
+  },
+  { ...strict, allOf: perHarness(false) },
+)
+
+export const sessionForkInput = Type.Object({ branch: text(256), rootDir }, strict)
 
 export const desktopSessionCreationInput = Type.Object(
   {
@@ -102,7 +147,7 @@ export const directoryQuery = Type.Object(
 )
 
 // Software ----------------------------------------------------------------------
-export const softwareIds = ['bash', 'python3', 'outpost-terminal', ...harnessIds, 'claude-agent-acp'] as const
+export const softwareIds = ['bash', 'outpost-terminal', ...harnessIds, 'claude-agent-acp'] as const
 export const installationInput = Type.Object(
   {
     softwareId: Type.Enum(softwareIds),

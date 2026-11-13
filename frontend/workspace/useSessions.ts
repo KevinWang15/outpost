@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Session, SessionList } from '../../shared/model'
+import type { Session } from '../../shared/model'
 import { api } from '../api'
 
 /** Live sessions for one target. Sessions are always read from the target;
@@ -18,7 +18,12 @@ export function useSessions(targetId: string) {
       request.current = controller
       if (!quiet) setRefreshing(true)
       try {
-        const result = await api<SessionList>(`/targets/${targetId}/sessions`, 'GET', undefined, controller.signal)
+        const result = await api<{ sessions: Session[] }>(
+          `/targets/${targetId}/sessions`,
+          'GET',
+          undefined,
+          controller.signal,
+        )
         if (!controller.signal.aborted) {
           setSessions(result.sessions)
           setError('')

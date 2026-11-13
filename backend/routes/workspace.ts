@@ -44,6 +44,7 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
     const { owner, workspace, target } = await services.context(request, request.params.targetId)
     await installations.removeTarget(owner, target.id, () => workspace.remove(target.id))
     services.broker.closeTarget(owner, target.id)
+    services.machines.forget(owner, target.id)
     return reply.code(204).send()
   })
   app.get<{ Params: Params }>('/api/targets/:targetId/software', async (request, reply) =>

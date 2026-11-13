@@ -148,7 +148,6 @@ test('only unambiguous control-connection failures qualify for recovery', () => 
     assert.equal(accepts(`${diagnostic}\n${mux}`), false, diagnostic)
   }
   assert.equal(accepts(' \r\n'), false)
-  for (const stdout of ['partial output', 'OUTPOST_RESULT:{"ok":false,"error":{}}\n', ' '])
-    assert.equal(accepts(mux, stdout), false)
+  for (const stdout of ['partial output', '\0OUTPOST-NODE-1\0', ' ']) assert.equal(accepts(mux, stdout), false)
   for (const code of [0, 1, null]) assert.equal(accepts(mux, '', code), false)
 })

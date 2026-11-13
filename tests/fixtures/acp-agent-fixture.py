@@ -142,7 +142,7 @@ def mcp_call(session, tool, arguments):
         environment.update({item['name']: item['value'] for item in server['env']})
     else:
         # Kimi receives Outpost MCP through its plugin, bound by its own environment.
-        command = [sys.executable, '-I', str(Path(os.environ['OUTPOST_STATE_DIRECTORY']) / 'bin' / 'outpost-mcp')]
+        command = [str(Path(os.environ['OUTPOST_STATE_DIRECTORY']) / 'bin' / 'outpost-terminal'), 'mcp']
     process = subprocess.Popen(
         command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environment, cwd=session['cwd'], text=True
     )

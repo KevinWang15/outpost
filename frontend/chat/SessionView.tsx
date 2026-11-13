@@ -185,7 +185,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const turns = (view?.turns ?? []).filter(turn => turn.status !== 'queued' && turn.status !== 'removed')
   const shown = turns.slice(-limit)
   const avatar = avatarFor(session)
-  const starting = link === 'starting' || info?.state === 'starting' || info?.state === 'identity'
+  const starting = link === 'starting' || info?.state === 'starting'
   const stopped = link === 'stopped' || info?.state === 'exited' || info?.state === 'failed'
   const usage = info?.usage
   return (
@@ -229,7 +229,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                   onSelect: () => open({ kind: 'terminal', ...target }),
                 },
                 {
-                  label: session.instructions ? 'Edit instructions' : 'Add instructions',
+                  label: session.config.instructions ? 'Edit instructions' : 'Add instructions',
                   icon: <NotebookPen size={14} />,
                   onSelect: () => open({ kind: 'instructions', ...target }),
                 },

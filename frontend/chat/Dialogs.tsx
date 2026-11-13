@@ -115,8 +115,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
           type: 'session-create',
           targetId,
           requestId: requestId.current,
-          input,
-          instructions: instructions.trim() || null,
+          input: { ...input, instructions: instructions.trim() || null },
         })
         select({ kind: 'session', ...created })
         onClose()
@@ -130,7 +129,7 @@ export function InstructionsDialog({ target: selected, onClose }: { target: Sess
   const { client } = useChat()
   const target = plainRef(selected)
   const session = client.session(target)
-  const [text, setText] = useState(session?.instructions ?? '')
+  const [text, setText] = useState(session?.config.instructions ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const running = session?.driver === 'chat'

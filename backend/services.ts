@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { FastifyRequest } from 'fastify'
 import type { Deployment, Owner } from './deployment'
 import type { Installations } from './installations'
+import type { Machines } from './machines'
 import type { SessionService, TargetContext } from './sessions'
 import type { SessionFileClient } from './sessionFiles'
 import type { SoftwareService } from './software'
@@ -19,12 +20,13 @@ export interface Services {
   installations: Installations
   tokens: ConnectTokens
   broker: TerminalBroker
+  machines: Machines
   active(owner: Owner): boolean
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
   context(request: FastifyRequest, targetId: string): Promise<TargetContext>
 }
 
-export function targetResolver(deployment: Deployment, multiplex: boolean) {
+export function targetResolver(deployment: Deployment, machines: Machines, multiplex: boolean) {
   const sharing = multiplex && supportsSshMultiplexing()
   const directory = join(deployment.directory, 'ssh')
   if (sharing) mkdirSync(directory, { recursive: true, mode: 0o700 })
@@ -32,14 +34,10 @@ export function targetResolver(deployment: Deployment, multiplex: boolean) {
     const workspace = deployment.workspace(owner)
     const target = await workspace.get(targetId)
     const identity = target.kind === 'ssh' ? await deployment.identity(owner) : null
-    return {
-      owner,
-      target,
-      workspace,
-      transport: transportFor(target, identity, {
-        scope: owner.userId,
-        ...(sharing ? { multiplex: directory } : {}),
-      }),
-    }
+    const transport = transportFor(target, identity, {
+      scope: owner.userId,
+      ...(sharing ? { multiplex: directory } : {}),
+    })
+    return { owner, target, workspace, transport, machine: machines.get(owner, target.id, transport) }
   }
 }

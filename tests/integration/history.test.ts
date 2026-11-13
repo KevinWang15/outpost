@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -9,23 +9,17 @@ import test from 'node:test'
 import { LocalDeployment, type Owner } from '../../backend/deployment'
 import { HostedDeployment } from '../../backend/hosted/deployment'
 import { HistoryHub } from '../../backend/history/hub'
+import { Machines } from '../../backend/machines'
 import { SessionClient, type TargetContext } from '../../backend/sessions'
 import type { Command } from '../../backend/process'
 import type { HistoryBatch, HistoryCatalog } from '../../shared/history'
 import type { Embed } from '../../backend/history/embeddings'
+import { terminalBinary } from './helpers'
 
 const embed: Embed = async text => {
   const vector = new Float32Array(384)
   vector[/kitten|feline/i.test(text) ? 0 : /certificate|TLS|expired/i.test(text) ? 1 : 2] = 1
   return vector
-}
-async function waitFor(check: () => Promise<boolean>, label: string) {
-  const until = Date.now() + 15000
-  while (Date.now() < until) {
-    if (await check()) return
-    await new Promise(resolve => setTimeout(resolve, 25))
-  }
-  throw new Error('Timed out: ' + label)
 }
 async function put(path: string, records: object[]) {
   await mkdir(join(path, '..'), { recursive: true })
@@ -45,6 +39,8 @@ test(
       homes.set(id, home)
       await mkdir(join(home, 'bin'), { recursive: true })
       await writeFile(join(home, 'bin', 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+      await mkdir(join(home, '.outpost', 'bin'), { recursive: true })
+      await copyFile(terminalBinary, join(home, '.outpost', 'bin', 'outpost-terminal'))
       await deployment.workspace().add({
         id,
         kind: 'local',
@@ -96,6 +92,7 @@ test(
         },
       ])
     }
+    const machines = new Machines('history')
     const resolve = async (owner: Owner, id: string): Promise<TargetContext> => {
       const home = homes.get(id)!
       const command = (script: string): Command => ({
@@ -113,15 +110,20 @@ test(
         ],
         label: 'Fixture machine ' + id,
       })
+      const transport = { label: 'Fixture', runtime: command, management: () => command('exec sh -s') }
       return {
         owner,
         target: await deployment.workspace().get(id),
         workspace: deployment.workspace(),
-        transport: { label: 'Fixture', runtime: command, management: () => command('exec sh -s') },
+        transport,
+        machine: machines.get(owner, id, transport),
       }
     }
     const hub = new HistoryHub({ deployment, resolve, embed })
+    // Agents' history tool calls arrive on their machine's connection.
+    machines.agent = (owner, _target, call) => hub.call(owner, call.tool, call.arguments)
     t.after(async () => {
+      machines.close()
       await hub.close()
       deployment.close()
       await rm(directory, { recursive: true, force: true })
@@ -137,25 +139,16 @@ test(
       JSON.stringify(status),
     )
     const context = await resolve(owner, 'alpha')
-    context.historySocket = hub.socket(owner, 'alpha')
     const session = await new SessionClient().create(context, {
       name: 'MCP caller',
       tool: 'claude',
       rootDir: homes.get('alpha')!,
     })
-    const home = homes.get('alpha')!,
-      socket = join(home, '.outpost', context.historySocket)
-    await waitFor(
-      () =>
-        access(socket).then(
-          () => true,
-          () => false,
-        ),
-      'persistent MCP connection',
-    )
-    const child = spawn('python3', ['-I', join(home, '.outpost/bin/outpost-mcp')], {
+    const home = homes.get('alpha')!
+    const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('OUTPOST_')))
+    const child = spawn(join(home, '.outpost/bin/outpost-terminal'), ['mcp'], {
       env: {
-        ...process.env,
+        ...inherited,
         HOME: home,
         OUTPOST_SESSION_ID: session.id,
         OUTPOST_STATE_DIRECTORY: join(home, '.outpost'),
@@ -324,18 +317,18 @@ test('history: hosted owners have separate indexes and cursors; offline machines
         warnings: [],
       }
     },
-    bridge(): never {
-      throw new Error('Background connections are disabled in this test')
+    message(): never {
+      throw new Error('Not used in this test')
     },
   }
   const hub = new HistoryHub({
     deployment,
-    resolve: async (owner, id) => ({
-      owner,
-      target: await deployment.workspace(owner).get(id),
-      workspace: deployment.workspace(owner),
-      transport: null!,
-    }),
+    resolve: async (owner, id) =>
+      ({
+        owner,
+        target: await deployment.workspace(owner).get(id),
+        workspace: deployment.workspace(owner),
+      }) as TargetContext,
     reader,
     embed,
     background: false,

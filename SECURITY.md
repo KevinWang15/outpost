@@ -65,12 +65,17 @@ Removing server trust closes its windows; signing out revokes the underlying
 grants. These first installers are unsigned previews with manual updates.
 
 **Signals.** Programs in a session can ask the attached client to open a link
-(`outpost-browser`). The helper talks to the relay over a Unix socket in a
-0700 directory; the broker validates each request, limits it to 120 per minute
-per connection, and delivers it at most once.
+(`outpost-browser`). The helper talks to the session's terminal service over an
+owner-only Unix socket; the broker validates each request, limits it to 120 per
+minute per connection, and delivers it at most once.
 
-**Targets.** Nothing runs on a target between operations. Installation scripts
-run only as reviewed and submitted. Conversation search returns bounded
+**Targets.** While Outpost is connected to a target, `outpost-terminal node`
+runs there as the target's user, on the SSH connection; it opens no network
+port. Sessions' terminal services and chat hosts keep running between
+connections. All their sockets and files are owner-only under `~/.outpost`, so
+the target's user account is the trust boundary. An agent's Outpost tools act
+only as its own session. Installation scripts run only as reviewed and
+submitted. Conversation search returns bounded
 metadata and excerpts; history files are never copied to the server. Pasted
 images are kept under `~/.outpost/clipboard/` (newest 20 per session).
 

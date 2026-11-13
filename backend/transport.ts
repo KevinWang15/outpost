@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import type { Target } from '../shared/model'
 import type { Command, CommandResult } from './process'
 import { AppError } from './errors'
-import { loginScriptShell, quote, type LoginMode } from './shell'
+import { quote } from '../shared/shell'
+import { loginScriptShell, type LoginMode } from './shell'
 
 /** Hosted accounts connect with their own key and known hosts; local mode uses OpenSSH defaults. */
 export interface SshIdentity {

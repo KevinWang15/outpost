@@ -13,7 +13,7 @@ export function sessionCreationOptions(
 ): SessionCreationOptions {
   const installed = new Set(software.filter(item => item.status === 'installed').map(item => item.id))
   const tools = target.tools.filter(tool => installed.has(tool))
-  const required: SoftwareId[] = ['bash', 'python3', 'outpost-terminal']
+  const required: SoftwareId[] = ['bash', 'outpost-terminal']
   return {
     tools,
     missing: [...required.filter(id => !installed.has(id)), ...(tools.length ? [] : target.tools)],

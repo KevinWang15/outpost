@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { createConnection, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -16,9 +16,38 @@ import type { Checkpoint } from '../../shared/terminalState'
  * so tests can reproduce a TUI redraw without credentials or an agent service. */
 export async function searchService() {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-search-'))
-  await mkdir(join(directory, 'terminals'))
-  const socketPath = `terminals/${randomUUID()}.sock`
-  const child = spawn(terminalBinary, ['serve'], { cwd: directory, stdio: ['pipe', 'ignore', 'pipe'] })
+  // The terminal service reads its session from the registry in $HOME/.outpost.
+  const state = join(directory, '.outpost')
+  await mkdir(join(state, 'terminals'), { recursive: true })
+  const session = randomUUID()
+  const conversation = randomUUID()
+  const now = new Date().toISOString()
+  await writeFile(
+    join(state, 'registry.json'),
+    JSON.stringify({
+      version: 3,
+      creations: {},
+      sessions: [
+        {
+          id: session,
+          name: 'Search',
+          tool: 'claude',
+          rootDir: directory,
+          createdAt: now,
+          lastConnectedAt: null,
+          storage: { CLAUDE_CONFIG_DIR: join(directory, '.claude') },
+          config: { revision: 1, env: {}, args: '', instructions: null },
+          conversations: [{ id: conversation, startedAt: now, movedTo: null }],
+        },
+      ],
+    }),
+  )
+  const socketPath = `terminals/${session}.sock`
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('OUTPOST_')))
+  const child = spawn(terminalBinary, ['serve'], {
+    env: { ...env, HOME: directory },
+    stdio: ['pipe', 'ignore', 'pipe'],
+  })
   const closed = once(child, 'exit')
   let error = ''
   child.stderr.on('data', data => {
@@ -27,6 +56,10 @@ export async function searchService() {
   child.stdin.end(
     JSON.stringify({
       socket: socketPath,
+      session,
+      revision: 1,
+      conversation,
+      problem: null,
       command: [
         'python3',
         '-u',
@@ -50,7 +83,7 @@ export async function searchService() {
     await expect
       .poll(() => {
         if (child.exitCode !== null) throw new Error(error)
-        return existsSync(join(directory, socketPath))
+        return existsSync(join(state, socketPath))
       })
       .toBe(true)
   } catch (failure) {
@@ -60,7 +93,7 @@ export async function searchService() {
   return {
     dispose,
     async attach() {
-      const socket = createConnection(join(directory, socketPath))
+      const socket = createConnection(join(state, socketPath))
       sockets.push(socket)
       const decoder = new FrameDecoder()
       const parts: Checkpoint[] = []

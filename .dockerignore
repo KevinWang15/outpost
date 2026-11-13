@@ -8,15 +8,9 @@
 !backend/**
 !shared/
 !shared/**
-!terminal-service/
-!terminal-service/*.ts
-!terminal-service/tsconfig.json
-!runtime/
-!runtime/**
 !frontend/
 !frontend/**
 !public/
 !public/**
 !scripts/
 !scripts/build-server.mjs
-**/__pycache__

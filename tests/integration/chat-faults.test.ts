@@ -113,50 +113,6 @@ test('an agent can message a session while the server reconnects', async () => {
   }
 })
 
-test('a session message survives a connection lost before the agent got its answer', async () => {
-  const chat = await chatHarness(['Coder', 'Reviewer'])
-  try {
-    const hub = await chat.startHub()
-    const [coder, reviewer] = chat.sessions
-    const link = await hub.link(chat.owner, chat.ref(coder))
-    link.ensure(true)
-    await until(() => link.state === 'live' && link.info?.state === 'ready', 'a ready chat')
-    chat.breakOnAnswer.add(coder.id)
-    const result = await link.request({
-      type: 'prompt',
-      key: 'k1',
-      origin: { kind: 'user' },
-      prompt: [{ type: 'text', text: 'message reviewer: please review' }],
-      files: [],
-    })
-    assert.equal(result.ok, true)
-    const turn = (result.data as { turn: string }).turn
-    await until(
-      () => chat.hosts.get(coder.id)?.journal.entries.some(entry => entry.kind === 'ended' && entry.turn === turn),
-      "the coder's turn",
-      30_000,
-    )
-    const reply = chat.hosts
-      .get(coder.id)!
-      .journal.entries.filter(entry => entry.kind === 'update' && entry.turn === turn)
-      .map(entry =>
-        entry.kind === 'update' &&
-        entry.update.sessionUpdate === 'agent_message_chunk' &&
-        entry.update.content.type === 'text'
-          ? entry.update.content.text
-          : '',
-      )
-      .join('')
-    // The agent was told the message was sent, and the reviewer received it once.
-    assert.match(reply, /"sent": true/)
-    await until(() => chat.deliveries().find(item => item.sessionId === reviewer.id), "the reviewer's delivery")
-    await pause(1000)
-    assert.equal(chat.deliveries().filter(item => item.sessionId === reviewer.id).length, 1)
-  } finally {
-    await chat.close()
-  }
-})
-
 test('a coding tool that crashes mid-turn ends its delivery with a notice', async () => {
   const chat = await chatHarness(['Coder'])
   try {

@@ -1,8 +1,8 @@
 # Contributing to Outpost
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: it explains the
-principles every change should keep (one connection path, target-owned persistent terminal
-state, modes that differ only in identity, one installed target executable).
+principles every change should keep (one connection path, machine-owned persistent sessions,
+Outpost as the hub, modes that differ only in identity, one installed machine executable).
 
 Outpost is unreleased. Keep one current implementation and schema: remove
 obsolete paths when replacing a feature instead of adding migration readers,
@@ -12,8 +12,9 @@ part of the current platform contract.
 
 ## Local setup
 
-Use Node.js 24+, npm 11+, Python 3.9+, an OpenSSH client and
-[ruff](https://docs.astral.sh/ruff/) (`pipx install ruff` or `uv tool install ruff`).
+Use Node.js 24+, npm 11+, an OpenSSH client, and Python 3 with
+[ruff](https://docs.astral.sh/ruff/) (`pipx install ruff` or `uv tool install ruff`)
+for the test fixtures that stand in for coding tools.
 
 ```sh
 ONNXRUNTIME_NODE_INSTALL=skip npm ci
@@ -22,7 +23,8 @@ npm run dev
 ```
 
 Open http://127.0.0.1:5173. Vite forwards `/api` to the API on
-`127.0.0.1:3000`, which restarts on changes to `backend/` and `runtime/`. Use `OUTPOST_DATA_DIR` for a separate development store, and a
+`127.0.0.1:3000`, which restarts on changes to `backend/`. Changes to `machine/`
+take effect after `npm run build:terminal` and installing the build on a target. Use `OUTPOST_DATA_DIR` for a separate development store, and a
 different one for hosted work (`OUTPOST_MODE=hosted` in `.env`). Without mail
 credentials, hosted development shows verification links in the UI.
 
@@ -33,22 +35,21 @@ credentials, hosted development shows verification links in the UI.
 | `backend/` | TypeScript | Outpost server |
 | `frontend/` | React + SCSS | Browser and Electron renderer |
 | `shared/` | TypeScript | Server, frontend and desktop contracts |
-| `terminal-service/` | TypeScript + bundled Bun | Linux targets, installed executable |
-| `runtime/` | Python 3.9 | Targets, sent with each operation |
+| `machine/` | TypeScript + bundled Bun | Linux targets, installed executable (Outpost Terminal) |
 | `desktop/` | TypeScript + Electron | Your computer (macOS, Windows) |
 
-Python code must stay compatible with Python 3.9 on targets and
-use only the standard library.
+Code in `machine/` runs in Bun on targets and in Node in its tests: use Node's
+APIs (Bun implements them), except in the terminal service's PTY handling.
 
 Formatting is automatic: `npm run format` runs Prettier on TypeScript, SCSS and
-JSON and ruff on Python; `npm run lint` and `npm run lint:python` check it.
-Contracts shared by TypeScript and Python are tested in
-`tests/unit/contracts.test.ts`; extend it when you add one.
+JSON and ruff on the Python test fixtures; `npm run lint` and
+`npm run lint:python` check it. Contracts between the server and the machine
+are tested in `tests/unit/contracts.test.ts`; extend it when you add one.
 
 ## Checks
 
 ```sh
-npm run check             # lint (incl. ruff), typecheck, build, Node unit tests, Python tests
+npm run check             # lint (incl. ruff), typecheck, build, unit and machine tests
 npm run test:integration  # persistent PTYs; the SSH test also needs Docker
 npx playwright install chromium
 npm run test:ui           # browser tests against a real local backend
@@ -123,13 +124,13 @@ same `desktopBridgeVersion`; there are no bridge compatibility shims.
 
 ## Linux terminal dependency
 
-Run `npm run build:terminal` before runtime/integration/browser tests. Use
+Run `npm run build:terminal` before machine, integration and browser tests. Use
 `npm run build:terminal -- arm64-glibc` (or `x64-musl`, `arm64-musl`) for other
 targets. The build pins Bun; the resulting executable embeds its runtime.
 
 The **Linux terminal service** workflow is manual and builds all four assets.
 Enable **publish** to create `terminal-v<version>` with checksums. Bump the
-shared service version and its Python contract together; never overwrite an
+version in `shared/terminalService.ts` for every release; never overwrite an
 existing release. The existing **CI** dispatcher also exposes `suite=terminal`
 and `publish_preview=true`, so it works before GitHub registers the new workflow
 on the default branch. This release is separate from desktop installers.
@@ -145,8 +146,8 @@ modes, and keep live output ordered after the snapshot.
 ## Pull requests
 
 Keep changes focused and describe the user-visible behavior, how you validated
-it, and any limitations. Add a regression test when changing runtime behavior,
-the terminal or relay protocol, or a security boundary. Use synthetic data in
+it, and any limitations. Add a regression test when changing machine behavior,
+the terminal or node protocol, or a security boundary. Use synthetic data in
 screenshots (`npm run docs:capture`) and fixtures.
 
 Report bugs through GitHub issues with reproduction steps, the commit, your

@@ -8,7 +8,7 @@ import type { SessionActivity } from './activity'
 import type { SessionFile } from './sessionFiles'
 
 export const chatHost = {
-  protocol: 2,
+  protocol: 3,
   /** Journal bounds; older entries are dropped like terminal scrollback. Bytes
    * are UTF-8 JSON, so a welcome snapshot always fits one relay frame. */
   maxEntries: 20_000,
@@ -26,9 +26,6 @@ export const chatHost = {
    * and kept when the agent replies with one. */
   maxImageBytes: 5 * 1024 * 1024,
   maxOrigin: 4096,
-  /** A bridge (MCP) call waits this long for Outpost to answer, including
-   * while the server reconnects. */
-  callMs: 45_000,
   /** A host with no viewers and nothing to do stops after this; opening the
    * chat starts it again in the same conversation. */
   idleMs: 10 * 60_000,
@@ -70,7 +67,7 @@ export type ChatEntryInput = DistributiveOmit<ChatEntry, 'seq' | 'at'>
 
 /** Latest-value session state. It is replaced, not journaled. */
 export interface ChatInfo {
-  state: 'starting' | 'identity' | 'ready' | 'failed' | 'exited'
+  state: 'starting' | 'ready' | 'failed' | 'exited'
   error: string | null
   agent: { name: string; title: string | null; version: string | null } | null
   nativeId: string | null
@@ -98,6 +95,8 @@ export interface ChatHostStatus {
   protocol: number
   pid: number
   clients: number
+  /** The session configuration revision it started with. */
+  revision: number
   state: ChatInfo['state']
   nativeId: string | null
   activity: SessionActivity
@@ -109,15 +108,13 @@ export type ChatHostMessage =
   | { type: 'welcome'; protocol: number; instance: string; info: ChatInfo; journal: ChatJournalSnapshot }
   | { type: 'entry'; entry: ChatEntry }
   | { type: 'info'; info: ChatInfo }
-  | { type: 'identity'; nativeId: string }
-  | { type: 'call'; id: string; tool: string; arguments: unknown; turn: string | null; origin: ChatOrigin | null }
   | { type: 'result'; id: string; ok: boolean; message?: string; data?: unknown }
   | { type: 'error'; message: string }
   | ChatHostStatus
 
 // Client → host frames.
 export type ChatHostRequest =
-  | { type: 'hello'; protocol: number; role: 'viewer' | 'hub' }
+  | { type: 'hello'; protocol: number }
   | { type: 'status' }
   /** `prompt` is text; `files` are session file IDs, sent as ACP resource links
    * to the stored files (docs/CHAT.md, "Files"). */
@@ -134,24 +131,27 @@ export type ChatHostRequest =
   | { type: 'permission'; id: string; request: string; optionId: string | null }
   | { type: 'config'; id: string; configId: string; value: string | boolean }
   | { type: 'mode'; id: string; modeId: string }
+  /** Start a new conversation in this session, like /new in a terminal. */
+  | { type: 'new'; id: string }
   /** Also a one-shot request without hello; it then replies with `status`. */
   | { type: 'seen'; id?: string; completionId: string }
   /** One-shot from the Outpost MCP server after it stored a published file. */
   | { type: 'file'; file: SessionFile }
   | { type: 'note'; id: string; level: 'info' | 'warning' | 'error'; text: string }
-  | { type: 'identity-saved'; nativeId: string }
-  | { type: 'answer'; id: string; ok: boolean; message?: string; data?: unknown }
   | { type: 'ping'; id: string }
-  | { type: 'call'; id: string; tool: string; arguments: unknown }
+  /** One-shot from the node: end the coding tool and this host. */
+  | { type: 'stop' }
 
 /** Launch configuration, written to `chat-serve` on stdin by the target runtime. */
 export interface ChatLaunch {
   socket: string
   session: string
+  /** The session configuration revision this launch uses. */
+  revision: number
   command: string[]
   cwd: string
   env: Record<string, string>
-  /** Load this native conversation; otherwise start one and confirm its identity. */
+  /** Load this native conversation; otherwise start one and record it in the session first. */
   resume: string | null
   mcpServers: acp.McpServerStdio[]
   instructions: string | null

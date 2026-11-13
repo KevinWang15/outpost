@@ -10,8 +10,8 @@ Outpost has two ways to work with the same sessions:
   other, and run on **schedules**.
 
 Both modes are views of one managed session and one native conversation (Claude
-Code's transcript, Codex's rollout, Kimi's session). A conversation started in
-one mode continues in the other.
+Code's transcript, Codex's rollout, Kimi's or DeepSeek's session). A
+conversation started in one mode continues in the other.
 
 ## Principles
 
@@ -22,8 +22,8 @@ one mode continues in the other.
 2. **One driver per conversation.** A session runs either its terminal service
    or its chat host, never both: two processes writing one transcript would fork
    it. Opening the other mode first ends the running one; the conversation stays.
-3. **The target owns the chat**, as it owns the terminal. A chat host on the
-   target keeps the agent, its prompt queue and its history while browsers,
+3. **The machine owns the chat**, as it owns the terminal. A chat host on the
+   machine keeps the agent, its prompt queue and its history while browsers,
    SSH and the Outpost server come and go.
 4. **ACP inside, Outpost envelope around it.** Payloads are ACP types. The
    envelope adds what one ACP client connection lacks: sequence numbers, many
@@ -38,20 +38,20 @@ one mode continues in the other.
 browser / Outpost Desktop chat window
         ⇅  one WebSocket per page: /api/chat (session lists, journals, actions)
 Outpost server — ChatHub: links to chat hosts, channels, deliveries, schedules
-        ⇅  same transport as terminals: SSH or local shell → runtime chat relay
-target — outpost-terminal chat-serve (one per session, persistent)
+        ⇅  the machine connection, as for terminals: a chat stream through the node
+machine — outpost-terminal chat-serve (one per session, persistent)
         ⇅  ACP over stdio
-coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp
+coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp · dsh
         ⇅  the tool's own CLI and native store
 ```
 
 | Piece | Code | Role |
 | --- | --- | --- |
-| Chat host | `terminal-service/chat.ts` | The persistent ACP client of one session: starts the tool's ACP server, opens the native conversation, queues prompts, journals updates, answers permission requests from viewers, forwards Outpost MCP calls to the server |
+| Chat host | `machine/chat.ts` | The persistent ACP client of one session: starts the tool's ACP server, opens the native conversation and records a new one in the session, queues prompts, journals updates, answers permission requests from viewers |
 | Host contract | `shared/chatHost.ts` | Envelope messages, the journal both ends apply, bounds |
 | Transcript model | `shared/chatTranscript.ts` | Turns and items for display, live or replayed |
-| Target runtime | `runtime/outpost_chat.py`, `outpost_runtime.py` | Starts the host, enforces one driver, relays frames, records a new conversation's identity, chat settings |
-| Harness adapters | `chat_command`, `chat_resumable`, `chat_mcp_servers` in `runtime/outpost_<id>.py` | How each tool serves ACP |
+| Node | `machine/node.ts`, `machine/launch.ts` | Starts the host, enforces one driver, connects chat streams to it |
+| Harness adapters | `chat`, `chatResumable`, `chatServers` in `machine/harnesses/` | How each tool serves ACP |
 | Server | `backend/chat/` | Links, hub (routing), store, socket, tokens |
 | Web app | `frontend/chat/` | The chat UI, also loaded by Outpost Desktop |
 | Desktop | `desktop/src/chat-windows.ts`, `chat-preload.ts` | One chat window per server account |
@@ -63,26 +63,31 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp
 | Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the target's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Required Software (`claude-agent-acp`, pinned in `shared/chatAgents.json`) |
 | Codex | Official [`codex-acp`](https://github.com/agentclientprotocol/codex-acp), run with the target's own `codex` (`CODEX_PATH`) | Bundled in Outpost Terminal (`outpost-terminal agent codex`), fetched with an integrity pin by `scripts/vendor-agents.mjs` |
 | Kimi Code | `kimi acp` | Kimi itself |
+| DeepSeek Harness | `dsh --profile acp`, through `outpost-terminal agent deepseek` | DeepSeek itself |
 
 The Claude adapter is installed rather than bundled because it depends on
 Anthropic's proprietary Agent SDK; Outpost does not redistribute it. Its release
 archive's own `claude` is removed after installation. Codex's adapter and its
 dependencies are Apache-2.0/MIT/BSD JavaScript using only Node built-ins.
 
-Session instructions (chat settings) are sent as ACP `systemPrompt` in `append`
-mode. Claude Code and Codex advertise it; Kimi does not, and the chat says so.
+Session instructions (part of the session's configuration) are sent as ACP
+`systemPrompt` in `append` mode. Claude Code and Codex advertise it; Kimi does
+not, and the chat says so. Like other configuration, an edit applies when the
+chat host next starts; its `status` reports the revision it runs.
 The chat host advertises no file-system or terminal client capability: tools
 use their own. It declares `_meta.terminal_output_delta`, the convention Codex
 uses to stream command output.
 
-## Conversation identity
+## Conversations
 
-Outpost pins each session's native conversation (`cliSessionId`). A chat host
-opens it with `session/load` when it exists (`chat_resumable`); the agent replays
-its history as ACP updates. A new Claude conversation has no transcript until
-its first prompt, so the host starts it with `session/new` and enters the
-`identity` state: the relay records the agent's id in the session registry,
-then the host accepts prompts. A restart therefore always finds the conversation.
+A session's timeline lists its native conversations; the last is current. A
+chat host opens the current one with `session/load` when the tool can load it
+(`chatResumable`); the agent replays its history as ACP updates. A new Claude
+conversation has no transcript until its first prompt, so the host starts it
+with `session/new` and records the agent's id as the session's current
+conversation before it accepts prompts. A restart therefore always finds the
+conversation. The `new` request starts another conversation the same way, like
+`/new` in a terminal.
 
 ## The chat host
 
@@ -90,13 +95,13 @@ then the host accepts prompts. A restart therefore always finds the conversation
 `~/.outpost/chats/<session>.sock` (owner-only), and outlives its viewers. After
 ten minutes with no viewer, no turn, no request waiting for approval and no
 unseen reply, it stops; opening the chat starts it again in the same
-conversation. The target runtime's `status` (SO_PEERCRED-checked, like the
-terminal service) reports its state and the same `SessionActivity` as terminal
-sessions, so lists and badges work in both modes. Terminate ends either driver.
+conversation. Its `status` reports its state and the same `SessionActivity` as
+terminal sessions, so lists and badges work in both modes. Terminate ends
+either driver.
 
-Requests (`shared/chatHost.ts`): `hello` (viewer or hub), `prompt` (with a key:
-a retried key is the same turn), `cancel`, `unqueue`, `permission`, `config`,
-`mode`, `seen`, `note`, `answer`, `ping`; one-shot `status` and `seen` without
+Requests (`shared/chatHost.ts`): `hello`, `prompt` (with a key: a retried key
+is the same turn), `cancel`, `unqueue`, `permission`, `config`, `mode`, `new`,
+`seen`, `note`, `ping`; one-shot `status`, `seen`, `stop` and `file` without
 hello.
 
 **Journal.** Entries are `queued`, `started`, `ended`, `update` (an ACP
@@ -104,7 +109,7 @@ hello.
 host assigns sequence numbers; a viewer applies the same entries in order with
 the same `ChatJournal`, so streamed text chunks and tool reports coalesce
 identically on both ends. A gap means resubscribe. The journal keeps 20,000
-entries or 16 MiB of UTF-8 JSON, so a snapshot always fits one 32 MiB relay
+entries or 16 MiB of UTF-8 JSON, so a snapshot always fits one 32 MiB
 frame, dropping the oldest like terminal scrollback; the native
 store still has the whole conversation. Tool reports and other agent data are
 bounded per field; image bytes are not journaled (only their metadata).
@@ -138,10 +143,10 @@ A reply that mentions another member passes the conversation on; chains stop
 after 6 hops or 12 deliveries per user message, with a notice. A member mentioned
 again while working gets the newer messages after its turn.
 
-**Session messages.** Outpost's MCP server (`runtime/outpost_mcp.py`) serves
+**Session messages.** Outpost's MCP server (`machine/mcp.ts`) serves
 `list_sessions` and `message_session` to chat launches (`OUTPOST_DRIVER=chat`;
-see "Outpost MCP" in ARCHITECTURE.md). The call travels agent →
-MCP process → chat host socket → hub. The recipient works in its own chat; its
+see "Outpost MCP" in ARCHITECTURE.md). The call travels agent → MCP process →
+the session's node → the machine connection → hub. The recipient works in its own chat; its
 final message returns to the sender as a new turn. A thread allows 6 messages.
 
 **Under failures.** A delivery ends in exactly one reply or one visible notice
@@ -156,13 +161,12 @@ final message returns to the sender as a new turn. A thread allows 6 messages.
   unconfirmed delivery is resent to the same instance. If the instance changed, it
   fails with a notice that the message may not have run.
 - A server restart keeps deliveries as they were. On start the hub reconnects to
-  their sessions and to every chat-driven session that is working, so agents'
-  Outpost tool calls get answers.
-- The chat host holds an agent's Outpost tool call while no server is connected
-  (up to 45 s), and forwards it again if the server's connection drops before
-  the answer. The hub answers a repeated call ID with the first answer;
-  `message_session` also records the call ID on its delivery, so a call repeated
-  across a server restart sends one message.
+  their sessions and lists every chat user's sessions, which reconnects their
+  machines, so agents' Outpost tool calls get answers.
+- While its machine is not connected, an agent's Outpost tool call waits up to
+  20 s for the node's endpoint. A call whose connection drops after it was sent
+  fails with an error the agent sees; it may have run, and the agent decides
+  whether to try again.
 - The composer keeps one key for a draft until the server accepts it, so
   sending the same draft again is recognized: by the chat host's prompt keys in
   a session, and by the key stored with each channel post, also after a server
@@ -176,7 +180,7 @@ Pages read files over HTTP with their chat grant
 save dialog.
 
 - *From the agent.* It shares a file with Outpost's `publish_file` MCP tool (or
-  `outpost-mcp publish FILE`), as in terminal mode. Publishing also tells the
+  `outpost publish FILE`), as in terminal mode. Publishing also tells the
   chat host, which records a `file` journal entry in the running turn. The turn
   shows a card for it, and a channel reply carries the files its turn published.
 - *To the agent.* The composer uploads each attached file (any type) on send:
@@ -213,7 +217,7 @@ Uploads are buffered (at most two at a time per account) before they are stored.
 ## Limits and known gaps
 
 - Schedules fire only while the Outpost server runs; missed times are not caught up.
-- A chat host does not survive a target reboot or a crash of the tool; opening
+- A chat host does not survive a machine reboot or a crash of the tool; opening
   the chat starts it again and the conversation continues.
 - Terminal-mode arguments (`args`) do not apply to chat; the agent's mode and
   model are chosen in the chat instead.
@@ -226,7 +230,7 @@ Uploads are buffered (at most two at a time per account) before they are stored.
   a session's chat is never resent automatically: if its confirmation is lost the
   page says so, and the journal shows whether it was queued. Sending the same
   draft again cannot run it twice unless the chat host also restarted.
-- An agent's Outpost tool call fails if no server connects within 45 s.
+- An agent's Outpost tool call fails if its machine is not connected within 20 s.
 - File cards are journal entries, so turns replayed from the native history
   after a chat host restart show none (an attachment shows as the tool's own
   link text); the Files panel still lists the files.

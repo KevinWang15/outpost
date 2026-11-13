@@ -132,7 +132,7 @@ export default function FinderDialog({
               const managed = match.managedSessionIds[0]
               const linkable = tools.includes(match.tool) && match.rootDir.startsWith('/')
               return (
-                <li key={`${match.tool}:${match.cliSessionId}:${JSON.stringify(match.cliSessionEnv)}`}>
+                <li key={`${match.tool}:${match.conversation}:${JSON.stringify(match.storage)}`}>
                   <div className="match-text">
                     <div className="match-title">
                       <span className="chip">

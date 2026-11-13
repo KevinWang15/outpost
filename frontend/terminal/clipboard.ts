@@ -15,7 +15,7 @@ export function screenText(term: Terminal) {
   return text.replace(/\n+$/, '')
 }
 
-/** Browser clipboard shims for the web terminal (principle 6): reads only on a
+/** Browser clipboard shims for the web terminal ("Explicit gestures only"): reads only on a
  * local paste gesture; OSC 52 lets remote programs copy to your clipboard. */
 export function attachClipboard(
   term: Terminal,

@@ -54,7 +54,7 @@ export default function SessionDialog({
         name: String(data.get('name')).trim(),
         rootDir: String(data.get('rootDir')),
         ...(conversation
-          ? { cliSessionId: conversation.cliSessionId, cliSessionEnv: conversation.cliSessionEnv }
+          ? { conversation: conversation.conversation, storage: conversation.storage }
           : { createDirectory: data.get('createDirectory') === 'on' }),
         ...(args ? { args } : {}),
         ...(names.length ? { env: Object.fromEntries(names.map((name, index) => [name, values[index]])) } : {}),

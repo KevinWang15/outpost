@@ -12,11 +12,11 @@ import { LocalDeployment } from '../../backend/deployment'
 import { TerminalClient } from '../integration/helpers'
 import { FakeSessions, fakeSoftware } from './fakes'
 
-async function setup(t: test.TestContext, env: NodeJS.ProcessEnv = process.env) {
+async function setup(t: test.TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-api-'))
   const sessions = new FakeSessions()
   const deployment = await LocalDeployment.open(directory)
-  const app = await createApp({ history: false, deployment, sessions, software: fakeSoftware, multiplex: false, env })
+  const app = await createApp({ history: false, deployment, sessions, software: fakeSoftware, multiplex: false })
   await app.listen({ host: '127.0.0.1', port: 0 })
   const port = (app.server.address() as { port: number }).port
   t.after(async () => {
@@ -124,7 +124,7 @@ test('targets and sessions are validated strictly', async t => {
   )
   assert.equal((await call('POST', base, { name: 'a', rootDir: 'relative', tool: 'kimi' })).status, 400)
   assert.equal(
-    (await call('POST', base, { name: 'a', rootDir: '~/p', tool: 'kimi', cliSessionId: 'not-a-kimi-id' })).status,
+    (await call('POST', base, { name: 'a', rootDir: '~/p', tool: 'kimi', conversation: 'not-a-kimi-id' })).status,
     400,
   )
   assert.equal(
@@ -137,8 +137,8 @@ test('targets and sessions are validated strictly', async t => {
         name: 'a',
         rootDir: '~/p',
         tool: 'kimi',
-        cliSessionId: 'session_abc',
-        cliSessionEnv: { CODEX_HOME: '/x' },
+        conversation: 'session_abc',
+        storage: { CODEX_HOME: '/x' },
       })
     ).status,
     400,
@@ -189,7 +189,7 @@ test('fork validates input, resolves the source on its target, and inherits laun
     { ...input, branch: 'bad\nbranch' },
     { ...input, rootDir: 'relative' },
     { ...input, tool: 'codex' },
-    { ...input, cliSessionId: source.cliSessionId },
+    { ...input, conversation: source.conversations[0].id },
   ])
     assert.equal((await call('POST', path, invalid)).status, 400)
   const { body: other } = await call('POST', '/targets', { kind: 'local', name: 'Other', tools: ['claude'] })
@@ -197,9 +197,9 @@ test('fork validates input, resolves the source on its target, and inherits laun
   const fork = await call('POST', path, input)
   assert.equal(fork.status, 201)
   assert.equal(fork.body.tool, source.tool)
-  assert.deepEqual(fork.body.env, source.env)
-  assert.equal(fork.body.args, source.args)
-  assert.notEqual(fork.body.cliSessionId, source.cliSessionId)
+  assert.deepEqual(fork.body.config.env, source.config.env)
+  assert.equal(fork.body.config.args, source.config.args)
+  assert.notEqual(fork.body.conversations[0].id, source.conversations[0].id)
   await call('PATCH', `/targets/${target.id}`, { tools: ['codex'] })
   assert.equal((await call('POST', path, input)).status, 400)
 })
@@ -229,7 +229,6 @@ test('the broker relays a terminal and reports attach failures', async t => {
   assert.equal(hello.session.name, 'Build')
   await client.message('ready')
   await client.text('started 120x40')
-  assert.ok(!client.output.includes('Welcome to the target'), 'login noise before the relay is not shown')
   assert.deepEqual(sessions.attached.at(-1), { targetId: target.id, id: session.id, cols: 120, rows: 40 })
   client.input('hello')
   await client.text('echo:hello')
@@ -264,7 +263,8 @@ test('the broker relays a terminal and reports attach failures', async t => {
     message: 'The coding tool exited. Connect again to start it in the same conversation.',
   })
 
-  const failing = await setup(t, { ...process.env, FAKE_RELAY: 'fail' })
+  const failing = await setup(t)
+  failing.sessions.failAttach = true
   const { body: other } = (await failing.call('POST', '/targets', {
     kind: 'ssh',
     name: 'dev',

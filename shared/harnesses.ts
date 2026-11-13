@@ -1,5 +1,5 @@
-// Coding harness registry. The target-side adapters live in runtime/outpost_<id>.py;
-// see docs/ARCHITECTURE.md → "Add a coding harness".
+// Coding harness registry, shared by the UI, the server and the machine adapters
+// in machine/harnesses/<id>.ts; see docs/ARCHITECTURE.md → "Add a coding harness".
 const uuid = '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
 
 export const harnesses = [
@@ -10,6 +10,7 @@ export const harnesses = [
     installer: { url: 'https://claude.ai/install.sh', shell: 'bash' },
     nativeId: uuid,
     storageKey: 'CLAUDE_CONFIG_DIR',
+    storageDirectory: '.claude',
   },
   {
     id: 'codex',
@@ -18,6 +19,7 @@ export const harnesses = [
     installer: { url: 'https://chatgpt.com/codex/install.sh', shell: 'sh' },
     nativeId: uuid,
     storageKey: 'CODEX_HOME',
+    storageDirectory: '.codex',
   },
   {
     id: 'kimi',
@@ -26,6 +28,7 @@ export const harnesses = [
     installer: { url: 'https://code.kimi.com/kimi-code/install.sh', shell: 'bash' },
     nativeId: '^session_[A-Za-z0-9_-]{1,120}$',
     storageKey: 'KIMI_CODE_HOME',
+    storageDirectory: '.kimi-code',
   },
   {
     id: 'deepseek',
@@ -34,6 +37,7 @@ export const harnesses = [
     installer: { npm: '@deepseek-ai/dsh@0.2.2-rc.1' },
     nativeId: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$',
     storageKey: 'DSH_HOME',
+    storageDirectory: '.dsh',
     terminal: false,
   },
 ] as const

@@ -16,7 +16,7 @@ export default defineConfig([
     'desktop/dist',
     'desktop/release',
     'desktop/resources',
-    'terminal-service/vendor/*.js',
+    'machine/vendor/*.js',
   ]),
   js.configs.recommended,
   tseslint.configs.recommended,
@@ -24,12 +24,16 @@ export default defineConfig([
     files: ['**/*.{js,ts,tsx}'],
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
     linterOptions: { reportUnusedDisableDirectives: 'error' },
+    rules: {
+      // Overridable methods name parameters only some implementations use.
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', ignoreRestSiblings: true }],
+    },
   },
   {
     files: [
       '*.{js,ts}',
       'backend/**/*.ts',
-      'terminal-service/**/*.ts',
+      'machine/**/*.ts',
       'desktop/src/**/*.ts',
       'desktop/scripts/**/*.mjs',
       'tests/**/*.{js,ts}',

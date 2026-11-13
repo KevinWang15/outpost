@@ -1,12 +1,11 @@
-import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { ChatInfo, ChatEntry, ChatHostMessage, ChatHostRequest, DistributiveOmit } from '../../shared/chatHost'
 import { chatHost, ChatJournal } from '../../shared/chatHost'
 import type { LinkState } from '../../shared/chatApi'
-import { BoundedWriter } from '../../shared/node/boundedWriter'
-import { FrameDecoder, relayMagic, terminalControl } from '../../shared/node/terminalFrames'
+import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
 import { terminalConnectionPolicy } from '../../shared/protocol'
-import { protocolResult } from '../process'
+import { AppError } from '../errors'
+import type { Stream } from '../machines'
 import type { SessionService, TargetContext } from '../sessions'
 
 /** A framed byte stream to one chat host. */
@@ -28,66 +27,43 @@ export type ChatConnector = (
   events: ChatTransportEvents,
 ) => ChatTransport
 
-/** The production path: the same transport as terminals, to the runtime's chat relay. */
-export function relayConnector(sessions: SessionService, env?: NodeJS.ProcessEnv): ChatConnector {
+/** The production path: a chat stream on the session machine's connection. */
+export function machineConnector(sessions: SessionService): ChatConnector {
   return (context, sessionId, start, events) => {
-    const command = sessions.chatAttach(context, sessionId, start)
-    const child = spawn(command.executable, command.args, { stdio: 'pipe', env: env ?? process.env })
-    let prelude: Buffer = Buffer.alloc(0)
-    let started = false
-    let stderr = ''
+    let stream: Stream | null = null
     let finished = false
+    const waiting: Buffer[] = []
     const decoder = new FrameDecoder()
     const finish = (message: string, status: number | null) => {
       if (finished) return
       finished = true
-      writer.dispose()
-      if (child.exitCode === null && child.signalCode === null) {
-        child.stdin.destroy()
-        setTimeout(() => child.kill('SIGKILL'), 5000).unref()
-      }
+      stream?.end()
       events.closed(message, status)
     }
-    const writer = new BoundedWriter(child.stdin, 64 * 1024 * 1024, 30_000, message => finish(message, null))
-    if (command.input) writer.write(command.input)
-    child.stdin.on('error', () => finish('The connection to the target stopped accepting input.', null))
-    child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (text: string) => {
-      stderr = (stderr + text).slice(-4096)
-    })
-    child.on('error', error => finish(`Could not reach the target: ${error.message}`, null))
-    child.stdout.on('data', (chunk: Buffer) => {
-      if (finished) return
-      events.progress()
-      if (!started) {
-        prelude = Buffer.concat([prelude, chunk]).subarray(-64 * 1024)
-        const at = prelude.indexOf(relayMagic)
-        if (at < 0) return
-        started = true
-        chunk = prelude.subarray(at + relayMagic.length)
-        prelude = Buffer.alloc(0)
-      }
-      try {
-        for (const frame of decoder.feed(chunk)) {
-          if (frame.kind !== 'C') throw new Error('Invalid chat frame')
-          events.message(JSON.parse(frame.payload.toString('utf8')))
-        }
-      } catch {
-        finish('The target sent an invalid chat stream.', 502)
-      }
-    })
-    child.on('close', () => {
-      if (started) return finish('The connection to the chat was lost.', null)
-      try {
-        const result = protocolResult(prelude.toString('utf8'))
-        if (result && !result.ok) return finish(result.error.message, result.error.statusCode)
-      } catch {
-        /* Keep the transport's own message. */
-      }
-      finish(stderr.trim().split('\n').at(-1) || 'Could not open the chat.', null)
-    })
+    const write = (frame: Buffer) => (stream ? stream.write(frame) : waiting.push(frame))
+    sessions.chatAttach(context, sessionId, start).then(
+      opened => {
+        if (finished) return opened.end()
+        stream = opened
+        for (const frame of waiting.splice(0)) opened.write(frame)
+        opened.onData(chunk => {
+          if (finished) return
+          events.progress()
+          try {
+            for (const frame of decoder.feed(chunk)) {
+              if (frame.kind !== 'C') throw new Error('Invalid chat frame')
+              events.message(JSON.parse(frame.payload.toString('utf8')))
+            }
+          } catch {
+            finish('The machine sent an invalid chat stream.', 502)
+          }
+        })
+        opened.onClose(error => finish(error?.message ?? 'The connection to the chat was lost.', null))
+      },
+      error => finish((error as Error).message, error instanceof AppError ? error.statusCode : null),
+    )
     return {
-      send: message => void writer.write(terminalControl(message)),
+      send: message => void write(terminalControl(message)),
       close: (reason = 'Closed.') => finish(reason, null),
     }
   }
@@ -148,8 +124,6 @@ export class ChatLink {
     readonly key: string,
     private open: (start: boolean, events: ChatTransportEvents) => ChatTransport,
     private hooks: {
-      /** An Outpost MCP call from the session's agent. */
-      call(link: ChatLink, message: Extract<ChatHostMessage, { type: 'call' }>): void
       /** Every journal change, for channel routing. */
       changed(link: ChatLink, event: LinkEvent): void
       disposed(link: ChatLink): void
@@ -184,7 +158,7 @@ export class ChatLink {
       },
     })
     this.transport = transport
-    transport.send({ type: 'hello', protocol: chatHost.protocol, role: 'hub' })
+    transport.send({ type: 'hello', protocol: chatHost.protocol })
   }
 
   /** A quiet connection gets a ping; one that stays silent is replaced. Before
@@ -226,8 +200,6 @@ export class ChatLink {
       case 'result': {
         return this.settle(message.id, { ok: message.ok, message: message.message, data: message.data })
       }
-      case 'call':
-        return this.hooks.call(this, message)
       case 'error':
         this.message = message.message
         return
@@ -296,9 +268,7 @@ export class ChatLink {
 
   private busy() {
     const state = this.info?.activity.state
-    return (
-      state === 'working' || state === 'waiting' || this.info?.state === 'identity' || this.info?.state === 'starting'
-    )
+    return state === 'working' || state === 'waiting' || this.info?.state === 'starting'
   }
 
   private needed() {
@@ -336,7 +306,7 @@ export class ChatLink {
   /** Send a request; it waits for the connection while the link starts. `onSent`
    * runs when it is written to a host, with that host's instance. */
   request(
-    message: DistributiveOmit<Exclude<ChatHostRequest, { type: 'hello' | 'status' | 'identity-saved' }>, 'id'>,
+    message: DistributiveOmit<Exclude<ChatHostRequest, { type: 'hello' | 'status' | 'stop' | 'file' }>, 'id'>,
     timeoutMs = 30_000,
     onSent?: (instance: string) => void,
   ) {
@@ -375,16 +345,5 @@ export class ChatLink {
     this.pending.delete(id)
     clearTimeout(pending.timer)
     pending.resolve(result)
-  }
-
-  /** Answer an MCP call the host forwarded. */
-  answer(id: string, ok: boolean, message?: string, data?: unknown) {
-    this.transport?.send({
-      type: 'answer',
-      id,
-      ok,
-      ...(message ? { message } : {}),
-      ...(data !== undefined ? { data } : {}),
-    })
   }
 }

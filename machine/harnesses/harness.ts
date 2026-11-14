@@ -44,13 +44,12 @@ interface HistoryMessage {
   identity: string | null
 }
 
-/** A neutral stdio MCP server; `env` is the launch's binding. */
-export interface McpServer {
-  name: string
-  command: string
-  args: string[]
-  env: Record<string, string>
-}
+/** A neutral MCP server: a command, or a URL (streamable HTTP). */
+export type McpServer =
+  | { name: string; command: string; args: string[]; env: Record<string, string> }
+  | { name: string; url: string; headers: Record<string, string> }
+export type McpStdioServer = Extract<McpServer, { command: string }>
+
 export interface Launch {
   session: SessionRecord
   conversation: string
@@ -58,6 +57,9 @@ export interface Launch {
   executable: string
   /** The environment the tool runs with (session env and storage included). */
   environment: Record<string, string>
+  /** Outpost's own server; its `env` is the launch's binding. */
+  outpost: McpStdioServer
+  /** The session's own servers. */
   servers: McpServer[]
   /** argv of the activity hook; it reads the binding from its environment. */
   hook: string[]
@@ -162,8 +164,12 @@ export abstract class Harness {
 
   // Launch -------------------------------------------------------------------------
 
-  /** Options that configure the launch's MCP servers natively (required). */
+  /** Options that configure the launch's MCP servers natively (required);
+   * the session's own servers where the registry says terminals apply them. */
   abstract mcp(launch: Launch): Promise<string[]>
+  /** Options that add the session's instructions (where the registry says
+   * terminals apply them) and select its model. */
+  abstract settings(launch: Launch): string[]
   /** Options that install activity hooks. A failure is reported, never fatal. */
   abstract hooks(launch: Launch): Promise<string[]>
   /** Arguments that open exactly this conversation. */
@@ -174,16 +180,17 @@ export abstract class Harness {
   chatResumable(_session: SessionRecord, _conversation: string) {
     return true
   }
-  /** ACP `mcpServers` for chat, from the launch's servers. */
-  async chatServers(launch: Launch): Promise<acp.McpServerStdio[]> {
-    return launch.servers.map(server => ({
-      name: server.name,
-      command: server.command,
-      args: server.args,
-      env: Object.entries(server.env).map(([name, value]) => ({ name, value })),
-    }))
+  /** ACP `mcpServers` for chat: Outpost's and the session's. */
+  async chatServers(launch: Launch): Promise<acp.McpServer[]> {
+    return [launch.outpost, ...launch.servers].map(acpServer)
   }
 }
+
+const pairs = (values: Record<string, string>) => Object.entries(values).map(([name, value]) => ({ name, value }))
+export const acpServer = (server: McpServer): acp.McpServer =>
+  'url' in server
+    ? { type: 'http', name: server.name, url: server.url, headers: pairs(server.headers) }
+    : { name: server.name, command: server.command, args: server.args, env: pairs(server.env) }
 
 /** A native record message with its text extracted. */
 export function historyMessage(

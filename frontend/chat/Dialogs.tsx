@@ -88,6 +88,11 @@ export function NewSessionDialog({
       conversation={conversation}
       directories={directories}
       description={target ? `On ${target.name}. It starts in chat.` : undefined}
+      copyFrom={client.sessions.map(session => ({
+        key: `${session.targetId}/${session.id}`,
+        label: `${session.name} · ${harnessLabel(session.tool)} on ${session.target}`,
+        session,
+      }))}
       beforeFields={
         <>
           <label className="field">

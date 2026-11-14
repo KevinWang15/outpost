@@ -25,7 +25,7 @@ export async function searchService() {
   await writeFile(
     join(state, 'registry.json'),
     JSON.stringify({
-      version: 3,
+      version: 4,
       creations: {},
       sessions: [
         {
@@ -37,7 +37,7 @@ export async function searchService() {
           lastConnectedAt: null,
           storage: { CLAUDE_CONFIG_DIR: join(directory, '.claude') },
           delivery: 'auto',
-          config: { revision: 1, env: {}, args: '', instructions: null },
+          config: { revision: 1, instructions: null, model: null, mode: null, mcpServers: {}, args: '', env: {} },
           conversations: [{ id: conversation, startedAt: now, movedTo: null }],
         },
       ],

@@ -113,7 +113,21 @@ def config(session):
             'type': 'select',
             'currentValue': session['mode'],
             'options': [{'value': 'ask', 'name': 'Ask'}, {'value': 'auto', 'name': 'Auto'}],
-        }
+        },
+        {
+            'id': 'model',
+            'name': 'Model',
+            'category': 'model',
+            'type': 'select',
+            'currentValue': session['model'],
+            'options': [
+                {
+                    'group': 'fixture',
+                    'name': 'Fixture',
+                    'options': [{'value': 'fixture-fast', 'name': 'Fast'}, {'value': 'fixture-deep', 'name': 'Deep'}],
+                }
+            ],
+        },
     ]
 
 
@@ -122,10 +136,13 @@ def open_session(params, session_id):
     session = {
         'cwd': params['cwd'],
         'mode': 'ask',
+        'model': 'fixture-fast',
         'mcp': server,
         'directories': params.get('additionalDirectories', []),
     }
     sessions[session_id] = session
+    servers = [item.get('name') for item in params.get('mcpServers', [])]
+    Path(params['cwd'], 'mcp-servers.json').write_text(json.dumps(servers))
     system = params.get('systemPrompt')
     if system:
         text = '\n'.join(block.get('text', '') for block in system['content'])
@@ -301,6 +318,7 @@ def handle(message):
         }
         if variant == 'claude':
             capabilities['sessionCapabilities']['systemPrompt'] = {}
+            capabilities['mcpCapabilities'] = {'http': True}
         if variant == 'deepseek':
             capabilities.pop('loadSession')
             capabilities['sessionCapabilities']['resume'] = {}
@@ -354,7 +372,7 @@ def handle(message):
         result = {}
     elif method == 'session/set_config_option':
         session = sessions[params['sessionId']]
-        session['mode'] = params['value']
+        session[params['configId']] = params['value']
         result = {'configOptions': config(session)}
     elif method == 'session/prompt':
         threading.Thread(target=prompt, args=(identifier, params), daemon=True).start()

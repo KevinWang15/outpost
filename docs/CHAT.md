@@ -76,8 +76,15 @@ dependencies are Apache-2.0/MIT/BSD JavaScript using only Node built-ins.
 
 Session instructions (part of the session's configuration) are sent as ACP
 `systemPrompt` in `append` mode. Claude Code and Codex advertise it; Kimi does
-not, and the chat says so. Like other configuration, an edit applies when the
-chat host next starts; its `status` reports the revision it runs.
+not, and the chat says so. The session's MCP servers follow Outpost's in
+`mcpServers`; servers by URL only when the agent advertises
+`mcpCapabilities.http`, and otherwise the chat names the ones it left out. After
+`session/new` or `session/load` (and for **New conversation**), the host selects
+the session's model and mode: the agent's `model` or `mode` select option whose
+value, or name ignoring case, matches, falling back to ACP modes for the mode. A
+choice the agent does not offer is reported as a warning in the chat. Like other
+configuration, an edit applies when the chat host next starts; its `status`
+reports the revision it runs.
 The chat host advertises no file-system or terminal client capability: tools
 use their own. It declares `_meta.terminal_output_delta`, the convention Codex
 uses to stream command output.

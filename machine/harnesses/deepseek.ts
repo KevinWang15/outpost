@@ -257,6 +257,9 @@ export class DeepSeek extends Harness {
   async hooks() {
     return []
   }
+  settings() {
+    return []
+  }
   resume(): string[] {
     throw new Error('DeepSeek Harness has no terminal interface. Open this session in Outpost Chat.')
   }

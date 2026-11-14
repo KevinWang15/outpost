@@ -20,7 +20,7 @@ async function createSession(page: Page, name: string, directory: string) {
   await page.getByRole('button', { name: 'New session' }).first().click()
   const dialog = page.getByRole('dialog', { name: 'New session' })
   await dialog.getByLabel('Name').fill(name)
-  await dialog.getByRole('combobox').fill(directory)
+  await dialog.getByRole('combobox', { name: 'Project directory' }).fill(directory)
   await dialog.getByText('Create the directory if it doesn’t exist').click()
   await dialog.getByRole('button', { name: 'Create session' }).click()
   await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible()

@@ -476,6 +476,21 @@ kbd {
     margin-top: 14px;
   }
 }
+.field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+textarea.code,
+.source-editor {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.source-editor {
+  min-height: 360px;
+  tab-size: 2;
+  white-space: pre;
+}
 .env-row {
   display: grid;
   grid-template-columns: 1fr 1.4fr auto;
@@ -1205,6 +1220,9 @@ kbd {
   gap: 14px;
   padding: 18px 22px 22px;
   overflow-y: auto;
+}
+.push-left {
+  margin-right: auto;
 }
 .dialog-footer {
   display: flex;

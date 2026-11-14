@@ -1,12 +1,12 @@
 // Starting a session's driver: the terminal service (the tool's own terminal
 // interface in a PTY) or the chat host (its ACP server). Both get the same
-// binding and the same Outpost MCP servers.
+// binding, Outpost's MCP server and the session's own.
 import { spawn, spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import type { SessionRecord } from '../shared/model'
 import { quote, shellJoin } from '../shared/shell'
-import type { Launch, McpServer } from './harnesses/harness'
+import type { Launch, McpServer, McpStdioServer } from './harnesses/harness'
 import { harness } from './harnesses'
 import { current, readRegistry, RegistryError } from './registry'
 import { machineExecutable, state, statePath, writeFile } from './state'
@@ -23,9 +23,19 @@ const binding = (session: SessionRecord, driver: Driver) => ({
   OUTPOST_DRIVER: driver,
 })
 
-const servers = (session: SessionRecord, driver: Driver): McpServer[] => [
-  { name: 'outpost', command: machineExecutable(), args: ['mcp'], env: binding(session, driver) },
-]
+const outpost = (session: SessionRecord, driver: Driver): McpStdioServer => ({
+  name: 'outpost',
+  command: machineExecutable(),
+  args: ['mcp'],
+  env: binding(session, driver),
+})
+
+const servers = (session: SessionRecord): McpServer[] =>
+  Object.entries(session.config.mcpServers).map(([name, server]) =>
+    'url' in server
+      ? { name, url: server.url, headers: server.headers ?? {} }
+      : { name, command: server.command, args: server.args ?? [], env: server.env ?? {} },
+  )
 
 export function which(command: string, path = process.env.PATH ?? '') {
   for (const directory of path.split(delimiter)) {
@@ -91,7 +101,8 @@ export function prepare(session: SessionRecord, driver: Driver) {
     conversation: conversation.id,
     executable,
     environment: { ...environment, ...binding(session, driver) },
-    servers: servers(session, driver),
+    outpost: outpost(session, driver),
+    servers: servers(session),
     hook: [machineExecutable(), 'hook'],
   }
   return { adapter, launch }
@@ -169,7 +180,7 @@ export async function startTerminal(session: SessionRecord, cols: number, rows: 
   if (!setsid) throw new RegistryError('setsid (util-linux) is missing on this machine. Install it first.')
   if (spawnSync(bash, ['-n', '-c', `exec "$1" ${session.config.args}`]).status !== 0)
     throw new RegistryError('The session arguments are not valid Bash syntax. Edit the session to fix them.')
-  const options = await adapter.mcp(launch)
+  const options = [...(await adapter.mcp(launch)), ...adapter.settings(launch)]
   let problem: string | null = null
   try {
     options.push(...(await adapter.hooks(launch)))
@@ -221,6 +232,8 @@ export async function startChat(session: SessionRecord) {
       resume: adapter.chatResumable(session, launch.conversation) ? launch.conversation : null,
       mcpServers: await adapter.chatServers(launch),
       instructions: session.config.instructions,
+      model: session.config.model,
+      mode: session.config.mode,
     },
     statePath('logs', `${session.id}.chat.log`),
     async () => (await driverStatus(session.id)).chat !== null,

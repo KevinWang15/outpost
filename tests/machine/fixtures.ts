@@ -41,7 +41,7 @@ export function record(
     lastConnectedAt: null,
     storage: adapter.storage(join(home, tool)),
     delivery: 'auto',
-    config: { revision: 1, env: {}, args: '', instructions: null },
+    config: { revision: 1, instructions: null, model: null, mode: null, mcpServers: {}, args: '', env: {} },
     conversations: [{ id: conversation, startedAt: '2026-10-01T00:00:00.000Z', movedTo: null }],
     ...overrides,
   }

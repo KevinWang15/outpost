@@ -53,7 +53,9 @@ function validLaunch(value: unknown): value is ChatLaunch {
     Object.values(launch.env).every(item => typeof item === 'string') &&
     (launch.resume === null || (typeof launch.resume === 'string' && launch.resume.length <= 256)) &&
     Array.isArray(launch.mcpServers) &&
-    (launch.instructions === null || (typeof launch.instructions === 'string' && launch.instructions.length <= 32_000))
+    (launch.instructions === null ||
+      (typeof launch.instructions === 'string' && launch.instructions.length <= 32_000)) &&
+    [launch.model, launch.mode].every(value => value === null || (typeof value === 'string' && value.length <= 200))
   )
 }
 
@@ -233,10 +235,12 @@ export class ChatHost {
     // Attachments live in the session's file store; let the agent's own tools read it.
     const directories = capabilities.sessionCapabilities?.additionalDirectories
     if (directories) mkdirSync(this.files, { recursive: true, mode: 0o700 })
+    const http = Boolean(capabilities.mcpCapabilities?.http)
+    const skipped = http ? [] : this.launch.mcpServers.filter(server => 'type' in server).map(server => server.name)
     const lifecycle: acp.NewSessionRequest = (this.lifecycle = {
       cwd: this.launch.cwd,
       ...(directories ? { additionalDirectories: [this.files] } : {}),
-      mcpServers: this.launch.mcpServers,
+      mcpServers: this.launch.mcpServers.filter(server => http || !('type' in server)),
       ...(instructions && supportsInstructions
         ? { systemPrompt: { mode: 'append', content: [{ type: 'text', text: instructions }] } }
         : {}),
@@ -267,12 +271,12 @@ export class ChatHost {
       await this.recordConversation(created.sessionId, true)
     }
     if (instructions && !supportsInstructions)
-      this.record({
-        kind: 'notice',
-        level: 'warning',
-        turn: null,
-        text: 'This coding tool does not support session instructions over ACP; they were not applied.',
-      })
+      this.warn('This coding tool does not support session instructions over ACP; they were not applied.')
+    if (skipped.length)
+      this.warn(
+        `This coding tool cannot connect to MCP servers by URL over ACP; ${skipped.join(', ')} ${skipped.length > 1 ? 'were' : 'was'} not added.`,
+      )
+    await this.applyChoices()
     this.info.nativeId = this.sessionId
     this.setState('ready')
     void connection.closed.then(() => {
@@ -299,8 +303,65 @@ export class ChatHost {
     this.unseen = null
     this.failure = null
     this.record({ kind: 'notice', level: 'info', turn: null, text: 'Started a new conversation.' })
+    await this.applyChoices()
     this.activityChanged()
     this.infoChanged(true)
+  }
+
+  private warn(text: string) {
+    this.record({ kind: 'notice', level: 'warning', turn: null, text })
+  }
+
+  /** Select the session's model and mode in the conversation that just opened. */
+  private async applyChoices() {
+    for (const category of ['model', 'mode'] as const) {
+      const wanted = this.launch[category]
+      if (!wanted) continue
+      const problem = await this.choose(category, wanted).catch(error => describeError(error))
+      if (problem) this.warn(problem)
+    }
+  }
+
+  /** The tool's choice whose ID or name is `wanted`; a problem if there is none. */
+  private async choose(category: 'model' | 'mode', wanted: string) {
+    const agent = this.connection!.agent
+    const pick = <T>(choices: T[], id: (choice: T) => string, name: (choice: T) => string) =>
+      choices.find(choice => id(choice) === wanted) ??
+      choices.find(choice => name(choice).toLowerCase() === wanted.toLowerCase())
+    const unknown = (names: string[]) =>
+      `The ${category} ${wanted} is not one this coding tool offers${names.length ? ` (${names.join(', ')})` : ''}; it was not selected.`
+    const option = this.info.config.find(item => item.category === category && item.type === 'select')
+    if (option?.type === 'select') {
+      const choices = option.options.flatMap(item => ('group' in item ? item.options : [item]))
+      const match = pick(
+        choices,
+        choice => choice.value,
+        choice => choice.name,
+      )
+      if (!match) return unknown(choices.map(choice => choice.name))
+      if (match.value === option.currentValue) return null
+      const result = await agent.request('session/set_config_option', {
+        sessionId: this.sessionId,
+        configId: option.id,
+        value: match.value,
+      })
+      this.info.config = bounded(result.configOptions) as acp.SessionConfigOption[]
+      return null
+    }
+    const modes = this.info.modes
+    if (category === 'mode' && modes) {
+      const match = pick(
+        modes.availableModes,
+        mode => mode.id,
+        mode => mode.name,
+      )
+      if (!match) return unknown(modes.availableModes.map(mode => mode.name))
+      if (match.id === modes.currentModeId) return null
+      await agent.request('session/set_mode', { sessionId: this.sessionId, modeId: match.id })
+      this.info.modes = { ...modes, currentModeId: match.id }
+      return null
+    }
+    return `This coding tool offers no ${category} choice over ACP; ${wanted} was not selected.`
   }
 
   private exitMessage(fallback: string) {

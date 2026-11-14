@@ -292,10 +292,22 @@ export class Codex extends Harness {
   }
 
   async mcp(launch: Launch) {
-    return launch.servers.flatMap(server => [
+    return [launch.outpost, ...launch.servers].flatMap(server => [
       '-c',
-      `mcp_servers.${server.name}=${toml({ command: server.command, args: server.args, env: server.env })}`,
+      `mcp_servers.${server.name}=${toml(
+        'url' in server
+          ? { url: server.url, http_headers: server.headers }
+          : { command: server.command, args: server.args, env: server.env },
+      )}`,
     ])
+  }
+
+  settings({ session: { config } }: Launch) {
+    return [
+      ...(config.instructions ? ['-c', `developer_instructions=${toml(config.instructions)}`] : []),
+      // Root -c overrides reach `resume` too.
+      ...(config.model ? ['-c', `model=${toml(config.model)}`] : []),
+    ]
   }
 
   /** Hooks from the command line need Codex's trust. Ask Codex for the keys and

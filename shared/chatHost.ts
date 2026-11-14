@@ -153,8 +153,11 @@ export interface ChatLaunch {
   env: Record<string, string>
   /** Load this native conversation; otherwise start one and record it in the session first. */
   resume: string | null
-  mcpServers: acp.McpServerStdio[]
+  mcpServers: acp.McpServer[]
   instructions: string | null
+  /** The model and mode each conversation starts with, as the tool names them. */
+  model: string | null
+  mode: string | null
 }
 
 // Bounds -------------------------------------------------------------------------

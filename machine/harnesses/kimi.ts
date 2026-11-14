@@ -8,6 +8,7 @@ import { withRpc } from '../rpc'
 import { locked, readJson, statePath, writeJson } from '../state'
 import { clean, foldLines, glob, isRecord, lines, newest, promptTitle, strings, timestamp, type Scan } from '../stores'
 import {
+  acpServer,
   Harness,
   historyMessage,
   turnId,
@@ -225,9 +226,9 @@ export class Kimi extends Harness {
       interface: { displayName: 'Outpost' },
       hooks: ['SessionStart', 'UserPromptSubmit'].map(event => ({ event, command, timeout: 2 })),
       // Plugin commands must be PATH names; env runs the exact executable.
-      mcpServers: Object.fromEntries(
-        launch.servers.map(server => [server.name, { command: 'env', args: [server.command, ...server.args] }]),
-      ),
+      mcpServers: {
+        [launch.outpost.name]: { command: 'env', args: [launch.outpost.command, ...launch.outpost.args] },
+      },
     }
     const registry = join(home, 'plugins', 'installed.json')
     const key = createHash('sha256').update(home).digest('hex').slice(0, 16)
@@ -272,6 +273,10 @@ export class Kimi extends Harness {
     return [] // The plugin installed by mcp() carries them.
   }
 
+  settings({ session: { config } }: Launch) {
+    return config.model ? ['--model', config.model] : []
+  }
+
   resume(_session: SessionRecord, conversation: string) {
     return ['--session', conversation]
   }
@@ -281,8 +286,8 @@ export class Kimi extends Harness {
   }
 
   async chatServers(launch: Launch) {
-    // The plugin supplies MCP; ACP must not add a second server.
+    // The plugin supplies Outpost's server; ACP must not add a second one.
     await this.plugin(launch)
-    return []
+    return launch.servers.map(acpServer)
   }
 }

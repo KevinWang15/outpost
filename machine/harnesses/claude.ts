@@ -201,13 +201,22 @@ export class Claude extends Harness {
 
   async mcp(launch: Launch) {
     const servers = Object.fromEntries(
-      launch.servers.map(server => [
+      [launch.outpost, ...launch.servers].map(server => [
         server.name,
-        { type: 'stdio', command: server.command, args: server.args, env: server.env },
+        'url' in server
+          ? { type: 'http', url: server.url, headers: server.headers }
+          : { type: 'stdio', command: server.command, args: server.args, env: server.env },
       ]),
     )
-    // The launch places resume() after these options, ending variadic --mcp-config.
+    // The launch places other options after these, ending variadic --mcp-config.
     return ['--mcp-config', JSON.stringify({ mcpServers: servers })]
+  }
+
+  settings({ session: { config } }: Launch) {
+    return [
+      ...(config.instructions ? ['--append-system-prompt', config.instructions] : []),
+      ...(config.model ? ['--model', config.model] : []),
+    ]
   }
 
   async hooks(launch: Launch) {

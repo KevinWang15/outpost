@@ -245,6 +245,47 @@ test('DeepSeek chats resume their exact conversation and have no terminal', { ti
   await assert.rejects(sessions.attach(context, session.id, 80, 24, true), { statusCode: 409, message: /chat/i })
 })
 
+test('chat starts with the session model, mode and MCP servers', { timeout: 120_000 }, async t => {
+  const { create, open, project, sessions, context } = await machine(t)
+  const mcpServers = {
+    local: { command: 'local-mcp', args: ['--stdio'] },
+    remote: { type: 'http' as const, url: 'https://example.com/mcp' },
+  }
+  const notices = (chat: ChatClient, ready: Awaited<ReturnType<ChatClient['ready']>>) =>
+    [
+      ...(ready.type === 'welcome' ? ready.journal.entries : []),
+      ...chat.messages.flatMap(message => (message.type === 'entry' ? [message.entry] : [])),
+    ].flatMap(entry => (entry.kind === 'notice' ? [entry.text] : []))
+  const current = (ready: Awaited<ReturnType<ChatClient['ready']>>, id: string) =>
+    ready.info.config.find(option => option.id === id)?.currentValue
+
+  // Names match the tool's choices by ID or, ignoring case, by name.
+  const claude = await create({ name: 'Claude', model: 'deep', mode: 'auto', mcpServers })
+  const chat = await open(claude.id)
+  const ready = await chat.ready()
+  assert.deepEqual([current(ready, 'model'), current(ready, 'mode')], ['fixture-deep', 'auto'])
+  assert.deepEqual(JSON.parse(await readFile(join(project, 'mcp-servers.json'), 'utf8')), [
+    'outpost',
+    'local',
+    'remote',
+  ])
+  assert.deepEqual(notices(chat, ready), [])
+  await sessions.terminate(context, claude.id)
+
+  // Kimi gets Outpost's server from its plugin, and its ACP server takes no URLs.
+  const kimi = await create({ name: 'Kimi', tool: 'kimi', model: 'Unknown', mcpServers })
+  const other = await open(kimi.id)
+  const started = await other.ready()
+  assert.equal(current(started, 'model'), 'fixture-fast')
+  assert.deepEqual(JSON.parse(await readFile(join(project, 'mcp-servers.json'), 'utf8')), ['local'])
+  const said = notices(other, started)
+  assert.ok(
+    said.some(text => /MCP servers by URL.*remote was not added/.test(text)),
+    said.join('\n'),
+  )
+  assert.ok(said.some(text => /model Unknown is not one this coding tool offers \(Fast, Deep\)/.test(text)))
+})
+
 test(
   "Kimi chats get Outpost's tools from its plugin and report unsupported instructions",
   { timeout: 120_000 },

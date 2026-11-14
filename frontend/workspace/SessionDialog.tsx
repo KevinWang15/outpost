@@ -1,11 +1,18 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
-import type { ConversationMatch, SessionInput, Target } from '../../shared/model'
+import { useId, useState, type FormEvent, type ReactNode } from 'react'
+import type { ConversationMatch, Session, SessionInput, Target } from '../../shared/model'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import { Dialog } from '../ui/Dialog'
 import DirectoryInput, { type DirectorySource } from './DirectoryInput'
-import LaunchFields, { InstructionsField } from './LaunchFields'
-import { readLaunch } from './launch'
+import LaunchFields from './LaunchFields'
+import { launchDraft, readDraft, settingsProblem } from './launch'
+
+/** An existing session whose settings a new one can start from. */
+export interface SettingsSource {
+  key: string
+  label: string
+  session: Pick<Session, 'tool' | 'config'>
+}
 
 /** Create a session, or link an existing conversation found by Find conversations. */
 export default function SessionDialog({
@@ -15,6 +22,7 @@ export default function SessionDialog({
   directories,
   beforeFields,
   description,
+  copyFrom = [],
   onSave,
   onClose,
 }: {
@@ -24,6 +32,8 @@ export default function SessionDialog({
   directories: DirectorySource
   beforeFields?: ReactNode
   description?: string
+  /** Sessions to offer under Copy settings from. */
+  copyFrom?: SettingsSource[]
   onSave: (input: SessionInput) => Promise<void>
   onClose: () => void
 }) {
@@ -31,6 +41,9 @@ export default function SessionDialog({
   const tool = conversation?.tool ?? (selectedTool && tools.includes(selectedTool) ? selectedTool : tools[0])
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('')
+  const [launch, setLaunch] = useState(() => launchDraft())
+  const [copied, setCopied] = useState('')
+  const copyId = useId()
   const available = target && (conversation ? tools.includes(conversation.tool) : Boolean(tool))
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -41,18 +54,18 @@ export default function SessionDialog({
     setError('')
     try {
       if (!tool) throw new Error('Install a coding tool on this machine first.')
-      const { args, env } = readLaunch(data)
-      const instructions = String(data.get('instructions')).trim()
+      const name = String(data.get('name')).trim()
+      const settings = readDraft(launch)
+      const problem = settingsProblem({ name, delivery: 'auto', ...settings })
+      if (problem) throw new Error(problem)
       await onSave({
         tool,
-        name: String(data.get('name')).trim(),
+        name,
         rootDir: String(data.get('rootDir')),
         ...(conversation
           ? { conversation: conversation.conversation, storage: conversation.storage }
           : { createDirectory: data.get('createDirectory') === 'on' }),
-        ...(args ? { args } : {}),
-        ...(Object.keys(env).length ? { env } : {}),
-        ...(instructions ? { instructions } : {}),
+        ...settings,
       })
     } catch (problem) {
       setError((problem as Error).message)
@@ -88,6 +101,34 @@ export default function SessionDialog({
           {beforeFields}
           {target && (
             <>
+              {copyFrom.length > 0 && (
+                <div className="field">
+                  <label className="label" htmlFor={copyId}>
+                    Copy settings from
+                  </label>
+                  <select
+                    id={copyId}
+                    value={copied}
+                    onChange={event => {
+                      const source = copyFrom.find(item => item.key === event.target.value)
+                      setCopied(event.target.value)
+                      setLaunch(launchDraft(source?.session.config))
+                      if (source && !conversation && tools.includes(source.session.tool)) setTool(source.session.tool)
+                    }}
+                  >
+                    <option value="">Nothing; start empty</option>
+                    {copyFrom.map(item => (
+                      <option key={item.key} value={item.key}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    Its instructions, model, mode, MCP servers, arguments and environment
+                    {conversation ? '' : ', and its coding tool if this machine has it'}.
+                  </small>
+                </div>
+              )}
               <label className="field">
                 <span className="label">Name</span>
                 <input
@@ -137,8 +178,7 @@ export default function SessionDialog({
                   </label>
                 </>
               )}
-              <InstructionsField tool={tool} />
-              <LaunchFields tool={tool} />
+              <LaunchFields key={copied} tool={tool} value={launch} onChange={setLaunch} />
             </>
           )}
         </fieldset>

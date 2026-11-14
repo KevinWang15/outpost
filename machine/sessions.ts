@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
-import type { Conversation, Session, SessionInput, SessionRecord, SessionUpdate } from '../shared/model'
+import type { Conversation, Session, LaunchSettings, SessionInput, SessionRecord, SessionUpdate } from '../shared/model'
 import { acknowledgeResting, restingActivity } from './activity'
 import { driverStatus, request, stopDriver } from './drivers'
 import { removeSessionFiles } from './files'
@@ -65,9 +65,9 @@ export async function getSession(id: unknown) {
   return describe(findSession(registry, id), registry)
 }
 
-function validLaunch(env: Record<string, string>, args: string) {
-  if (Buffer.byteLength(JSON.stringify({ env, args })) > 16 * 1024)
-    throw new RegistryError('Environment variables and arguments must fit within 16 KiB.', 400)
+function validLaunch({ env, args, mcpServers }: LaunchSettings) {
+  if (Buffer.byteLength(JSON.stringify({ env, args, mcpServers })) > 32 * 1024)
+    throw new RegistryError('Environment variables, arguments and MCP servers must fit within 32 KiB.', 400)
   const syntax = spawnSync('bash', ['-n', '-c', `exec "$1" ${args}`], { encoding: 'utf8' })
   if (syntax.error) throw new RegistryError('Bash is missing on this machine. Open Required software to install it.')
   if (syntax.status !== 0) throw new RegistryError(`Invalid Bash argument syntax: ${syntax.stderr.trim()}`, 400)
@@ -102,14 +102,22 @@ function createWorktree(source: string, destination: string, branch: string) {
   run('worktree', 'add', '-b', branch, '--', destination, 'HEAD')
 }
 
+const launchKeys = ['instructions', 'model', 'mode', 'mcpServers', 'args', 'env'] as const
+const launchOf = (source: Partial<LaunchSettings>): LaunchSettings => ({
+  instructions: source.instructions?.trim() || null,
+  model: source.model?.trim() || null,
+  mode: source.mode?.trim() || null,
+  mcpServers: source.mcpServers ?? {},
+  args: source.args ?? '',
+  env: source.env ?? {},
+})
+
 interface Creation {
   name: string
   rootDir: string
   createDirectory?: boolean
   tool: SessionInput['tool']
-  env: Record<string, string>
-  args: string
-  instructions: string | null
+  launch: LaunchSettings
   conversation?: string
   storage?: Record<string, string>
   /** Fork: a new worktree for this branch from the source session's directory. */
@@ -133,13 +141,13 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
     }
     const name = input.name.trim()
     uniqueName(before, name)
-    validLaunch(input.env, input.args)
+    validLaunch(input.launch)
     const path = input.rootDir.startsWith('~/') ? homedir() + input.rootDir.slice(1) : input.rootDir
     if (!isAbsolute(path)) throw new RegistryError('Root directory must be absolute or begin with ~/', 400)
     const adapter = harness(input.tool)
     let tokens: string[] = []
     try {
-      tokens = input.args.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) ?? []
+      tokens = input.launch.args.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) ?? []
     } catch {
       /* Bash validated the syntax; expanded arguments are checked at launch. */
     }
@@ -148,7 +156,7 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
         'Outpost controls the coding tool conversation. Find conversations to resume one instead.',
         400,
       )
-    const environment = { ...(process.env as Record<string, string>), ...input.env, ...(input.storage ?? {}) }
+    const environment = { ...(process.env as Record<string, string>), ...input.launch.env, ...(input.storage ?? {}) }
     const executable = which(adapter.command, environment.PATH)
     if (!executable)
       throw new RegistryError(
@@ -192,7 +200,7 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
       lastConnectedAt: null,
       storage,
       delivery: 'auto',
-      config: { revision: 1, env: input.env, args: input.args, instructions: input.instructions?.trim() || null },
+      config: { revision: 1, ...input.launch },
       conversations: [{ id: conversation, startedAt: now(), movedTo: null }],
     }
     return changeRegistry(registry => {
@@ -221,9 +229,7 @@ export async function createSession(input: SessionInput, creationKey?: string) {
       rootDir: input.rootDir,
       createDirectory: input.createDirectory,
       tool: input.tool,
-      env: input.env ?? {},
-      args: input.args ?? '',
-      instructions: input.instructions ?? null,
+      launch: launchOf(input),
       conversation: input.conversation,
       storage: input.storage,
     },
@@ -245,9 +251,7 @@ export async function forkSession(id: unknown, branch: unknown, rootDir: unknown
     name,
     rootDir,
     tool: source.tool,
-    env: source.config.env,
-    args: source.config.args,
-    instructions: source.config.instructions,
+    launch: launchOf(source.config),
     worktree: { source: source.rootDir, branch },
   })
 }
@@ -263,20 +267,20 @@ export async function updateSession(id: unknown, update: SessionUpdate) {
       record.name = update.name.trim()
     }
     if (update.delivery !== undefined) record.delivery = update.delivery
-    const env = update.env ?? record.config.env
-    const args = update.args ?? record.config.args
-    if (update.env !== undefined || update.args !== undefined) validLaunch(env, args)
-    if (update.env !== undefined || update.args !== undefined || update.instructions !== undefined)
-      record.config = {
-        revision: record.config.revision + 1,
-        env,
-        args,
-        instructions:
-          update.instructions === undefined ? record.config.instructions : update.instructions?.trim() || null,
-      }
+    const { revision, ...current } = record.config
+    const launch = launchOf({ ...current, ...pick(update, launchKeys) })
+    // Only a real change is a new revision, which the running session restarts for.
+    if (JSON.stringify(launch) !== JSON.stringify(launchOf(current))) {
+      validLaunch(launch)
+      record.config = { revision: revision + 1, ...launch }
+    }
     return record
   })
   return describe(record, readRegistry())
+}
+
+function pick<T extends object, K extends keyof T>(value: T, keys: readonly K[]) {
+  return Object.fromEntries(keys.filter(key => value[key] !== undefined).map(key => [key, value[key]])) as Pick<T, K>
 }
 
 /** Make an earlier conversation current; it is resumed at the next start. */

@@ -98,7 +98,7 @@ test('an invalid registry is reported and never rewritten', async t => {
   const { input, registryBytes } = setup(t)
   await createSession(input())
   const data = JSON.parse(registryBytes().toString())
-  assert.equal(data.version, 3)
+  assert.equal(data.version, 4)
   writeFileSync(statePath('registry.json'), JSON.stringify({ ...data, extra: true }))
   await assert.rejects(listSessions(), /Invalid session registry/)
   await assert.rejects(createSession(input({ name: 'Other' })), /Invalid session registry/)
@@ -133,6 +133,30 @@ test('edits make a new revision; a stale edit is refused', async t => {
   assert.equal(readRegistry().sessions.find(item => item.id === session.id)!.config.revision, 2)
 })
 
+test('model, mode and MCP servers are launch configuration; an unchanged edit keeps the revision', async t => {
+  const { input } = setup(t)
+  const mcpServers = {
+    docs: { type: 'http' as const, url: 'https://example.com/mcp', headers: { Authorization: 'Bearer x' } },
+  }
+  const session = await createSession(input({ model: ' opus ', mode: 'plan', mcpServers }))
+  assert.deepEqual(
+    { model: session.config.model, mode: session.config.mode, mcpServers: session.config.mcpServers },
+    { model: 'opus', mode: 'plan', mcpServers },
+  )
+  const same = await updateSession(session.id, { revision: 1, model: 'opus', mcpServers, env: {} })
+  assert.equal(same.config.revision, 1)
+  const edited = await updateSession(session.id, { revision: 1, mode: null, mcpServers: {} })
+  assert.equal(edited.config.revision, 2)
+  assert.deepEqual([edited.config.mode, edited.config.mcpServers, edited.config.model], [null, {}, 'opus'])
+  await assert.rejects(
+    updateSession(session.id, {
+      revision: 2,
+      mcpServers: { big: { command: 'x', args: Array.from({ length: 10 }, () => 'a'.repeat(4000)) } },
+    }),
+    { status: 400, message: /32 KiB/ },
+  )
+})
+
 test('switching makes an earlier conversation current, but not one that moved', async t => {
   const home = machine(t)
   const [a, b, c] = ['1', '2', '3'].map(digit => `${digit.repeat(8)}-1111-4111-8111-111111111111`)
@@ -155,15 +179,23 @@ test('a fork is a new session in a new worktree, with the source settings and a 
   repository()
   writeFileSync(join(project, 'tracked.txt'), 'uncommitted content')
   for (const tool of ['claude', 'codex', 'kimi'] as const) {
-    const source = await createSession(input({ name: tool, tool, env: { MODEL: 'fixture' }, args: '--model "$MODEL"' }))
+    const source = await createSession(
+      input({
+        name: tool,
+        tool,
+        env: { MODEL: 'fixture' },
+        args: '--verbose',
+        model: 'fixture',
+        mcpServers: { tools: { command: 'tools-mcp' } },
+      }),
+    )
     const branch = `feature/${tool}`
     const destination = join(home, `${tool} fork's worktree`)
     const fork = await forkSession(source.id, branch, destination)
     assert.equal(fork.rootDir, destination)
     assert.equal(fork.name, branch)
     assert.equal(fork.tool, tool)
-    assert.deepEqual(fork.config.env, source.config.env)
-    assert.equal(fork.config.args, source.config.args)
+    assert.deepEqual({ ...fork.config, revision: 1 }, source.config)
     assert.deepEqual(fork.storage, source.storage)
     assert.notEqual(currentConversation(fork), currentConversation(source))
     assert.equal(fork.status, 'ready')

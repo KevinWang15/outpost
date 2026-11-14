@@ -16,8 +16,8 @@ with splits, local terminals alongside them, and Outpost Chat in its own window.
 
 ## Update
 
-Use it with an Outpost server whose machines run Outpost Terminal 2.1.0
-(**Required software** installs it). The desktop bridge is version 10.
+Use it with an Outpost server whose machines run Outpost Terminal 2.2.0
+(**Required software** installs it). The desktop bridge is version 11.
 
 ## Install
 

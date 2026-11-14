@@ -76,6 +76,8 @@ slash commands.
   typing, or holds them until you choose **Deliver now** (**Edit session**).
 - **Schedules** send a session a message at set times, e.g. a weekday summary.
 - **Instructions** give a session a role, added to the coding tool's own.
+  A session can also start with a model, a chat mode and MCP servers of its
+  own, next to Outpost's.
 
 A session runs in a terminal or in chat, never both, and each view shows which
 (**Runs in** in Machines). Opening a session that is not running starts nothing;
@@ -108,12 +110,48 @@ remain accessible through history MCP. See the [official ACP contract](https://g
 
 ## Edit a session and its conversations
 
-**Edit session** in a session’s **…** menu changes its name, instructions,
-arguments and environment. The name changes at once. The rest applies when the
-session next starts: a running session shows **Changes apply at the next start**
-with **Restart now**, which restarts it in the same conversation. The coding tool
-and project directory stay fixed; fork the session to work in another directory.
-Instructions apply when the session runs in chat.
+**Edit session** in a session’s **…** menu changes its name, how messages reach
+its terminal, its instructions and, under **Model, MCP servers and launch**, its
+model, chat mode, MCP servers, arguments and environment. The name and message
+delivery change at once. The rest applies when the session next starts: a running
+session shows **Changes apply at the next start** with **Restart now**, which
+restarts it in the same conversation. The coding tool and project directory stay
+fixed; fork the session to work in another directory. **Edit source** shows the
+same settings as one JSON document, for editing or pasting in bulk:
+
+```json
+{
+  "name": "Docs writer",
+  "delivery": "auto",
+  "instructions": "You write and review the user documentation.",
+  "model": "opus",
+  "mode": "plan",
+  "mcpServers": {
+    "docs": { "type": "http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer …" } },
+    "db": { "command": "npx", "args": ["-y", "my-db-mcp"], "env": { "DB_URL": "…" } }
+  },
+  "args": "",
+  "env": {}
+}
+```
+
+- **Instructions** are added to the tool's own: in terminals and chat for Claude
+  Code (`--append-system-prompt`) and Codex (`developer_instructions`), not yet
+  for Kimi Code or DeepSeek Harness.
+- **Model** and **mode** use the tool's own names for them, as its chat menus
+  show them. Chat selects both whenever a conversation opens, and says so when
+  the tool offers no such choice. Terminals start with the model.
+- **MCP servers** use the usual `mcpServers` format, a command or
+  `"type": "http"` with a URL, and run alongside Outpost's own server (`outpost`
+  is reserved). Kimi Code terminals get only Outpost's, from its shared plugin;
+  chat adds a session's servers for every tool, and servers by URL where the
+  tool's ACP server takes them.
+- **Arguments** (Bash syntax) are added to the terminal command, and the
+  **environment** applies to both.
+
+**New session** can start from another session's settings: **Copy settings
+from** fills in its instructions, model, mode, MCP servers, arguments and
+environment, and picks its coding tool when the machine has it.
 
 A session keeps the conversations its coding tool works in. Starting a new one
 inside the tool (`/new`, `/clear`, or resuming another), or **New conversation**

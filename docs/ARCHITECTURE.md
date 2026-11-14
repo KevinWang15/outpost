@@ -878,9 +878,12 @@ leaves its source alone; deleting a managed session removes its store.
 ### Outpost MCP
 
 Every launch, whichever driver (terminal or chat) and harness runs it, gets
-the same MCP servers from `servers(session, driver)` in `machine/launch.ts`:
-neutral `{name, command, args, env}` descriptors. Today that is the one Outpost
-server, `outpost-terminal mcp`, speaking MCP 2025-06-18 over stdio. Its binding
+Outpost's server and the session's own MCP servers from `machine/launch.ts`, as
+neutral descriptors: `Launch.outpost` (`{name, command, args, env}`) and
+`Launch.servers` (the same, or `{name, url, headers}` for streamable HTTP). The
+session's servers come from its configuration's `mcpServers`, in the common
+`mcpServers` format; the name `outpost` is reserved. Outpost's server is
+`outpost-terminal mcp`, speaking MCP 2025-06-18 over stdio. Its binding
 is the launch's environment: `OUTPOST_SESSION_ID`, `OUTPOST_STATE_DIRECTORY` and
 `OUTPOST_DRIVER`. The launcher sets it, also in the coding tool's own
 environment, and a tool call can never select a session. A process with no
@@ -902,15 +905,17 @@ shell in a managed session.
 Adapters only translate the descriptors into their tool's native form; they
 never construct Outpost's server:
 
-- **Codex:** invocation-only `-c mcp_servers.<name>={command, args, env}`.
-- **Claude:** invocation-only `--mcp-config` JSON with stdio servers and their
-  `env`. The native conversation selector follows integration options so the
+- **Codex:** invocation-only `-c mcp_servers.<name>={command, args, env}` or
+  `{url, http_headers}`.
+- **Claude:** invocation-only `--mcp-config` JSON with `stdio` and `http`
+  servers. The native conversation selector follows integration options so the
   variadic MCP flag cannot consume a prompt.
 - **Chat (all harnesses):** the same servers as ACP `mcpServers` on
   `session/new` and `session/load` (`chatServers`).
-- **Kimi Code:** one Outpost plugin declares both activity hooks and the
-  servers, for terminal and chat alike (Kimi has no invocation-only option, so
-  its chat passes no ACP servers). The plugin contains no session IDs: each
+- **Kimi Code:** one Outpost plugin declares both activity hooks and Outpost's
+  server, for terminal and chat alike (Kimi has no invocation-only option, so
+  its chat passes only the session's servers over ACP, and its terminals get
+  none of them). The plugin contains no session IDs: each
   server process inherits its Kimi process's binding. Installation is atomic,
   idempotent, and preserves plugin order, unrelated records and per-server
   preferences. Only a missing registry is initialized; malformed registry data
@@ -920,6 +925,13 @@ never construct Outpost's server:
 
 Native configuration references: [Claude MCP](https://code.claude.com/docs/en/mcp)
 and [Kimi plugin MCP servers](https://moonshotai.github.io/kimi-code/en/customization/plugins.html#mcp-servers-in-plugins).
+
+The rest of a session's launch settings take the same route (`settings` in
+the adapter): its instructions as Claude's `--append-system-prompt` or Codex's
+`-c developer_instructions`, and its model as `--model` or `-c model`.
+`instructions` and `servers` in `shared/harnesses.ts` say where each applies,
+which the UI shows. The chat host selects the model and mode over ACP (see
+[CHAT.md](CHAT.md)).
 
 MCP configuration is additive; Codex/Claude user configuration and Kimi's
 `config.toml` and `mcp.json` are not rewritten. Harness-specific flags, plugin
@@ -1534,11 +1546,12 @@ untrusted data, never instructions for the current session.
 ## Coding harnesses
 
 `shared/harnesses.ts` lists harnesses for the UI and validation (id, label,
-command, installer, native ID pattern, storage variable).
+command, installer, native ID pattern, storage variable, and where session
+instructions and MCP servers apply).
 `machine/harnesses/harness.ts` defines the adapter contract, one class per
 harness: its native store (discovery, search text, transcripts, titles,
 history messages), conversation allocation, activity markers, launch arguments
-(resume, MCP servers, hooks) and how the tool serves ACP for chat (`chat`,
+(resume, MCP servers, instructions and model, hooks) and how the tool serves ACP for chat (`chat`,
 `chatResumable`, `chatServers`). Session records pin the storage directory, and
 their timeline names the native conversations, so a session resumes its
 current conversation.
@@ -1561,7 +1574,8 @@ current conversation.
 | Outpost Terminal and helpers | `~/.outpost/bin/` |
 
 A session record holds its name, tool, directory, pinned native store, its
-configuration (environment, arguments and chat instructions, with a revision)
+configuration (instructions, model, mode, MCP servers, arguments and
+environment, with a revision that changes only when one of them does)
 and its conversation timeline; the last conversation is current, and one that
 another session resumed names where it moved. Every registry write holds the
 registry lock and replaces the file atomically. Records are validated

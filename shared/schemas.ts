@@ -50,6 +50,39 @@ const env = Type.Record(Type.String(), Type.String({ maxLength: 4096, pattern: '
   propertyNames: { maxLength: 128, pattern: '^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])' },
 })
 const instructions = Type.Union([Type.String({ maxLength: 32_000 }), Type.Null()])
+/** The tool's own name for a model or mode, e.g. "opus" or "plan". */
+const choice = Type.Union([text(200), Type.Null()])
+const headers = Type.Record(Type.String(), Type.String({ maxLength: 4096, pattern: '^[^\\u0000\\r\\n]*$' }), {
+  maxProperties: 16,
+  propertyNames: { maxLength: 100, pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+(?![\\s\\S])" },
+})
+/** An MCP server the coding tool connects to, in the common mcpServers format.
+ * "outpost" is Outpost's own server. */
+const mcpServer = Type.Union([
+  Type.Object(
+    {
+      type: Type.Optional(Type.Literal('stdio')),
+      command: text(4096),
+      args: Type.Optional(Type.Array(Type.String({ maxLength: 4096, pattern: '^[^\\u0000]*$' }), { maxItems: 64 })),
+      env: Type.Optional(env),
+    },
+    strict,
+  ),
+  Type.Object(
+    {
+      type: Type.Literal('http'),
+      url: Type.String({ maxLength: 2048, pattern: '^https?://[^\\s]+$' }),
+      headers: Type.Optional(headers),
+    },
+    strict,
+  ),
+])
+const mcpServers = Type.Record(Type.String(), mcpServer, {
+  maxProperties: 16,
+  propertyNames: { pattern: '^(?!outpost(?![\\s\\S]))[A-Za-z0-9_-]{1,64}(?![\\s\\S])' },
+})
+/** What a session's coding tool starts with. */
+const launch = { instructions, model: choice, mode: choice, mcpServers, args, env }
 /** Native store location, e.g. { CLAUDE_CONFIG_DIR: '/home/me/.claude' }. */
 const storage = Type.Record(Type.String(), absolutePath, { minProperties: 1, maxProperties: 1 })
 // Each harness pins its own native conversation ID format and storage variable.
@@ -71,9 +104,7 @@ export const sessionInput = Type.Object(
     rootDir,
     createDirectory: Type.Optional(Type.Boolean()),
     tool: harnessId,
-    args: Type.Optional(args),
-    env: Type.Optional(env),
-    instructions: Type.Optional(instructions),
+    ...Type.Partial(Type.Object(launch)).properties,
     conversation: Type.Optional(Type.String({ maxLength: 128 })),
     storage: Type.Optional(storage),
   },
@@ -82,22 +113,18 @@ export const sessionInput = Type.Object(
 
 /** What a session runs with. Each change is a new revision; a running driver
  * keeps the revision it started with until the session restarts. */
-export const sessionConfig = Type.Object({ revision: Type.Integer({ minimum: 1 }), env, args, instructions }, strict)
+export const sessionConfig = Type.Object({ revision: Type.Integer({ minimum: 1 }), ...launch }, strict)
 
 /** How messages from other sessions, channels and schedules reach a terminal:
  * typed in when the agent is idle, or held until you deliver them. */
 const delivery = Type.Union([Type.Literal('auto'), Type.Literal('manual')])
 
+/** Everything about a session you can edit, as Edit source shows it. */
+export const sessionSettings = Type.Object({ name, delivery, ...launch }, strict)
+
 /** An edit names the revision it was based on; a concurrent edit is refused. */
 export const sessionUpdate = Type.Object(
-  {
-    revision: Type.Integer({ minimum: 1 }),
-    name: Type.Optional(name),
-    delivery: Type.Optional(delivery),
-    env: Type.Optional(env),
-    args: Type.Optional(args),
-    instructions: Type.Optional(instructions),
-  },
+  { revision: Type.Integer({ minimum: 1 }), ...Type.Partial(sessionSettings).properties },
   { ...strict, minProperties: 2 },
 )
 

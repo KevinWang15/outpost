@@ -3,7 +3,7 @@ import type { HarnessId } from './harnesses'
 import type { SessionFileBridge } from './sessionFiles'
 
 /** The entire API available to the remote terminal. No generic IPC or Node access. */
-export const desktopBridgeVersion = 10
+export const desktopBridgeVersion = 11
 export interface TerminalPreferences {
   fontSize: number
   sound: boolean

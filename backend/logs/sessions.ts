@@ -12,6 +12,9 @@ function changes(update: SessionUpdate) {
   return [
     update.name !== undefined && 'name',
     update.instructions !== undefined && 'instructions',
+    update.model !== undefined && 'model',
+    update.mode !== undefined && 'mode',
+    update.mcpServers !== undefined && 'MCP servers',
     update.args !== undefined && 'arguments',
     update.env !== undefined && 'environment',
     update.delivery !== undefined && 'message delivery',

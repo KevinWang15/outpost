@@ -68,7 +68,7 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
     lastConnectedAt: null,
     storage: { CLAUDE_CONFIG_DIR: home },
     delivery: 'auto',
-    config: { revision: 1, env: {}, args: '', instructions: null },
+    config: { revision: 1, instructions: null, model: null, mode: null, mcpServers: {}, args: '', env: {} },
     conversations: [{ id: randomUUID(), startedAt: new Date().toISOString(), movedTo: null }],
   }))
   await changeRegistry(registry => void registry.sessions.push(...created))

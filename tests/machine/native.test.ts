@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import type { HarnessId } from '../../shared/harnesses'
+import type { SessionRecord } from '../../shared/model'
 import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
 import { TerminalActivity } from '../../machine/activity'
 import { harness } from '../../machine/harnesses'
@@ -36,9 +37,12 @@ async function provider(t: TestContext) {
   let release: () => void = () => {}
   const released = new Promise<void>(resolve => (release = resolve))
   const state = { fail: false }
+  const bodies: string[] = []
   const server = createHttpServer(async (request, response) => {
-    await new Promise(resolve => request.on('end', resolve).resume())
+    let body = ''
+    await new Promise(resolve => request.on('data', chunk => (body += chunk)).on('end', resolve))
     if (request.url?.split('?')[0].endsWith('/count_tokens')) return response.end('{"input_tokens":1}')
+    bodies.push(body)
     requested = true
     await Promise.race([released, new Promise(resolve => setTimeout(resolve, 10_000))])
     if (state.fail) {
@@ -93,12 +97,12 @@ async function provider(t: TestContext) {
           choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
         },
       ]
-    let body = events
+    let stream = events
       .map(event => `${'type' in event ? `event: ${event.type}\n` : ''}data: ${JSON.stringify(event)}\n\n`)
       .join('')
-    if (request.url!.includes('/chat/completions')) body += 'data: [DONE]\n\n'
+    if (request.url!.includes('/chat/completions')) stream += 'data: [DONE]\n\n'
     response.writeHead(200, { 'content-type': 'text/event-stream' })
-    response.end(body)
+    response.end(stream)
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   t.after(() => {
@@ -107,12 +111,17 @@ async function provider(t: TestContext) {
     server.close()
   })
   const port = (server.address() as { port: number }).port
-  return { url: `http://127.0.0.1:${port}`, requested: () => requested, release, state }
+  return { url: `http://127.0.0.1:${port}`, requested: () => requested, release, state, bodies }
 }
 
 /** A session of the real `tool`, with the hooks reaching its activity through
  * the terminal service's socket, as in a running session. */
-async function session(t: TestContext, tool: HarnessId, conversation: string) {
+async function session(
+  t: TestContext,
+  tool: HarnessId,
+  conversation: string,
+  config: Partial<SessionRecord['config']> = {},
+) {
   if (!which(harness(tool).command)) return null
   const home = machine(t)
   mkdirSync(statePath('bin'), { recursive: true })
@@ -121,6 +130,7 @@ async function session(t: TestContext, tool: HarnessId, conversation: string) {
   const root = join(home, "project ' activity")
   mkdirSync(root)
   const created = record(home, tool, conversation, { rootDir: root })
+  created.config = { ...created.config, ...config }
   mkdirSync(Object.values(created.storage)[0], { recursive: true })
   await register(created)
   const { adapter, launch } = prepare(created, 'terminal')
@@ -304,5 +314,70 @@ test(
       JSON.stringify(again.hooks),
     )
     assert.equal(readFileSync(config, 'utf8'), saved)
+  },
+)
+
+test(
+  'Claude Code and Codex start with the session instructions, model and MCP servers',
+  { skip: !enabled },
+  async t => {
+    const config = {
+      instructions: 'Fixture rule: answer in haiku.',
+      model: 'fixture-model',
+      mcpServers: { fixturetools: { command: binary, args: ['mcp'] } },
+    }
+    for (const tool of ['claude', 'codex'] as const)
+      await t.test(tool, async t => {
+        const id = crypto.randomUUID()
+        const fixture = await session(t, tool, id, config)
+        if (!fixture) return t.skip(`${tool} is not installed`)
+        // The extra server is Outpost's own executable, so it needs a binding too.
+        fixture.launch.servers = fixture.launch.servers.map(server => ({ ...server, env: fixture.launch.outpost.env }))
+        const model = await provider(t)
+        model.release()
+        const options = [...(await fixture.adapter.mcp(fixture.launch)), ...fixture.adapter.settings(fixture.launch)]
+        const [command, env] =
+          tool === 'claude'
+            ? [
+                ['--print', '--session-id', id, ...options, 'settings test'],
+                {
+                  ANTHROPIC_BASE_URL: model.url,
+                  ANTHROPIC_API_KEY: 'test-key',
+                  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+                },
+              ]
+            : [
+                [
+                  'exec',
+                  '--skip-git-repo-check',
+                  ...options,
+                  '-c',
+                  'model_provider="settings_test"',
+                  '-c',
+                  `model_providers.settings_test=${toml({
+                    name: 'Test',
+                    base_url: model.url,
+                    wire_api: 'responses',
+                    requires_openai_auth: false,
+                    request_max_retries: 0,
+                    stream_max_retries: 0,
+                  })}`,
+                  'settings test',
+                ],
+                {},
+              ]
+        const child = spawn(fixture.launch.executable, command, {
+          cwd: fixture.root,
+          env: { ...fixture.launch.environment, ...env },
+          stdio: 'ignore',
+        })
+        t.after(() => child.kill('SIGKILL'))
+        await until(() => model.bodies.some(body => body.includes('settings test')), 'the model request', 60_000)
+        const request = model.bodies.find(body => body.includes('settings test'))!
+        assert.equal(JSON.parse(request).model, 'fixture-model')
+        assert.ok(request.includes(config.instructions), 'the instructions reach the model')
+        assert.match(request, /fixturetools/, "the session's MCP server's tools reach the model")
+        assert.match(request, /outpost/, "Outpost's own server is still there")
+      })
   },
 )

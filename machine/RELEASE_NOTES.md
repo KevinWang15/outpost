@@ -1,4 +1,4 @@
-# Outpost Terminal 2.1.0
+# Outpost Terminal 2.2.0
 
 Everything Outpost runs on a machine, as one executable. Terminal service
 protocol 5, chat host protocol 3, node protocol 2.
@@ -13,6 +13,8 @@ protocol 5, chat host protocol 3, node protocol 2.
   coding tool in a persistent PTY) and chat host (its ACP client). Both keep the
   session's activity, and the terminal service types in messages from other
   sessions, channels and schedules when the agent is idle and nobody is typing.
+  Both start the coding tool with the session's instructions, model and MCP
+  servers where the tool supports them; chat also selects its mode.
 - `outpost-terminal mcp` and `hook`: Outpost's MCP server, with the same tools
   for every session, and the coding tools' activity hook. `publish`, `open` and
   `signal` serve programs running in a session.

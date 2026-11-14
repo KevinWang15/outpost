@@ -19,6 +19,10 @@ export interface Environment {
 }
 
 export type SessionUpdate = Static<typeof schemas.sessionUpdate>
+export type SessionConfig = Static<typeof schemas.sessionConfig>
+/** What a session's coding tool starts with: its configuration, less the revision. */
+export type LaunchSettings = Omit<SessionConfig, 'revision'>
+export type SessionSettings = Static<typeof schemas.sessionSettings>
 export type SessionRecord = Static<typeof schemas.sessionRecord>
 export type SessionStatus = 'ready' | 'attached' | 'detached' | 'stopped'
 /** A conversation in a session's timeline, with the coding tool's own title for it. */

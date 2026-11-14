@@ -211,6 +211,11 @@ export default function TargetView({
           tools={tools}
           conversation={panel.conversation}
           directories={directories}
+          copyFrom={(sessions ?? []).map(session => ({
+            key: session.id,
+            label: `${session.name} · ${harnessLabel(session.tool)}`,
+            session,
+          }))}
           onClose={close}
           onSave={async (input: SessionInput) => {
             const session = await api<Session>(`/targets/${target.id}/sessions`, 'POST', input)

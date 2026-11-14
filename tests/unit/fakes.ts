@@ -101,7 +101,15 @@ export class FakeSessions implements SessionService {
       lastConnectedAt: null,
       storage: input.storage ?? { CLAUDE_CONFIG_DIR: '/home/dev/.claude' },
       delivery: 'auto',
-      config: { revision: 1, env: input.env ?? {}, args: input.args ?? '', instructions: input.instructions ?? null },
+      config: {
+        revision: 1,
+        instructions: input.instructions ?? null,
+        model: input.model ?? null,
+        mode: input.mode ?? null,
+        mcpServers: input.mcpServers ?? {},
+        args: input.args ?? '',
+        env: input.env ?? {},
+      },
       conversations: [{ id: input.conversation ?? crypto.randomUUID(), title: '', startedAt: now, movedTo: null }],
       title: '',
       status: 'ready',
@@ -122,8 +130,9 @@ export class FakeSessions implements SessionService {
   async update(context: TargetContext, id: string, update: SessionUpdate) {
     const session = this.find(context, id)
     if (update.revision !== session.config.revision) throw new AppError('The session changed since.', 409)
-    const { revision, name, ...config } = update
+    const { revision, name, delivery, ...config } = update
     if (name) session.name = name
+    if (delivery) session.delivery = delivery
     if (Object.keys(config).length) session.config = { ...session.config, ...config, revision: revision + 1 }
     return session
   }

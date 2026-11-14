@@ -63,7 +63,7 @@ test('create and connect on a phone, send to the real process, resize, and resum
   await page.getByRole('button', { name: 'New session', exact: true }).first().tap()
   const create = page.getByRole('dialog', { name: 'New session', exact: true })
   await create.getByLabel('Name', { exact: true }).fill(`Mobile coding ${suffix}`)
-  await create.getByRole('combobox').fill(`~/mobile-${suffix}`)
+  await create.getByRole('combobox', { name: 'Project directory' }).fill(`~/mobile-${suffix}`)
   await create.getByText('Create the directory if it doesn’t exist').tap()
   const created = page.waitForResponse(
     response => response.url().endsWith('/sessions') && response.request().method() === 'POST',

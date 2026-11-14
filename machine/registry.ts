@@ -7,7 +7,7 @@ import { harness } from './harnesses'
 import { locked, now, readJson, statePath, writeJson } from './state'
 
 export interface Registry {
-  version: 3
+  version: 4
   sessions: SessionRecord[]
   /** Retryable creations by request key. Kept after deletion, so replaying an
    * old request can never resurrect a session deliberately removed. */
@@ -33,7 +33,7 @@ function validate(data: unknown): Registry {
   if (typeof data !== 'object' || data === null) throw invalid('file')
   const registry = data as Registry
   if (
-    registry.version !== 3 ||
+    registry.version !== 4 ||
     !Array.isArray(registry.sessions) ||
     typeof registry.creations !== 'object' ||
     registry.creations === null ||
@@ -67,7 +67,7 @@ function validate(data: unknown): Registry {
 }
 
 export function readRegistry(): Registry {
-  return validate(readJson<unknown>(path(), { version: 3, sessions: [], creations: {} }))
+  return validate(readJson<unknown>(path(), { version: 4, sessions: [], creations: {} }))
 }
 
 /** Change the registry under its lock; `change` sees the latest file. */

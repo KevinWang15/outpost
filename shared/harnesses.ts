@@ -49,6 +49,18 @@ export const harnesses = [
     servers: ['chat'],
     terminal: false,
   },
+  {
+    id: 'antigravity',
+    label: 'Antigravity CLI',
+    command: 'agy',
+    installer: { url: 'https://antigravity.google/cli/install.sh', shell: 'bash' },
+    nativeId: uuid,
+    storageKey: 'ANTIGRAVITY_GEMINI_DIR',
+    storageDirectory: '.gemini',
+    instructions: ['chat'],
+    // Terminals get Outpost's server from a plugin shared by every Antigravity session.
+    servers: ['chat'],
+  },
 ] as const
 
 export type HarnessId = (typeof harnesses)[number]['id']

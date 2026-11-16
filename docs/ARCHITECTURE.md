@@ -1,6 +1,6 @@
 # Outpost architecture
 
-Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code, DeepSeek Harness)
+Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code, DeepSeek Harness, Antigravity CLI)
 running on Linux machines, in persistent PTYs or as chats, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
 
 This document is the source of truth for how Outpost behaves and why. Code
@@ -708,6 +708,10 @@ owns its native configuration:
   determine state because Kimi's generic turn hooks do not reliably identify
   subagents. Pending interactions remain Waiting until all are resolved; failed
   turns become Error.
+- Antigravity CLI uses an additive local plugin registered in `.gemini/config/plugins.json`,
+  preserving user entries and `inherits`. Its camelCase hooks map root-conversation
+  starts, invocations, tools, cancellations and errors, ignoring subagent hooks
+  that carry no direct user input.
 - DeepSeek Harness runs only in chat.
 
 A failed hook setup is shown on the session and does not prevent the terminal
@@ -725,7 +729,8 @@ a conversation.
 **Transcripts.** The service also follows the current conversation's native
 transcript, which the adapter locates inside the session's pinned store:
 Claude's newest `projects/*/<id>.jsonl`, the rollout Codex's `state_5.sqlite`
-names for the thread, Kimi's main-agent `wire.jsonl`. Paths that leave the
+names for the thread, Kimi's main-agent `wire.jsonl`, Antigravity's
+`antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl`. Paths that leave the
 store or symlinks are not read. The first read walks backwards from the last
 complete line to the newest state marker; later reads, every second, consume
 only appended complete lines. A replaced or truncated file is read again from
@@ -922,9 +927,16 @@ never construct Outpost's server:
   is rejected. Plugin commands must be names on the PATH, so the plugin runs
   `env` with the exact `outpost-terminal` path. An ordinary Kimi launch loads
   the installed plugin with no binding and sees no Outpost tools.
+- **Antigravity CLI:** one Outpost plugin in `~/.outpost/integrations/antigravity/outpost/`
+  registered in `.gemini/config/plugins.json` declares activity hooks and
+  Outpost's server for terminal launches (`agy acp` does not load plugin MCP
+  servers, so chat passes Outpost's server and the session's `stdio` and `http`
+  servers over ACP). `outpost-terminal agent antigravity` pins `--gemini-dir`
+  and maps ACP `systemPrompt` append onto `_meta.antigravity.systemPrompt`.
 
-Native configuration references: [Claude MCP](https://code.claude.com/docs/en/mcp)
-and [Kimi plugin MCP servers](https://moonshotai.github.io/kimi-code/en/customization/plugins.html#mcp-servers-in-plugins).
+Native configuration references: [Claude MCP](https://code.claude.com/docs/en/mcp),
+[Kimi plugin MCP servers](https://moonshotai.github.io/kimi-code/en/customization/plugins.html#mcp-servers-in-plugins)
+and [Antigravity CLI plugins](https://antigravity.google/docs/plugins).
 
 The rest of a session's launch settings take the same route (`settings` in
 the adapter): its instructions as Claude's `--append-system-prompt` or Codex's
@@ -1570,6 +1582,7 @@ current conversation.
 | Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Session files | `~/.outpost/files/<session>/<file-id>/` (`metadata.json`, `content/<name>`) |
 | Kimi Code plugin | `~/.outpost/integrations/kimi/` |
+| Antigravity CLI plugin | `~/.outpost/integrations/antigravity/` |
 | Claude Code chat adapter | `~/.outpost/agents/claude-agent-acp-<version>/`, linked from `~/.outpost/bin/` |
 | Outpost Terminal and helpers | `~/.outpost/bin/` |
 

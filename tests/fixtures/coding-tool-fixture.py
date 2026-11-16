@@ -56,10 +56,17 @@ if tool == 'dsh' and sys.argv[1:] == ['--profile', 'acp']:
     agent = Path(sys.argv[0]).resolve().parent / 'acp-agent-fixture'
     os.execve(sys.executable, [sys.executable, str(agent)], {**os.environ, 'FIXTURE_ACP_VARIANT': 'deepseek'})
 
+if tool == 'agy' and len(sys.argv) >= 2 and sys.argv[1] == 'acp':
+    agent = Path(sys.argv[0]).resolve().parent / 'acp-agent-fixture'
+    extra = {'FIXTURE_ACP_VARIANT': 'antigravity'}
+    if len(sys.argv) >= 4 and sys.argv[2] == '--gemini-dir':
+        extra['ANTIGRAVITY_GEMINI_DIR'] = sys.argv[3]
+    os.execve(sys.executable, [sys.executable, str(agent)], {**os.environ, **extra})
+
 native_arguments = sys.argv[1:]
 settings = {}
 # Launches put integration options (MCP, activity hooks) before the conversation selector.
-while len(native_arguments) >= 2 and native_arguments[0] in ('--mcp-config', '--settings', '-c'):
+while len(native_arguments) >= 2 and native_arguments[0] in ('--mcp-config', '--settings', '-c', '--model'):
     if native_arguments[0] == '--settings':
         settings = json.loads(native_arguments[1])
     native_arguments = native_arguments[2:]
@@ -93,6 +100,11 @@ elif tool == 'claude' and len(native_arguments) >= 2 and native_arguments[0] in 
 elif tool == 'kimi' and len(native_arguments) >= 2 and native_arguments[0] == '--session':
     cli_session_id = native_arguments[1]
     assert any((Path(os.environ['KIMI_CODE_HOME']) / 'sessions').glob('*/' + cli_session_id + '/state.json'))
+    arguments = native_arguments[2:]
+elif tool == 'agy' and len(native_arguments) >= 2 and native_arguments[0] == '--conversation':
+    cli_session_id = native_arguments[1]
+    gemini_dir = Path(os.environ.get('ANTIGRAVITY_GEMINI_DIR', str(Path.home() / '.gemini')))
+    assert (gemini_dir / 'antigravity-cli' / 'conversations' / (cli_session_id + '.db')).exists()
     arguments = native_arguments[2:]
 else:
     raise ValueError('Expected an exact coding CLI session ID')

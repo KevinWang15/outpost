@@ -17,7 +17,7 @@ const settings: Target = {
   kind: 'local',
   id: 'chat-machine',
   name: 'Chat machine',
-  tools: ['claude', 'codex', 'kimi', 'deepseek'],
+  tools: ['claude', 'codex', 'kimi', 'deepseek', 'antigravity'],
   createdAt: '2026-11-01T00:00:00Z',
 }
 
@@ -308,5 +308,43 @@ test(
       ['list_sessions'],
     )
     assert.match(chat.reply(), /Other/)
+  },
+)
+
+test(
+  "Antigravity chats apply instructions, accept HTTP MCP servers, get Outpost's tools, and replay history",
+  { timeout: 120_000 },
+  async t => {
+    const { context, sessions, create, open, project, calls } = await machine(t)
+    const mcpServers = {
+      local: { command: 'local-mcp', args: ['--stdio'] },
+      remote: { type: 'http' as const, url: 'https://example.com/mcp' },
+    }
+    const session = await create({
+      name: 'Antigravity',
+      tool: 'antigravity',
+      instructions: 'Keep it concise.',
+      mcpServers,
+    })
+    const native = currentConversation(session)
+    const chat = await open(session.id)
+    const ready = await chat.ready()
+    assert.equal(ready.info.instructions, 'applied')
+    assert.equal(ready.info.nativeId, native)
+    assert.equal(await readFile(join(project, 'system-prompt.txt'), 'utf8'), 'append:Keep it concise.')
+    assert.deepEqual(JSON.parse(await readFile(join(project, 'mcp-servers.json'), 'utf8')), [
+      'outpost',
+      'local',
+      'remote',
+    ])
+    chat.prompt('a1', 'list sessions')
+    assert.equal((await chat.entry('ended')).entry.stopReason, 'end_turn')
+    assert.deepEqual(
+      calls.map(call => call.tool),
+      ['list_sessions'],
+    )
+    await sessions.terminate(context, session.id)
+    const reopened = await open(session.id)
+    assert.equal((await reopened.ready()).info.nativeId, native)
   },
 )

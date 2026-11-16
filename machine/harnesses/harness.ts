@@ -153,6 +153,10 @@ export abstract class Harness {
     const activity = this.activity(record)
     return activity ? { activity, offset } : previous
   }
+  /** Translate a native hook's fields into the common hook payload, or null to ignore it. */
+  hookPayload(_session: SessionRecord, payload: Record<string, unknown>): Record<string, unknown> | null {
+    return payload
+  }
 
   // History ------------------------------------------------------------------------
 

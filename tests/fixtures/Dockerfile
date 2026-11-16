@@ -6,6 +6,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/* && mkdir -p /run/sshd \
     && useradd --create-home --shell /bin/bash dev && install -d -m 700 -o dev -g dev /home/dev/.ssh /home/dev/.outpost /home/dev/.outpost/bin
 COPY coding-tool-fixture.py /usr/local/bin/claude
-RUN chmod +x /usr/local/bin/claude && cp /usr/local/bin/claude /usr/local/bin/codex && cp /usr/local/bin/claude /usr/local/bin/kimi
+RUN chmod +x /usr/local/bin/claude && cp /usr/local/bin/claude /usr/local/bin/codex && cp /usr/local/bin/claude /usr/local/bin/kimi && cp /usr/local/bin/claude /usr/local/bin/agy
 RUN su dev -c "git init -b main /home/dev/work && git -C /home/dev/work -c user.name=Fixture -c user.email=fixture@example.com commit --allow-empty -m 'Initial commit'"
 CMD ["/usr/sbin/sshd", "-D", "-e", "-o", "PermitRootLogin=no", "-o", "PasswordAuthentication=no"]

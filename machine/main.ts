@@ -15,7 +15,7 @@ const usage = `Usage: outpost-terminal COMMAND
   publish FILE [NAME]  share a file with the user of this session
   open URL             open a link on the user's computer
   signal TYPE JSON     send a signal to the user's terminal
-  agent codex | deepseek DSH   bundled ACP adapters for chat
+  agent codex | deepseek DSH | antigravity AGY   bundled ACP adapters for chat
   --version`
 
 const [role, ...args] = process.argv.slice(2)
@@ -53,6 +53,8 @@ const run = async () => {
         return
       }
       if (args[0] === 'deepseek' && args.length === 2) return (await import('./agents/deepseek')).deepseekAgent(args[1])
+      if (args[0] === 'antigravity' && args.length === 2)
+        return (await import('./agents/antigravity')).antigravityAgent(args[1])
       throw new Error(usage)
     default:
       throw new Error(usage)

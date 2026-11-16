@@ -45,7 +45,7 @@ test(
         id,
         kind: 'local',
         name: id === 'alpha' ? 'Build machine' : 'Development laptop',
-        tools: ['claude', 'codex', 'kimi', 'deepseek'],
+        tools: ['claude', 'codex', 'kimi', 'deepseek', 'antigravity'],
         createdAt: new Date().toISOString(),
       })
       const codex = randomUUID(),
@@ -91,6 +91,28 @@ test(
           data: { message: { role: 'assistant', content: 'DeepSeek found a kitten on ' + id } },
         },
       ])
+      const antigravity = randomUUID()
+      await put(
+        join(home, '.gemini/antigravity-cli/brain', antigravity, '.system_generated/logs/transcript_full.jsonl'),
+        [
+          {
+            step_index: 0,
+            source: 'USER_EXPLICIT',
+            type: 'USER_INPUT',
+            status: 'DONE',
+            created_at: '2026-11-03T12:00:00Z',
+            content: `<USER_REQUEST>\nAntigravity checked TLS certificate on ${id}\n</USER_REQUEST>`,
+          },
+          {
+            step_index: 1,
+            source: 'MODEL',
+            type: 'PLANNER_RESPONSE',
+            status: 'DONE',
+            created_at: '2026-11-03T12:01:00Z',
+            content: `Antigravity renewed certificate on ${id}`,
+          },
+        ],
+      )
     }
     const machines = new Machines('history')
     const resolve = async (owner: Owner, id: string): Promise<TargetContext> => {
@@ -103,6 +125,7 @@ test(
           `CLAUDE_CONFIG_DIR=${home}/.claude`,
           `KIMI_CODE_HOME=${home}/.kimi-code`,
           `DSH_HOME=${home}/.dsh`,
+          `ANTIGRAVITY_GEMINI_DIR=${home}/.gemini`,
           `PATH=${home}/bin:${process.env.PATH}`,
           'bash',
           '-c',
@@ -186,15 +209,17 @@ test(
     const result = (await call('search_history', { query: 'TLS certificate', mode: 'keyword' })) as unknown as {
       results: { machine: { id: string; name: string }; tool: string; sessionId: string; cursor: string }[]
     }
-    assert.equal(result.results.length, 2)
+    assert.equal(result.results.length, 4)
     assert.deepEqual(new Set(result.results.map(r => r.machine.id)), new Set(['alpha', 'beta']))
-    const page = (await call('read_context', { cursor: result.results[0].cursor })) as {
+    assert.deepEqual(new Set(result.results.map(r => r.tool)), new Set(['codex', 'antigravity']))
+    const codexResult = result.results.find(r => r.tool === 'codex')!
+    const page = (await call('read_context', { cursor: codexResult.cursor })) as {
       machine: { id: string }
       messages: { text: string }[]
     }
     assert.equal(page.messages.length, 2)
     assert.match(page.messages[0].text, /certificate/)
-    const details = await call('get_session', { sessionId: result.results[0].sessionId })
+    const details = await call('get_session', { sessionId: codexResult.sessionId })
     assert.equal(details.tool, 'codex')
     assert.equal(
       ((await call('search_history', { query: '缓存失效', mode: 'keyword' })) as { results: unknown[] }).results.length,

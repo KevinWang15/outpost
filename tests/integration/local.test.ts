@@ -37,7 +37,7 @@ test(
     const target = await request<Target>(
       'POST',
       '/targets',
-      { kind: 'local', name: 'This computer', tools: ['claude', 'codex', 'kimi', 'deepseek'] },
+      { kind: 'local', name: 'This computer', tools: ['claude', 'codex', 'kimi', 'deepseek', 'antigravity'] },
       201,
     )
     const report = await request<SoftwareReport>('GET', `/targets/${target.id}/software`)
@@ -50,6 +50,7 @@ test(
         ['codex', 'installed'],
         ['kimi', 'installed'],
         ['deepseek', 'installed'],
+        ['antigravity', 'installed'],
         ['claude-agent-acp', 'installed'],
       ],
     )

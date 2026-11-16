@@ -45,7 +45,7 @@ Outpost server — ChatHub: links to chat hosts, channels, deliveries, schedules
         ⇅  the machine connection, as for terminals: a chat stream through the node
 machine — outpost-terminal chat-serve (one per session, persistent)
         ⇅  ACP over stdio
-coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp · dsh
+coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp · dsh · agy acp
         ⇅  the tool's own CLI and native store
 ```
 
@@ -68,6 +68,7 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 | Codex | Official [`codex-acp`](https://github.com/agentclientprotocol/codex-acp), run with the target's own `codex` (`CODEX_PATH`) | Bundled in Outpost Terminal (`outpost-terminal agent codex`), fetched with an integrity pin by `scripts/vendor-agents.mjs` |
 | Kimi Code | `kimi acp` | Kimi itself |
 | DeepSeek Harness | `dsh --profile acp`, through `outpost-terminal agent deepseek` | DeepSeek itself |
+| Antigravity CLI | `agy acp`, through `outpost-terminal agent antigravity` | Antigravity CLI itself |
 
 The Claude adapter is installed rather than bundled because it depends on
 Anthropic's proprietary Agent SDK; Outpost does not redistribute it. Its release
@@ -75,8 +76,8 @@ archive's own `claude` is removed after installation. Codex's adapter and its
 dependencies are Apache-2.0/MIT/BSD JavaScript using only Node built-ins.
 
 Session instructions (part of the session's configuration) are sent as ACP
-`systemPrompt` in `append` mode. Claude Code and Codex advertise it; Kimi does
-not, and the chat says so. The session's MCP servers follow Outpost's in
+`systemPrompt` in `append` mode. Claude Code, Codex and Antigravity CLI advertise
+it; Kimi does not, and the chat says so. The session's MCP servers follow Outpost's in
 `mcpServers`; servers by URL only when the agent advertises
 `mcpCapabilities.http`, and otherwise the chat names the ones it left out. After
 `session/new` or `session/load` (and for **New conversation**), the host selects

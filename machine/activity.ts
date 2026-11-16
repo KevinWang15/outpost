@@ -253,7 +253,9 @@ export class TerminalActivity {
   }
 
   /** A hook from the tool, relayed by `outpost-terminal hook`. */
-  async hookEvent(payload: Record<string, unknown>) {
+  async hookEvent(raw: Record<string, unknown>) {
+    const payload = this.harness.hookPayload(this.session, raw)
+    if (!payload) return
     const native = payload.session_id
     const event = payload.hook_event_name
     if (typeof event !== 'string' || !this.harness.validId(native)) return

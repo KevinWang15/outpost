@@ -1,4 +1,5 @@
 import type { HarnessId } from '../../shared/harnesses'
+import { Antigravity } from './antigravity'
 import { Claude } from './claude'
 import { Codex } from './codex'
 import { DeepSeek } from './deepseek'
@@ -10,6 +11,7 @@ const adapters: Record<HarnessId, Harness> = {
   codex: new Codex(),
   kimi: new Kimi(),
   deepseek: new DeepSeek(),
+  antigravity: new Antigravity(),
 }
 export const harness = (id: HarnessId) => adapters[id]
 export const allHarnesses = () => Object.values(adapters)

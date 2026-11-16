@@ -178,7 +178,7 @@ test('a fork is a new session in a new worktree, with the source settings and a 
   const { input, home, project, git, repository } = setup(t)
   repository()
   writeFileSync(join(project, 'tracked.txt'), 'uncommitted content')
-  for (const tool of ['claude', 'codex', 'kimi'] as const) {
+  for (const tool of ['claude', 'codex', 'kimi', 'antigravity'] as const) {
     const source = await createSession(
       input({
         name: tool,

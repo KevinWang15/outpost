@@ -18,13 +18,39 @@ import { statePath } from '../../machine/state'
 import { reverseRecords } from '../../machine/stores'
 import { machine, record, register, uuid } from './fixtures'
 
-const tools = ['claude', 'codex', 'kimi'] as const
+const tools = ['claude', 'codex', 'kimi', 'antigravity'] as const
 type Tool = (typeof tools)[number]
 type State = 'working' | 'finished' | 'idle'
 const time = (second = 0) => `2026-10-01T00:00:0${second}Z`
 
 /** A native record for a main-turn state, as each tool writes it. */
 function event(tool: Tool, state: State, second = 0): Record<string, unknown> {
+  if (tool === 'antigravity')
+    return state === 'working'
+      ? {
+          step_index: second,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          status: 'DONE',
+          created_at: time(second),
+          content: 'PRIVATE_TURN_CONTENT',
+        }
+      : state === 'finished'
+        ? {
+            step_index: second,
+            source: 'MODEL',
+            type: 'PLANNER_RESPONSE',
+            status: 'DONE',
+            created_at: time(second),
+            content: 'PRIVATE_TURN_CONTENT',
+          }
+        : {
+            step_index: second,
+            source: 'MODEL',
+            type: 'PLANNER_RESPONSE',
+            status: 'CANCELED',
+            created_at: time(second),
+          }
   if (tool === 'codex')
     return {
       type: 'event_msg',
@@ -73,6 +99,7 @@ async function fixture(t: TestContext, tool: Tool) {
       codex: `sessions/2026/10/01/rollout-test-${uuid}.jsonl`,
       claude: `projects/project/${uuid}.jsonl`,
       kimi: 'sessions/project/session_fixture/agents/main/wire.jsonl',
+      antigravity: `antigravity-cli/brain/${uuid}/.system_generated/logs/transcript_full.jsonl`,
     }[tool],
   )
   mkdirSync(dirname(path), { recursive: true })
@@ -164,6 +191,7 @@ test('subagent replies are not the main turn; an interrupt ends it', async t => 
     codex: { type: 'event_msg', timestamp: time(1), payload: { type: 'agent_message', message: 'task_complete' } },
     claude: { ...event('claude', 'finished', 1), isSidechain: true },
     kimi: { ...event('kimi', 'finished', 1), agentId: 'subagent' },
+    antigravity: { step_index: 1, source: 'SYSTEM', type: 'SYSTEM_MESSAGE', status: 'DONE', created_at: time(1) },
   }
   for (const tool of tools)
     await t.test(tool, async t => {
@@ -373,4 +401,47 @@ test('Codex: review mode is reported as untracked work until it exits', async t 
   assert.equal(current(activity).state, 'idle')
   append({ ...event('codex', 'finished', 2), payload: { type: 'task_complete', turn_id: 't', error: 'quota' } })
   assert.equal(current(activity).state, 'error')
+})
+
+test('Antigravity: camelCase hooks map turns, cancellations and errors, and ignore subagents', async t => {
+  const { start, conversation } = await fixture(t, 'antigravity')
+  const activity = start()
+  const subagent = '33333333-3333-4333-8333-333333333333'
+  await activity.hookEvent({ conversationId: conversation, hookEventName: 'SessionStart', hasUserInput: true })
+  await activity.hookEvent({ conversationId: conversation, hookEventName: 'PreInvocation', hasUserInput: true })
+  assert.equal(activity.current.state, 'working')
+  // A subagent's SessionStart and Stop have no direct user input and must not hijack the session.
+  await activity.hookEvent({ conversationId: subagent, hookEventName: 'SessionStart', hasUserInput: false })
+  await activity.hookEvent({
+    conversationId: subagent,
+    hookEventName: 'Stop',
+    terminationReason: 'NO_TOOL_CALL',
+    hasUserInput: false,
+  })
+  assert.equal(activity.currentConversation, conversation)
+  assert.equal(activity.current.state, 'working')
+  await activity.hookEvent({
+    conversationId: conversation,
+    hookEventName: 'Stop',
+    terminationReason: 'NO_TOOL_CALL',
+    hasUserInput: true,
+  })
+  assert.equal(activity.current.state, 'finished')
+  activity.acknowledge(activity.current.completionId!)
+  await activity.hookEvent({ conversationId: conversation, hookEventName: 'PreInvocation', hasUserInput: true })
+  await activity.hookEvent({
+    conversationId: conversation,
+    hookEventName: 'Stop',
+    terminationReason: 'USER_CANCELED',
+    hasUserInput: true,
+  })
+  assert.equal(activity.current.state, 'idle')
+  await activity.hookEvent({ conversationId: conversation, hookEventName: 'PreInvocation', hasUserInput: true })
+  await activity.hookEvent({
+    conversationId: conversation,
+    hookEventName: 'Stop',
+    terminationReason: 'ERROR',
+    hasUserInput: true,
+  })
+  assert.equal(activity.current.state, 'error')
 })

@@ -1,4 +1,4 @@
-# Outpost Terminal 2.2.0
+# Outpost Terminal 2.3.0
 
 Everything Outpost runs on a machine, as one executable. Terminal service
 protocol 5, chat host protocol 3, node protocol 2.
@@ -18,6 +18,6 @@ protocol 5, chat host protocol 3, node protocol 2.
 - `outpost-terminal mcp` and `hook`: Outpost's MCP server, with the same tools
   for every session, and the coding tools' activity hook. `publish`, `open` and
   `signal` serve programs running in a session.
-- `outpost-terminal agent codex | deepseek`: the bundled ACP adapters for chat.
+- `outpost-terminal agent codex | deepseek | antigravity`: the bundled ACP adapters for chat.
 
 Install the binary matching the Outpost server before deploying the server.

@@ -16,6 +16,7 @@ failing tool would. Other replies echo the prompt without its @-mentions.
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -50,7 +51,13 @@ def request(method, params):
     return pending.pop(identifier)[1]
 
 
+def antigravity_home():
+    return Path(os.environ.get('ANTIGRAVITY_GEMINI_DIR', str(Path.home() / '.gemini'))) / 'antigravity-cli'
+
+
 def store(session_id):
+    if variant == 'antigravity':
+        return antigravity_home() / 'brain' / session_id / '.system_generated' / 'logs' / 'transcript_full.jsonl'
     if variant == 'deepseek':
         return Path(os.environ['DSH_HOME']) / 'sessions' / 'fixture' / session_id / 'session.v4.jsonl'
     if variant == 'kimi':
@@ -62,10 +69,20 @@ def store(session_id):
 def history(session_id):
     path = store(session_id)
     if not path.exists():
+        if variant == 'antigravity' and (antigravity_home() / 'conversations' / (session_id + '.db')).exists():
+            return []
         return None
     records = []
     for line in path.read_text().splitlines():
         record = json.loads(line)
+        if variant == 'antigravity':
+            content = record.get('content', '')
+            if record.get('type') == 'USER_INPUT':
+                match = re.match(r'^<USER_REQUEST>\r?\n([\s\S]*?)\r?\n</USER_REQUEST>', content)
+                records.append(('user', match.group(1) if match else content))
+            elif record.get('type') == 'PLANNER_RESPONSE' and content:
+                records.append(('assistant', content))
+            continue
         if variant == 'deepseek':
             kind = {'user/message': 'user', 'assistant/message': 'assistant'}.get(record.get('type'))
             data = record.get('data', {})
@@ -83,7 +100,17 @@ def append(session_id, kind, text, cwd):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a') as stream:
         record = {'type': kind, 'sessionId': session_id, 'cwd': cwd, 'message': {'role': kind, 'content': text}}
-        if variant == 'deepseek':
+        if variant == 'antigravity':
+            wrapped = '<USER_REQUEST>\n' + text + '\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\n</ADDITIONAL_METADATA>'
+            record = {
+                'step_index': 0,
+                'source': 'USER_EXPLICIT' if kind == 'user' else 'MODEL',
+                'type': 'USER_INPUT' if kind == 'user' else 'PLANNER_RESPONSE',
+                'status': 'DONE',
+                'created_at': '2026-11-16T00:00:00Z',
+                'content': wrapped if kind == 'user' else text,
+            }
+        elif variant == 'deepseek':
             message = {'role': kind, 'content': text}
             record = {
                 'type': kind + '/message',
@@ -91,6 +118,33 @@ def append(session_id, kind, text, cwd):
                 'data': message if kind == 'user' else {'message': message},
             }
         stream.write(json.dumps(record) + '\n')
+
+
+def create_antigravity(session_id, cwd):
+    home = antigravity_home()
+    (home / 'conversations').mkdir(parents=True, exist_ok=True)
+    (home / 'conversations' / (session_id + '.db')).touch()
+    connection = sqlite3.connect(str(home / 'conversation_summaries.db'))
+    try:
+        connection.execute(
+            'CREATE TABLE IF NOT EXISTS conversation_summaries ('
+            'conversation_id text PRIMARY KEY, title text NOT NULL DEFAULT "", preview text NOT NULL DEFAULT "", '
+            'step_count integer NOT NULL DEFAULT 0, last_modified_time datetime NOT NULL, '
+            'workspace_uris text NOT NULL, parent_conversation_id text NOT NULL DEFAULT "", '
+            'nesting_depth integer NOT NULL DEFAULT 0, last_user_input_time datetime NOT NULL)'
+        )
+        connection.execute(
+            'INSERT OR REPLACE INTO conversation_summaries VALUES (?, "", "", 0, ?, ?, "", 0, ?)',
+            (
+                session_id,
+                '0001-01-01 00:00:00+00:00',
+                json.dumps([Path(cwd).resolve().as_uri()]),
+                '0001-01-01 00:00:00+00:00',
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def create_kimi(session_id, cwd):
@@ -144,9 +198,12 @@ def open_session(params, session_id):
     servers = [item.get('name') for item in params.get('mcpServers', [])]
     Path(params['cwd'], 'mcp-servers.json').write_text(json.dumps(servers))
     system = params.get('systemPrompt')
+    meta_system = params.get('_meta', {}).get('antigravity', {}).get('systemPrompt', {}).get('append')
     if system:
         text = '\n'.join(block.get('text', '') for block in system['content'])
         Path(params['cwd'], 'system-prompt.txt').write_text(system['mode'] + ':' + text)
+    elif isinstance(meta_system, str):
+        Path(params['cwd'], 'system-prompt.txt').write_text('append:' + meta_system)
     return session
 
 
@@ -322,6 +379,8 @@ def handle(message):
         if variant == 'deepseek':
             capabilities.pop('loadSession')
             capabilities['sessionCapabilities']['resume'] = {}
+        if variant == 'antigravity':
+            capabilities['_meta'] = {'antigravity': {'systemPrompt': {'append': True}}}
         result = {
             'protocolVersion': 1,
             'agentCapabilities': capabilities,
@@ -332,6 +391,8 @@ def handle(message):
         session_id = ('session_' + uuid.uuid4().hex) if variant == 'kimi' else str(uuid.uuid4())
         if variant == 'kimi':
             create_kimi(session_id, params['cwd'])
+        if variant == 'antigravity':
+            create_antigravity(session_id, params['cwd'])
         if variant == 'deepseek':
             path = store(session_id)
             path.parent.mkdir(parents=True, exist_ok=True)

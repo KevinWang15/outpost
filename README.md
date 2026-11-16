@@ -2,7 +2,7 @@
 
 ![Outpost — keep the session, keep your flow.](docs/images/banner.png)
 
-Outpost keeps your **Claude Code, Codex and Kimi Code** sessions running in persistent terminals
+Outpost keeps your **Claude Code, Codex, Kimi Code and Antigravity CLI** sessions running in persistent terminals
 on your Linux machines, and lets you come back to them from your browser or
 Outpost Desktop — with paste, copy, Shift+Enter and links working as if
 the agent ran on your computer.
@@ -18,7 +18,7 @@ default Outpost MCP tools and cross-machine history search.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
 - **Find any conversation.** Search the coding tools' history on all your machines, including conversations started outside Outpost, and resume them as sessions.
 - **See what happened.** Logs records when agents start, work, finish or fail, every message passed between sessions, channels and schedules, and errors, and sends what you choose to your own webhooks.
-- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code and DeepSeek Harness histories across all configured machines using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
+- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code, DeepSeek Harness and Antigravity CLI histories across all configured machines using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
 
 ![Outpost's Machines view: a machine with three sessions and their activity](docs/images/workspace.png)
 
@@ -136,16 +136,16 @@ same settings as one JSON document, for editing or pasting in bulk:
 ```
 
 - **Instructions** are added to the tool's own: in terminals and chat for Claude
-  Code (`--append-system-prompt`) and Codex (`developer_instructions`), not yet
-  for Kimi Code or DeepSeek Harness.
+  Code (`--append-system-prompt`) and Codex (`developer_instructions`), in chat
+  for Antigravity CLI, and not yet for Kimi Code or DeepSeek Harness.
 - **Model** and **mode** use the tool's own names for them, as its chat menus
   show them. Chat selects both whenever a conversation opens, and says so when
   the tool offers no such choice. Terminals start with the model.
 - **MCP servers** use the usual `mcpServers` format, a command or
   `"type": "http"` with a URL, and run alongside Outpost's own server (`outpost`
-  is reserved). Kimi Code terminals get only Outpost's, from its shared plugin;
-  chat adds a session's servers for every tool, and servers by URL where the
-  tool's ACP server takes them.
+  is reserved). Kimi Code and Antigravity CLI terminals get only Outpost's, from
+  their shared plugins; chat adds a session's servers for every tool, and servers
+  by URL where the tool's ACP server takes them.
 - **Arguments** (Bash syntax) are added to the terminal command, and the
   **environment** applies to both.
 
@@ -392,7 +392,7 @@ you return to it.
 
 ### Session files
 
-Managed Codex, Claude Code, Kimi Code and DeepSeek Harness sessions receive an **Outpost MCP** tool named `publish_file`.
+Managed Codex, Claude Code, Kimi Code, DeepSeek Harness and Antigravity CLI sessions receive an **Outpost MCP** tool named `publish_file`.
 Ask the agent to publish a generated image or document to your Outpost session;
 the tool takes an absolute `path` and an optional download `name`. Any managed
 coding tool can also publish from its shell:
@@ -424,17 +424,17 @@ Local shell tabs do not have this session file list.
 
 Outpost's MCP server is part of Outpost Terminal, and every managed agent gets
 it, in a terminal or in chat. Codex and Claude receive launch-specific MCP
-configuration, and chat passes the same server over ACP. Kimi uses its native
-Outpost plugin, which also reports activity. Its MCP server inherits the
-current process's session binding; ordinary Kimi launches outside Outpost expose no
-Outpost tools. No manual MCP setup is required, and existing user MCP servers
-remain configured.
+configuration, and chat passes the same server over ACP. Kimi and Antigravity
+use their native Outpost plugins, which also report activity. Their MCP servers
+inherit the current process's session binding; ordinary Kimi or `agy` launches
+outside Outpost expose no Outpost tools. No manual MCP setup is required, and
+existing user MCP servers remain configured.
 
 Update the server and desktop app together for native file downloads.
 
 ### Cross-machine history MCP
 
-Managed Claude Code, Codex, Kimi Code and DeepSeek Harness sessions receive five history tools in
+Managed Claude Code, Codex, Kimi Code, DeepSeek Harness and Antigravity CLI sessions receive five history tools in
 the same **Outpost MCP** as `publish_file`, with no additional registration:
 
 | Tool | Purpose |

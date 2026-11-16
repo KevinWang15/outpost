@@ -32,9 +32,9 @@ export async function fixtureHome(prefix: string) {
   const service = join(home, '.outpost', 'bin')
   await mkdir(service, { recursive: true })
   await copyFile(terminalBinary, join(service, 'outpost-terminal'))
-  for (const tool of ['claude', 'codex', 'kimi', 'dsh'])
+  for (const tool of ['claude', 'codex', 'kimi', 'dsh', 'agy'])
     await copyFile(join(fixtures, 'coding-tool-fixture.py'), join(bin, tool))
-  for (const tool of ['claude', 'codex', 'kimi', 'dsh'])
+  for (const tool of ['claude', 'codex', 'kimi', 'dsh', 'agy'])
     await import('node:fs/promises').then(fs => fs.chmod(join(bin, tool), 0o700))
   // Chat mode: the scripted ACP agent stands in for Claude Code's adapter and Kimi's own server.
   await copyFile(join(fixtures, 'acp-agent-fixture.py'), join(bin, 'acp-agent-fixture'))
@@ -50,6 +50,7 @@ export async function fixtureHome(prefix: string) {
     CLAUDE_CONFIG_DIR: join(home, '.claude'),
     KIMI_CODE_HOME: join(home, '.kimi-code'),
     DSH_HOME: join(home, '.dsh'),
+    ANTIGRAVITY_GEMINI_DIR: join(home, '.gemini'),
     SHELL: '/bin/bash',
     PATH: `${bin}:${process.env.PATH}`,
   }

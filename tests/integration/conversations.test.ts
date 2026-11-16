@@ -13,7 +13,7 @@ const settings: Target = {
   kind: 'local',
   id: 'coding',
   name: 'Coding',
-  tools: ['codex', 'kimi', 'claude'],
+  tools: ['codex', 'kimi', 'claude', 'antigravity'],
   createdAt: '2026-09-30T00:00:00Z',
 }
 const jsonl = (records: unknown[]) => records.map(record => JSON.stringify(record)).join('\n') + '\n'

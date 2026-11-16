@@ -80,6 +80,13 @@ async function provider(t: TestContext) {
         },
         { type: 'response.completed', response: { id: 'resp', usage: { ...usage, total_tokens: 2 } } },
       ]
+    else if (request.url!.includes('streamGenerateContent'))
+      events = [
+        {
+          candidates: [{ content: { role: 'model', parts: [{ text: 'done' }] }, finishReason: 'STOP', index: 0 }],
+          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+        },
+      ]
     else
       events = [
         {
@@ -379,5 +386,110 @@ test(
         assert.match(request, /fixturetools/, "the session's MCP server's tools reach the model")
         assert.match(request, /outpost/, "Outpost's own server is still there")
       })
+  },
+)
+
+test(
+  'Antigravity CLI: its plugin validates, reports turns and errors, and serves ACP chat with instructions and MCP',
+  { skip: !enabled },
+  async t => {
+    const placeholder = crypto.randomUUID()
+    const fixture = await session(t, 'antigravity', placeholder)
+    if (!fixture) return t.skip('agy is not installed')
+    // Antigravity's TUI reads ~/.gemini; align the session store with its disposable HOME.
+    const store = join(fixture.home, '.gemini')
+    fixture.record.storage = { ANTIGRAVITY_GEMINI_DIR: store }
+    fixture.launch.environment.ANTIGRAVITY_GEMINI_DIR = store
+    mkdirSync(join(store, 'antigravity-cli'), { recursive: true })
+    writeFileSync(
+      join(store, 'antigravity-cli', 'settings.json'),
+      JSON.stringify({ modelProvider: 'gemini', trustedWorkspaces: [fixture.root] }),
+    )
+    await fixture.adapter.mcp(fixture.launch)
+    await fixture.adapter.mcp(fixture.launch)
+    assert.equal(JSON.parse(readFileSync(join(store, 'config', 'plugins.json'), 'utf8')).entries.length, 1)
+
+    // Validate the generated plugin with Antigravity CLI's own strict validator.
+    const validation = spawn(
+      fixture.launch.executable,
+      ['plugin', 'validate', statePath('integrations', 'antigravity', 'outpost'), '--strict'],
+      { cwd: fixture.root, env: fixture.launch.environment, stdio: 'ignore' },
+    )
+    assert.equal(await new Promise<number | null>(resolve => validation.on('exit', resolve)), 0)
+
+    const model = await provider(t)
+    const env = {
+      ...fixture.launch.environment,
+      GEMINI_API_KEY: 'test-key',
+      GOOGLE_GEMINI_BASE_URL: model.url,
+    }
+    const child = spawn(fixture.launch.executable, ['-p', 'hook test'], {
+      cwd: fixture.root,
+      env,
+      stdio: 'ignore',
+    })
+    t.after(() => child.kill('SIGKILL'))
+    await until(() => fixture.activity.currentConversation !== placeholder, 'the SessionStart hook')
+    await fixture.state('working')
+    await until(model.requested, 'the model request')
+    model.release()
+    const done = await fixture.state('finished')
+    fixture.activity.acknowledge(done.completionId!)
+    assert.equal(fixture.activity.current.state, 'idle')
+    assert.ok(
+      model.bodies.some(body => body.includes('search_history')),
+      "Outpost's plugin MCP tools reach the terminal launch",
+    )
+
+    model.state.fail = true
+    const failing = spawn(
+      fixture.launch.executable,
+      ['-p', 'failure test', '--conversation', fixture.activity.currentConversation],
+      { cwd: fixture.root, env, stdio: 'ignore' },
+    )
+    t.after(() => failing.kill('SIGKILL'))
+    await fixture.state('error')
+
+    // ACP wrapper pins `--gemini-dir`, maps `systemPrompt` append, and advertises HTTP MCP support.
+    model.state.fail = false
+    model.bodies.length = 0
+    const chatLaunch = prepare(fixture.record, 'chat').launch
+    const chat = fixture.adapter.chat(chatLaunch.executable)
+    const rpc = new JsonRpcProcess(
+      chat.command,
+      { ...chatLaunch.environment, ...env, ...chat.env },
+      fixture.root,
+      60_000,
+    )
+    t.after(() => rpc.close())
+    const init = await rpc.call('initialize', {
+      protocolVersion: 1,
+      clientCapabilities: {},
+      clientInfo: { name: 'outpost_native_test', version: '1.0' },
+    })
+    const capabilities = init.agentCapabilities as Record<string, Record<string, unknown>>
+    assert.ok(capabilities.sessionCapabilities?.systemPrompt)
+    assert.equal(capabilities.mcpCapabilities?.http, true)
+    const created = await rpc.call('session/new', {
+      cwd: fixture.root,
+      mcpServers: await fixture.adapter.chatServers(chatLaunch),
+      systemPrompt: { mode: 'append', content: [{ type: 'text', text: 'ANTIGRAVITY_ACP_RULE_MARKER' }] },
+    })
+    const acpSession = created.sessionId as string
+    const reply = await rpc.call('session/prompt', {
+      sessionId: acpSession,
+      prompt: [{ type: 'text', text: 'acp prompt test' }],
+    })
+    assert.equal(reply.stopReason, 'end_turn')
+    // Antigravity also sends a tool-free title-generation request for the first prompt.
+    const acpRequests = model.bodies.filter(body => body.includes('acp prompt test'))
+    assert.ok(
+      acpRequests.some(body => body.includes('ANTIGRAVITY_ACP_RULE_MARKER')),
+      'the instructions reach the model',
+    )
+    assert.ok(
+      acpRequests.some(body => body.includes('publish_file')),
+      "Outpost's ACP MCP tools reach the model",
+    )
   },
 )

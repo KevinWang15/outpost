@@ -42,10 +42,15 @@ export async function hook() {
         'turn_id',
         'notification_type',
         'is_interrupt',
+        'conversationId',
+        'hookEventName',
+        'terminationReason',
       ]
         .filter(key => key in payload)
         .map(key => [key, payload[key]]),
     )
+    if ('lastUserInput' in payload)
+      kept.hasUserInput = typeof payload.lastUserInput === 'string' && payload.lastUserInput.length > 0
     await request(terminalSocket(bound.session), { type: 'hook', payload: kept }, 2000)
   } catch {
     /* Observation failures surface in Outpost, never in the tool. */

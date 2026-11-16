@@ -58,7 +58,7 @@ const fixtures = fileURLToPath(new URL('../fixtures/', import.meta.url))
 export function tools(t: TestContext, home: string) {
   const bin = join(home, 'bin')
   mkdirSync(bin, { recursive: true })
-  for (const tool of ['claude', 'codex', 'kimi', 'dsh']) {
+  for (const tool of ['claude', 'codex', 'kimi', 'dsh', 'agy']) {
     copyFileSync(join(fixtures, 'coding-tool-fixture.py'), join(bin, tool))
     chmodSync(join(bin, tool), 0o700)
   }
@@ -74,6 +74,7 @@ export function tools(t: TestContext, home: string) {
     CLAUDE_CONFIG_DIR: join(home, '.claude'),
     KIMI_CODE_HOME: join(home, '.kimi-code'),
     DSH_HOME: join(home, '.dsh'),
+    ANTIGRAVITY_GEMINI_DIR: join(home, '.gemini'),
   })
   t.after(() => {
     for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key]

@@ -23,7 +23,6 @@ export class HistoryIndex {
   readonly db: DatabaseSync
   private embedding: Promise<number> | null = null
   private closed = false
-  private preferredChunks = new Set<number>()
   constructor(
     path: string,
     private secret: string,
@@ -67,15 +66,48 @@ export class HistoryIndex {
     if (old && old.value !== embeddingIdentity)
       throw new Error('History embedding model changed. Rebuild the generated index.')
     this.db.prepare("INSERT OR IGNORE INTO settings VALUES('embedding_model',?)").run(embeddingIdentity)
-    // Give every source a representative message before embedding long tails.
-    // Rebuild this small queue after restart; vectors themselves remain durable.
-    for (const row of this.db
-      .prepare(
-        `SELECT (SELECT dc.chunk_id FROM messages m JOIN document_chunks dc ON dc.document_id=m.document_id
-      WHERE m.source_id=s.id AND dc.position=0 ORDER BY CASE WHEN m.role='user' THEN 0 ELSE 1 END,m.position LIMIT 1) chunk_id FROM sources s`,
-      )
-      .all())
-      if (row.chunk_id !== null) this.preferredChunks.add(Number(row.chunk_id))
+    this.initializeChunkQueue()
+  }
+  private initializeChunkQueue() {
+    const exists = this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='machine_chunks'")
+    if (exists.get()) return
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      if (!exists.get())
+        this.db.exec(`
+        CREATE TABLE machine_chunks (
+          machine_id TEXT NOT NULL, chunk_id INTEGER NOT NULL, refs INTEGER NOT NULL,
+          embedded INTEGER NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(machine_id,chunk_id)
+        ) WITHOUT ROWID;
+        INSERT INTO machine_chunks(machine_id,chunk_id,refs,embedded)
+        SELECT s.machine_id,dc.chunk_id,count(DISTINCT m.id),dc.chunk_id IN (SELECT chunk_id FROM embeddings)
+        FROM messages m JOIN sources s ON s.id=m.source_id
+        JOIN document_chunks dc ON dc.document_id=m.document_id GROUP BY s.machine_id,dc.chunk_id;
+        UPDATE machine_chunks SET priority=1 WHERE (machine_id,chunk_id) IN (
+          SELECT s.machine_id,(SELECT dc.chunk_id FROM messages m JOIN document_chunks dc ON dc.document_id=m.document_id
+          WHERE m.source_id=s.id AND dc.position=0 ORDER BY CASE WHEN m.role='user' THEN 0 ELSE 1 END,m.position LIMIT 1)
+          FROM sources s);
+        CREATE INDEX pending_machine_chunks ON machine_chunks(machine_id,priority DESC,chunk_id) WHERE embedded=0;
+        CREATE INDEX machines_by_chunk ON machine_chunks(chunk_id);
+        CREATE TRIGGER machine_chunks_insert AFTER INSERT ON messages BEGIN
+          INSERT INTO machine_chunks(machine_id,chunk_id,refs,embedded)
+          SELECT DISTINCT s.machine_id,dc.chunk_id,1,EXISTS(SELECT 1 FROM embeddings e WHERE e.chunk_id=dc.chunk_id)
+          FROM document_chunks dc JOIN sources s ON s.id=NEW.source_id WHERE dc.document_id=NEW.document_id
+          ON CONFLICT(machine_id,chunk_id) DO UPDATE SET refs=refs+1;
+        END;
+        CREATE TRIGGER machine_chunks_delete AFTER DELETE ON messages BEGIN
+          UPDATE machine_chunks SET refs=refs-1 WHERE machine_id=(SELECT machine_id FROM sources WHERE id=OLD.source_id)
+          AND chunk_id IN (SELECT chunk_id FROM document_chunks WHERE document_id=OLD.document_id);
+          DELETE FROM machine_chunks WHERE machine_id=(SELECT machine_id FROM sources WHERE id=OLD.source_id)
+          AND chunk_id IN (SELECT chunk_id FROM document_chunks WHERE document_id=OLD.document_id) AND refs=0;
+        END;
+      `)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
   }
   close() {
     this.closed = true
@@ -87,6 +119,30 @@ export class HistoryIndex {
   checkpoint(machine: string, source: HistorySource): HistoryCheckpoint | null {
     const row = this.db.prepare('SELECT checkpoint FROM sources WHERE id=?').get(this.sourceKey(machine, source.id))
     return row?.checkpoint ? JSON.parse(String(row.checkpoint)) : null
+  }
+  checkpoints(machine: string, sources: HistorySource[]) {
+    return sources.map(source => ({ source, checkpoint: this.checkpoint(machine, source) }))
+  }
+  catalog(machine: HistoryMachine, sources: HistorySource[]) {
+    const lookup = this.db.prepare('SELECT checkpoint,machine,source FROM sources WHERE id=?')
+    const changed: HistorySource[] = []
+    const metadata: HistoryBatch = { files: [], warnings: [] }
+    const machineJson = JSON.stringify(machine)
+    for (const source of sources) {
+      const row = lookup.get(this.sourceKey(machine.id, source.id))
+      const checkpoint: HistoryCheckpoint | null = row?.checkpoint ? JSON.parse(String(row.checkpoint)) : null
+      if (
+        !checkpoint ||
+        checkpoint.modified !== source.modified ||
+        checkpoint.offset < checkpoint.size ||
+        (checkpoint.sourceSize ?? checkpoint.size) !== source.size
+      )
+        changed.push(source)
+      else if (row!.machine !== machineJson || row!.source !== JSON.stringify(source))
+        metadata.files.push({ source, checkpoint, reset: false, messages: [], pending: false })
+    }
+    if (metadata.files.length) this.ingest(machine, metadata)
+    return changed
   }
   private document(text: string) {
     const digest = hash(text)
@@ -143,6 +199,7 @@ export class HistoryIndex {
             checkpoint,
           )
         if (file.reset) this.db.prepare('DELETE FROM messages WHERE source_id=?').run(key)
+        if (!file.messages.length) continue
         let firstMessage = !this.db.prepare('SELECT 1 FROM messages WHERE source_id=? LIMIT 1').get(key)
         let firstUser = !this.db.prepare("SELECT 1 FROM messages WHERE source_id=? AND role='user' LIMIT 1").get(key)
         for (const m of file.messages) {
@@ -150,14 +207,6 @@ export class HistoryIndex {
           const timestamp =
             m.timestamp && !Number.isNaN(Date.parse(m.timestamp)) ? new Date(m.timestamp).toISOString() : null
           const document = this.document(m.text)
-          if (firstMessage || (m.role === 'user' && firstUser)) {
-            const chunk = this.db
-              .prepare('SELECT chunk_id FROM document_chunks WHERE document_id=? AND position=0')
-              .get(document)
-            if (chunk) this.preferredChunks.add(Number(chunk.chunk_id))
-          }
-          firstMessage = false
-          if (m.role === 'user') firstUser = false
           inserted += Number(
             this.db
               .prepare(
@@ -178,6 +227,15 @@ export class HistoryIndex {
                 m.contentHash ?? hash(m.text),
               ).changes,
           )
+          if (firstMessage || (m.role === 'user' && firstUser))
+            this.db
+              .prepare(
+                `UPDATE machine_chunks SET priority=1 WHERE machine_id=? AND chunk_id=(
+              SELECT chunk_id FROM document_chunks WHERE document_id=? AND position=0)`,
+              )
+              .run(machine.id, document)
+          firstMessage = false
+          if (m.role === 'user') firstUser = false
         }
       }
       this.db.exec('COMMIT')
@@ -192,8 +250,8 @@ export class HistoryIndex {
     const filter = machineIds.map(() => '?').join(',')
     const row = this.db
       .prepare(
-        `SELECT count(*) total,coalesce(sum(c.id IN (SELECT chunk_id FROM embeddings)),0) embedded
-      FROM chunks c WHERE EXISTS (SELECT 1 FROM document_chunks dc JOIN messages m ON m.document_id=dc.document_id JOIN sources s ON s.id=m.source_id WHERE dc.chunk_id=c.id AND s.machine_id IN (${filter}))`,
+        `SELECT count(*) total,coalesce(sum(embedded),0) embedded FROM (
+          SELECT chunk_id,max(embedded) embedded FROM machine_chunks WHERE machine_id IN (${filter}) GROUP BY chunk_id)`,
       )
       .get(...machineIds)!
     const total = Number(row.total),
@@ -204,41 +262,29 @@ export class HistoryIndex {
     if (this.embedding) return this.embedding
     this.embedding = (async () => {
       if (!machineIds.length) return 0
-      const eligible = `EXISTS (SELECT 1 FROM document_chunks dc JOIN messages m ON m.document_id=dc.document_id JOIN sources s ON s.id=m.source_id WHERE dc.chunk_id=c.id AND s.machine_id IN (${machineIds.map(() => '?').join(',')}))`
-      const preferred = [...this.preferredChunks].slice(0, 1024)
-      let rows = this.preferredChunks.size
-        ? this.db
-            .prepare(
-              `SELECT id,text FROM chunks c WHERE id IN (${preferred.map(() => '?').join(',')})
-        AND id NOT IN (SELECT chunk_id FROM embeddings) AND ${eligible} ORDER BY id LIMIT ?`,
-            )
-            .all(...preferred, ...machineIds, limit)
-        : []
-      if (!rows.length) {
-        for (const id of preferred) this.preferredChunks.delete(id)
-      }
-      if (rows.length < limit) {
-        const excluded = rows.map(row => Number(row.id))
-        rows = [
-          ...rows,
-          ...this.db
-            .prepare(
-              `SELECT id,text FROM chunks c WHERE id NOT IN (SELECT chunk_id FROM embeddings)
-        AND ${eligible} ${excluded.length ? `AND id NOT IN (${excluded.map(() => '?').join(',')})` : ''}
-        ORDER BY id LIMIT ?`,
-            )
-            .all(...machineIds, ...excluded, limit - rows.length),
-        ]
-      }
+      // Seek into each machine's pending index. Shared chunks need only one vector.
+      const pending = this.db.prepare(`SELECT chunk_id,priority FROM machine_chunks
+        WHERE machine_id=? AND embedded=0 ORDER BY priority DESC,chunk_id LIMIT ?`)
+      const candidates = machineIds.flatMap(id => pending.all(id, limit))
+      candidates.sort((a, b) => Number(b.priority) - Number(a.priority) || Number(a.chunk_id) - Number(b.chunk_id))
+      const ids = [...new Set(candidates.map(row => Number(row.chunk_id)))].slice(0, limit)
       let completed = 0
-      for (const row of rows) {
+      for (const id of ids) {
+        const row = this.db.prepare('SELECT text FROM chunks WHERE id=?').get(id)!
         const vector = await this.embed(String(row.text), 'passage')
         if (this.closed) return completed
-        this.db
-          .prepare('INSERT OR REPLACE INTO embeddings(chunk_id,embedding) VALUES(?,?)')
-          .run(BigInt(row.id as number), new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength))
+        this.db.exec('BEGIN IMMEDIATE')
+        try {
+          this.db
+            .prepare('INSERT OR REPLACE INTO embeddings(chunk_id,embedding) VALUES(?,?)')
+            .run(BigInt(id), new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength))
+          this.db.prepare('UPDATE machine_chunks SET embedded=1 WHERE chunk_id=?').run(id)
+          this.db.exec('COMMIT')
+        } catch (error) {
+          this.db.exec('ROLLBACK')
+          throw error
+        }
         completed++
-        this.preferredChunks.delete(Number(row.id))
       }
       return completed
     })().finally(() => {

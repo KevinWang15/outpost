@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
+import { HistoryIndexClient } from '../../backend/history/index-client'
 import type { HistoryBatch, HistoryMachine, HistorySource } from '../../shared/history'
 import { HistoryIndex } from '../../backend/history/index'
 import type { Embed } from '../../backend/history/embeddings'
@@ -243,4 +248,69 @@ test('history: initial semantic indexing reaches another machine before a long t
     reached.map(row => row.machine_id),
     ids,
   )
+})
+
+test('history: an existing index migrates once, preserving shared vectors and replayed message counts', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-history-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const path = join(directory, 'index.sqlite')
+  const old = new HistoryIndex(path, 'secret', embed)
+  try {
+    old.ingest(machines[0], batch(source('one'), ['shared']))
+    await old.embedPending(ids)
+    old.ingest(machines[1], batch(source('two'), ['shared', 'unique']))
+    old.db.exec('DROP TRIGGER machine_chunks_insert; DROP TRIGGER machine_chunks_delete; DROP TABLE machine_chunks')
+  } finally {
+    old.close()
+  }
+  const index = new HistoryIndex(path, 'secret', embed)
+  try {
+    assert.deepEqual(index.coverage(ids), { searchableChunks: 2, embeddedChunks: 1, pendingChunks: 1 })
+    assert.equal(await index.embedPending(['alpha']), 0)
+    assert.equal(await index.embedPending(['beta']), 1)
+    index.ingest(machines[1], batch(source('two'), ['shared'], 'replacement'))
+    index.ingest(machines[1], batch(source('two'), ['shared'], 'replacement', 0, false))
+    index.ingest(machines[1], batch(source('three'), ['shared']))
+    index.ingest(machines[1], batch(source('two'), [], 'empty'))
+    assert.deepEqual(index.coverage(['beta']), { searchableChunks: 1, embeddedChunks: 1, pendingChunks: 0 })
+    index.ingest(machines[1], batch(source('three'), [], 'empty'))
+    assert.equal(index.coverage(['beta']).searchableChunks, 0)
+    assert.equal(index.coverage(['alpha']).embeddedChunks, 1)
+    const changes = () => index.db.prepare('SELECT total_changes() n').get()!.n
+    const before = changes()
+    assert.deepEqual(index.catalog(machines[0], [source('one')]), [])
+    assert.equal(changes(), before)
+    assert.deepEqual(index.catalog(machines[0], [{ ...source('one'), title: 'Renamed' }]), [])
+    assert.ok(Number(changes()) > Number(before))
+  } finally {
+    index.close()
+  }
+  const reopened = new HistoryIndex(path, 'secret', embed)
+  try {
+    assert.equal(await reopened.embedPending(ids), 0)
+    assert.deepEqual(reopened.coverage(ids), { searchableChunks: 1, embeddedChunks: 1, pendingChunks: 0 })
+  } finally {
+    reopened.close()
+  }
+})
+
+test('history: a blocked index write leaves the server event loop free to release the lock', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-history-worker-'))
+  const path = join(directory, 'index.sqlite')
+  const client = new HistoryIndexClient(path, 'secret', embed)
+  const lock = new DatabaseSync(path)
+  try {
+    await client.call('coverage', ids)
+    lock.exec('BEGIN IMMEDIATE')
+    const release = setTimeout(() => lock.exec('COMMIT'), 100)
+    try {
+      assert.equal(await client.call('ingest', machines[0], batch(source('one'), ['hello'])), 1)
+    } finally {
+      clearTimeout(release)
+    }
+  } finally {
+    lock.close()
+    await client.close()
+    await rm(directory, { recursive: true, force: true })
+  }
 })

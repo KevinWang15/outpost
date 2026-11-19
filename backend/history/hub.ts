@@ -8,7 +8,8 @@ import type { TargetContext } from '../sessions'
 import { HistoryBridge } from './bridge'
 import { HistoryClient, type HistoryReader } from './client'
 import { localEmbeddings, type Embed } from './embeddings'
-import { HistoryIndex } from './index'
+import type { HistoryIndex } from './index'
+import { HistoryIndexClient } from './index-client'
 
 interface MachineState {
   after: string | null
@@ -22,7 +23,7 @@ interface MachineState {
 }
 interface Account {
   owner: Owner
-  index: HistoryIndex
+  index: HistoryIndexClient
   states: Map<string, MachineState>
   syncing: Promise<void> | null
   machines: HistoryMachine[]
@@ -71,7 +72,7 @@ export class HistoryHub {
       const directory = this.dependencies.deployment.workspace(owner).directory
       account = {
         owner,
-        index: new HistoryIndex(
+        index: new HistoryIndexClient(
           join(directory, 'history', 'index.sqlite'),
           `${this.dependencies.deployment.secret}:${owner.userId}`,
           this.embed,
@@ -168,26 +169,13 @@ export class HistoryHub {
         if (this.stopped || account.closed) return
         state.after = catalog.next
         state.warnings = catalog.warnings
-        for (const source of catalog.sources) {
-          const checkpoint = account.index.checkpoint(machine.id, source)
-          if (
-            !checkpoint ||
-            checkpoint.modified !== source.modified ||
-            checkpoint.offset < checkpoint.size ||
-            (checkpoint.sourceSize ?? checkpoint.size) !== source.size
-          )
-            state.pending.set(source.id, source)
-          else
-            account.index.ingest(machine, {
-              files: [{ source, checkpoint, reset: false, messages: [], pending: false }],
-              warnings: [],
-            })
-        }
+        const changed = await account.index.call('catalog', machine, catalog.sources)
+        for (const source of changed) state.pending.set(source.id, source)
         if (state.pending.size) {
-          const sources = [...state.pending.values()]
+          const pending = [...state.pending.values()]
             .sort((a, b) => Number(BigInt(b.modified) - BigInt(a.modified)))
             .slice(0, 100)
-            .map(source => ({ source, checkpoint: account.index.checkpoint(machine.id, source) }))
+          const sources = await account.index.call('checkpoints', machine.id, pending)
           const batch = await this.reader.read(context, sources, signal)
           if (this.stopped || account.closed) return
           await this.ingest(account, machine, batch)
@@ -247,7 +235,8 @@ export class HistoryHub {
           bytes = 0
         while (end < file.messages.length && end - start < 32 && bytes < 256 * 1024)
           bytes += file.messages[end++].text.length
-        account.index.ingest(
+        await account.index.call(
+          'ingest',
           machine,
           { files: [{ ...file, reset: first && file.reset, messages: file.messages.slice(start, end) }], warnings: [] },
           end === file.messages.length,
@@ -262,7 +251,8 @@ export class HistoryHub {
     if (account.embeddingJob || account.closed || this.stopped || Date.now() < account.embeddingRetryAt) return
     account.embeddingJob = (async () => {
       while (!this.stopped && !account.closed) {
-        const n = await account.index.embedPending(
+        const n = await account.index.call(
+          'embedPending',
           account.machines.map(m => m.id),
           16,
         )
@@ -312,17 +302,19 @@ export class HistoryHub {
         }),
       )
       let embedded = 0
-      if (Number(input.embedLimit) > 0) embedded = await account.index.embedPending(ids, Number(input.embedLimit))
+      if (Number(input.embedLimit) > 0)
+        embedded = await account.index.call('embedPending', ids, Number(input.embedLimit))
       return {
         embedded,
-        coverage: account.index.coverage(ids),
+        coverage: await account.index.call('coverage', ids),
         machines: this.status(account, selected),
         note: 'Native source conversations are read-only. Further refreshes continue catalog pages and pending files.',
       }
     }
     if (tool === 'search_history') {
       this.watch(owner)
-      const result = await account.index.search(
+      const result = await account.index.call(
+        'search',
         { ...input, ...(input.machine ? { machine: selected[0].id } : {}) } as unknown as HistorySearchInput,
         ids,
       )
@@ -340,12 +332,12 @@ export class HistoryHub {
     }
     if (tool === 'read_context') {
       if (!input.cursor && !input.sessionId) throw new Error('Supply a search cursor or sessionId.')
-      return account.index.context(input as Parameters<HistoryIndex['context']>[0], ids)
+      return account.index.call('context', input as Parameters<HistoryIndex['context']>[0], ids)
     }
     if (tool === 'read_message') {
       const pageInput = input as Parameters<HistoryIndex['readMessage']>[0]
-      const source = account.index.messageSource(pageInput.cursor, ids)
-      const cached = account.index.readMessage(pageInput, ids)
+      const source = await account.index.call('messageSource', pageInput.cursor, ids)
+      const cached = await account.index.call('readMessage', pageInput, ids)
       if (source.truncated && (pageInput.offset ?? 0) >= source.length) {
         if (!this.reader.message) throw new Error('This source message needs an online machine to read further.')
         const context = await this.dependencies.resolve(owner, source.machineId)
@@ -364,7 +356,7 @@ export class HistoryHub {
       }
       return cached
     }
-    return account.index.session(String(input.sessionId), ids)
+    return account.index.call('session', String(input.sessionId), ids)
   }
   private status(account: Account, machines: HistoryMachine[]) {
     return machines.map(machine => {
@@ -389,7 +381,7 @@ export class HistoryHub {
         ...[...account.states.values()].map(state => state.refreshing),
       ]),
     )
-    for (const account of this.accounts.values()) account.index.close()
+    await Promise.all([...this.accounts.values()].map(account => account.index.close()))
     this.accounts.clear()
   }
 }

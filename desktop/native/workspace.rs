@@ -1230,7 +1230,13 @@ impl Workspace {
                     .flex_1()
                     .h_full()
                     .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, |_, w, _| w.start_window_move()),
+                    .on_mouse_down(MouseButton::Left, |event, w, _| {
+                        if event.click_count == 2 {
+                            w.zoom_window();
+                        } else {
+                            w.start_window_move();
+                        }
+                    }),
             ))
             .child(icon("switch", LucideIcon::Search, cx, |s, w, cx| {
                 s.show(Page::Switch, w, cx)

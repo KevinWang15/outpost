@@ -2,7 +2,6 @@ import { useEffect, useReducer, useState } from 'react'
 import { LoaderCircle, Monitor, Plus, Server } from 'lucide-react'
 import type { ConversationResults, ConversationSearch, Target, TargetInput } from '../shared/model'
 import { api } from './api'
-import { useAuth } from './auth/useAuth'
 import { rememberMode } from './mode'
 import { AppSidebar } from './ui/AppSidebar'
 import FinderDialog from './workspace/FinderDialog'
@@ -57,7 +56,6 @@ const searchMachine = (id: string, input: ConversationSearch, signal: AbortSigna
   api<ConversationResults>(`/targets/${id}/conversations/search`, 'POST', input, signal)
 
 export default function App() {
-  const { mode } = useAuth()
   const [{ targets, selected, visit, request }, dispatch] = useReducer(reducer, {
     targets: null,
     selected: '',
@@ -162,11 +160,7 @@ export default function App() {
             <ol className="steps">
               <li>
                 <strong>Add a machine</strong>
-                <span>
-                  {mode === 'hosted'
-                    ? 'An SSH server that trusts your Outpost key.'
-                    : 'This computer or an SSH server.'}
-                </span>
+                <span>Choose how Outpost connects to the Linux machine that runs your sessions.</span>
               </li>
               <li>
                 <strong>Create a session</strong>

@@ -1,6 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Monitor, Server } from 'lucide-react'
-import type { Environment, Target, TargetInput, TargetUpdate } from '../../shared/model'
+import {
+  machineSetupLabels,
+  type Environment,
+  type Target,
+  type TargetInput,
+  type TargetUpdate,
+} from '../../shared/model'
 import { harnesses, type HarnessId } from '../../shared/harnesses'
 import { api } from '../api'
 import { useAuth } from '../auth/useAuth'
@@ -98,21 +104,21 @@ export default function TargetDialog({
     >
       <form id="target-form" className="form" onSubmit={submit}>
         {!target && (
-          <div className="segmented" role="radiogroup" aria-label="Machine type">
+          <div className="segmented" role="radiogroup" aria-label="Machine connection setup">
             <button type="button" role="radio" aria-checked={kind === 'ssh'} onClick={() => setKind('ssh')}>
               <Server size={16} />
-              SSH server
+              {machineSetupLabels.ssh}
             </button>
             <button type="button" role="radio" aria-checked={kind === 'paired'} onClick={() => setKind('paired')}>
-              Paired machine
+              {machineSetupLabels.paired}
             </button>
             <button type="button" role="radio" aria-checked={kind === 'direct'} onClick={() => setKind('direct')}>
-              Direct only
+              {machineSetupLabels.direct}
             </button>
             {environment?.localTargets && (
               <button type="button" role="radio" aria-checked={kind === 'local'} onClick={() => setKind('local')}>
                 <Monitor size={16} />
-                This computer
+                {machineSetupLabels.local}
               </button>
             )}
           </div>
@@ -125,7 +131,7 @@ export default function TargetDialog({
             maxLength={80}
             autoFocus
             defaultValue={target?.name}
-            placeholder={kind === 'local' ? 'This computer' : 'dev-box'}
+            placeholder={kind === 'local' ? machineSetupLabels.local : 'dev-box'}
           />
         </label>
         {!target && kind === 'direct' && (
@@ -172,11 +178,12 @@ export default function TargetDialog({
         )}
         {!target && kind === 'paired' && (
           <p className="hint">
-            This machine connects out to Outpost. After adding it, generate a pairing code on its page.
+            Enroll with a pairing code. The machine opens an outbound connection to the Outpost server. To prefer a
+            direct connection, also configure the machine’s HTTPS endpoint.
           </p>
         )}
         {!target && kind === 'local' && (
-          <p className="hint">Sessions run as your user on the computer running Outpost.</p>
+          <p className="hint">Sessions run on the Linux machine running the Outpost server.</p>
         )}
         <ToolChoice value={tools} onChange={setTools} />
         {error && (

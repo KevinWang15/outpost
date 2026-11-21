@@ -8,6 +8,12 @@ export type ExecutionEnvironment = Static<typeof schemas.environment>
 export type TargetInput = Static<typeof schemas.targetInput>
 export type TargetUpdate = Static<typeof schemas.targetUpdate>
 export type Target = Static<typeof schemas.targetRecord>
+export const machineSetupLabels = {
+  ssh: 'SSH',
+  local: 'On the Outpost server',
+  paired: 'Relay enabled',
+  direct: 'Direct only',
+} as const satisfies Record<Target['kind'], string>
 export type SshTarget = Extract<Target, { kind: 'ssh' }>
 export type SessionCreationRequest = Static<typeof schemas.desktopSessionCreationInput>
 export type SessionInput = Static<typeof schemas.sessionInput>
@@ -71,7 +77,7 @@ export interface DirectorySuggestions {
 }
 
 /** Chat mode runs Claude Code through its official ACP adapter; Codex's is
- * bundled in Outpost Terminal; Kimi Code, DeepSeek Harness and Antigravity CLI
+ * bundled in Outpost machine service; Kimi Code, DeepSeek Harness and Antigravity CLI
  * serve ACP themselves. */
 export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => [
   'bash',
@@ -81,7 +87,7 @@ export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] =
 ]
 const systemLabels: Record<string, string> = {
   bash: 'Bash',
-  'outpost-terminal': 'Outpost Terminal',
+  'outpost-terminal': 'Outpost machine service',
   'claude-agent-acp': 'Claude Code chat adapter',
 }
 /** Software as the interface names it. */

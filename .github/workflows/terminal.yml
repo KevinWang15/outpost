@@ -1,4 +1,4 @@
-name: Outpost Terminal
+name: Outpost machine service
 
 on:
   workflow_call:
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the immutable Outpost Terminal release
+        description: Publish the immutable Outpost machine service release
         type: boolean
         default: false
       run_tests:
@@ -84,4 +84,4 @@ jobs:
             exit 1
           fi
           gh release create "$tag" binaries/* --target "$GITHUB_SHA" --latest=false \
-            --title "Outpost Terminal $version" --notes-file machine/RELEASE_NOTES.md
+            --title "Outpost machine service $version" --notes-file machine/RELEASE_NOTES.md

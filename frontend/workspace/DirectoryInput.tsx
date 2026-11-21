@@ -185,7 +185,7 @@ export default function DirectoryInput({ source }: { source: DirectorySource }) 
           </div>
         )}
       </div>
-      <small id={`${id}-help`}>An absolute or ~/ path on the target. Suggestions are live.</small>
+      <small id={`${id}-help`}>An absolute or ~/ path on the machine. Suggestions are live.</small>
     </div>
   )
 }

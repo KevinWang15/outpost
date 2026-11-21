@@ -729,7 +729,9 @@ export class ChatHost {
       }
       if (message.type !== 'hello') throw new Error('Say hello first')
       if (message.protocol !== chatHost.protocol)
-        throw new Error('Chat host protocol mismatch; install the current Outpost Terminal and restart this chat')
+        throw new Error(
+          'Chat host protocol mismatch; install the current Outpost machine service and restart this chat',
+        )
       client.greeted = true
       socket.setTimeout(0)
       this.send(socket, {

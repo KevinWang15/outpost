@@ -70,10 +70,10 @@ test('a stale shared SSH connection is retried once without sharing', async t =>
   await assert.rejects(failing.call('echo'), /Permission denied/)
 })
 
-test('a machine without Outpost Terminal says so; a lost connection fails its calls and reconnects', async t => {
+test('a machine without Outpost machine service says so; a lost connection fails its calls and reconnects', async t => {
   const missing = connection(transport(fail(127, 'bash: outpost-terminal: No such file or directory\n')))
   t.after(() => missing.close())
-  await assert.rejects(missing.call('echo'), /Outpost Terminal is missing/)
+  await assert.rejects(missing.call('echo'), /Outpost machine service is missing/)
   const machine = connection(transport(node.slice(1)))
   t.after(() => machine.close())
   await machine.call('echo', { value: 1 })

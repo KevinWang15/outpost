@@ -827,7 +827,7 @@ impl Workspace {
                             }
                             "connection" => {
                                 let state = &e["state"];
-                                p.route = state["route"].as_str().map(str::to_owned);
+                                p.route = state["routeLabel"].as_str().map(str::to_owned);
                                 p.restoring = state["kind"] != "connected";
                                 p.status = if state["kind"] == "connected" {
                                     String::new()
@@ -1407,7 +1407,7 @@ impl Workspace {
         match self.page {
             Page::Home => {
                 content=content.child(row().gap(px(20.)).child(img(self.logo.clone()).size(px(52.))).child(title("YOUR TERMINAL WORKSPACE","A place for every session.")))
-                   .child(text("Open a local terminal with +, or right-click + to find or create a session on your logged-in Outpost servers. Local and remote sessions share the same tabs and splits.",13.,MUTED))
+                   .child(text("Open a local terminal with +, or right-click + to find or create a session on your logged-in Outpost servers. Local terminals and managed sessions share the same tabs and splits.",13.,MUTED))
                    .child(section("Recent sessions"));
                 for item in items(&self.accounts["recent"]) {
                     let id = strval(item, "id");
@@ -1419,7 +1419,7 @@ impl Workspace {
                     ))
                 }
                 if items(&self.accounts["recent"]).is_empty() {
-                    content=content.child(text("Your 10 most recent Outpost sessions will appear here after connecting. Local terminals aren't saved.",13.,MUTED))
+                    content=content.child(text("Your 10 most recent managed sessions will appear here after connecting. Local terminals aren't saved.",13.,MUTED))
                 } else {
                     content = content.child(row().child(control(
                         "Clear recent sessions",
@@ -1535,7 +1535,7 @@ impl Workspace {
                 let choose = self.page == Page::Choose;
                 content = content
                     .child(if choose {
-                        title("OUTPOST TERMINALS", "Open a session.")
+                        title("MANAGED SESSIONS", "Open a session.")
                     } else {
                         title("OPEN SESSIONS", "Jump back in.")
                     })
@@ -1594,7 +1594,7 @@ impl Workspace {
             }
             Page::Create => {
                 content = content
-                    .child(title("OUTPOST TERMINALS", "New session"))
+                    .child(title("MANAGED SESSIONS", "New session"))
                     .child(text(self.origin.clone(), 13., MUTED))
                     .child(section("Machine"));
                 for t in items(&self.targets) {
@@ -1654,7 +1654,7 @@ impl Workspace {
                             s.split(Axis::Down, w, cx)
                         }))
                         .child(control(
-                            "Split with Outpost terminal",
+                            "Split with managed session",
                             false,
                             cx,
                             |s, w, cx| {

@@ -100,7 +100,7 @@ test('V3 browser sign-in, checkpoint restore, live input, resize and reconnect',
     const send = (v: unknown) => socket.send(JSON.stringify(v))
     send({ type: 'hello', resume: 'fixture.resume', session: { id: 'session', name: 'Fixture', tool: 'codex' } })
     for (const part of parts) send({ type: 'restore', checkpoint: part })
-    send({ type: 'route-selected', route: 'relay' })
+    send({ type: 'route-selected', route: 'server-managed' })
     send({ type: 'ready' })
     socket.on('message', (bytes, binary) => {
       if (binary) socket.send(bytes)
@@ -162,7 +162,8 @@ test('V3 browser sign-in, checkpoint restore, live input, resize and reconnect',
   cmd({ op: 'link', value: desktopConnectUrl(origin) })
   const catalogue = await wait(e => e.event === 'accounts' && e.sessions.length > 0)
   cmd({ op: 'choose', value: catalogue.sessions[0].id })
-  await wait(e => e.event === 'connection' && e.state.kind === 'connected')
+  const connected = await wait(e => e.event === 'connection' && e.state.kind === 'connected')
+  assert.equal(connected.state.routeLabel, 'Server-managed')
   assert.match(restored, /restored history/)
   assert.match(restored, /wide 界/)
   assert.match(restored, /alt screen/)

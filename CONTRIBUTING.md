@@ -24,7 +24,7 @@ npm run dev
 
 Open http://127.0.0.1:5173. Vite forwards `/api` to the API on
 `127.0.0.1:3000`, which restarts on changes to `backend/`. Changes to `machine/`
-take effect after `npm run build:terminal` and installing the build on a target. Use `OUTPOST_DATA_DIR` for a separate development store, and a
+take effect after `npm run build:terminal` and installing the build on a machine. Use `OUTPOST_DATA_DIR` for a separate development store, and a
 different one for hosted work (`OUTPOST_MODE=hosted` in `.env`). Without mail
 credentials, hosted development shows verification links in the UI.
 
@@ -35,10 +35,10 @@ credentials, hosted development shows verification links in the UI.
 | `backend/` | TypeScript | Outpost server |
 | `frontend/` | React + SCSS | Browser |
 | `shared/` | TypeScript | Server, frontend and desktop contracts |
-| `machine/` | TypeScript + bundled Bun | Linux targets, installed executable (Outpost Terminal) |
+| `machine/` | TypeScript + bundled Bun | Linux machines, installed executable (Outpost machine service) |
 | `desktop/` | Rust + GPUI, TypeScript session helper | Your computer (macOS, Windows) |
 
-Code in `machine/` runs in Bun on targets and in Node in its tests: use Node's
+Code in `machine/` runs in Bun on machines and in Node in its tests: use Node's
 APIs (Bun implements them), except in the terminal service's PTY handling.
 
 Formatting is automatic: `npm run format` runs Prettier on TypeScript, SCSS and
@@ -87,7 +87,7 @@ The desktop workflow builds Apple silicon, Intel Mac and Windows x64 on
 separate runners. Bump the desktop package and Cargo versions together before
 publishing a new release.
 
-## Outpost Terminal
+## Outpost machine service
 
 For a self-hosted release, `OUTPOST_TERMINAL_RELEASE_BASE` can point to an HTTPS directory containing the four version-matched Linux executables and their `SHA256SUMS`. The installer checks the downloaded binary’s checksum and protocol version. For a bundled Apple silicon installer, set `VITE_OUTPOST_MAC_ARM64_INSTALLER` at web build time to its public download path.
 
@@ -96,7 +96,7 @@ Build the machine binary with `npm run build:terminal`. Integration and browser 
 `npm run build:terminal -- arm64-glibc` (or `x64-musl`, `arm64-musl`) for other
 targets. The build pins Bun; the resulting executable embeds its runtime.
 
-The **Outpost Terminal** workflow is manual and builds all four assets. Enable
+The **Outpost machine service** workflow is manual and builds all four assets. Enable
 **publish** to create `terminal-v<version>` with checksums. Bump the version in
 `shared/terminalService.ts` for every release; never overwrite an existing
 release. The **CI** dispatcher also runs it (`suite=terminal`,

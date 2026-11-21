@@ -143,6 +143,6 @@ export async function locked<T>(
 
 export const now = () => new Date().toISOString()
 
-/** The installed Outpost Terminal, which hooks, MCP servers and helpers run as.
+/** The installed Outpost machine service, which hooks, MCP servers and helpers run as.
  * Tests point it at a launcher for the source tree. */
 export const machineExecutable = () => statePath('bin', 'outpost-terminal')

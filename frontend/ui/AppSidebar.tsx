@@ -111,7 +111,7 @@ function SidebarFooter({ logs }: { logs: boolean }) {
           ]}
         />
       ) : (
-        <p className="muted">Runs on this computer. Sessions keep running on your machines.</p>
+        <p className="muted">Local Outpost server. Sessions keep running on your machines.</p>
       )}
       {account && <AccountDialog onClose={() => setAccount(false)} />}
       {preferences && <ConnectionPreferences onClose={() => setPreferences(false)} />}

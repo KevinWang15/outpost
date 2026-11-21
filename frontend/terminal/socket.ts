@@ -2,7 +2,7 @@ import { directTerminalPath } from '../../shared/directOnly'
 import { desktopOrigin } from '../../shared/desktopAuth'
 import { terminalFileChunk, type TerminalFileReader } from '../../shared/terminalFiles'
 import { maxSessionFiles, parseSessionFile } from '../../shared/sessionFiles'
-import type { ClientMessage, ServerMessage } from '../../shared/protocol'
+import type { ClientMessage, ServerMessage, TerminalRoute } from '../../shared/protocol'
 import { maxInputMessage, maxInputQueue, protocolVersion, terminalConnectionPolicy } from '../../shared/protocol'
 import { imageProblem } from '../../shared/images'
 import type { SessionActivity } from '../../shared/activity'
@@ -102,7 +102,7 @@ export class TerminalSocket {
     let candidate: WebSocket | null = null
     let probeTimer: ReturnType<typeof setTimeout> | undefined
     let verified = false
-    let selected: 'direct' | 'relay' | undefined
+    let selected: TerminalRoute | undefined
     const releaseDirect = () => {
       clearTimeout(probeTimer)
       this.direct = null
@@ -225,7 +225,7 @@ export class TerminalSocket {
       } else if (message.type === 'route-selected') {
         if (selected) return
         selected = message.route
-        if (selected === 'relay') return releaseDirect()
+        if (selected === 'relay' || selected === 'server-managed') return releaseDirect()
         if (!verified || !candidate || candidate.readyState !== WebSocket.OPEN) {
           this.preferRelayOnce = true
           return this.unresponsive(socket)

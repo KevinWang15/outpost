@@ -64,8 +64,8 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 
 | Tool | ACP server | Installed by |
 | --- | --- | --- |
-| Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the target's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Required software (`claude-agent-acp`, pinned in `shared/chatAgents.json`) |
-| Codex | Official [`codex-acp`](https://github.com/agentclientprotocol/codex-acp), run with the target's own `codex` (`CODEX_PATH`) | Bundled in Outpost Terminal (`outpost-terminal agent codex`), fetched with an integrity pin by `scripts/vendor-agents.mjs` |
+| Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the machine's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Required software (`claude-agent-acp`, pinned in `shared/chatAgents.json`) |
+| Codex | Official [`codex-acp`](https://github.com/agentclientprotocol/codex-acp), run with the machine's own `codex` (`CODEX_PATH`) | Bundled in Outpost machine service (`outpost-terminal agent codex`), fetched with an integrity pin by `scripts/vendor-agents.mjs` |
 | Kimi Code | `kimi acp` | Kimi itself |
 | DeepSeek Harness | `dsh --profile acp`, through `outpost-terminal agent deepseek` | DeepSeek itself |
 | Antigravity CLI | `agy acp`, through `outpost-terminal agent antigravity` | Antigravity CLI itself |
@@ -144,7 +144,7 @@ pings a host that has sent nothing for 15 s and replaces a connection silent
 for 30 s (60 s before the host's welcome); any byte counts, so a large
 snapshot on a slow link is not mistaken for silence.
 
-`ChatHub` keeps, per owner, the session list across targets (polled every 15 s
+`ChatHub` keeps, per owner, the session list across machines (polled every 15 s
 while a page is open, with live chat activity merged in), handles, channels,
 deliveries, threads and schedules. State is in `<workspace>/chat/` (atomic JSON;
 channel messages are append-only JSONL). Deliveries are persisted with their
@@ -189,7 +189,7 @@ messages.
   a session, and by the key stored with each channel post, also after a server
   restart.
 
-**Files.** Both directions use the session's file store on its target
+**Files.** Both directions use the session's file store on its machine
 (`~/.outpost/files/<session>`, at most 100 files and 256 MiB, 32 MiB each);
 files stay until removed. The session header's Files panel lists all of them.
 Pages read files over HTTP with their chat grant
@@ -201,7 +201,7 @@ Pages read files over HTTP with their chat grant
   shows a card for it, and a channel reply carries the files its turn published.
 - *To the agent.* The composer uploads each attached file (any type) on send:
   `POST /api/chat/files/:target/:session?name=…` with the raw bytes, stored on
-  the target. The prompt carries the file IDs, at most 8. The chat host turns
+  the machine. The prompt carries the file IDs, at most 8. The chat host turns
   each into an ACP `resource_link` to the stored file (`file://…/content/<name>`,
   with the file's metadata in `_meta.outpost.file`), which every ACP agent
   accepts; the agent reads it with its own tools. When the agent advertises

@@ -220,7 +220,7 @@ test('fork validates input, resolves the source on its target, and inherits laun
   assert.equal((await call('POST', path, input)).status, 400)
 })
 
-test('the broker relays a terminal and reports attach failures', async t => {
+test('the broker identifies a server-managed SSH attachment and reports attach failures', async t => {
   const { port, call, sessions, addSession } = await setup(t)
   const { target, session } = await addSession()
   const connect = async () =>
@@ -232,6 +232,7 @@ test('the broker relays a terminal and reports attach failures', async t => {
   t.after(() => client.socket.terminate())
   const hello = await client.message('hello')
   assert.equal(hello.session.name, 'Build')
+  assert.equal((await client.message('route-selected')).route, 'server-managed')
   await client.message('ready')
   await client.text('started 120x40')
   assert.deepEqual(sessions.attached.at(-1), { targetId: target.id, id: session.id, cols: 120, rows: 40 })

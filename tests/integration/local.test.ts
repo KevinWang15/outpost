@@ -98,6 +98,7 @@ test(
     const hello = await client.message('hello')
     assert.equal(hello.session.name, 'Build')
     assert.equal(hello.target.name, 'This computer')
+    assert.equal((await client.message('route-selected')).route, 'server-managed')
     await client.message('ready')
     await client.text('OUTPOST_FIXTURE_READY')
     await client.text('100x30')

@@ -28,11 +28,11 @@ export function pairedRoutes(app: FastifyInstance, services: Services) {
         /* Missing or removed pairing. */
       }
     }
-    throw new AppError('Invalid machine credential. Pair the target again.', 401)
+    throw new AppError('Invalid machine credential. Enroll the machine again.', 401)
   }
   const paired = async (owner: Owner, targetId: string) => {
     const target = await services.deployment.workspace(owner).get(targetId)
-    if (target.kind !== 'paired') throw new AppError('Choose a paired machine.', 400)
+    if (target.kind !== 'paired') throw new AppError('Choose a relay-enabled machine.', 400)
     return target
   }
 

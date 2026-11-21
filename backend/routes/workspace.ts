@@ -2,7 +2,7 @@ import { desktopOrigin } from '../../shared/desktopAuth'
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { Environment, SoftwareId, Target, TargetInput, TargetUpdate } from '../../shared/model'
-import { requiredSoftware } from '../../shared/model'
+import { machineSetupLabels, requiredSoftware } from '../../shared/model'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
@@ -47,9 +47,7 @@ export function workspaceRoutes(app: FastifyInstance, services: Services, forget
             ? `${added.user}@${added.host}`
             : added.kind === 'direct'
               ? added.endpoint
-              : added.kind === 'paired'
-                ? 'paired machine'
-                : 'this computer',
+              : machineSetupLabels[added.kind],
       },
     })
     return reply.code(201).send(added)
@@ -111,7 +109,7 @@ export function workspaceRoutes(app: FastifyInstance, services: Services, forget
     async (request, reply) => {
       const context = await services.context(request, request.params.targetId)
       if (context.target.kind === 'paired' || context.target.kind === 'direct')
-        throw new AppError('Install the required software on the paired machine, then check again.', 409)
+        throw new AppError('Install the required software on this machine, then check again.', 409)
       return reply.code(202).send(await installations.start(context, request.body.softwareId, request.body.script))
     },
   )

@@ -66,7 +66,7 @@ async function signal(type: string, payload: unknown) {
     { type: 'signal', signal: { type, payload } },
     15_000,
   )
-  if (!result) throw new Error('No Outpost terminal is connected to this session.')
+  if (!result) throw new Error('No terminal client is connected to this session.')
   if (!result.ok) throw new Error(result.message ?? 'Outpost did not accept the signal.')
 }
 

@@ -3,14 +3,14 @@
 ![Outpost — keep the session, keep your flow.](docs/images/banner.png)
 
 Outpost keeps your **Claude Code, Codex, Kimi Code and Antigravity CLI** sessions running in persistent terminals
-on your Linux machines, and lets you come back to them from your browser or
+on your Linux machines, and lets you come back to them from the web terminal or
 Outpost Desktop — with paste, copy, Shift+Enter and links working as if
 the agent ran on your computer.
 
 **DeepSeek Harness** also runs in Outpost Chat, with named persistent sessions,
 default Outpost MCP tools and cross-machine history search.
 
-- **One Connect button.** Choose the web terminal or Outpost Desktop for macOS and Windows. Both share the terminal UI and connection path.
+- **One Connect button.** Choose the web terminal or Outpost Desktop for macOS and Windows. Both attach to the same machine-owned session.
 - **Feels native.** Paste screenshots with your normal paste shortcut and the agent receives the image. Shift+Enter inserts a newline. Text the agent copies lands on your clipboard. Links it opens open in your browser.
 - **Managed sessions outlive connections.** Close the tab or lose Wi-Fi; the agent keeps working. Reconnect from any computer or your phone, to the same process.
 - **Local terminals, too.** Outpost Desktop opens your local shell alongside managed sessions, with shared tabs, splits and clipboard controls. Local tabs work offline and end when closed.
@@ -26,14 +26,14 @@ default Outpost MCP tools and cross-machine history search.
 
 | Where | What you need |
 | --- | --- |
-| Machines — where sessions run | Linux with Bash and Outpost Terminal, reachable over SSH as any user you choose (no root access needed). The computer running Outpost can be one too when it runs Linux (including WSL). Outpost can install missing software for you. |
+| Machines — where sessions run | Linux (including WSL), Bash and the Outpost machine service. Choose a connection setup below. |
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Web terminal | Any current browser, including on phones. |
 | Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Native GPUI terminal with local shells and managed Outpost sessions. |
 
 For corporate machines that cannot open an outbound Outpost connection, choose
 **Direct only** when adding the machine. The client connects to its HTTPS
-endpoint. See [installation, ownership and cleanup](docs/ARCHITECTURE.md#installing-and-removing-a-machine)
+endpoint. See the [V3 glossary](docs/ARCHITECTURE.md#v3-terminology), [installation, ownership and cleanup](docs/ARCHITECTURE.md#installing-and-removing-a-machine)
 and [direct-only setup](docs/ARCHITECTURE.md#direct-only-machines).
 
 ## Run the local tool
@@ -91,7 +91,7 @@ starts it in chat. **Continue in chat** or **Continue in a terminal**, in the
 session's **…** menu in either view, ends the coding tool where it runs and
 continues the same conversation in the other. Both views offer the same session
 actions in the same order. Outpost
-Desktop opens chat in its own window (**Chat** next to a signed-in server, or
+Desktop opens chat in the system browser (**Chat** next to a signed-in server, or
 **File → Chat**). Chat uses each tool's [Agent Client Protocol](https://agentclientprotocol.com)
 server; Claude Code's is installed from Required software. See
 [docs/CHAT.md](docs/CHAT.md) for how it works.
@@ -417,7 +417,7 @@ are **32 MiB per file**, **100 files**, and **256 MiB total per session**.
 PNG, JPEG, GIF and WebP have previews; other formats are available to download.
 Local shell tabs do not have this session file list.
 
-Outpost's MCP server is part of Outpost Terminal, and every managed agent gets
+Outpost's MCP server is part of Outpost machine service, and every managed agent gets
 it, in a terminal or in chat. Codex and Claude receive launch-specific MCP
 configuration, and chat passes the same server over ACP. Kimi and Antigravity
 use their native Outpost plugins, which also report activity. Their MCP servers
@@ -486,7 +486,7 @@ across all of its conversations.
 DeepSeek history reads `$DSH_HOME/sessions` on each machine, including root and
 subagent logs in formats v0–v4, raw JSONL and concatenated Zstandard frames.
 Only the highest retained generation is scanned. Native files remain unchanged;
-compressed input is decoded in memory by Outpost Terminal on the machine, capped
+compressed input is decoded in memory by Outpost machine service on the machine, capped
 at 256 MiB per file. An incomplete final frame
 is retried after the native log changes. Use `tool: "deepseek"` to filter it.
 
@@ -543,10 +543,11 @@ Build and run the native app from a checkout with the commands in
 
 ## Run a hosted service
 
-Set `OUTPOST_MODE=hosted`. Users sign up with a verified email, get their own
-workspace and an Ed25519 SSH key that they authorize on their servers, in
-`~/.ssh/authorized_keys` of the user each machine's sessions run as. Web terminal and Outpost Desktop work exactly as in local mode, connecting
-to the hosted server.
+Set `OUTPOST_MODE=hosted`. Each verified account gets its own workspace.
+For an SSH machine, add the account’s Ed25519 public key to
+`~/.ssh/authorized_keys` for the Linux user that runs the sessions.
+Relay-enabled machines use pairing codes. Direct-only machines use offline enrollment.
+Both terminal clients sign in through the hosted Outpost server.
 
 ```dotenv
 OUTPOST_MODE=hosted
@@ -579,24 +580,24 @@ instance per data directory.
 
 ## How it works
 
-The client opens every managed terminal. A session runs in a persistent PTY on
-its machine. Terminal input, output, published files and image paste use the
+The **terminal client** (Outpost Desktop or the web terminal) attaches to a **session** on a **machine**. The **Outpost machine service** (`outpost-terminal`) runs the coding agent there. The machine enrolls with one Outpost server. Terminal input, output, published files and image paste use the
 selected attachment.
 
 | Machine configuration | How the session is reached |
 | --- | --- |
 | Direct only | The client obtains authorization from Outpost and connects to the machine’s HTTPS endpoint. The machine verifies the grant locally. |
-| Paired with relay | The machine maintains an outbound link to Outpost. A reachable direct endpoint is preferred. Otherwise the server relays the attachment. |
-| Managed SSH or local shell | Outpost starts the machine node through SSH or a local login shell. |
+| Relay enabled | The machine maintains an outbound link to Outpost. A reachable direct endpoint is preferred. Otherwise the server relays the attachment. |
+| SSH | The client uses the Server-managed route. The Outpost server reaches the machine over SSH. |
+| On the Outpost server | The client uses the Server-managed route. Sessions run on the Linux system running the Outpost server. |
 
-**Required software → Outpost Terminal → Install** downloads the matching Linux
+**Required software → Outpost machine service → Install** downloads the matching Linux
 executable into `~/.outpost/bin`, verifies its SHA-256 checksum and installs it
 atomically. x86_64 and ARM64 machines with glibc or musl are supported. The runtime
 is bundled; machines need neither Node.js nor Bun. Minimal musl installations also
 receive the system `libstdc++` package. Running sessions keep their processes
 when the executable is replaced.
 
-The **Outpost Terminal** GitHub Actions workflow is manual. Enable **Publish**
+The **Outpost machine service** GitHub Actions workflow is manual. Enable **Publish**
 to create the versioned release the installer downloads. See
 [machine/RELEASE_NOTES.md](machine/RELEASE_NOTES.md) for what it contains, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 protocol and ownership model.
@@ -604,7 +605,7 @@ protocol and ownership model.
 ## Development
 
 ```sh
-npm run build:terminal   # build Outpost Terminal before machine, integration and browser tests
+npm run build:terminal   # build Outpost machine service before machine, integration and browser tests
 npm run check            # lint, typecheck, build, unit and machine tests
 npm run test:integration # persistent PTYs: this computer and SSH in Docker
 npx playwright install chromium webkit

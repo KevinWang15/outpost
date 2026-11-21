@@ -1,4 +1,4 @@
-// A paired machine dials one configured deployment. Only the Outpost node
+// A relay-enabled machine dials one configured deployment. Only the Outpost node
 // protocol is carried on this link. Each reconnect starts a fresh node while
 // the machine's terminal and chat processes keep their sessions.
 import { spawn } from 'node:child_process'
@@ -30,12 +30,12 @@ async function readLine(prompt: string) {
   throw Error('Expected installation input.')
 }
 export async function installDirect() {
-  const config = validateDirect(JSON.parse(await readLine('Direct installation JSON: ')))
+  const config = validateDirect(JSON.parse(await readLine('Offline enrollment JSON: ')))
   await installationLock(async () => {
     await requireUnpaired()
     writeInstallation(config)
   })
-  console.log('Direct-only machine installed. Run outpost-terminal connect.')
+  console.log('Direct-only machine enrolled. Run outpost-terminal connect.')
 }
 export async function pairTarget(address: string) {
   const origin = desktopOrigin(address)
@@ -61,7 +61,7 @@ export async function pairTarget(address: string) {
       socket: pair.socket,
     })
   })
-  console.log('Paired. Run outpost-terminal connect to keep this machine online.')
+  console.log('Relay-enabled machine enrolled. Run outpost-terminal connect to keep this machine online.')
 }
 
 function connectOnce(pair: RelayInstall, signal: AbortSignal): Promise<boolean> {
@@ -138,7 +138,7 @@ function connectOnce(pair: RelayInstall, signal: AbortSignal): Promise<boolean> 
 }
 export async function runConnector() {
   const initial = installation()
-  if (!initial || (initial.mode !== 'relay' && initial.mode !== 'direct')) throw Error('Pair this machine first.')
+  if (!initial || (initial.mode !== 'relay' && initial.mode !== 'direct')) throw Error('Enroll this machine first.')
   return runtimeLock(async () => {
     const pair = installation()
     if (!pair || pair.generation !== initial.generation || (pair.mode !== 'relay' && pair.mode !== 'direct'))

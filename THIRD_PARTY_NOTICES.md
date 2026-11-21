@@ -21,7 +21,7 @@ retain the license notices supplied with their distributions in `node_modules`.
 
 - The [Agent Client Protocol SDK](https://github.com/agentclientprotocol/typescript-sdk)
   (`@agentclientprotocol/sdk`) is distributed under the Apache License 2.0.
-- Outpost Terminal bundles [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp)
+- Outpost machine service bundles [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp)
   (Apache License 2.0), fetched at build time at the version and integrity in
   `shared/chatAgents.json`; its license is kept beside it in `machine/vendor/`.
   Codex itself is not bundled.

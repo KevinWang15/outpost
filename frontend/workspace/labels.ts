@@ -1,4 +1,4 @@
-import type { Session, Target } from '../../shared/model'
+import { machineSetupLabels, type Session, type Target } from '../../shared/model'
 import { pagePaths } from '../../shared/pages'
 
 export const shortVersion = (version: string | null) => version?.match(/\d+(?:\.\d+)+[a-z]?/)?.[0] ?? version ?? ''
@@ -14,14 +14,14 @@ export function relativeTime(value: string | null) {
 
 export const address = (target: Target) =>
   target.kind === 'direct'
-    ? 'Direct only · ' + target.endpoint
+    ? machineSetupLabels.direct + ' · ' + target.endpoint
     : target.kind === 'paired'
-      ? 'Paired machine'
+      ? machineSetupLabels.paired
       : target.kind === 'ssh'
         ? `${target.user}@${target.host}${target.port ? `:${target.port}` : ''}`
         : target.environment?.username
-          ? `${target.environment.username} on this computer`
-          : 'This computer'
+          ? `${target.environment.username} on the Outpost server`
+          : machineSetupLabels.local
 
 /** Where a session runs now, in the words both modes use. */
 export function placeLabel(session: Pick<Session, 'driver' | 'status'>) {

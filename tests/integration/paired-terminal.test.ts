@@ -37,7 +37,7 @@ for (const directOnly of [false, true])
   test(
     directOnly
       ? 'direct-only enrollment, discovery, terminal, transfers and local revocation without machine egress'
-      : 'paired target chooses direct, resumes through relay and revokes both paths',
+      : 'relay-enabled machine chooses direct, resumes through relay and revokes both paths',
     {
       skip: !bun && !(existsSync(executable) && (process.env.TEST_TERMINAL || process.platform === 'linux')),
       timeout: directOnly ? 75000 : 45000,
@@ -267,7 +267,7 @@ for (const directOnly of [false, true])
               resolve(false)
             })
           })
-          assert.ok(rejected, 'paired endpoint rejects untrusted browser origins')
+          assert.ok(rejected, 'relay-enabled machine rejects untrusted browser origins')
         }
         const transfer = async () => {
           const listed = await client.listFiles(AbortSignal.timeout(5000))

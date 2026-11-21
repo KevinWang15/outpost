@@ -91,7 +91,7 @@ export async function requireUnpaired() {
   const current = installation()
   if (current)
     throw Error(
-      'This machine already has an owner. Stop its Outpost service and run outpost-terminal unpair before changing servers.',
+      'This machine already has an owner. Stop the Outpost machine service and run outpost-terminal unpair before changing servers.',
     )
   await runtimeLock(() => {})
   await nodeLock(() => {}, 300)
@@ -105,7 +105,7 @@ export function validateDirect(value: unknown): DirectInstall {
     typeof c.publicKey !== 'string' ||
     c.publicKey.length > 128
   )
-    throw Error('Invalid direct installation.')
+    throw Error('Invalid offline enrollment configuration.')
   new DirectTickets(c.publicKey, c.targetId)
   return {
     mode: 'direct',
@@ -132,7 +132,7 @@ async function removableExecutable() {
 }
 export async function unpair(removeExecutable = false) {
   if (!removeExecutable && !existsSync(hostDirectory())) {
-    console.log('Machine is unpaired.')
+    console.log('Machine is not enrolled.')
     return
   }
   const previous = await installationLock(async () => {
@@ -159,10 +159,12 @@ export async function unpair(removeExecutable = false) {
       })
       if (!r.ok && r.status !== 401) throw Error()
     } catch {
-      console.error('Local credential removed. Remove the target in the old workspace to revoke its server credential.')
+      console.error(
+        'Local credential removed. Remove the machine from the old workspace to revoke its server credential.',
+      )
     }
   }
-  if (removeExecutable) console.log('Removed the managed Outpost Terminal executable.')
+  if (removeExecutable) console.log('Removed the managed Outpost machine service executable.')
   console.log('Machine disconnected. Remove its entry from the old workspace. Session data is kept.')
 }
 export function watchInstallation(record: Installation, onChange: () => void) {

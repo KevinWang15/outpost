@@ -163,7 +163,10 @@ export class TerminalBroker {
         direct,
       )
       if ((stream.opened as { route?: string } | null)?.route !== 'direct')
-        connection.send({ type: 'route-selected', route: 'relay' })
+        connection.send({
+          type: 'route-selected',
+          route: context.target.kind === 'paired' ? 'relay' : 'server-managed',
+        })
       connection.start(stream)
     } catch (error) {
       const failure = terminalFailure(error)

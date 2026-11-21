@@ -254,7 +254,7 @@ export class Connection<Identity> {
       } catch (error) {
         return reply(false, (error as Error).message)
       }
-      if (this.socket.readyState !== WebSocket.OPEN) return reply(false, 'The Outpost terminal disconnected.')
+      if (this.socket.readyState !== WebSocket.OPEN) return reply(false, 'The terminal client disconnected.')
       this.send({ type: 'signal', signal: { type: signal!.type as string, payload } })
       reply(true)
     } else if (message.type === 'exit' && message.reason === 'ended') {

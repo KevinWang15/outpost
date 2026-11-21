@@ -354,7 +354,7 @@ export class Codex extends Harness {
   }
 
   chat(executable: string) {
-    // The pinned Codex ACP adapter is bundled in Outpost Terminal.
+    // The pinned Codex ACP adapter is bundled in Outpost machine service.
     return { command: [machineExecutable(), 'agent', 'codex'], env: { CODEX_PATH: executable, NO_BROWSER: '1' } }
   }
 }

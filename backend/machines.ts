@@ -136,7 +136,7 @@ export class MachineConnection {
     this.sawMagic = false
     this.started = false
     const timer = setTimeout(() => {
-      if (this.incoming === stream) this.lost('The paired target did not finish its handshake.')
+      if (this.incoming === stream) this.lost('The relay-enabled machine did not finish its handshake.')
     }, 10_000).unref()
     this.writer = new BoundedWriter(stream, 64 * 1024 * 1024, 30_000, message => this.lost(message))
     stream.on('data', (bytes: Buffer) => {
@@ -144,12 +144,12 @@ export class MachineConnection {
       try {
         this.output(bytes, () => {}, timer)
       } catch {
-        this.lost('The paired target sent an invalid node message.')
+        this.lost('The relay-enabled machine sent an invalid node message.')
       }
     })
     const ended = () => {
       clearTimeout(timer)
-      if (this.incoming === stream) this.lost('The paired target disconnected.')
+      if (this.incoming === stream) this.lost('The relay-enabled machine disconnected.')
     }
     stream.on('error', ended)
     stream.once('close', ended)
@@ -159,7 +159,8 @@ export class MachineConnection {
   /** Connect if needed; resolves once the node said hello. */
   private connect() {
     if (this.closed) return Promise.reject(new MachineError('Outpost is restarting. Try again shortly.', 503))
-    if (this.incoming && !this.started) return Promise.reject(new MachineError('The paired target is connecting.', 503))
+    if (this.incoming && !this.started)
+      return Promise.reject(new MachineError('The relay-enabled machine is connecting.', 503))
     if ((this.child || this.incoming) && this.started) return Promise.resolve()
     this.starting ??= new Promise<void>((resolve, reject) => {
       const command = this.transport.login(`exec "$HOME/.outpost/bin/outpost-terminal" node --socket ${this.socket}`)
@@ -206,7 +207,7 @@ export class MachineConnection {
           }
           const message = !this.started
             ? code === 127 || code === 126 || /outpost-terminal: (not found|No such file)/.test(stderr)
-              ? 'Outpost Terminal is missing on this machine. Open Required software to install it.'
+              ? 'Outpost machine service is missing on this machine. Open Required software to install it.'
               : stderr.split('\n').at(-1) || 'Could not connect to the machine. Check access and Required software.'
             : 'The connection to the machine was lost.'
           this.lost(message)
@@ -250,7 +251,7 @@ export class MachineConnection {
         if (this.started) return this.lost('Duplicate machine handshake.')
         clearTimeout(timer)
         if (message.version !== terminalService.version || message.protocol !== machineProtocol) {
-          const problem = `This machine runs Outpost Terminal ${message.version}; ${terminalService.version} is required. Open Required software to install it.`
+          const problem = `This machine runs Outpost machine service ${message.version}; ${terminalService.version} is required. Open Required software to install it.`
           this.lost(problem, 409)
           return
         }
@@ -402,7 +403,7 @@ export class MachineConnection {
   }
   /** Drop the current connection; the next use starts a new node (after an update). */
   restart() {
-    this.lost('Outpost Terminal was updated. Reconnecting…')
+    this.lost('Outpost machine service was updated. Reconnecting…')
   }
 }
 

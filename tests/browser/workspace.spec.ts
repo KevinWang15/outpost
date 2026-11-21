@@ -8,7 +8,7 @@ async function addMachine(page: Page, name: string) {
   await page.goto('/')
   await page.getByRole('button', { name: 'Add a machine' }).first().click()
   const dialog = page.getByRole('dialog', { name: 'Add a machine' })
-  await dialog.getByRole('radio', { name: 'This computer' }).click()
+  await dialog.getByRole('radio', { name: 'On the Outpost server' }).click()
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByText('Codex').click()
   await dialog.getByRole('button', { name: 'Add machine' }).click()

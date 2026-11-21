@@ -188,7 +188,7 @@ for (const gpu of [false, true]) {
       expect(await positions()).not.toEqual(before)
     })
 
-    test('actual Outpost Terminal output and reattachment keep search aligned', async ({ page }) => {
+    test('actual Outpost machine service output and reattachment keep search aligned', async ({ page }) => {
       const service = await searchService()
       try {
         await mount(page, true, gpu)

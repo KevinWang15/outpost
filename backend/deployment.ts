@@ -130,7 +130,7 @@ export class LocalDeployment implements Deployment {
   }
   validateTarget(input: TargetInput) {
     if (input.kind === 'local' && !this.localTargets)
-      throw new AppError('This computer can run sessions when the Outpost server runs on Linux, including WSL.', 400)
+      throw new AppError('Running sessions on the Outpost server requires Linux, including WSL.', 400)
   }
   register(app: FastifyInstance) {
     app.get('/api/auth/session', async () => ({ mode: 'local', user: null }))

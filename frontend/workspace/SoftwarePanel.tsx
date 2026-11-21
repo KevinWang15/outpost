@@ -7,12 +7,12 @@ import { shortVersion } from './labels'
 
 /** Required software, checked live on the machine. Collapsed to one line when everything is ready. */
 export default function SoftwarePanel({
-  paired,
+  manualInstall,
   targetId,
   state,
   onInstalled,
 }: {
-  paired?: boolean
+  manualInstall?: boolean
   targetId: string
   state: ReturnType<typeof useSoftware>
   onInstalled: () => void
@@ -85,7 +85,7 @@ export default function SoftwarePanel({
                         : shortVersion(item.version)}
                   </span>
                   <code title={item.path ?? ''}>{item.path ?? ''}</code>
-                  {item.status !== 'installed' && !paired && (
+                  {item.status !== 'installed' && !manualInstall && (
                     <button
                       className="button small"
                       disabled={job?.status === 'running'}
@@ -107,8 +107,8 @@ export default function SoftwarePanel({
               </button>
             </p>
           )}
-          {paired && problems.length > 0 && (
-            <p className="hint">Install the missing tools on the paired machine, then check again.</p>
+          {manualInstall && problems.length > 0 && (
+            <p className="hint">Install the missing tools on this machine, then check again.</p>
           )}
           <p className="hint">Checked in the machine’s login shell. Coding tools sign in when you first connect.</p>
         </div>

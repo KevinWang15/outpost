@@ -166,7 +166,9 @@ async function daemon(
     await new Promise(resolve => setTimeout(resolve, 50))
   }
   child.kill()
-  throw new RegistryError(`${failure}: it did not become ready. Open Required software to reinstall Outpost Terminal.`)
+  throw new RegistryError(
+    `${failure}: it did not become ready. Open Required software to reinstall Outpost machine service.`,
+  )
 }
 
 export async function startTerminal(session: SessionRecord, cols: number, rows: number) {

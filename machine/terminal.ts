@@ -238,7 +238,7 @@ export async function serveTerminal() {
           sendControl(socket, {
             type: 'result',
             ok: false,
-            message: 'No Outpost terminal is connected to this session.',
+            message: 'No terminal client is connected to this session.',
           })
           return socket.end()
         }
@@ -294,7 +294,7 @@ export async function serveTerminal() {
           } else if (message.type === 'attach' && !attached) {
             if (message.protocol !== terminalService.protocol)
               throw new Error(
-                'Terminal service protocol mismatch; install the current Outpost Terminal and restart this session',
+                'Terminal service protocol mismatch; install the current Outpost machine service and restart this session',
               )
             if (!terminalSize(message.cols, message.rows)) throw new Error('Invalid terminal size')
             // A raw full-width checkpoint can hold about 50 MiB of cells. Bound
@@ -471,7 +471,7 @@ export async function serveTerminal() {
     deliveries.exited()
     for (const { socket, timer } of signals.values()) {
       clearTimeout(timer)
-      sendControl(socket, { type: 'result', ok: false, message: 'The Outpost terminal disconnected.' })
+      sendControl(socket, { type: 'result', ok: false, message: 'The terminal client disconnected.' })
       socket.end()
     }
     for (const client of clients.values()) client.attachment.end()

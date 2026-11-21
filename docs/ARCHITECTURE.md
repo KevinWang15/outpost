@@ -3,49 +3,56 @@
 Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code, DeepSeek Harness, Antigravity CLI)
 running on Linux machines, in persistent PTYs or as chats, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
 
-This document is the source of truth for how Outpost behaves and why. Code
-comments refer back to the principles below by name. A *target* is a machine
-where sessions run; the code and API say target (`/api/targets`,
-`TargetContext`), the interface says machine.
+## V3 terminology
+
+| Term | Meaning |
+| --- | --- |
+| Terminal client | Outpost Desktop or the web terminal. The client initiates an **attachment** to a session. |
+| Outpost server | The deployment that owns the workspace, authorizes clients and can relay an attachment. |
+| Machine | The Linux system that runs coding agents. A **target** (`Target`, `/api/targets`) is its workspace record. |
+| Outpost machine service | The `outpost-terminal` executable installed on a machine. Its **node** process (`outpost-terminal node`) handles the server’s management connection on server-managed and relay-enabled machines. |
+| Session | The machine-owned workspace for one coding agent. Its terminal process can keep running after a client detaches. |
+| Enrollment | Binding a machine to one Outpost server and execution account. A pairing code enrolls a relay-enabled machine. Offline enrollment uses a verification key for a direct-only machine. |
+| Connection route | The path carrying an active terminal attachment. **Direct** connects client to machine. **Relay** uses the machine’s outbound connection to the server. **Server-managed** uses SSH or runs on the Outpost server itself. |
 
 ## Principles
 
-1. **The target owns the terminal.** A dedicated `outpost-terminal` process
+1. **The machine owns the terminal.** A dedicated `outpost-terminal` process
    owns each coding session's PTY, screen and 10,000-line in-memory scrollback.
    Clients and connections are disposable. Reconnect restores a checkpoint and then
    follows live output; disconnect never terminates the session.
-2. **The client opens each attachment.** For a paired machine, both client and target
+2. **The client opens each attachment.** For a relay-enabled machine, both client and machine
    connect out to the same deployment. The server authorizes the requested session.
    A reachable advertised endpoint carries terminal data directly. Otherwise the
-   server relays it through the target's existing outbound connection.
+   server relays it through the machine's existing outbound connection.
 
    ```text
-   Direct data     client → target → session PTY
-   Relayed data    client → public Outpost server ← paired target → session PTY
+   Direct data     client → machine → session PTY
+   Relayed data    client → public Outpost server ← relay-enabled machine → session PTY
    ```
 
    Arrows show who opens the connection. Data flows both ways on each link.
-   SSH and local-shell targets use the existing server-to-node transport.
+   For server-managed machines, the server starts the node over SSH or on its own Linux system.
 
    Hosted and local server installations run the same code. Desktop local shells
    use a native PTY on the user's computer; they have no broker, authentication,
    remote service or persistence daemon. For a managed session the selected
    attachment carries file lists, published bytes, removals and image uploads.
-   Each upload or download request can carry at most 64 KiB of file content each. The client waits for the target
+   Each upload or download request can carry at most 64 KiB of file content each. The client waits for the machine
    to confirm a complete image before pasting its path.
 
 3. **Outpost authorizes each attachment.** On the direct route, the client
    holds a server control socket for revocation and reconnect grants. Terminal
-   input, output, image paste and file operations use the client-to-target socket.
+   input, output, image paste and file operations use the client-to-machine socket.
 4. **Modes differ only in identity.** A *deployment* answers four questions:
    who owns this request, where is their workspace stored, which SSH identity
-   do they use, and may they use this computer as a target. Everything else —
+   do they use, and may sessions run on the Outpost server. Everything else —
    sessions, software, terminals, the UI — is mode-agnostic.
-5. **One installed machine dependency.** Required software installs Outpost
-   Terminal, a versioned, self-contained Linux executable in `~/.outpost/bin`.
+5. **One installed machine dependency.** Required software installs the Outpost
+   machine service, a versioned, self-contained Linux executable in `~/.outpost/bin`.
    It is everything Outpost runs on a machine: the node, terminal services, chat
    hosts, the MCP server and hooks. Its processes run as the machine's user and
-   use private Unix sockets for local communication. A paired target optionally
+   use private Unix sockets for local communication. A relay-enabled machine optionally
    exposes a direct terminal endpoint through its HTTPS reverse proxy.
 6. **The client shims the platform.** Making a remote session feel native
    (paste an image with the usual shortcut, Shift+Enter for a newline, copying
@@ -84,14 +91,13 @@ where sessions run; the code and API say target (`/api/targets`,
 | --- | --- | --- |
 | `frontend/` | Browser | Workspace UI, Connect dialog, web terminal client |
 | `backend/` | Outpost server | HTTP API, deployments, transports, machine connections, terminal broker, chat and history hubs |
-| `machine/` | Linux machines | Outpost Terminal: node, session registry, terminal service, chat host, MCP server, harness adapters |
+| `machine/` | Linux machines | Outpost machine service: node, session registry, terminal service, chat host, MCP server, harness adapters |
 | `desktop/` | Your computer | GPUI workspace, native PTYs, server accounts, trust and installers |
 | `shared/` | Browser + desktop + server | Schemas, harness registry, terminal protocols and desktop account contracts |
 
 **One definition per contract.** Request and stored-record shapes are TypeBox
 schemas in `shared/schemas.ts`; the server and the machine validate with them,
-and the types in `shared/model.ts` are derived from them. The server and
-Outpost Terminal share the rest of `shared/` too: framing, the node protocol
+and the types in `shared/model.ts` are derived from them. The server and the Outpost machine service share the rest of `shared/` too: framing, the node protocol
 (`shared/machine.ts`), the chat host protocol and the harness registry.
 `tests/unit/contracts.test.ts` checks that every registered harness has a
 machine adapter. Browser entry paths live in
@@ -102,7 +108,7 @@ browser page must be registered there so development and production agree.
 
 | Role | Supported |
 | --- | --- |
-| Targets (where sessions run) | Linux with Bash, `setsid` (util-linux) and Outpost Terminal; Git for forks. SSH as the user named for the target (root is not required), or the Outpost computer itself when the server runs on Linux (including WSL). |
+| Machines (where sessions run) | Linux with Bash, `setsid` (util-linux) and Outpost machine service; Git for forks. Choose Relay enabled, Direct only, SSH or On the Outpost server (Linux, including WSL). |
 | Outpost server | Node.js 24+ with OpenSSH, on Linux (including WSL) or macOS. Hosted deployments run on Linux. |
 | Web terminal | Any current browser, including phones. |
 | Outpost Desktop | GPUI desktop for macOS arm64/x64 and Windows x64. |
@@ -123,11 +129,11 @@ except that hosted adds account routes.
 | Owner | The single local user | A verified account and login session |
 | Workspace | `DATA/workspace.json` | `DATA/users/<id>/workspace.json` |
 | SSH identity | Your OpenSSH config, agent and keys | A per-account Ed25519 key and known-hosts file |
-| Local targets | Yes, when the server runs on Linux | No |
+| Local machines | Yes, when the server runs on Linux | No |
 | Network | Loopback only | Behind an HTTPS reverse proxy |
 
 `backend/deployment.ts` defines the interface; `backend/hosted/` implements the
-account side. Routes receive an owner and a resolved target context; they never
+account side. Routes receive an owner and a resolved machine context; they never
 branch on the mode.
 
 ## Terminal data path
@@ -145,7 +151,7 @@ window blur and page visibility before sending the OS intent. Retry/download hel
 appears after two seconds only if the browser stays focused and the user has not
 continued working in the web UI. Leaving the browser dismisses any help and ends
 the observer; returning never reopens it. Closing, retrying, choosing another
-terminal, or changing targets cancels the timer and listeners. These signals are
+terminal, or changing machines cancels the timer and listeners. These signals are
 UX hints, not acknowledgement that the app connected. Remembered launches skip
 help entirely; synchronous launch errors reopen the chooser. No browser polling
 or terminal credential is needed to ask the app to connect.
@@ -177,7 +183,7 @@ authentication or desktop trust confirmation.
    Grants remain bound to their issuing login and one session; revoking that
    login closes its live connections. Resume tokens stay in memory, never in
    OS links or page URLs. Proxies must not log WebSocket query strings.
-5. `desktopSessionId` defines routing identity as server, account, target and
+5. `desktopSessionId` defines routing identity as server, account, machine and
    session, independently of login lifetime. Reopening activates the existing
    pane across windows. A connected pane consumes a fresh launch with `activate`
    on its existing socket; a renewed app login reloads the same pane with its
@@ -348,7 +354,7 @@ worker (`public/terminal-notifications.js`, scope `/terminal`). Registration and
 activation have deadlines; failures leave a retryable notice. The worker has no
 fetch handler, cache, background session, or Push subscription. Notification
 clicks focus the matching web terminal or open its normal authenticated page;
-data contains only target/session identifiers, never launch/resume credentials.
+data contains only machine/session identifiers, never launch/resume credentials.
 Pending notifications are cancelled by generation on acknowledgement/disposal,
 and an old notification's cleanup cannot close a newer notification with the same
 session tag. Browsers without service workers retain the page Notification path.
@@ -394,6 +400,7 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `draft {active}` | The message box has text; messages from other sessions wait until it is sent or cleared |
 | → server | `deliver-now` | Type the next waiting message in once the agent is idle |
 | ← client | `hello {resume, session, target}` | Connection accepted |
+| ← client | `route-selected {route}` | Active path for a server-managed or relay-enabled machine. Direct-only enrollment fixes the route to Direct. |
 | ← client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
 | ← client | `geometry {cols, rows}` | Shared terminal dimensions, applied before subsequent output |
 | ← client | `clear` | Clear the screen at this point in the ordered output stream |
@@ -413,10 +420,10 @@ user action, such as installing a missing helper or restarting an incompatible
 service. The broker preserves the node's HTTP error status through a single failure
 classifier, shared with API lookup failures. A missing session or exited process is `ended`;
 authentication errors are `expired`; other permanent request/setup errors are
-`unavailable`. Transport failures, timeouts and target RPC throttling remain retryable.
+`unavailable`. Transport failures, timeouts and machine RPC throttling remain retryable.
 Input congestion and WebSocket policy violations require explicit reconnection;
 the client does not repeatedly retry rejected input.
-An explicit Reconnect is available after the user repairs an unavailable target.
+An explicit Reconnect is available after the user repairs an unavailable machine.
 
 The coding process owns session lifetime. The Linux helper observes
 `Subprocess.exited`; the reusable Bun PTY's `exit` callback only reports stream
@@ -432,27 +439,26 @@ never automatically restarts a tool that deliberately exited.
 **Current contracts.** Both clients send `protocolVersion` from `shared/protocol.ts`.
 A mismatch returns `outdated` before redeeming the launch ticket and asks the
 client to update. Connection grants authorize an owner/login,
-target and session independently of the selected UI.
+machine and session independently of the selected UI.
 
 ### Machine connection (server ⇄ node)
 
-`backend/machines.ts` keeps one node link per account and target. For SSH and
-local targets the server starts the node on first use. A paired target starts
+`backend/machines.ts` keeps one node link per account and machine. For SSH and
+local machines the server starts the node on first use. A relay-enabled machine starts
 its own node and registers an authenticated WebSocket at `/api/paired/node`.
 The link carries session management, chat, relay attachments and agent calls.
 
 #### Installing and removing a machine
 
-Outpost Terminal reserves **one Linux host, one execution account, one
-server/target identity**. The ordinary executable still lives in
+Each Linux machine enrolls with one Outpost server under one execution account. The ordinary executable still lives in
 `~/.outpost/bin/outpost-terminal`. A private installation record in
 `/var/lib/outpost-machine/machine.json` binds the account’s session directory to
-its owner and transport. SSH/local nodes and paired connectors check the same
+its owner and transport. Server-managed nodes and relay-enabled connectors check the same
 record. Removing an entry in the server UI revokes server access. Releasing
 the host for a new installation also requires action on the host.
 
-The SSH/local **Required software** installer creates the host directory on
-first installation. For a manually installed paired or direct-only host, run
+The server-managed **Required software** installer creates the host directory on
+first installation. For a manually installed relay-enabled or direct-only machine, run
 the following once as the intended execution user on a fresh Linux installation:
 
 ```sh
@@ -466,18 +472,18 @@ and executable only by them. A restricted machine can receive the executable
 and configuration through the company's normal offline software distribution.
 
 **Installation.** The reviewed SSH/local install script runs `pair --managed`
-with the node socket identity for this server, account and target. Starting a node
+with the node socket identity for this server, account and machine. Starting a node
 requires an installed identity that matches that socket.
 
 **Remove or transfer.** Stop and disable the connector in its service manager,
 then run `~/.outpost/bin/outpost-terminal unpair` under the execution account.
 This fences the old node/listener, clears enrollment credentials and releases its registered node socket. Relay installations also attempt to revoke their
 credential on the old server. Direct-only unpairing is entirely local. Remove
-the machine from its old workspace and, for SSH targets, remove that server's
+the machine from its old workspace and, for SSH machines, remove that server's
 SSH key if its access should end. A new installation requires explicit enrollment.
 
 To switch servers or change the host’s network policy, unpair it locally, add the
-new target in the workspace, then enroll it explicitly.
+new machine in the workspace, then enroll it explicitly.
 Existing sessions and files in the same execution account become visible to its
 new owner. For a different data owner use a fresh Linux account and session
 directory. After unpairing, the administrator can archive the disconnected host
@@ -488,10 +494,10 @@ files are retained.
 
 #### Direct-only machines
 
-Choose **Add machine → Direct only**, enter the HTTPS origin reachable by the
-client, and open **Show offline installation**. On the machine run
+In **Add a machine**, select **Direct only**, enter the HTTPS origin reachable by the
+client, and open **Show offline enrollment**. On the machine run
 `~/.outpost/bin/outpost-terminal pair --direct` and paste the JSON at the
-prompt. It contains the server origin, target ID, endpoint and a target-specific
+prompt. It contains the server origin, machine ID, endpoint and a machine-specific
 Ed25519 public verification key. Deliver it through a trusted administrative
 channel. Run `~/.outpost/bin/outpost-terminal connect` as that account.
 In this mode it listens on `127.0.0.1:8844` (overridable with
@@ -504,24 +510,24 @@ then sends each grant directly to the machine. The machine verifies it locally.
 Terminal and file bytes stay between the client and machine. A live terminal
 requires a fresh server-signed lease carried by the client every 15 seconds.
 The machine closes it when its last lease expires (45 seconds). A client that
-loses direct connectivity cannot attach through the relay. Direct-only hosts
+loses direct connectivity cannot attach through the relay. Direct-only machines
 support managing terminal sessions, image paste, and publishing files. Server
 background features such as chat, schedules and cross-machine MCP operations
 require a server-connected machine. Coding tools have their own network behavior.
 
-#### Connecting a paired target
+#### Connecting a relay-enabled machine
 
-1. Add a **Paired machine** in the workspace, then choose **Generate pairing code**.
-2. On the Linux target, use a V3 `outpost-terminal` build containing the connector.
+1. In **Add a machine**, select **Relay enabled**. Save the machine and choose **Generate pairing code**.
+2. On the Linux machine, use a V3 `outpost-terminal` build containing the connector.
    Run `~/.outpost/bin/outpost-terminal pair https://YOUR-OUTPOST-SERVER` and
    enter the single-use code within five minutes.
 3. Run `~/.outpost/bin/outpost-terminal connect` as the account that owns the sessions.
    Keep it running with your service manager. It reconnects after network loss.
-   Outbound HTTPS from the client and target to the deployment is sufficient for relay.
-4. To enable direct connections, set `OUTPOST_DIRECT_ORIGIN` to the target's
+   Outbound HTTPS from the client and machine to the deployment is sufficient for relay.
+4. To enable direct connections, set `OUTPOST_DIRECT_ORIGIN` to the machine's
    client-reachable HTTPS origin in the connector's environment. Configure that
    host's TLS reverse proxy to forward WebSocket upgrades for `/api/terminal/direct`
-   to `127.0.0.1:8844` on the target and preserve the client Origin header.
+   to `127.0.0.1:8844` on the machine and preserve the client Origin header.
    Set `OUTPOST_DIRECT_PORT` to change the loopback listener port. Restart the
    connector after changing these settings. Loopback HTTP also works for local tests.
 
@@ -532,13 +538,13 @@ session. A slow or failed probe falls back to relay before either route attaches
 the PTY. The native client shows the active route in the pane management menu.
 Hosted browsers can use endpoints present in their signed-in account's content
 security policy when the page loaded. Browser network permissions also apply.
-Deleting a target or enrolling a replacement invalidates its previous credential
+Deleting a machine or enrolling a replacement invalidates its previous credential
 and closes attachments through the old link.
 
 Login shells may print first; the node then prints the marker
 `\0OUTPOST-NODE-1\0` and a `hello` with its version and protocol. A machine
 running an incompatible version is asked to update before any operation runs.
-The host ownership check requires a matching 2.5 machine build.
+The required machine service version is defined in `shared/terminalService.ts`.
 
 Frames are length-prefixed as everywhere in Outpost (one type byte, a 4-byte
 big-endian length, the payload): `C` carries a JSON control message and `D`
@@ -573,16 +579,16 @@ Its name is an HMAC of the server secret, account and machine. The host's
 installation record pins that node identity. MCP clients read the installed
 socket for server-backed operations, and the node checks that the calling
 session exists in its registry. Direct-only machines expose local file
-publication to agents. Outpost terminal and file viewers communicate directly
+publication to agents. Terminal clients and file viewers communicate directly
 with the machine’s listener.
 
 Software inspection and installation use the separate POSIX script transport,
-which runs before Outpost Terminal is installed. Inspection loads the
+which runs before Outpost machine service is installed. Inspection loads the
 interactive login environment to discover the same tools as session launches.
 Installation loads login profiles noninteractively, then runs the submitted
 script with `sh -s`. Batch installers have no controlling terminal and must not
 initialize interactive shell job control. Their stdout and stderr are streamed
-unchanged; the Outpost Terminal installer reports its download and verification
+unchanged; the Outpost machine service installer reports its download and verification
 stages explicitly.
 
 SSH connection sharing is a backend transport policy. Linux and macOS backends
@@ -590,7 +596,7 @@ use owner/identity-scoped control sockets with a 120-second idle lifetime.
 Windows backends always use independent connections: the transport explicitly
 sets `ControlMaster=no`, `ControlPath=none` and `ControlPersist=no`, overriding
 user SSH configuration. `OUTPOST_SSH_MULTIPLEX=0` applies the same policy on
-other platforms. This depends on the backend host, not the desktop or SSH target.
+other platforms. This depends on the backend host, not the desktop or SSH machine.
 SSH keepalives (`ServerAliveInterval=15`, three misses) end a connection whose
 network went away.
 
@@ -617,7 +623,7 @@ The node starts it detached, in its own process group, with its log in
 `~/.outpost/logs/<id>.log` and no inherited SSH stdio, so it outlives the node
 and its connection. Each session has its own process; a failure cannot take
 down every session. The service never needs Node or Bun installed separately on
-the target. Its socket is owner-only (mode 0600, in the owner-only state
+the machine. Its socket is owner-only (mode 0600, in the owner-only state
 directory): the machine's user account is the trust boundary. Besides viewers,
 it answers one-shot requests on the same socket: `status`, `stop`,
 `acknowledge`, hook events, `files` hints and signals.
@@ -680,7 +686,7 @@ ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
 This contract uses the versions declared in `shared/terminalService.ts` and `shared/protocol.ts`.
-Publish the matching Outpost Terminal before deploying the server. Replacing the
+Publish the matching Outpost machine service before deploying the server. Replacing the
 executable does not alter a running PTY service: after a service protocol
 change, existing sessions restart explicitly to use it.
 
@@ -697,7 +703,7 @@ a supervisor; the service retains the PTY master and its independent lifetime.
 Ctrl+C and other application keys pass directly through the PTY.
 
 The terminal service persists across client, SSH and Outpost server restarts.
-Its in-memory state and running processes do not survive a target reboot or
+Its in-memory state and running processes do not survive a machine reboot or
 service crash. Explicit **Stop coding tool** asks the driver to stop; if it does not
 answer, the node ends its process tree, children first, after checking that the
 PID still runs an Outpost driver. Updating the installed executable atomically
@@ -712,8 +718,8 @@ binaries for glibc and musl, plus SHA256SUMS. Publishing creates an immutable
 `terminal-v<version>` release. The Required software installer selects the
 architecture/libc, downloads that exact release, checks SHA-256 and `--version`,
 and renames the verified executable into `~/.outpost/bin/outpost-terminal`.
-It uses the existing editable installation plan, SSH/local transport and log UI.
-Minimal musl targets also receive the `libstdc++` system package.
+It uses the existing editable installation plan, server-managed transport and log UI.
+Minimal musl machines also receive the `libstdc++` system package.
 
 **Creation and forking** share the `creation` lock, serializing
 allocations without blocking operations on existing sessions. Lock order is
@@ -729,7 +735,7 @@ Forking uses a snapshot of the source settings, so deleting the source record
 during allocation does not cancel an already-started fork.
 
 Retryable creates carry a request key scoped by the server to its deployment,
-account and target. The node hashes the creation input and commits a receipt
+account and machine. The node hashes the creation input and commits a receipt
 (`creation key → input fingerprint + session ID`) in the registry's `creations`
 map in the same atomic write as the session. Replays under the creation lock
 return the existing session; different input with the same key is rejected.
@@ -1020,7 +1026,7 @@ concurrent chat downloads to two per owner and four in total.
 
 After committing a file, the MCP server sends the session's driver a
 best-effort hint, which the driver passes to its viewers.
-The broker validates it and broadcasts to every viewer of that owner's target
+The broker validates it and broadcasts to every viewer of that owner's machine
 and managed session. The receipt means **stored**, not delivered to a viewer.
 The files themselves are durable; they can be published with no attached client.
 Clients load the list on connection, refresh on hints and visibility changes,
@@ -1101,9 +1107,9 @@ embeddings and background backfill. It reads each machine through its machine
 connection (`history.catalog`, `history.read`, `history.message`), and agents'
 history tool calls arrive on the same connections. `Deployment.historyOwners()`
 supplies verified owners without history code branching on deployment mode.
-Calls enumerate the owner's current workspace each time, so removed targets and
+Calls enumerate the owner's current workspace each time, so removed machines and
 other accounts cannot be read through cached results or cursors. Offline
-targets retain explicitly identified cached history. The embedding model is
+machines retain explicitly identified cached history. The embedding model is
 shared; conversation indexes are not.
 
 History reads use the harness adapters' native-store readers on the machine
@@ -1160,7 +1166,7 @@ history messages), conversation allocation, activity markers, launch arguments
 their timeline names the native conversations, so a session resumes its
 current conversation.
 
-## Target state
+## Machine state
 
 | Data | Location |
 | --- | --- |
@@ -1176,7 +1182,7 @@ current conversation.
 | Kimi Code plugin | `~/.outpost/integrations/kimi/` |
 | Antigravity CLI plugin | `~/.outpost/integrations/antigravity/` |
 | Claude Code chat adapter | `~/.outpost/agents/claude-agent-acp-<version>/`, linked from `~/.outpost/bin/` |
-| Outpost Terminal and helpers | `~/.outpost/bin/` |
+| Outpost machine service and helpers | `~/.outpost/bin/` |
 
 A session record holds its name, tool, directory, pinned native store, its
 configuration (instructions, model, mode, MCP servers, arguments and
@@ -1294,8 +1300,8 @@ the broker, and handle it in the shared client, delegating native actions throug
 | --- | --- |
 | Machine | `tests/machine/` — the machine's modules in a disposable state directory: registry, creation receipts, forks, edits and switching, images, activity from hooks and transcripts, native stores and history reads, DeepSeek decoding, store readers, locks; opt-in real Claude Code, Codex and Kimi Code hooks |
 | Server | `tests/unit/` — tokens, workspace, API validation and network policy, hosted isolation and revocation, the machine connection against a fake node, the broker against a fake terminal stream, contracts |
-| Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with the built service in both modes; conversation discovery and history over real machine connections; chat through the node |
-| Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout; mobile WebGL rendering, real clipboard copying, and GPU context-loss fallback |
+| Whole path | `tests/integration/` — local machines over WebSocket; SSH in Docker with the built service in both modes; conversation discovery and history over real machine connections; chat through the node |
+| Browser | `tests/browser/` — real backend: add machine, create session, web terminal, desktop ticket flow, phone layout; mobile WebGL rendering, real clipboard copying, and GPU context-loss fallback |
 | Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
 | Native desktop | `npm run test:desktop` exercises V3 restore, reconnect and layout logic. `npm --prefix desktop run test:ui` exercises GPUI controls, native shell I/O and moving a live pane across windows. |
 | Chat | `tests/unit/chat-*.test.ts` (journal, transcript, mentions, cron and prompts); `tests/integration/node-chat.test.ts` (chat host through the node: conversation timeline, one driver, Outpost tools, files, queue, DeepSeek and Kimi); `tests/integration/chat.test.ts` (hub with real chat hosts: channels, floor passing, session messages, schedules); `tests/browser/chat.spec.ts`. A scripted ACP agent (`tests/fixtures/acp-agent-fixture.py`) stands in for the tools; no model is called |

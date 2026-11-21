@@ -1,3 +1,4 @@
+import { terminalRouteLabels } from '../../shared/protocol'
 // Child-process adapter for V3's shared protocol and account services. Stdin/stdout
 // are private inherited pipes. Credentials stay here and never enter the terminal grid.
 import { createInterface } from 'node:readline'
@@ -240,7 +241,11 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
       () => ({ cols: state.cols, rows: state.rows }),
       rendering,
       {
-        state: s => emit('connection', { pane, state: s }),
+        state: state =>
+          emit('connection', {
+            pane,
+            state: state.kind === 'connected' ? { ...state, routeLabel: terminalRouteLabels[state.route] } : state,
+          }),
         hello: msg => {
           emit('title', { pane, title: msg.session.name })
           void recent

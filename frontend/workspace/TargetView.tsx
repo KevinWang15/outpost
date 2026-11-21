@@ -174,7 +174,7 @@ export default function TargetView({
         </div>
       </header>
       <SoftwarePanel
-        paired={target.kind === 'paired' || target.kind === 'direct'}
+        manualInstall={target.kind === 'paired' || target.kind === 'direct'}
         targetId={target.id}
         state={software}
         onInstalled={() => void refresh()}
@@ -380,13 +380,15 @@ function PairMachine({ id }: { id: string }) {
       {pair && (
         <div>
           <p>
-            On the target run <code>outpost-terminal pair {pair.origin}</code>. Enter this code within five minutes.
+            On the machine run <code>outpost-terminal pair {pair.origin}</code>. Enter this code within five minutes.
           </p>
           <p>
             <code>{pair.code}</code>
           </p>
           <p>
-            Then run <code>outpost-terminal connect</code>.
+            Run <code>outpost-terminal connect</code> to enable relay. To prefer a direct route, set{' '}
+            <code>OUTPOST_DIRECT_ORIGIN</code> to the machine’s client-reachable HTTPS endpoint and forward WebSocket
+            requests for <code>/api/terminal/direct</code> to its listener.
           </p>
         </div>
       )}
@@ -410,7 +412,7 @@ function DirectInstall({ id }: { id: string }) {
           }
         }}
       >
-        Show offline installation
+        Show offline enrollment
       </button>
       {error && <p role="alert">{error}</p>}
       {config && (

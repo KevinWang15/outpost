@@ -13,7 +13,7 @@ export async function prepareTerminal(args: TerminalStreamArgs) {
   if (chat) throw new RegistryError('This session runs in chat. Choose Continue in a terminal to move it.')
   if (terminal && terminal.protocol !== terminalService.protocol)
     throw new RegistryError(
-      'This session runs an older Outpost Terminal. Stop it, then connect again to restart it with the current one.',
+      'This session runs an older Outpost machine service. Stop it, then connect again to restart it with the current one.',
     )
   if (!terminal) {
     if (!args.start)

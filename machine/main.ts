@@ -1,4 +1,5 @@
-// Outpost Terminal: everything Outpost runs on a machine, as one executable.
+// Outpost machine service: everything Outpost runs on a machine, as one executable.
+import { machineSetupLabels } from '../shared/model'
 import { resolve } from 'node:path'
 import { terminalService } from '../shared/terminalService'
 import { serveChat } from './chat'
@@ -13,9 +14,9 @@ import { serveTerminal } from './terminal'
 const usage = `Usage: outpost-terminal COMMAND
   node --socket PATH   the machine end of Outpost's connection (Outpost runs it)
   serve | chat-serve   a session's terminal service or chat host (the node runs them)
-  pair SERVER          enroll using the code from Add machine → Paired machine
+  pair SERVER          enroll using the code from Add machine → ${machineSetupLabels.paired}
   pair --managed PATH  bind a server-managed installation to its node socket
-  pair --direct        import the server-provided direct installation JSON on stdin (offline)
+  pair --direct        enroll a direct-only machine with the server’s offline enrollment JSON
   connect              serve this installation using its configured network policy
   status | unpair      inspect ownership or disconnect locally and release it for reinstallation
   uninstall            disconnect and remove the managed executable after sessions stop
@@ -56,10 +57,14 @@ const run = async () => {
       const r = installation()
       console.log(
         !r
-          ? 'Unpaired'
+          ? 'Not enrolled'
           : r.mode === 'ssh'
-            ? 'Server-managed node ' + r.socket
-            : r.mode + ' · ' + r.origin + ' · ' + r.targetId,
+            ? 'Server-managed · ' + r.socket
+            : (r.mode === 'direct' ? machineSetupLabels.direct : machineSetupLabels.paired) +
+              ' · ' +
+              r.origin +
+              ' · ' +
+              r.targetId,
       )
       return
     }

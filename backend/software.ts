@@ -47,7 +47,7 @@ function status(id: SoftwareId, path: string, code: number, output: string): Sof
     id === 'outpost-terminal' &&
     version !== `outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`
   )
-    detail = `Outpost Terminal ${terminalService.version} is required. Install the matching version.`
+    detail = `Outpost machine service ${terminalService.version} is required. Install the matching version.`
   if (!detail && id === 'claude-agent-acp' && version !== chatAgents.claude.version)
     detail = `The Claude Code chat adapter ${chatAgents.claude.version} is required. Install the matching version.`
   return { id, status: detail ? 'broken' : 'installed', path, version, detail }
@@ -81,11 +81,11 @@ function installationScript(id: SoftwareId, socket: string): string {
   if (id === 'outpost-terminal')
     return `#!/bin/sh
 set -eu
-# Install the matching, immutable Outpost Terminal build as the execution user.
+# Install the matching, immutable Outpost machine service build as the execution user.
 ${packages}
 command -v curl >/dev/null 2>&1 || install_packages curl ca-certificates
 command -v sha256sum >/dev/null 2>&1 || install_packages coreutils
-[ "$(uname -s)" = Linux ] || { echo 'Outpost Terminal requires Linux.' >&2; exit 1; }
+[ "$(uname -s)" = Linux ] || { echo 'Outpost machine service requires Linux.' >&2; exit 1; }
 case "$(uname -m)" in
   x86_64) arch=x64 ;;
   aarch64|arm64) arch=arm64 ;;
@@ -105,7 +105,7 @@ mkdir -p "$HOME/.outpost/bin"
 # Already running sessions keep their original process and in-memory history.
 work=$(mktemp -d "$HOME/.outpost/bin/.terminal-install.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
-echo "Downloading Outpost Terminal ${terminalService.version} ($arch, $libc)..."
+echo "Downloading Outpost machine service ${terminalService.version} ($arch, $libc)..."
 curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 15 --max-time 300 "$base/$asset" -o "$work/$asset"
 echo 'Downloading checksums...'
 curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 15 --max-time 60 "$base/SHA256SUMS" -o "$work/SHA256SUMS"
@@ -120,7 +120,7 @@ if [ ! -d /var/lib/outpost-machine ]; then
 fi
 "$work/$asset" pair --managed ${quote(socket)}
 mv -f "$work/$asset" "$HOME/.outpost/bin/outpost-terminal"
-echo 'Outpost Terminal ${terminalService.version} installed.'
+echo 'Outpost machine service ${terminalService.version} installed.'
 `
   if (id === 'claude-agent-acp')
     return `#!/bin/sh

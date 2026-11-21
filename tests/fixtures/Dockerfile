@@ -1,5 +1,5 @@
 # A disposable SSH target. Sessions run as the unprivileged user `dev`; the
-# test installs the built Outpost Terminal in its home. Python runs the
+# test installs the built Outpost machine service in its home. Python runs the
 # fixture coding tools.
 FROM ubuntu:22.04
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server python3 git ca-certificates \

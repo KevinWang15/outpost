@@ -190,7 +190,9 @@ export async function serveNode(socketName: string) {
         const { terminal, chat } = await driverStatus(record.id)
         if (terminal) throw new RegistryError('This session runs in a terminal. Choose Continue in chat to move it.')
         if (chat && chat.protocol !== chatHost.protocol)
-          throw new RegistryError('This chat runs an older Outpost Terminal. Stop the session, then open it again.')
+          throw new RegistryError(
+            'This chat runs an older Outpost machine service. Stop the session, then open it again.',
+          )
         if (!chat) {
           if (!args.start) throw new RegistryError('This session is not running in chat.', 410)
           await startChat(record)

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { Target } from '../shared/model'
+import { machineSetupLabels, type Target } from '../shared/model'
 import type { Command, CommandResult } from './process'
 import { AppError } from './errors'
 import { quote } from '../shared/shell'
@@ -160,10 +160,9 @@ class SshTransport implements Transport {
 
 /** The same commands as SSH, run as the Outpost server's own user. */
 class LocalTransport implements Transport {
-  readonly label = 'Local shell'
+  readonly label = machineSetupLabels.local
   constructor(private target: Extract<Target, { kind: 'local' }>) {
-    if (process.platform !== 'linux')
-      throw new AppError('Running sessions on this computer requires the Outpost server to run on Linux.', 409)
+    if (process.platform !== 'linux') throw new AppError('Running sessions on the Outpost server requires Linux.', 409)
   }
   management(mode: LoginMode): Command {
     return { executable: 'sh', args: ['-c', loginScriptShell(mode)], label: this.label }
@@ -183,13 +182,13 @@ export function transportFor(target: Target, identity: SshIdentity | null, optio
       const deny = (): never => {
         throw new AppError('This direct-only machine requires a connection from your client.', 409)
       }
-      return { label: 'Direct only', login: deny, management: deny }
+      return { label: machineSetupLabels.direct, login: deny, management: deny }
     }
     case 'paired': {
       const offline = (): never => {
-        throw new AppError('Start the Outpost connector on this machine. Install or update its software there.', 503)
+        throw new AppError('Run outpost-terminal connect on this machine. Install or update its software there.', 503)
       }
-      return { label: 'Paired machine', login: offline, management: offline }
+      return { label: machineSetupLabels.paired, login: offline, management: offline }
     }
   }
 }

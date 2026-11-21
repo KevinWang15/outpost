@@ -18,10 +18,11 @@ import { createApp } from '../../backend/app'
 import { LocalDeployment } from '../../backend/deployment'
 import { TerminalSocket } from '../../frontend/terminal/socket'
 import type { TerminalState } from '../../frontend/terminal/connection'
+import { filesChanged } from '../../machine/commands'
 import { publish } from '../../machine/files'
 import { state } from '../../machine/state'
 import { record, register } from '../machine/fixtures'
-import { terminalBinary } from './helpers'
+import { TerminalClient, terminalBinary } from './helpers'
 
 const bun = process.platform === 'linux' ? undefined : process.env.TEST_BUN
 const executable = process.platform === 'linux' ? terminalBinary : (process.env.TEST_TERMINAL ?? terminalBinary)
@@ -214,6 +215,7 @@ for (const directOnly of [false, true])
         const servers: Peer[] = []
         const peers: Peer[] = []
         const centralFrames: string[] = []
+        let fileChanges = 0
         const output: Buffer[] = []
         const client = new TerminalSocket(
           token,
@@ -231,7 +233,15 @@ for (const directOnly of [false, true])
               done()
             },
           },
-          { state: s => connections.push(s), activity() {}, signal() {}, hello() {}, deliveries() {} },
+          {
+            state: s => connections.push(s),
+            activity() {},
+            signal: message => {
+              if (message.signal.type === 'files.changed') fileChanges++
+            },
+            hello() {},
+            deliveries() {},
+          },
           {
             origin,
             open: url => {
@@ -322,6 +332,29 @@ for (const directOnly of [false, true])
           assert.equal((await once(reinstall, 'exit'))[0], 0)
           return
         }
+        // The same file mutation reaches each viewer once, even over different routes.
+        const grant = await (await request(targetPath + '/sessions/' + session.id + '/connect')).json()
+        const relayUrl = new URL(servers[0].url)
+        relayUrl.searchParams.set('token', grant.token)
+        const relay = new TerminalClient(relayUrl.href)
+        cleanup.push(() => relay.socket.terminate())
+        const offer = await relay.message('route-offer')
+        relay.send({ type: 'route-choice', slot: offer.slot, direct: false })
+        assert.equal((await relay.message('route-selected')).route, 'relay')
+        await relay.message('ready')
+        const sharedFile = await publish(session.id, image)
+        await filesChanged(session.id, 'terminal', sharedFile)
+        assert.equal((await relay.take('signal')).signal.type, 'files.changed')
+        await client.removeFile(sharedFile.id, AbortSignal.timeout(5000))
+        assert.equal((await relay.take('signal')).signal.type, 'files.changed')
+        // Drain older messages on both sockets before checking their final counts.
+        relay.send({ type: 'ping', id: 'after-file-changes' })
+        await relay.message('result')
+        await client.listFiles(AbortSignal.timeout(5000))
+        assert.equal(fileChanges, 2)
+        assert.ok(!relay.messages.some(m => m.type === 'signal' && m.signal.type === 'files.changed'))
+        relay.socket.close()
+        await relay.closed
         assert.deepEqual([...new Set(centralFrames)].sort(), ['hello', 'route-offer', 'route-selected'])
         refuseDirect = true
         peers[0].terminate()

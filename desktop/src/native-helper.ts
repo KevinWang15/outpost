@@ -345,7 +345,7 @@ async function handle(c: Cmd) {
             panes.delete(id)
             emit('connection', { pane: id, state: { kind: 'closed', message: 'Signed out' } })
           }
-        await recent.retain(ref => accounts.accountId(ref.server) === ref.accountId)
+        await recent.retain(ref => accounts.hasAccount(ref.server, ref.accountId))
         await refresh()
       }
       return

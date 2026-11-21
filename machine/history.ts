@@ -2,7 +2,13 @@
 // modified; the server owns indexing, embeddings and account boundaries.
 import { createHash, randomUUID } from 'node:crypto'
 import { closeSync, openSync, readSync, statSync } from 'node:fs'
-import type { HistoryBatch, HistoryCatalog, HistoryCheckpoint, HistorySource } from '../shared/history'
+import {
+  historyMessagePage,
+  type HistoryBatch,
+  type HistoryCatalog,
+  type HistoryCheckpoint,
+  type HistorySource,
+} from '../shared/history'
 import type { SessionRecord } from '../shared/model'
 import type { Harness } from './harnesses/harness'
 import { allHarnesses } from './harnesses'
@@ -239,7 +245,8 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
           try {
             for (const message of adapter.historyMessages(record, source.format ?? '')) {
               if (!message.text.trim()) continue
-              if (message.text.length > maxText)
+              const prefix = historyMessagePage(message.text, 0, maxText)
+              if (prefix.nextOffset !== null)
                 warnings.push(
                   'A very large message was indexed as a prefix; read_message can fetch the remainder while this machine is online.',
                 )
@@ -247,9 +254,9 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
                 ...message,
                 identity: identity(message),
                 position: start,
-                text: message.text.slice(0, maxText),
-                truncated: message.text.length > maxText,
-                totalChars: message.text.length,
+                text: prefix.text,
+                truncated: prefix.nextOffset !== null,
+                totalChars: prefix.totalChars,
                 contentHash: digest(message.text),
               })
             }
@@ -310,12 +317,7 @@ export function readMessage(sessions: SessionRecord[], request: Record<string, u
   const record = decode(line)
   for (const entry of record ? adapter.historyMessages(record, source.format ?? '') : []) {
     if (digest(entry.text) !== request.contentHash) continue
-    const end = Math.min(entry.text.length, (offset as number) + (limit as number))
-    return {
-      text: entry.text.slice(offset as number, end),
-      totalChars: entry.text.length,
-      nextOffset: end < entry.text.length ? end : null,
-    }
+    return historyMessagePage(entry.text, offset as number, limit as number)
   }
   throw new RegistryError('The native message changed. Refresh the history index and search again.')
 }

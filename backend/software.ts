@@ -1,57 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import type {
-  ExecutionEnvironment,
-  InstallationPlan,
-  SoftwareId,
-  SoftwareReport,
-  SoftwareStatus,
-} from '../shared/model'
+import type { InstallationPlan, SoftwareId, SoftwareReport } from '../shared/model'
 import { requiredSoftware } from '../shared/model'
 import { harnesses } from '../shared/harnesses'
 import { AppError } from './errors'
 import { runCommand } from './process'
 import { quote } from '../shared/shell'
-import { inspectionScript } from '../shared/node/softwareInspection'
+import { inspectionScript, softwareReport } from '../shared/node/softwareInspection'
 import type { CommandResult } from './process'
 import type { TargetContext } from './sessions'
 import { terminalService } from '../shared/terminalService'
 import chatAgents from '../shared/chatAgents.json' with { type: 'json' }
-
-function status(id: SoftwareId, path: string, code: number, output: string): SoftwareStatus {
-  if (!path)
-    return {
-      id,
-      status: 'missing',
-      path: null,
-      version: null,
-      detail:
-        id === 'outpost-terminal'
-          ? 'Not installed in ~/.outpost/bin.'
-          : id === 'claude-agent-acp'
-            ? 'Needed for Claude Code sessions in chat. Not installed in ~/.outpost/bin.'
-            : 'Not found on the interactive login PATH.',
-    }
-  const version =
-    output
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .find(Boolean) ?? null
-  let detail =
-    code !== 0
-      ? output.trim() || `Version check exited with status ${code}.`
-      : !version
-        ? 'The version command returned no version.'
-        : null
-  if (
-    !detail &&
-    id === 'outpost-terminal' &&
-    version !== `outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`
-  )
-    detail = `Outpost machine service ${terminalService.version} is required. Install the matching version.`
-  if (!detail && id === 'claude-agent-acp' && version !== chatAgents.claude.version)
-    detail = `The Claude Code chat adapter ${chatAgents.claude.version} is required. Install the matching version.`
-  return { id, status: detail ? 'broken' : 'installed', path, version, detail }
-}
 
 const packages = `install_packages() {
   elevate=''
@@ -207,7 +165,7 @@ export class SoftwareClient implements SoftwareService {
   async inspect({ target, transport, machine }: TargetContext, signal?: AbortSignal) {
     const marker = `OUTPOST_SOFTWARE_${randomUUID()}`
     const ids = requiredSoftware(target)
-    const { code, stdout, stderr } =
+    const result =
       target.kind === 'paired'
         ? await machine.call<CommandResult>(
             'software.inspect',
@@ -220,7 +178,11 @@ export class SoftwareClient implements SoftwareService {
             timeoutMs: 45_000,
             readOnly: true,
           })
-    return softwareReport(ids, marker, { code, stdout, stderr })
+    try {
+      return softwareReport(ids, marker, result)
+    } catch (error) {
+      throw new AppError((error as Error).message, 502)
+    }
   }
   async install({ transport }: TargetContext, script: string, onOutput: (text: string) => void, signal: AbortSignal) {
     return (
@@ -238,31 +200,3 @@ export const planInstallation = (id: SoftwareId, socket: string): InstallationPl
   softwareId: id,
   script: installationScript(id, socket),
 })
-
-export function softwareReport(ids: SoftwareId[], marker: string, { code, stdout, stderr }: CommandResult) {
-  const start = stdout.indexOf(`\0${marker}\0`)
-  if (code !== 0 || start < 0)
-    throw new AppError(`Software check failed. ${stderr.trim() || 'Check access to the machine.'}`, 502)
-  const fields = stdout.slice(start + marker.length + 2).split('\0')
-  const [home, uid, username, shell] = fields.splice(0, 4)
-  const environment: ExecutionEnvironment = { home, uid: Number(uid), username, shell }
-  const software: SoftwareStatus[] = []
-  for (let index = 0; index < ids.length; index++) {
-    const [id, path, exit, output] = fields.splice(0, 4)
-    if (
-      [id, path, exit, output].some(value => typeof value !== 'string') ||
-      !ids.includes(id as SoftwareId) ||
-      software.some(item => item.id === id) ||
-      !/^\d+$/.test(exit)
-    )
-      throw new AppError('Invalid software check response', 502)
-    software.push(status(id as SoftwareId, path, Number(exit), output))
-  }
-  if (fields[0] !== 'END' || !home?.startsWith('/') || !/^\d+$/.test(uid) || !username || !shell?.startsWith('/'))
-    throw new AppError('Invalid execution environment response', 502)
-  return {
-    environment,
-    checkedAt: new Date().toISOString(),
-    software: ids.map(id => software.find(item => item.id === id)!),
-  }
-}

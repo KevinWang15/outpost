@@ -18,7 +18,7 @@ default Outpost MCP tools and cross-machine history search.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
 - **Find any conversation.** Search the coding tools' history on all your machines, including conversations started outside Outpost, and resume them as sessions.
 - **See what happened.** Logs records when agents start, work, finish or fail, every message passed between sessions, channels and schedules, and errors, and sends what you choose to your own webhooks.
-- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code, DeepSeek Harness and Antigravity CLI histories across all configured machines using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
+- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code, DeepSeek Harness and Antigravity CLI histories across server-connected machines using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
 
 ![Outpost's Machines view: a machine with three sessions and their activity](docs/images/workspace.png)
 
@@ -434,7 +434,7 @@ the same **Outpost MCP** as `publish_file`, with no additional registration:
 
 | Tool | Purpose |
 | --- | --- |
-| `search_history` | Search every configured machine, or filter by machine, coding tool, session, working directory, role and dates. |
+| `search_history` | Search the account’s server-connected machines, or filter by machine, coding tool, session, working directory, role and dates. |
 | `read_context` | Read a chronological page around a match, then page before or after it. |
 | `read_message` | Retrieve further character pages of a long message. |
 | `get_session` | Inspect the source machine, native conversation and transcript files, its lineage and its Outpost session. |
@@ -444,7 +444,7 @@ For example, ask a session to **"Search my history across machines for the TLS
 deployment failure, then read the surrounding discussion."** Keyword search
 requires all terms; substring search preserves literal text. Semantic search
 uses a pinned multilingual model on the Outpost server. Mixed search (the
-default, also named `hybrid`) combines keyword and semantic rankings. Single
+default) combines keyword and semantic rankings. Single
 technical identifiers and CJK terms use literal lookup automatically in mixed
 mode; explicit semantic mode always uses embeddings.
 

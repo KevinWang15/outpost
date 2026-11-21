@@ -71,17 +71,11 @@ export class RecentSessions {
   remember(entry: RecentSession) {
     return this.change(entries => [entry, ...entries.filter(item => item.id !== entry.id)].slice(0, 10))
   }
-  remove(id: string) {
-    return this.change(entries => entries.filter(entry => entry.id !== id))
-  }
   clear() {
     return this.change(() => [])
   }
   retain(allowed: (session: RecentSession) => boolean) {
     return this.change(entries => entries.filter(allowed))
-  }
-  flush() {
-    return this.writes
   }
   private change(update: (entries: RecentSession[]) => RecentSession[]) {
     const write = this.writes.then(async () => {

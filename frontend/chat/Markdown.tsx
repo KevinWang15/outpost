@@ -3,7 +3,7 @@
 import { memo, useContext, useState, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { copyText } from '../api'
-import { MarkdownContext } from './context'
+import { MentionHandlesContext } from './context'
 
 const safeUrl = (url: string) => {
   try {
@@ -17,19 +17,10 @@ const safeUrl = (url: string) => {
 }
 
 function Link({ href, children }: { href: string; children: ReactNode }) {
-  const { openLink } = useContext(MarkdownContext)
   const url = safeUrl(href)
   if (!url) return <>{children}</>
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={event => {
-        event.preventDefault()
-        openLink(url)
-      }}
-    >
+    <a href={url} target="_blank" rel="noopener noreferrer">
       {children}
     </a>
   )
@@ -62,7 +53,7 @@ const patterns: [RegExp, (match: RegExpExecArray, key: number) => ReactNode][] =
 const triggers = new Set(['`', '*', '_', '~', '[', 'h', '@'])
 
 function Mention({ handle }: { handle: string }) {
-  const { handles } = useContext(MarkdownContext)
+  const handles = useContext(MentionHandlesContext)
   const known = handles.includes(handle) || ['all', 'channel', 'here'].includes(handle)
   return known ? <span className="mention">@{handle}</span> : <>@{handle}</>
 }

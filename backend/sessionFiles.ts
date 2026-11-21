@@ -1,4 +1,4 @@
-import { maxSessionFileBytes, maxSessionFiles, parseSessionFile, type SessionFile } from '../shared/sessionFiles'
+import { maxSessionFiles, parseSessionFile, type SessionFile } from '../shared/sessionFiles'
 import { AppError } from './errors'
 import { upload, type TargetContext } from './sessions'
 
@@ -20,22 +20,28 @@ export class SessionFileClient {
   }
   async read({ machine }: TargetContext, id: string, fileId: string, signal: AbortSignal) {
     const stream = await machine.open('file-read', { session: id, file: fileId }, signal)
-    const file = parseSessionFile(stream.opened)
-    const parts: Buffer[] = []
-    let size = 0
-    const bytes = await new Promise<Buffer>((resolve, reject) => {
-      signal.addEventListener('abort', () => {
-        stream.end()
-        reject(new AppError('The download was cancelled.', 499))
+    const listeners = new AbortController()
+    try {
+      signal.throwIfAborted()
+      const file = parseSessionFile(stream.opened)
+      const parts: Buffer[] = []
+      let size = 0
+      await new Promise<void>((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new AppError('The download was cancelled.', 499)), {
+          signal: listeners.signal,
+        })
+        stream.onData(chunk => {
+          size += chunk.length
+          if (size > file.size) return reject(new AppError('Session file exceeds its declared size.', 502))
+          parts.push(chunk)
+        })
+        stream.onClose(error => (error ? reject(error) : resolve()))
       })
-      stream.onData(chunk => {
-        size += chunk.length
-        if (size > maxSessionFileBytes) return reject(new AppError('Session file exceeds its size limit.', 502))
-        parts.push(chunk)
-      })
-      stream.onClose(error => (error ? reject(error) : resolve(Buffer.concat(parts))))
-    })
-    if (bytes.length !== file.size) throw new AppError('Session file transfer was incomplete.', 502)
-    return { file, bytes }
+      if (size !== file.size) throw new AppError('Session file transfer was incomplete.', 502)
+      return { file, bytes: Buffer.concat(parts, size) }
+    } finally {
+      listeners.abort()
+      stream.end()
+    }
   }
 }

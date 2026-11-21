@@ -14,7 +14,7 @@ import { transcriptOf } from './client'
 import { mentions } from '../../shared/chatMentions'
 import Composer from './Composer'
 import { clock, day, elapsed } from './format'
-import { MarkdownContext, useChat } from './context'
+import { MentionHandlesContext, useChat } from './context'
 import { Markdown } from './Markdown'
 import { Reply } from './Turn'
 
@@ -148,7 +148,7 @@ function Message({
 }
 
 export default function ChannelView({ channelId, onBack }: { channelId: string; onBack: () => void }) {
-  const { client, open, openLink } = useChat()
+  const { client, open } = useChat()
   const channel = client.channels.get(channelId)
   const state = client.channelMessages.get(channelId)
   const scroller = useRef<HTMLDivElement>(null)
@@ -193,7 +193,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
   const messages = state?.messages ?? []
   const members = channel.members.map(member => ({ member, session: client.session(member) }))
   return (
-    <MarkdownContext.Provider value={{ handles, openLink }}>
+    <MentionHandlesContext.Provider value={handles}>
       <section className="conversation channel">
         <header className="conversation-header">
           <button className="icon-button back" aria-label="Back to the list" onClick={onBack}>
@@ -338,6 +338,6 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
           onClose={() => setViewing(null)}
         />
       )}
-    </MarkdownContext.Provider>
+    </MentionHandlesContext.Provider>
   )
 }

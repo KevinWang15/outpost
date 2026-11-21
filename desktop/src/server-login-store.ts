@@ -52,9 +52,6 @@ export class ServerLoginStore {
       if (records.get(entry.origin) === entry) records.delete(entry.origin)
     })
   }
-  flush() {
-    return this.writes
-  }
   private change(update: (records: Map<string, SavedServerLogin>) => void) {
     const work = this.writes.then(async () => {
       const next = new Map(this.records)

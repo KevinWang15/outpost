@@ -3,11 +3,9 @@
 // (stdio) is open. Drivers it starts outlive it.
 import { prepareTerminal } from './terminalAttach'
 import { authorizeNode, validNodeSocket, watchInstallation, nodeLock, installation } from './installation'
-import { inspectionScript } from '../shared/node/softwareInspection'
+import { inspectSoftware } from './software'
 import { requiredSoftware } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
-import { runCommand } from '../backend/process'
-import { loginScriptShell } from '../backend/shell'
 import { directEndpoint } from './direct'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, mkdirSync, renameSync, rmSync, statSync, watch } from 'node:fs'
@@ -56,8 +54,8 @@ function remoteError(error: unknown): RemoteError {
 interface Stream {
   /** Bytes from Outpost. */
   data(bytes: Buffer): void
-  /** Outpost ended the stream. */
-  close(): void
+  /** Outpost ended the stream, optionally abandoning an unclaimed open. */
+  close(error?: RemoteError): void
   /** Outpost granted more of the window. */
   credit(bytes: number): void
 }
@@ -74,10 +72,13 @@ export async function serveNode(socketName: string) {
     const streams = new Map<number, Stream>()
     const calls = new Map<string, { resolve(data: unknown): void; reject(error: Error): void }>()
     // A direct endpoint is optional: an unavailable listener still permits relay attachment.
-    const direct = await directEndpoint().catch(error => {
-      console.error('Direct terminal endpoint unavailable:', (error as Error).message)
-      return undefined
-    })
+    const direct =
+      owner.mode === 'relay'
+        ? await directEndpoint(owner.origin).catch(error => {
+            console.error('Direct terminal endpoint unavailable:', (error as Error).message)
+            return undefined
+          })
+        : undefined
     process.stdout.write(nodeMagic)
     send({
       type: 'hello',
@@ -114,12 +115,17 @@ export async function serveNode(socketName: string) {
       }
       return {
         write(bytes: Buffer) {
+          if (!streams.has(stream)) return true
           for (let offset = 0; offset < bytes.length; offset += 64 * 1024)
             queue.push(bytes.subarray(offset, offset + 64 * 1024))
           flush()
           return queue.length === 0
         },
         drain: () => new Promise<void>(resolve => (queue.length ? (drained = resolve) : resolve())),
+        discard() {
+          queue.length = 0
+          flush()
+        },
         credit(bytes: number) {
           inflight = Math.max(0, inflight - bytes)
           flush()
@@ -140,11 +146,14 @@ export async function serveNode(socketName: string) {
         if (ended) return
         ended = true
         socket.destroy()
+        out.discard()
         closeStream(stream, error ? { error } : {})
       }
-      socket.on('connect', () => socket.write(hello))
+      socket.on('connect', () => {
+        if (!ended) socket.write(hello)
+      })
       socket.on('data', (bytes: Buffer) => {
-        if (out.write(bytes)) return
+        if (ended || out.write(bytes)) return
         socket.pause()
         void out.drain().then(() => socket.resume())
       })
@@ -161,8 +170,12 @@ export async function serveNode(socketName: string) {
         },
         close: () => {
           ended = true
-          socket.end()
-          streams.delete(stream)
+          // Flush accepted input, then release even a driver that keeps writing output.
+          const deadline = setTimeout(() => socket.destroy(), 5_000).unref()
+          socket.once('close', () => clearTimeout(deadline))
+          socket.end(() => socket.destroy())
+          out.discard()
+          closeStream(stream)
         },
         credit: bytes => out.credit(bytes),
       })
@@ -178,8 +191,8 @@ export async function serveNode(socketName: string) {
             data: () => {},
             credit: () => {},
             close: () => {
-              streams.delete(stream)
               release()
+              closeStream(stream)
             },
           })
           send({ type: 'opened', stream, data: { route: 'direct' } })
@@ -204,11 +217,19 @@ export async function serveNode(socketName: string) {
         findSession(readRegistry(), args.session)
         const { file, path } = readFile(args.session, args.file)
         const out = output(stream)
-        streams.set(stream, { data() {}, close: () => streams.delete(stream), credit: bytes => out.credit(bytes) })
+        const reader = createReadStream(path, { highWaterMark: 64 * 1024 })
+        streams.set(stream, {
+          data() {},
+          close() {
+            reader.destroy()
+            out.discard()
+            closeStream(stream)
+          },
+          credit: bytes => out.credit(bytes),
+        })
         send({ type: 'opened', stream, data: file })
         try {
-          for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 }))
-            if (!out.write(chunk as Buffer)) await out.drain()
+          for await (const chunk of reader) if (!out.write(chunk as Buffer)) await out.drain()
           closeStream(stream)
         } catch (error) {
           closeStream(stream, { error: remoteError(error) })
@@ -230,7 +251,11 @@ export async function serveNode(socketName: string) {
               failed = error
             }
           },
-          close() {
+          close(error) {
+            if (error) {
+              stored.abort()
+              return closeStream(stream, { error })
+            }
             streams.set(stream, { data() {}, close() {}, credit() {} })
             if (!failed && received !== args.size) failed = new RegistryError('Incomplete file upload', 400)
             if (failed) {
@@ -262,11 +287,7 @@ export async function serveNode(socketName: string) {
           !/^OUTPOST_SOFTWARE_[0-9a-f-]{36}$/.test(args.marker)
         )
           throw new RegistryError('Invalid software inspection request.', 400)
-        return runCommand(
-          { executable: 'sh', args: ['-c', loginScriptShell('interactive')], label: 'Software inspection' },
-          inspectionScript(requiredSoftware({ tools: args.tools }), args.marker),
-          { timeoutMs: 45000, maxOutputBytes: 256 * 1024 },
-        )
+        return inspectSoftware(requiredSoftware({ tools: args.tools }), args.marker)
       },
       'viewer.offer': async args => {
         if (typeof args.session !== 'string') throw new RegistryError('Invalid session', 400)
@@ -368,7 +389,7 @@ export async function serveNode(socketName: string) {
           return
         }
         case 'close':
-          return streams.get(message.stream)?.close()
+          return streams.get(message.stream)?.close(message.error)
         case 'credit':
           return streams.get(message.stream)?.credit(message.bytes)
       }

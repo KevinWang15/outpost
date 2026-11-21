@@ -10,12 +10,10 @@ import { Connection } from '../shared/node/terminalViewer'
 import { requiredSoftware, type SessionInput, type SessionUpdate } from '../shared/model'
 import { type HarnessId } from '../shared/harnesses'
 import { sessionCreationOptions } from '../shared/sessionCreation'
-import { inspectionScript } from '../shared/node/softwareInspection'
+import { softwareReport } from '../shared/node/softwareInspection'
 import { desktopSession } from '../shared/desktopSession'
-import { softwareReport } from '../backend/software'
+import { inspectSoftware } from './software'
 import { launchSize } from '../backend/sessions'
-import { runCommand } from '../backend/process'
-import { loginScriptShell } from '../backend/shell'
 import { terminalStream } from './direct'
 import { prepareTerminal } from './terminalAttach'
 import * as sessions from './sessions'
@@ -80,12 +78,7 @@ async function execute(call: Call, targetId: string) {
     case 'software': {
       const ids = requiredSoftware(target),
         marker = 'OUTPOST_SOFTWARE_' + randomUUID()
-      const result = await runCommand(
-        { executable: 'sh', args: ['-c', loginScriptShell('interactive')], label: 'Software inspection' },
-        inspectionScript(ids, marker),
-        { timeoutMs: 45000 },
-      )
-      const report = softwareReport(ids, marker, result)
+      const report = softwareReport(ids, marker, await inspectSoftware(ids, marker))
       return call.op === 'software'
         ? { ...report, installation: null }
         : sessionCreationOptions(target, report.software)
@@ -177,11 +170,10 @@ export async function serveDirectOnly(config: DirectInstall, signal: AbortSignal
         timeout = setTimeout(() => ws.terminate(), Math.max(0, until - Date.now()))
       }
       expires(claim.until)
-      const viewer: Connection<string> = new Connection(a.session, ws, {
+      const viewer = new Connection(a.session, ws, {
         activate: () => false,
         forget: () => {},
         logged: () => {},
-        filesChanged: () => viewer.send({ type: 'signal', signal: { type: 'files.changed', payload: {} } }),
         renew: ticket => {
           try {
             const r = tickets.redeem<{ lease: string }>(ticket, 'renew')

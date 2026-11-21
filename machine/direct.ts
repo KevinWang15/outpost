@@ -9,10 +9,9 @@ import type { TerminalStreamArgs } from '../shared/machine'
 import { desktopOrigin } from '../shared/desktopAuth'
 
 type Slot = { session: string; proof: string; timer: NodeJS.Timeout; ws?: WebSocket }
-export async function directEndpoint() {
-  const configured = process.env.OUTPOST_DIRECT_ORIGIN,
-    authority = process.env.OUTPOST_PAIR_ORIGIN
-  if (!configured || !authority) return
+export async function directEndpoint(authority: string) {
+  const configured = process.env.OUTPOST_DIRECT_ORIGIN
+  if (!configured) return
   const origin = desktopOrigin(configured)
   const port = Number(process.env.OUTPOST_DIRECT_PORT ?? 8844)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('Invalid OUTPOST_DIRECT_PORT.')
@@ -91,7 +90,6 @@ export async function directEndpoint() {
           activate: () => false,
           logged: () => {},
           forget: () => {},
-          filesChanged: () => viewer.send({ type: 'signal', signal: { type: 'files.changed', payload: {} } }),
         })
         viewer.start(terminalStream(path, hello))
       })

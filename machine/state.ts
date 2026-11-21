@@ -2,9 +2,9 @@
 // writer uses: owner-only atomic files and a cross-process lock.
 import { randomUUID } from 'node:crypto'
 import {
+  chmodSync,
   closeSync,
   fsyncSync,
-  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -13,6 +13,8 @@ import {
   writeSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
+import { setTimeout as delay } from 'node:timers/promises'
 import { dirname, join, relative } from 'node:path'
 
 /** `~/.outpost` of the user Outpost runs as; every path below derives from it.
@@ -77,17 +79,8 @@ export function readJson<T>(path: string, fallback: T, limit = 4 * 1024 * 1024):
   return JSON.parse(raw.toString('utf8')) as T
 }
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-/** Run `action` holding an exclusive lock shared by every Outpost process of
- * this user. The lock file names its holder; a dead holder's lock is broken. */
+// SQLite holds an OS lock on this inode for the transaction's lifetime.
+// Keep one private file per key so concurrent processes always lock the same inode.
 export async function locked<T>(
   name: string,
   action: () => T | Promise<T>,
@@ -96,48 +89,26 @@ export async function locked<T>(
 ): Promise<T> {
   const path = join(directory, 'locks', `${name}.lock`)
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    try {
-      const descriptor = openSync(path, 'wx', 0o600)
-      writeSync(descriptor, String(process.pid))
-      closeSync(descriptor)
-      break
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      let holder: number
-      try {
-        holder = Number(readFileSync(path, 'utf8'))
-      } catch {
-        continue // Released between the attempt and the read.
-      }
-      if (holder > 0 && !alive(holder)) {
-        // Break it by renaming, so two breakers cannot both remove a fresh lock.
-        const stale = `${path}.${randomUUID()}.stale`
-        try {
-          renameSync(path, stale)
-        } catch {
-          continue // Another process broke it first.
-        }
-        // A fresh lock may have replaced the dead one before the rename: put it back.
-        if (readFileSync(stale, 'utf8') !== String(holder))
-          try {
-            linkSync(stale, path)
-          } catch {
-            /* Someone holds a newer lock; theirs stands, this one was ours to drop. */
-          }
-        rmSync(stale, { force: true })
-        continue
-      }
-      if (Date.now() > deadline)
-        throw new Error('Outpost is busy on this machine. Try again shortly.', { cause: error })
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-  }
+  const db = new DatabaseSync(path, { timeout: 0 })
   try {
+    const deadline = performance.now() + timeoutMs
+    for (;;) {
+      try {
+        db.exec('BEGIN EXCLUSIVE')
+        break
+      } catch (error) {
+        // SQLITE_BUSY (5) is the only retryable result. The event loop must
+        // remain free for holders in this process to complete their actions.
+        if ((error as { errcode?: number }).errcode !== 5) throw error
+        const remaining = deadline - performance.now()
+        if (remaining <= 0) throw new Error('Outpost is busy on this machine. Try again shortly.', { cause: error })
+        await delay(Math.min(remaining, 10))
+      }
+    }
+    chmodSync(path, 0o600)
     return await action()
   } finally {
-    rmSync(path, { force: true })
+    db.close()
   }
 }
 

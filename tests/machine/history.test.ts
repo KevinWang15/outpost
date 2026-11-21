@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import type { HistorySource } from '../../shared/history'
+import { HistoryIndex } from '../../backend/history/index'
 import { harness } from '../../machine/harnesses'
 import { catalog, readBatch, readMessage } from '../../machine/history'
 import { Scan } from '../../machine/stores'
@@ -140,23 +141,49 @@ test('sources are confined to their stores; escaping symlinks are not read', asy
   assert.ok(!JSON.stringify(escaped).includes('PRIVATE_OUTSIDE_HISTORY'))
 })
 
-test('a long message is indexed by its prefix and read in pages', async t => {
+test('cached and native message pages use the same Unicode offsets', async t => {
   const { codexPath } = setup(t)
   const maxText = 1024 * 1024
-  const text = 'x'.repeat(maxText - 5) + '😀中文'.repeat(8000)
+  const prefix = 'boundary ' + 'x'.repeat(maxText - 10) + '😀'
+  const tail = '🚀中文🧪'
+  const short = 'short 😀'
   put(codexPath, [
     { type: 'session_meta', payload: { id: crypto.randomUUID(), cwd: '/work' } },
-    { type: 'response_item', payload: { type: 'message', role: 'assistant', content: text } },
+    { type: 'response_item', payload: { type: 'message', role: 'assistant', content: prefix + tail } },
+    { type: 'response_item', payload: { type: 'message', role: 'assistant', content: short } },
   ])
   const source = catalog([], null).sources[0]
-  const message = readBatch([], [{ source, checkpoint: null }]).files[0].messages[0]
-  assert.equal(message.truncated, true)
-  assert.equal(message.totalChars, text.length)
-  const request = { source, position: message.position, contentHash: message.contentHash, offset: maxText, limit: 5000 }
-  const page = readMessage([], request)
-  assert.equal(page.text, text.slice(maxText, maxText + 5000))
-  assert.equal(page.nextOffset, maxText + 5000)
-  assert.equal(page.totalChars, text.length)
+  const batch = readBatch([], [{ source, checkpoint: null }])
+  const index = new HistoryIndex(':memory:', 'secret', async () => new Float32Array(384))
+  t.after(() => index.close())
+  index.ingest({ id: 'box', name: 'Box', host: 'box' }, batch)
+  const cursorFor = async (query: string) => (await index.search({ query, mode: 'keyword' }, ['box'])).results[0].cursor
+  const cached = index.readMessage({ cursor: await cursorFor('short') }, ['box'])
+  assert.equal(cached.page.text, short)
+  assert.equal(cached.page.totalChars, 7)
+  assert.equal(cached.page.nextOffset, null)
+  assert.equal(cached.source, undefined)
+
+  const cursor = await cursorFor('boundary')
+  assert.equal(batch.files[0].messages[0].text, prefix)
+  const lastCached = index.readMessage({ cursor, offset: maxText - 1, limit: 2 }, ['box'])
+  assert.equal(lastCached.source, undefined)
+  assert.equal(lastCached.page.text, '😀')
+  assert.equal(lastCached.page.nextOffset, maxText)
+  assert.equal(lastCached.page.totalChars, maxText + 4)
+  let offset: number | null = lastCached.page.nextOffset
+  let remainder = ''
+  while (offset !== null) {
+    const { source: request } = index.readMessage({ cursor, offset, limit: 2 }, ['box'])
+    assert.ok(request)
+    const page = readMessage([], request)
+    assert.equal(page.totalChars, maxText + 4)
+    assert.ok(page.nextOffset === null || page.nextOffset > offset)
+    remainder += page.text
+    offset = page.nextOffset
+  }
+  assert.equal(remainder, tail)
+  const request = index.readMessage({ cursor, offset: maxText }, ['box']).source!
   assert.throws(() => readMessage([], { ...request, contentHash: 'invalid' }), /changed/)
 })
 

@@ -286,6 +286,14 @@ test('history: hosted owners have separate indexes and cursors; offline machines
       createdAt: new Date().toISOString(),
     })
   }
+  await deployment.workspace(owners[0]).add({
+    id: 'restricted',
+    kind: 'direct',
+    name: 'Direct only',
+    endpoint: 'https://restricted.example',
+    tools: ['codex'],
+    createdAt: new Date().toISOString(),
+  })
   let offline = false
   let readCalls = 0
   const reader = {
@@ -368,7 +376,11 @@ test('history: hosted owners have separate indexes and cursors; offline machines
     await rm(directory, { recursive: true, force: true })
   })
   for (const owner of owners) await hub.call(owner, 'refresh_index', {})
-  assert.equal(readCalls, 2)
+  assert.equal(readCalls, 2, 'direct-only machines must never be polled')
+  await assert.rejects(
+    hub.call(owners[0], 'search_history', { query: 'test', mode: 'hybrid' }),
+    /Invalid history tool arguments/,
+  )
   for (const owner of owners) await hub.call(owner, 'refresh_index', {})
   assert.equal(readCalls, 2, 'complete decoded checkpoints must not be compared with physical file sizes')
   const a = (await hub.call(owners[0], 'search_history', { query: 'private', mode: 'keyword' })) as {

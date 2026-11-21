@@ -15,24 +15,20 @@ export type ChatDialog =
   | ({ kind: 'settings' | 'conversations' | 'fork' | 'stop' | 'delete' | 'chat' | 'terminal' } & SessionRef)
   | { kind: 'find'; query: string }
 
-export interface ChatApp {
-  client: ChatClient
-  openLink(url: string): void
-}
 interface ChatShell {
   select(selection: Selection): void
   open(dialog: ChatDialog): void
 }
 
-export const ChatAppContext = createContext<ChatApp | null>(null)
+export const ChatClientContext = createContext<ChatClient | null>(null)
 export const ShellContext = createContext<ChatShell>({ select() {}, open() {} })
 
 /** The app, its navigation, and a re-render on every store change. */
 export function useChat() {
-  const app = useContext(ChatAppContext)!
+  const client = useContext(ChatClientContext)!
   const shell = useContext(ShellContext)
-  useSyncExternalStore(app.client.subscribe, app.client.getVersion)
-  return { ...app, ...shell }
+  useSyncExternalStore(client.subscribe, client.getVersion)
+  return { client, ...shell }
 }
 
 export interface ConversationActions {
@@ -56,12 +52,5 @@ interface ConversationFiles {
 }
 export const FilesContext = createContext<ConversationFiles | null>(null)
 
-interface MarkdownOptions {
-  /** Handles to highlight as @mentions. */
-  handles: readonly string[]
-  openLink: (url: string) => void
-}
-export const MarkdownContext = createContext<MarkdownOptions>({
-  handles: [],
-  openLink: url => void window.open(url, '_blank', 'noopener'),
-})
+/** Handles to highlight as @mentions in a channel's Markdown. */
+export const MentionHandlesContext = createContext<readonly string[]>([])

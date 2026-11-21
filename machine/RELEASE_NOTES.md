@@ -1,7 +1,11 @@
-# Outpost machine service 2.6.1
+# Outpost machine service 2.6.2
 
 Everything Outpost runs on a machine, as one executable. Terminal service
 protocol 6, chat host protocol 3, node protocol 3.
+
+- File publication and removal notify each attached terminal once. Closing an attachment releases its machine stream.
+- Machine state locks are released automatically if the process exits.
+- History search uses `mixed` for combined keyword and semantic results. Message pages count Unicode code points. Existing V3 installations must rebuild the generated history index with the matching server.
 
 - The CLI reports enrollment as Relay enabled, Direct only or Server-managed.
 - Direct-only machines import a deployment verification key offline and accept

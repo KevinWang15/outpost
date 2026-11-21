@@ -80,3 +80,27 @@ test('a machine without Outpost machine service says so; a lost connection fails
   await assert.rejects(machine.call('exit'), /connection to the machine was lost/)
   assert.deepEqual(await machine.call('echo', { value: 2 }), { value: 2 }, 'the next call reconnects')
 })
+
+test('cancelling during the handshake prevents calls and streams from starting', async t => {
+  const machine = connection(transport(node.slice(1)))
+  t.after(() => machine.close())
+  const controller = new AbortController()
+  const call = machine.call('echo', {}, { signal: controller.signal })
+  const open = machine.open('terminal', {}, controller.signal)
+  controller.abort()
+  await Promise.all([assert.rejects(call, { name: 'AbortError' }), assert.rejects(open, { name: 'AbortError' })])
+  assert.equal(await machine.call('open-count'), 0)
+})
+
+test('cancelling while a stream is opening releases a late stream on the node', async t => {
+  const machine = connection(transport(node.slice(1)))
+  t.after(() => machine.close())
+  await machine.call('echo')
+  const controller = new AbortController()
+  const pending = machine.open('terminal', { hold: true }, controller.signal)
+  await machine.call('echo') // The node received the open, but is still preparing the attachment.
+  controller.abort()
+  await assert.rejects(pending, (error: unknown) => error instanceof MachineError && error.statusCode === 499)
+  await machine.call('release-open')
+  assert.equal(await machine.call('open-count'), 0)
+})

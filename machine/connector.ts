@@ -103,7 +103,6 @@ function connectOnce(pair: RelayInstall, signal: AbortSignal): Promise<boolean> 
           ? [process.argv[1], 'node', '--socket', socket]
           : ['node', '--socket', socket]
         node = spawn(process.execPath, args, {
-          env: { ...process.env, OUTPOST_PAIR_ORIGIN: pair.origin },
           stdio: ['pipe', 'pipe', 'inherit'],
         })
         node.once('exit', abort)

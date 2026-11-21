@@ -1,17 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { MessagesSquare, Plus } from 'lucide-react'
 import { sessionKey } from '../../shared/chatApi'
 import ChannelView from './ChannelView'
 import { ChatClient } from './client'
-import {
-  ChatAppContext,
-  MarkdownContext,
-  ShellContext,
-  useChat,
-  type ChatApp as App,
-  type ChatDialog,
-  type Selection,
-} from './context'
+import { ChatClientContext, ShellContext, useChat, type ChatDialog, type Selection } from './context'
 import {
   ChannelDialog,
   ContinueChatDialog,
@@ -185,13 +177,9 @@ export default function ChatApp() {
       client.dispose()
     }
   }, [client])
-  const openLink = useCallback((url: string) => void window.open(url, '_blank', 'noopener,noreferrer'), [])
-  const app = useMemo<App>(() => ({ client, openLink }), [client, openLink])
   return (
-    <ChatAppContext.Provider value={app}>
-      <MarkdownContext.Provider value={{ handles: [], openLink }}>
-        <Shell />
-      </MarkdownContext.Provider>
-    </ChatAppContext.Provider>
+    <ChatClientContext.Provider value={client}>
+      <Shell />
+    </ChatClientContext.Provider>
   )
 }

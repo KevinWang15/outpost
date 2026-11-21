@@ -138,7 +138,8 @@ test('a long compressed message pages by characters and the native file is uncha
     offset: 1048576,
     limit: 100,
   })
-  assert.equal(page.text, text.slice(1048576, 1048676))
+  assert.equal(page.text, [...text].slice(1048576, 1048676).join(''))
+  assert.equal(page.totalChars, 1_050_000)
   assert.equal(digest(), before)
 })
 

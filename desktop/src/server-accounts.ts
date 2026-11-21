@@ -75,7 +75,10 @@ export class ServerAccounts {
     if (!this.current(entry)) return
     const previous = this.connections.get(entry.origin)
     // Concurrent requests cannot revive a credential after any request rejected it.
-    if (previous?.entry === entry && previous.status === 'expired' && status !== 'expired') return
+    if (previous?.entry === entry) {
+      if (previous.status === 'expired' && status !== 'expired') return
+      if (previous.status === status && previous.error === error) return
+    }
     this.connections.set(entry.origin, { entry, status, error })
     this.host.changed()
   }
@@ -266,12 +269,6 @@ export class ServerAccounts {
     )
       throw new Error('The server returned a different session. Connect again.')
     return launch
-  }
-  accountId(server: string) {
-    return this.store.get(desktopOrigin(server))?.account.id ?? null
-  }
-  flush() {
-    return this.signIn.flush()
   }
   dispose() {
     this.lifetime.abort()

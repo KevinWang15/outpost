@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
-import type { AgentCall } from '../../shared/machine'
+import { streamWindow, type AgentCall } from '../../shared/machine'
 import { chatHost, type ChatEntry, type ChatHostMessage, type ChatHostRequest } from '../../shared/chatHost'
 import { currentConversation, type SessionInput, type Target } from '../../shared/model'
 import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
@@ -198,6 +198,65 @@ test("an agent's Outpost tools reach the server; queued prompts can be withdrawn
   const cancelled = await chat.entry('ended', entry => entry.stopReason === 'cancelled')
   assert.equal(cancelled.entry.turn, running)
 })
+
+test(
+  'the node acknowledges a detached chat and a cancelled download while keeping its machine connection usable',
+  { timeout: 20_000 },
+  async t => {
+    const { context, create, files, sessions } = await machine(t)
+    const session = await create()
+    const detached = (stream: Stream) =>
+      new Promise<void>((resolve, reject) => stream.onClose(error => (error ? reject(error) : resolve())))
+    const chat = await sessions.chatAttach(context, session.id, true)
+    const chatClosed = detached(chat)
+    chat.end()
+    await chatClosed
+
+    const data = Buffer.alloc(streamWindow + 256 * 1024, 7)
+    const stored = await files.receive(context, session.id, 'large.bin', data, AbortSignal.timeout(10_000))
+    // An unclaimed file-receive stream must discard even a complete, zero-byte upload.
+    const empty = await context.machine.open('file-receive', { session: session.id, name: 'abandoned', size: 0 })
+    const emptyClosed = detached(empty)
+    context.machine.send({ type: 'close', stream: empty.id, error: { status: 499, message: 'Cancelled' } })
+    await assert.rejects(emptyClosed, { statusCode: 499 })
+    assert.deepEqual(await files.list(context, session.id, AbortSignal.timeout(10_000)), [stored])
+
+    const stream = await context.machine.open('file-read', { session: session.id, file: stored.id })
+    stream.pause()
+    const downloadClosed = detached(stream)
+    let received = 0
+    await new Promise<void>(resolve =>
+      stream.onData(bytes => {
+        received += bytes.length
+        if (received >= streamWindow) resolve()
+      }),
+    )
+    stream.end()
+    await downloadClosed
+    assert.ok(received < data.length)
+
+    // A request can disconnect after the machine opened the file but before read() takes over.
+    const controller = new AbortController()
+    const open = context.machine.open.bind(context.machine)
+    let abandoned: Promise<void> | undefined
+    t.mock.method(
+      context.machine,
+      'open',
+      async (...args: Parameters<typeof open>) => {
+        const opened = await open(...args)
+        abandoned = detached(opened)
+        controller.abort()
+        return opened
+      },
+      { times: 1 },
+    )
+    await assert.rejects(files.read(context, session.id, stored.id, controller.signal), { name: 'AbortError' })
+    await abandoned
+
+    const read = await files.read(context, session.id, stored.id, AbortSignal.timeout(10_000))
+    assert.deepEqual(read.bytes, data)
+  },
+)
 
 test('files sent to the agent are stored, and linked where its own tools read them', { timeout: 120_000 }, async t => {
   const { context, create, open, files } = await machine(t)

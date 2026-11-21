@@ -14,6 +14,9 @@ import { WebSocketServer } from 'ws'
 import { checkpoint, writeHeadless } from '../../shared/terminalCheckpoint'
 import { desktopConnectUrl } from '../../shared/desktopAuth'
 import { protocolVersion } from '../../shared/protocol'
+import { ServerAccounts } from '../src/server-accounts'
+import { ServerTrust } from '../src/server-trust'
+import { ServerLoginStore } from '../src/server-login-store'
 
 test('V3 browser sign-in, checkpoint restore, live input, resize and reconnect', { timeout: 20000 }, async t => {
   const { Terminal } = createRequire(import.meta.url)('@xterm/headless') as typeof import('@xterm/headless')
@@ -177,4 +180,51 @@ test('V3 browser sign-in, checkpoint restore, live input, resize and reconnect',
   await wait(e => e.event === 'connection' && e.state.kind === 'connected')
   assert.equal(connections, 2)
   cmd({ op: 'close', pane })
+})
+
+test('repeated machine requests notify desktop windows only when the account state changes', async t => {
+  const origin = 'https://outpost.example'
+  const dir = await mkdtemp(join(tmpdir(), 'outpost-account-status-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const trust = new ServerTrust(join(dir, 'trust.json'), async () => true)
+  await trust.ensure(origin)
+  const path = join(dir, 'logins.json')
+  await new ServerLoginStore(path).put({
+    origin,
+    token: 'op_app_' + 'a'.repeat(43),
+    account: { id: 'account', name: 'Fixture', email: null },
+    expiresAt: Date.now() + 600_000,
+  })
+  const changes: Array<[string, string | null]> = []
+  const accounts = new ServerAccounts(path, trust, {
+    openBrowser: async () => assert.fail('unexpected sign-in'),
+    failed: error => assert.fail(error),
+    changed: () => {
+      const { status, error } = accounts.snapshot().accounts[0]
+      changes.push([status, error])
+    },
+  })
+  t.after(() => accounts.dispose())
+  await accounts.load()
+  let failure = ''
+  t.mock.method(globalThis, 'fetch', async () => {
+    if (failure) throw new Error(failure)
+    return Response.json([])
+  })
+  const list = () => accounts.creationServers()[0].targets(AbortSignal.timeout(1000))
+  await list()
+  await list()
+  failure = 'Server unreachable'
+  await assert.rejects(list, /Server unreachable/)
+  await assert.rejects(list, /Server unreachable/)
+  failure = 'Connection reset'
+  await assert.rejects(list, /Connection reset/)
+  failure = ''
+  await list()
+  assert.deepEqual(changes, [
+    ['connected', null],
+    ['offline', 'Server unreachable'],
+    ['offline', 'Connection reset'],
+    ['connected', null],
+  ])
 })

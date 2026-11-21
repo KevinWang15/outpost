@@ -225,7 +225,7 @@ export class ChatHub {
   refresh(account: Account): Promise<void> {
     account.refreshing ??= (async () => {
       try {
-        const targets = await this.dependencies.deployment.workspace(account.owner).list()
+        const targets = await this.dependencies.deployment.workspace(account.owner).listForServer()
         account.machines = new Map(targets.map(target => [target.id, { name: target.name, tools: target.tools }]))
         await Promise.all(
           targets.map(async target => {

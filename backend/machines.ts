@@ -280,7 +280,13 @@ export class MachineConnection {
       }
       case 'opened': {
         const waiter = this.opening.get(message.stream)
-        if (!waiter) return
+        // Opening a session can finish after the requester has cancelled.
+        if (!waiter)
+          return this.send({
+            type: 'close',
+            stream: message.stream,
+            error: { status: 499, message: 'The operation was cancelled.' },
+          })
         this.opening.delete(message.stream)
         const stream = new MachineStream(message.stream, message.data, this)
         this.streams.set(message.stream, stream)
@@ -358,6 +364,7 @@ export class MachineConnection {
   async call<T>(op: string, args: object = {}, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
     options.signal?.throwIfAborted()
     await this.connect()
+    options.signal?.throwIfAborted()
     return new Promise<T>((resolve, reject) => {
       const id = randomUUID()
       const timer = setTimeout(() => {
@@ -381,6 +388,7 @@ export class MachineConnection {
   async open(kind: StreamKind, args: object, signal?: AbortSignal): Promise<MachineStream> {
     signal?.throwIfAborted()
     await this.connect()
+    signal?.throwIfAborted()
     const stream = this.nextStream++
     return new Promise<MachineStream>((resolve, reject) => {
       this.opening.set(stream, { resolve, reject })
@@ -388,7 +396,6 @@ export class MachineConnection {
         'abort',
         () => {
           if (!this.opening.delete(stream)) return
-          this.send({ type: 'close', stream })
           reject(new MachineError('The operation was cancelled.', 499))
         },
         { once: true },

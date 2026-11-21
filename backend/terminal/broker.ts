@@ -174,19 +174,6 @@ export class TerminalBroker {
     }
   }
 
-  /** Availability hints reach every authorized viewer of this managed session. */
-  filesChanged(grant: Grant) {
-    for (const connection of this.connections) {
-      const other = connection.grant
-      if (
-        other.owner.userId === grant.owner.userId &&
-        other.targetId === grant.targetId &&
-        other.sessionId === grant.sessionId
-      )
-        connection.send({ type: 'signal', signal: { type: 'files.changed', payload: {} } })
-    }
-  }
-
   /** Close connections after a session is terminated or deleted, or a target removed. */
   closeTarget(owner: Owner, targetId: string, sessionId?: string) {
     for (const connection of this.connections) {

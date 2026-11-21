@@ -175,12 +175,6 @@ export class ServerSignIn {
     this.cancel(origin)
     await attempt?.exchange?.catch(() => {})
   }
-  async flush() {
-    await Promise.allSettled(
-      [...this.attempts.values()].filter(item => item.phase === 'saving').map(item => item.exchange),
-    )
-    await this.store.flush()
-  }
   dispose() {
     this.closed = true
     for (const origin of this.attempts.keys()) this.cancel(origin)

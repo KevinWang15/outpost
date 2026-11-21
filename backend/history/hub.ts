@@ -38,9 +38,8 @@ interface Dependencies extends HistoryOptions {
   deployment: Deployment
   resolve(owner: Owner, id: string): Promise<TargetContext>
 }
-const validate = new Map(
-  definitions.map(tool => [tool.name, new Ajv({ strict: false, allErrors: true }).compile(tool.inputSchema)]),
-)
+const ajv = new Ajv({ strict: false, allErrors: true })
+const validate = new Map(definitions.map(tool => [tool.name, ajv.compile(tool.inputSchema)]))
 
 /** Account-private index of all native conversations on configured targets. */
 export class HistoryHub {
@@ -101,7 +100,7 @@ export class HistoryHub {
     void this.sync(account)
   }
   private async machines(account: Account) {
-    const targets = await this.dependencies.deployment.workspace(account.owner).list()
+    const targets = await this.dependencies.deployment.workspace(account.owner).listForServer()
     account.machines = targets.map(target => ({
       id: target.id,
       name: target.name,
@@ -253,8 +252,7 @@ export class HistoryHub {
     const check = validate.get(tool)
     if (!check || !check(args))
       throw new Error(
-        'Invalid history tool arguments. ' +
-          (check ? new Ajv().errorsText(check.errors) : 'Unknown Outpost history tool.'),
+        'Invalid history tool arguments. ' + (check ? ajv.errorsText(check.errors) : 'Unknown Outpost history tool.'),
       )
     const input = args as Record<string, unknown>
     const account = this.account(owner)
@@ -311,24 +309,11 @@ export class HistoryHub {
     }
     if (tool === 'read_message') {
       const pageInput = input as Parameters<HistoryIndex['readMessage']>[0]
-      const source = account.index.messageSource(pageInput.cursor, ids)
-      const cached = account.index.readMessage(pageInput, ids)
-      if (source.truncated && (pageInput.offset ?? 0) >= source.length) {
-        const context = await this.dependencies.resolve(owner, source.machineId)
-        const page = await this.reader.message(
-          context,
-          {
-            source: source.source,
-            position: source.position,
-            contentHash: source.contentHash,
-            offset: pageInput.offset,
-            limit: pageInput.limit,
-          },
-          AbortSignal.timeout(20000),
-        )
-        return { ...cached, ...page }
-      }
-      return cached
+      const { page, source, machineId } = account.index.readMessage(pageInput, ids)
+      if (!source) return page
+      const context = await this.dependencies.resolve(owner, machineId)
+      const nativePage = await this.reader.message(context, source, AbortSignal.timeout(20000))
+      return { ...page, ...nativePage }
     }
     return account.index.session(String(input.sessionId), ids)
   }

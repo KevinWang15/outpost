@@ -119,7 +119,7 @@ test('history: real SQLite vector search finds meaning without keywords and mixe
   assert.match(semantic.results[0].text, /kitten/)
   assert.equal(semantic.results[0].machine.id, 'alpha')
   const mixed = await index.search({ query: 'publishing the release', mode: 'mixed' }, ids)
-  assert.equal(mixed.mode, 'hybrid')
+  assert.equal(mixed.mode, 'mixed')
   assert.match(mixed.results[0].text, /deployment/)
   assert.equal(mixed.results[0].machine.id, 'beta')
 })
@@ -151,6 +151,25 @@ test('history: machine/tool/role/date filters apply to lexical and vector retrie
   assert.equal((await index.search({ query: 'deployment', mode: 'semantic' }, ['alpha'])).results.length, 1)
 })
 
+test('history: only a page inside the uncached tail needs a native read', async t => {
+  const index = setup(t)
+  const native = source('partial')
+  const input = batch(native, ['find 😀'])
+  Object.assign(input.files[0].messages[0], { truncated: true, totalChars: 10, contentHash: 'native-hash' })
+  index.ingest(machines[0], input)
+  const { cursor } = (await index.search({ query: 'find', mode: 'keyword' }, ids)).results[0]
+  const cached = index.readMessage({ cursor, offset: 5 }, ids)
+  assert.equal(cached.page.text, '😀')
+  assert.equal(cached.page.nextOffset, 6)
+  assert.equal(cached.source, undefined)
+  const tail = index.readMessage({ cursor, offset: 6, limit: 3 }, ids)
+  assert.equal(tail.machineId, 'alpha')
+  assert.deepEqual(tail.source, { source: native, position: 0, contentHash: 'native-hash', offset: 6, limit: 3 })
+  const end = index.readMessage({ cursor, offset: 10 }, ids)
+  assert.equal(end.source, undefined)
+  assert.equal(end.page.nextOffset, null)
+})
+
 test('history: context/message paging is bounded and chronological; appends keep cursors stable, replacement invalidates them', async t => {
   const index = setup(t),
     s = source('long')
@@ -173,14 +192,14 @@ test('history: context/message paging is bounded and chronological; appends keep
   let offset = 0,
     all = ''
   for (;;) {
-    const page = index.readMessage({ cursor: found.cursor, offset, limit: 7000 }, ids)
+    const { page } = index.readMessage({ cursor: found.cursor, offset, limit: 7000 }, ids)
     all += page.text
     if (page.nextOffset === null) break
     offset = page.nextOffset
   }
   assert.equal(all, texts[1])
   assert.equal(index.ingest(machines[0], batch(s, ['appended paragraph'], 'first', 500, false)), 1)
-  assert.equal(index.readMessage({ cursor: found.cursor }, ids).totalChars, texts[1].length)
+  assert.equal(index.readMessage({ cursor: found.cursor }, ids).page.totalChars, texts[1].length)
   const session = index.session(String(found.sessionId), ids)
   assert.equal(session.machine.id, 'alpha')
   assert.equal(session.nativeSessionId, 'native-long')
@@ -208,7 +227,7 @@ test('history: paging counts Unicode characters and repeated chunks share one em
   let offset = 0,
     result = ''
   for (;;) {
-    const page = index.readMessage({ cursor: found.cursor, offset, limit: 701 }, ids)
+    const { page } = index.readMessage({ cursor: found.cursor, offset, limit: 701 }, ids)
     result += page.text
     assert.equal(page.totalChars, [...text].length)
     if (page.nextOffset === null) break

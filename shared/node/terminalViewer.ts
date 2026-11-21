@@ -21,7 +21,6 @@ interface ViewerHost<Identity> {
   renew?(ticket: string): void
   logged(connection: Connection<Identity>, change: 'opened' | 'closed'): void
   activate(grant: Identity, token: string): boolean
-  filesChanged(grant: Identity): void
   forget(connection: Connection<Identity>): void
 }
 /** One client socket attached to one terminal stream on the machine connection.
@@ -201,8 +200,8 @@ export class Connection<Identity> {
       if (Number.isSafeInteger(message.waiting) && (message.waiting as number) >= 0)
         this.send({ type: 'deliveries', waiting: message.waiting as number })
     } else if (message.type === 'files') {
-      // The agent stored a file: every viewer of the session refreshes its list.
-      this.broker.filesChanged(this.grant)
+      // The terminal service broadcasts once to each attachment.
+      this.send({ type: 'signal', signal: { type: 'files.changed', payload: {} } })
     } else if (message.type === 'activity') {
       this.send({
         type: 'activity',

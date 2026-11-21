@@ -76,6 +76,10 @@ export class Workspace {
     await this.queue
     return (await this.read()).targets
   }
+  /** Chat, history and activity collection need a server-to-machine connection. */
+  async listForServer() {
+    return (await this.list()).filter(target => target.kind !== 'direct')
+  }
   async get(id: string) {
     const target = (await this.list()).find(item => item.id === id)
     if (!target) throw new AppError('Machine not found', 404)

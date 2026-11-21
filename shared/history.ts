@@ -1,5 +1,5 @@
 import type { HarnessId } from './harnesses'
-export type HistoryMode = 'keyword' | 'substring' | 'semantic' | 'hybrid' | 'mixed'
+export type HistoryMode = 'keyword' | 'substring' | 'semantic' | 'mixed'
 
 export interface HistoryMachine {
   id: string
@@ -81,4 +81,19 @@ export interface HistorySearchInput {
   groupBy?: 'session' | 'message'
   sort?: 'relevance' | 'newest' | 'oldest'
   minSimilarity?: number
+}
+
+/** History offsets count Unicode code points. Keep just the requested slice of a large native record. */
+export function historyMessagePage(text: string, offset: number, limit: number) {
+  let start = text.length,
+    end = text.length,
+    index = 0,
+    totalChars = 0
+  for (const character of text) {
+    if (totalChars === offset) start = index
+    if (totalChars === offset + limit) end = index
+    index += character.length
+    totalChars++
+  }
+  return { text: text.slice(start, end), totalChars, nextOffset: offset + limit < totalChars ? offset + limit : null }
 }

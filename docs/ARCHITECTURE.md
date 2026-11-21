@@ -727,10 +727,10 @@ creation → registry; other operations never take the creation lock. The
 registry lock is held only to snapshot settings and to commit a new record;
 Git and harness allocation run outside it. Registration re-reads the latest
 registry and rechecks unique names and conversation identities, preserving
-concurrent deletes and attachment timestamps. Locks are files in
-`~/.outpost/locks/` holding their holder's PID; a lock whose holder died is
-broken, with a check that a new holder did not take it meanwhile, so a failed
-process leaves no reservation to recover.
+concurrent deletes and attachment timestamps. Each lock key has a private file in `~/.outpost/locks/`.
+An exclusive SQLite transaction holds the lock across processes and async work.
+Closing the connection or exiting the process releases the lock. Its file stays
+in place so every contender uses the same inode.
 Forking uses a snapshot of the source settings, so deleting the source record
 during allocation does not cancel an already-started fork.
 
@@ -1100,7 +1100,7 @@ routes channels, session messages and schedules. See [CHAT.md](CHAT.md).
 The built-in Outpost MCP registers `search_history`, `read_context`,
 `read_message`, `get_session` and `refresh_index` alongside `publish_file`.
 `shared/historyTools.json` is the single tool/schema definition used by the
-server and the MCP server. Unmanaged CLI launches still expose no Outpost tools.
+server and the MCP server. Chat, history indexing and machine activity collection use only server-connected machines. Direct-only machines remain available in the terminal clients. Unmanaged CLI launches still expose no Outpost tools.
 
 `backend/history/` owns an account-private SQLite index, local multilingual
 embeddings and background backfill. It reads each machine through its machine

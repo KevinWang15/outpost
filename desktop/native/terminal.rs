@@ -82,6 +82,7 @@ pub struct Pane {
     pub sound: bool,
     pub server: Option<String>,
     focus_subs: Vec<Subscription>,
+    active: bool,
     bounds: Bounds<Pixels>,
     cell: Size<Pixels>,
     desired: (u16, u16),
@@ -207,6 +208,7 @@ impl Pane {
             sound: true,
             server: None,
             focus_subs: Vec::new(),
+            active: false,
             bounds: Bounds::default(),
             cell: size(px(8.), px(17.)),
             desired: (80, 24),
@@ -215,12 +217,14 @@ impl Pane {
         }
     }
     pub fn bind_focus(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        self.sync_focus(w, cx);
         self.focus_subs = vec![
-            cx.on_focus(&self.focus, w, |s, _, cx| {
-                s.active(true, cx);
+            cx.on_focus(&self.focus, w, |s, w, cx| {
+                s.sync_focus(w, cx);
                 cx.emit(PaneChanged)
             }),
-            cx.on_blur(&self.focus, w, |s, _, cx| s.active(false, cx)),
+            cx.on_blur(&self.focus, w, |s, w, cx| s.sync_focus(w, cx)),
+            cx.observe_window_activation(w, |s, w, cx| s.sync_focus(w, cx)),
         ];
     }
     pub fn command(&self, op: &str, mut args: serde_json::Value) {
@@ -310,7 +314,17 @@ impl Pane {
         self.term.grid_mut().cursor.point.column = saved.point.column;
         self.term.selection = None;
     }
-    fn active(&mut self, active: bool, cx: &mut Context<Self>) {
+    pub fn focus_terminal(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        self.focus.focus(w, cx);
+        // A newly inserted pane can receive focus before its subscription is installed.
+        self.sync_focus(w, cx);
+    }
+    fn sync_focus(&mut self, w: &Window, cx: &mut Context<Self>) {
+        let active = w.is_window_active() && self.focus.is_focused(w);
+        if active == self.active {
+            return;
+        }
+        self.active = active;
         if active {
             self.bell = false;
         }
@@ -816,7 +830,13 @@ impl Pane {
             self.paste(text, cx);
         }
     }
+    fn observe_completion(&self, w: &Window) {
+        if self.activity == "finished" && w.is_window_active() && self.focus.is_focused(w) {
+            self.command("observe", json!({}));
+        }
+    }
     fn key(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
+        self.observe_completion(w);
         if !self.marked.is_empty() {
             return;
         }
@@ -848,6 +868,7 @@ impl Pane {
     }
     fn down(&mut self, e: &MouseDownEvent, w: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(w, cx);
+        self.observe_completion(w);
         let button = match e.button {
             MouseButton::Left => 0,
             MouseButton::Middle => 1,
@@ -1043,9 +1064,10 @@ impl EntityInputHandler for Pane {
         &mut self,
         _: Option<Range<usize>>,
         text: &str,
-        _: &mut Window,
+        w: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.observe_completion(w);
         self.marked.clear();
         self.user_write(text.as_bytes().to_vec(), cx)
     }

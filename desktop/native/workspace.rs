@@ -318,7 +318,7 @@ impl Workspace {
         match self.page {
             Page::Terminal => {
                 if let Some(p) = self.active() {
-                    p.read(cx).focus.clone().focus(w, cx)
+                    p.update(cx, |p, cx| p.focus_terminal(w, cx))
                 }
             }
             Page::Find | Page::Choose | Page::Switch => {
@@ -841,7 +841,12 @@ impl Workspace {
                             }
                             "title" => p.title = strval(&e, "title"),
                             "deliveries" => p.waiting = e["waiting"].as_u64().unwrap_or(0),
-                            "activity" => p.activity = strval(&e["activity"], "state"),
+                            "activity" => {
+                                p.activity = strval(&e["activity"], "state");
+                                if let Some(seq) = e["seq"].as_u64() {
+                                    p.command("ack", json!({"seq":seq}));
+                                }
+                            }
                             _ => return,
                         }
                         cx.notify()
@@ -2068,6 +2073,46 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         test.capture_screenshot(window.into())?
             .save(PathBuf::from(dir).join("home.png"))?;
     }
+    // Drive remote panes through the same focus and window activation callbacks as the app.
+    let (bridge, commands) = Bridge::recording();
+    let remote_window = test.open_window(size(px(700.), px(500.)), |w, cx| {
+        cx.new(|cx| {
+            let mut s = Workspace::new(false, w, cx);
+            s.bridge = Some(bridge);
+            s
+        })
+    })?;
+    let focused = || {
+        std::iter::from_fn(|| commands.try_recv().ok())
+            .filter(|c| c["op"] == "focus")
+            .map(|c| (c["pane"].as_u64().unwrap(), c["active"].as_bool().unwrap()))
+            .collect::<Vec<_>>()
+    };
+    let open_remote = |test: &mut HeadlessAppContext, id| -> anyhow::Result<()> {
+        test.update_window(remote_window.into(), |root, w, cx| {
+            root.downcast::<Workspace>().unwrap().update(cx, |s, cx|
+                s.event(json!({"event":"opened","pane":id,"title":"test","server":"https://example.com"}), w, cx));
+            w.draw(cx).clear(cx);
+        })?;
+        test.run_until_parked();
+        Ok(())
+    };
+    open_remote(&mut test, 1)?;
+    test.update_window(remote_window.into(), |_, w, _| w.activate_window())?;
+    test.run_until_parked();
+    assert_eq!(focused(), vec![(1, true)]);
+    open_remote(&mut test, 2)?;
+    let mut switched = focused();
+    switched.sort_unstable();
+    assert_eq!(switched, vec![(1, false), (2, true)]);
+    test.update_window(window.into(), |_, w, _| w.activate_window())?;
+    test.run_until_parked();
+    assert_eq!(focused(), vec![(2, false)]);
+    test.update_window(remote_window.into(), |_, w, _| w.activate_window())?;
+    test.run_until_parked();
+    assert_eq!(focused(), vec![(2, true)], "a hidden tab must stay unread");
+    test.update_window(remote_window.into(), |_, w, _| w.remove_window())?;
+    test.run_until_parked();
     // Click the actual title-bar button, then type through GPUI's input method.
     let x = if cfg!(target_os = "macos") { 132. } else { 62. };
     click(&mut test, x, 20.)?;

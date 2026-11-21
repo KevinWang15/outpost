@@ -4,7 +4,6 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex, mpsc},
     thread,
 };
 
@@ -19,20 +18,29 @@ pub fn data_dir() -> PathBuf {
 }
 #[derive(Clone)]
 pub struct Bridge {
-    send: mpsc::Sender<Value>,
-    _child: Arc<ChildGuard>,
+    send: async_channel::Sender<Value>,
 }
-struct ChildGuard(Mutex<Child>);
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        if let Ok(child) = self.0.get_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+pub struct HelperProcess {
+    child: Child,
+    commands: async_channel::Sender<Value>,
+    events: async_channel::Sender<Value>,
+}
+impl HelperProcess {
+    pub fn shutdown(&mut self) -> Result<()> {
+        // Drain queued commands and close stdin. Stop forwarding UI events while
+        // the main thread waits, but keep reading stdout so the helper can finish.
+        self.commands.close();
+        self.events.close();
+        let status = self.child.wait()?;
+        anyhow::ensure!(
+            status.success(),
+            "Outpost session helper exited with {status}"
+        );
+        Ok(())
     }
 }
 impl Bridge {
-    pub fn start() -> Result<(Self, async_channel::Receiver<Value>)> {
+    pub fn start() -> Result<(Self, async_channel::Receiver<Value>, HelperProcess)> {
         let exe = std::env::current_exe()?;
         let dir = exe.parent().context("Executable directory")?;
         let resource = if cfg!(target_os = "macos") {
@@ -60,19 +68,21 @@ impl Bridge {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x08000000);
         }
+        cmd.arg(helper).arg(data_dir());
+        Self::spawn(cmd)
+    }
+    fn spawn(mut cmd: Command) -> Result<(Self, async_channel::Receiver<Value>, HelperProcess)> {
         let mut child = cmd
-            .arg(helper)
-            .arg(data_dir())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()?;
         let mut stdin = BufWriter::new(child.stdin.take().unwrap());
         let stdout = BufReader::new(child.stdout.take().unwrap());
-        let (send, requests) = mpsc::channel::<Value>();
+        let (send, requests) = async_channel::unbounded::<Value>();
         let (tx, rx) = async_channel::bounded(128);
         thread::spawn(move || {
-            for request in requests {
+            while let Ok(request) = requests.recv_blocking() {
                 if serde_json::to_writer(&mut stdin, &request).is_err()
                     || stdin.write_all(b"\n").and_then(|_| stdin.flush()).is_err()
                 {
@@ -80,25 +90,56 @@ impl Bridge {
                 }
             }
         });
+        let process = HelperProcess {
+            child,
+            commands: send.clone(),
+            events: tx.clone(),
+        };
         thread::spawn(move || {
             for line in stdout.lines().map_while(Result::ok) {
-                if let Ok(event) = serde_json::from_str(&line)
-                    && tx.send_blocking(event).is_err()
+                if !tx.is_closed()
+                    && let Ok(event) = serde_json::from_str(&line)
                 {
-                    return;
+                    let _ = tx.send_blocking(event);
                 }
             }
-            let _=tx.send_blocking(serde_json::json!({"event":"error","message":"The Outpost session helper stopped."}));
+            let _ = tx.send_blocking(serde_json::json!({"event":"error","message":"The Outpost session helper stopped."}));
         });
-        Ok((
-            Self {
-                send,
-                _child: Arc::new(ChildGuard(Mutex::new(child))),
-            },
-            rx,
-        ))
+        Ok((Self { send }, rx, process))
+    }
+    #[cfg(feature = "ui-tests")]
+    pub fn recording() -> (Self, async_channel::Receiver<Value>) {
+        let (send, commands) = async_channel::unbounded();
+        (Self { send }, commands)
     }
     pub fn call(&self, value: Value) {
-        let _ = self.send.send(value);
+        let _ = self.send.try_send(value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn quit_drains_commands_even_with_a_full_ui_event_queue() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let result = dir.path().join("result");
+        let mut cmd = Command::new("node");
+        cmd.arg("-e").arg(r#"
+            const lines = require('node:readline').createInterface({input: process.stdin})
+            const received = []
+            for (let i = 0; i < 512; i++) console.log(JSON.stringify({event: 'output'}))
+            lines.on('line', line => received.push(JSON.parse(line)))
+            lines.on('close', () => require('node:fs').writeFileSync(process.argv[1], JSON.stringify(received)))
+        "#).arg(&result);
+        let (bridge, _events, mut process) = Bridge::spawn(cmd)?;
+        let commands: Vec<_> = (0..512).map(Value::from).collect();
+        for command in &commands {
+            bridge.call(command.clone());
+        }
+        process.shutdown()?;
+        let written: Vec<Value> = serde_json::from_slice(&std::fs::read(result)?)?;
+        assert_eq!(written, commands);
+        Ok(())
     }
 }

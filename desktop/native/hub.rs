@@ -14,7 +14,15 @@ impl Hub {
     pub fn start(links: async_channel::Receiver<String>, cx: &mut App) {
         let mut error = String::new();
         let bridge = match Bridge::start() {
-            Ok((bridge, events)) => {
+            Ok((bridge, events, mut process)) => {
+                cx.on_app_quit(move |_| {
+                    // Keep the profile lock until the helper finishes its disk writes.
+                    if let Err(error) = process.shutdown() {
+                        eprintln!("{error}");
+                    }
+                    std::future::ready(())
+                })
+                .detach();
                 cx.spawn(async move |cx| {
                     while let Ok(event) = events.recv().await {
                         cx.update(|cx| Self::dispatch(event, cx));

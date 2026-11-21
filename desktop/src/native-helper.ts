@@ -15,6 +15,7 @@ import { Preferences } from './preferences'
 import { shellProfiles } from './shell-profiles'
 import { bufferControls, terminalControls } from './checkpoint-modes'
 import type { CheckpointState } from '../../shared/terminalState'
+import { TerminalActivity } from '../../frontend/terminal/activity'
 import { TerminalSocket } from '../../frontend/terminal/socket'
 import type { TerminalRendering } from '../../frontend/terminal/rendering'
 import { CheckpointReader } from '../../shared/terminalCheckpoint'
@@ -32,7 +33,19 @@ import type { SessionInput } from '../../shared/model'
 import type { ServerMessage } from '../../shared/protocol'
 
 const dir = process.argv[2]
-const emit = (event: string, payload: object = {}) => process.stdout.write(JSON.stringify({ event, ...payload }) + '\n')
+let closing = false
+const emit = (event: string, payload: object = {}) => {
+  if (!closing) process.stdout.write(JSON.stringify({ event, ...payload }) + '\n')
+}
+const pending = new Set<Promise<unknown>>()
+function run(work: Promise<unknown>, context: object = {}) {
+  const task = work.catch(error => {
+    if (closing) console.error(message(error))
+    else emit('error', { ...context, message: message(error) })
+  })
+  pending.add(task)
+  void task.finally(() => pending.delete(task))
+}
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const prompts = new Map<number, (answer: boolean) => void>()
 let serial = 0
@@ -40,6 +53,7 @@ const trust = new ServerTrust(
   join(dir, 'server-trust.json'),
   origin =>
     new Promise(resolve => {
+      if (closing) return resolve(false)
       const id = ++serial
       prompts.set(id, resolve)
       emit('trust', { id, origin })
@@ -59,6 +73,7 @@ let catalogue: DesktopSessionChoice[] = []
 let listing: AbortController | undefined
 const snapshot = () => emit('accounts', { ...accounts.snapshot(), recent: recent.list(), sessions: catalogue })
 const refresh = async () => {
+  if (closing) return
   listing?.abort()
   const controller = (listing = new AbortController())
   await accounts.refresh()
@@ -98,10 +113,10 @@ class NativeRendering implements TerminalRendering {
     this.state = undefined
     this.links = { normal: [], alt: [] }
   }
-  private barrier(done: () => void) {
+  barrier(done: () => void, event = 'barrier', payload: object = {}) {
     const seq = ++serial
     this.callbacks.set(seq, done)
-    emit('barrier', { pane: this.pane, seq })
+    emit(event, { pane: this.pane, seq, ...payload })
   }
   ack(seq: number) {
     const done = this.callbacks.get(seq)
@@ -215,12 +230,15 @@ interface Attachment {
   launch: DesktopLaunch
   socket: TerminalSocket
   rendering: NativeRendering
+  activity: TerminalActivity
+  focused: boolean
   cols: number
   rows: number
 }
 const creations = new Map<number, { key: string; id: string }>()
 const panes = new Map<number, Attachment>()
 const attach = async (launch: DesktopLaunch, window?: number) => {
+  if (closing) return
   const key = desktopSessionId(launch)
   for (const [pane, existing] of panes)
     if (existing.key === key) {
@@ -230,25 +248,25 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
     }
   const pane = ++serial
   const rendering = new NativeRendering(pane, reason => state.socket.fail(reason))
-  const state: Attachment = {
-    key,
-    launch,
-    cols: 80,
-    rows: 24,
+  const socket = new TerminalSocket(
+    launch.token,
+    () => ({ cols: state.cols, rows: state.rows }),
     rendering,
-    socket: new TerminalSocket(
-      launch.token,
-      () => ({ cols: state.cols, rows: state.rows }),
-      rendering,
-      {
-        state: state =>
-          emit('connection', {
-            pane,
-            state: state.kind === 'connected' ? { ...state, routeLabel: terminalRouteLabels[state.route] } : state,
-          }),
-        hello: msg => {
-          emit('title', { pane, title: msg.session.name })
-          void recent
+    {
+      state: connection => {
+        state.activity.setActive(state.focused && connection.kind === 'connected')
+        emit('connection', {
+          pane,
+          state:
+            connection.kind === 'connected'
+              ? { ...connection, routeLabel: terminalRouteLabels[connection.route] }
+              : connection,
+        })
+      },
+      hello: msg => {
+        emit('title', { pane, title: msg.session.name })
+        run(
+          recent
             .remember({
               server: launch.server,
               accountId: launch.accountId,
@@ -259,32 +277,49 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
               tool: msg.session.tool,
               lastConnectedAt: Date.now(),
             })
-            .then(snapshot)
-            .catch(e => emit('error', { message: message(e) }))
-        },
-        signal: s => {
-          if (s.signal.type === 'files.changed') emit('filesChanged', { pane })
-          if (s.signal.type === 'browser.open') {
-            try {
-              emit('browser', { url: browserUrl(s.signal.payload) })
-            } catch (e) {
-              emit('error', { pane, message: message(e) })
-            }
+            .then(snapshot),
+        )
+      },
+      signal: s => {
+        if (s.signal.type === 'files.changed') emit('filesChanged', { pane })
+        if (s.signal.type === 'browser.open') {
+          try {
+            emit('browser', { url: browserUrl(s.signal.payload) })
+          } catch (e) {
+            emit('error', { pane, message: message(e) })
           }
-        },
-        activity: activity => emit('activity', { pane, activity }),
-        deliveries: waiting => emit('deliveries', { pane, waiting }),
+        }
       },
-      {
-        origin: launch.server,
-        open: url =>
-          new WebSocketClient(url, {
-            origin: launch.server,
-            followRedirects: false,
-            maxPayload: 8 * 1024 * 1024,
-          }) as unknown as WebSocket,
+      activity: activity => {
+        if (!activity) {
+          state.activity.update(null)
+          emit('activity', { pane, activity })
+          return
+        }
+        // Apply the observation only once the native pane has received this exact activity.
+        rendering.barrier(() => state.activity.update(activity), 'activity', { activity })
       },
-    ),
+      deliveries: waiting => emit('deliveries', { pane, waiting }),
+    },
+    {
+      origin: launch.server,
+      open: url =>
+        new WebSocketClient(url, {
+          origin: launch.server,
+          followRedirects: false,
+          maxPayload: 8 * 1024 * 1024,
+        }) as unknown as WebSocket,
+    },
+  )
+  const state: Attachment = {
+    key,
+    launch,
+    socket,
+    rendering,
+    cols: 80,
+    rows: 24,
+    focused: false,
+    activity: new TerminalActivity(socket, message => emit('error', { pane, message })),
   }
   panes.set(pane, state)
   emit('opened', { pane, window, title: launch.title, server: launch.server })
@@ -340,6 +375,7 @@ async function handle(c: Cmd) {
       if (await accounts.logout(c.origin)) {
         for (const [id, p] of panes)
           if (p.launch.server === c.origin) {
+            p.activity.dispose()
             p.socket.close()
             p.rendering.dispose()
             panes.delete(id)
@@ -411,12 +447,17 @@ async function handle(c: Cmd) {
       }
       return
     case 'focus':
-      return p.socket.setActive(c.active)
+      p.focused = c.active
+      p.socket.setActive(c.active)
+      return p.activity.setActive(c.active && p.socket.connected)
+    case 'observe':
+      return p.activity.acknowledge()
     case 'resume':
       return p.socket.resume()
     case 'reconnect':
       return p.socket.reconnect()
     case 'close':
+      p.activity.dispose()
       p.socket.close()
       p.rendering.dispose()
       panes.delete(c.pane)
@@ -475,17 +516,26 @@ async function main() {
   lines.on('line', line => {
     try {
       const c = JSON.parse(line) as Cmd
-      void handle(c).catch(e => emit('error', { message: message(e), window: c.window, pane: c.pane }))
+      run(handle(c), { window: c.window, pane: c.pane })
     } catch (e) {
       emit('error', { message: message(e) })
     }
   })
-  lines.on('close', () => {
+  lines.on('close', async () => {
+    closing = true
+    for (const answer of prompts.values()) answer(false)
+    prompts.clear()
+    accounts.dispose()
     for (const p of panes.values()) {
+      p.activity.dispose()
       p.socket.close()
       p.rendering.dispose()
     }
-    accounts.dispose()
+    panes.clear()
+    // Every command preceding EOF was dispatched. Wait for its local writes before
+    // ending the helper, including a credential exchange already in its saving phase.
+    await Promise.all(pending)
+    process.exit(0)
   })
   void refresh().catch(e => emit('error', { message: message(e) }))
 }

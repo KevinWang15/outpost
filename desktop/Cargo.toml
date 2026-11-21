@@ -21,8 +21,8 @@ name = "outpost"
 path = "native/main.rs"
 
 [dependencies]
-gpui = { git = "https://github.com/KevinWang15/gpui", rev = "3e5581d9bee2ca6b15e0ae08200d2a20ca7dccc6", default-features = false, features = ["components", "lucide"] }
-gpui_platform = { git = "https://github.com/KevinWang15/gpui", rev = "3e5581d9bee2ca6b15e0ae08200d2a20ca7dccc6", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui = { git = "https://github.com/KevinWang15/gpui", branch = "main", default-features = false, features = ["components", "lucide"] }
+gpui_platform = { git = "https://github.com/KevinWang15/gpui", branch = "main", default-features = false, features = ["font-kit", "wayland", "x11"] }
 alacritty_terminal = { version = "0.26", default-features = false }
 portable-pty = "0.9"
 anyhow = "1"

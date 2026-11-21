@@ -82,6 +82,7 @@ pub struct Pane {
     pub restoring: bool,
     pub sound: bool,
     pub server: Option<String>,
+    pub files: serde_json::Value,
     focus_subs: Vec<Subscription>,
     active: bool,
     bounds: Bounds<Pixels>,
@@ -90,6 +91,8 @@ pub struct Pane {
     dragging: bool,
     marked: String,
 }
+pub struct PasteError(pub String);
+impl EventEmitter<PasteError> for Pane {}
 pub struct PaneMenu;
 impl EventEmitter<PaneMenu> for Pane {}
 pub struct PaneChanged;
@@ -209,6 +212,7 @@ impl Pane {
             restoring: false,
             sound: true,
             server: None,
+            files: serde_json::Value::Null,
             focus_subs: Vec::new(),
             active: false,
             bounds: Bounds::default(),
@@ -758,28 +762,15 @@ impl Pane {
         let Some(item) = cx.read_from_clipboard() else {
             return;
         };
-        for entry in item.entries() {
-            if let ClipboardEntry::Image(image) = entry {
-                let mime = match image.format {
-                    ImageFormat::Png => "image/png",
-                    ImageFormat::Jpeg => "image/jpeg",
-                    ImageFormat::Webp => "image/webp",
-                    _ => continue,
-                };
+        match crate::clipboard_image::read(&item) {
+            Ok(Some((mime, bytes))) => {
                 if self.server.is_some() {
-                    self.command(
-                        "image",
-                        json!({"mime":mime,"data":STANDARD.encode(&image.bytes)}),
-                    );
+                    self.command("image", json!({"mime":mime,"data":STANDARD.encode(&bytes)}));
                 } else {
                     let ext = mime.split('/').next_back().unwrap_or("png");
                     let outcome = (|| -> Result<String> {
                         anyhow::ensure!(
-                            image.bytes.len() <= 16 * 1024 * 1024,
-                            "Images must be 16 MiB or smaller."
-                        );
-                        anyhow::ensure!(
-                            self.image_bytes + image.bytes.len() <= 256 * 1024 * 1024,
+                            self.image_bytes + bytes.len() <= 256 * 1024 * 1024,
                             "This tab has reached its image storage limit."
                         );
                         if self.images.is_none() {
@@ -794,9 +785,9 @@ impl Pane {
                             .suffix(&format!(".{ext}"))
                             .tempfile_in(self.images.as_ref().unwrap().path())?;
                         use std::io::Write;
-                        file.write_all(&image.bytes)?;
+                        file.write_all(&bytes)?;
                         let (_, path) = file.keep()?;
-                        self.image_bytes += image.bytes.len();
+                        self.image_bytes += bytes.len();
                         let path = if self.wsl {
                             let output = std::process::Command::new("wsl.exe")
                                 .args(["--exec", "wslpath", "-u"])
@@ -820,16 +811,19 @@ impl Pane {
                     match outcome {
                         Ok(path) => self.paste(path, cx),
                         Err(e) => {
-                            self.status = e.to_string();
-                            cx.emit(PaneChanged)
+                            cx.emit(PasteError(e.to_string()));
                         }
                     }
                 }
-                return;
             }
-        }
-        if let Some(text) = item.text() {
-            self.paste(text, cx);
+            Ok(None) => {
+                if let Some(text) = item.text() {
+                    self.paste(text, cx);
+                }
+            }
+            Err(error) => {
+                cx.emit(PasteError(error.to_string()));
+            }
         }
     }
     fn observe_completion(&self, w: &Window) {
@@ -842,10 +836,16 @@ impl Pane {
         if !self.marked.is_empty() {
             return;
         }
+        let k = &e.keystroke;
+        if cfg!(target_os = "macos") && k.key == "v" && k.modifiers == Modifiers::control() {
+            self.paste_clipboard(cx);
+            w.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
         if e.prefer_character_input {
             return;
         }
-        let k = &e.keystroke;
         let shortcut = if cfg!(target_os = "macos") {
             k.modifiers.platform
         } else {

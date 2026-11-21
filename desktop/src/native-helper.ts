@@ -496,6 +496,7 @@ async function handle(c: Cmd) {
       const file = parseSessionFile(c.file)
       const blob = await p.socket.readFile(file, AbortSignal.timeout(120000))
       await writeFile(c.path, Buffer.from(await blob.arrayBuffer()))
+      emit('fileSaved', { pane: c.pane, path: c.path })
       return
     }
     case 'deleteFile': {

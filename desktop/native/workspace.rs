@@ -38,7 +38,7 @@ enum Page {
     Files,
 }
 pub struct Workspace {
-    watches: HashMap<Id, ([Subscription; 2], SnapshotSource)>,
+    watches: HashMap<Id, ([Subscription; 3], SnapshotSource)>,
     drag: DragState,
     active_order: usize,
     handle: AnyWindowHandle,
@@ -70,7 +70,6 @@ pub struct Workspace {
     targets: Value,
     tools: Value,
     creating: bool,
-    files: Value,
     preview_id: String,
     preview: Option<Arc<Image>>,
 }
@@ -295,7 +294,6 @@ impl Workspace {
             targets: Value::Null,
             tools: Value::Null,
             creating: false,
-            files: Value::Null,
             preview_id: String::new(),
             preview: None,
         }
@@ -395,8 +393,12 @@ impl Workspace {
             }
             cx.notify()
         });
+        let paste_error = cx.subscribe(p, |s, _, e: &crate::terminal::PasteError, cx| {
+            s.message = e.0.clone();
+            cx.notify();
+        });
         self.watches
-            .insert(id, ([sub, menu], SnapshotSource::new()));
+            .insert(id, ([sub, menu, paste_error], SnapshotSource::new()));
     }
     fn local(&mut self, profile: Option<String>, w: &mut Window, cx: &mut Context<Self>) {
         let profiles = items(&self.prefs["profiles"]);
@@ -772,6 +774,7 @@ impl Workspace {
                     cx.open_url(&url)
                 }
             }
+            "fileSaved" => self.message = format!("Saved {}", strval(&e, "path")),
             "error" => {
                 if let Some(p) = self.remote.get(&n).and_then(|id| self.panes.get(id)) {
                     p.update(cx, |p, _| p.sending = false)
@@ -831,16 +834,14 @@ impl Workspace {
                     self.preview = Some(Arc::new(Image::from_bytes(format, bytes)))
                 }
             }
-            "filesChanged" if self.page == Page::Files => {
-                if let Some(pane) = self.remote.get(&n).and_then(|id| self.panes.get(id))
-                    && self.active().as_ref() == Some(pane)
-                {
+            "filesChanged" => {
+                if let Some(pane) = self.remote.get(&n).and_then(|id| self.panes.get(id)) {
                     pane.read(cx).command("files", json!({}));
                 }
             }
             "files" => {
-                if self.remote.get(&n) == self.tabs.get(self.current).map(|t| &t.active) {
-                    self.files = e["files"].clone()
+                if let Some(pane) = self.remote.get(&n).and_then(|id| self.panes.get(id)) {
+                    pane.update(cx, |p, _| p.files = e["files"].clone());
                 }
             }
             "barrier" => self.call(json!({"op":"ack","pane":n,"seq":e["seq"]})),
@@ -865,6 +866,9 @@ impl Workspace {
                                 let state = &e["state"];
                                 p.route = state["routeLabel"].as_str().map(str::to_owned);
                                 p.restoring = state["kind"] != "connected";
+                                if !p.restoring {
+                                    p.command("files", json!({}));
+                                }
                                 p.status = if state["kind"] == "connected" {
                                     String::new()
                                 } else {
@@ -1354,7 +1358,24 @@ impl Workspace {
                         move |s, _, cx| s.panes[&id].read(cx).command("deliver", json!({})),
                     ))
                 }
-                let pane_body = body.child(col().p(px(5.)).flex_1().overflow_hidden().child(p));
+                let count = items(&pane.files).len();
+                let surface = col()
+                    .relative()
+                    .p(px(5.))
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(p);
+                let pane_body = body.child(surface.when(count > 0, |surface| {
+                    surface.child(div().absolute().top(px(6.)).right(px(8.)).child(control(
+                        format!("Files ({count})"),
+                        false,
+                        cx,
+                        move |s, w, cx| {
+                            s.select(id, w, cx);
+                            s.show(Page::Files, w, cx);
+                        },
+                    )))
+                }));
                 snapshot_source(&self.watches[&id].1, pane_body).into_any_element()
             }
             Layout::Split {
@@ -1766,7 +1787,6 @@ impl Workspace {
                         false,
                         cx,
                         |s, w, cx| {
-                            s.files = Value::Null;
                             s.active().unwrap().read(cx).command("files", json!({}));
                             s.show(Page::Files, w, cx)
                         },
@@ -1895,12 +1915,18 @@ impl Workspace {
             Page::Find | Page::Compose => {}
             Page::Files => {
                 content = content.child(title("TERMINAL", "Session files"));
-                for f in items(&self.files) {
+                let active = self.active();
+                let files = active
+                    .as_ref()
+                    .map(|p| &p.read(cx).files)
+                    .unwrap_or(&Value::Null);
+                for f in items(files) {
                     let file = f.clone();
                     let remove = file.clone();
                     let preview = file.clone();
                     content = content.child(
                         row()
+                            .id(SharedString::from(strval(f, "id")))
                             .child(text(strval(f, "name"), 14., TEXT).flex_1())
                             .when(
                                 f["mediaType"]
@@ -1910,6 +1936,7 @@ impl Workspace {
                                     r.child(control("Preview", false, cx, move |s, _, cx| {
                                         s.preview_id = strval(&preview, "id");
                                         s.preview = None;
+                                        s.message.clear();
                                         if let Some(p) = s.active() {
                                             p.read(cx).command("preview", json!({"file":preview}))
                                         }
@@ -1957,10 +1984,12 @@ impl Workspace {
                             .h(px(320.))
                             .object_fit(ObjectFit::Contain),
                     );
+                } else if !self.preview_id.is_empty() && self.message.is_empty() {
+                    content = content.child(text("Loading preview…", 13., MUTED));
                 }
-                if self.files.is_null() {
+                if files.is_null() {
                     content = content.child(text("Loading files…", 13., MUTED))
-                } else if items(&self.files).is_empty() {
+                } else if items(files).is_empty() {
                     content = content.child(text("No session files.", 13., MUTED))
                 }
             }
@@ -2179,6 +2208,29 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     let mut switched = focused();
     switched.sort_unstable();
     assert_eq!(switched, vec![(1, false), (2, true)]);
+    // A publication on a background tab must refresh that pane while Files is closed.
+    test.update_window(remote_window.into(), |root, w, cx| {
+        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+            s.event(
+                json!({"event":"connection","pane":2,"state":{"kind":"connected"}}),
+                w,
+                cx,
+            );
+            s.event(json!({"event":"filesChanged","pane":1}), w, cx);
+            s.event(
+                json!({"event":"files","pane":1,"files":[{"id":"fixture"}]}),
+                w,
+                cx,
+            );
+            assert_eq!(items(&s.panes[&s.remote[&1]].read(cx).files).len(), 1);
+            assert!(s.active().unwrap().read(cx).files.is_null());
+        });
+    })?;
+    let lists: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+        .filter(|c| c["op"] == "files")
+        .map(|c| c["pane"].as_u64().unwrap())
+        .collect();
+    assert_eq!(lists, [2, 1]);
     test.update_window(window.into(), |_, w, _| w.activate_window())?;
     test.run_until_parked();
     assert_eq!(focused(), vec![(2, false)]);

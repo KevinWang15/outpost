@@ -1,5 +1,6 @@
 mod agent_mark;
 mod bridge;
+mod clipboard_image;
 mod colors;
 mod hub;
 mod instance;

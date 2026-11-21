@@ -1,5 +1,7 @@
 import type { HarnessId } from '../../shared/harnesses'
-import { harnessMarks } from '../../shared/harnessMarks'
+import marks from '../../shared/harnessMarks.json'
+
+const harnessMarks: Record<HarnessId, { paths: string[]; evenOdd?: boolean }> = marks
 
 /** The coding tool's mark, sized like a Lucide icon. */
 export function ToolIcon({ tool, size = 16 }: { tool: HarnessId; size?: number }) {

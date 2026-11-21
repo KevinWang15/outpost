@@ -264,7 +264,7 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
         })
       },
       hello: msg => {
-        emit('title', { pane, title: msg.session.name })
+        emit('session', { pane, title: msg.session.name, tool: msg.session.tool })
         run(
           recent
             .remember({
@@ -322,7 +322,8 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
     activity: new TerminalActivity(socket, message => emit('error', { pane, message })),
   }
   panes.set(pane, state)
-  emit('opened', { pane, window, title: launch.title, server: launch.server })
+  const known = catalogue.find(session => session.id === key) ?? recent.get(key)
+  emit('opened', { pane, window, title: launch.title, server: launch.server, tool: known?.tool })
   state.socket.open()
 }
 type Cmd = {

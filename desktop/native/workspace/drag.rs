@@ -24,7 +24,7 @@ pub(super) struct Preview {
     pub(super) destination: Destination,
     moving_tab: Option<Id>,
     bounds: Bounds<Pixels>,
-    pub(super) label: String,
+    pub(super) label: DragLabel,
     body: Option<LivePreview>,
 }
 #[derive(Clone, Copy)]
@@ -75,7 +75,7 @@ impl Workspace {
             item: DragItem {
                 pane,
                 whole,
-                label,
+                label: DragLabel::new(label, self.panes[&pane].read(cx).mark),
                 window: self.id,
             },
             start,
@@ -504,7 +504,7 @@ impl Workspace {
     fn update_ghost(
         &mut self,
         outside: bool,
-        label: &str,
+        label: &DragLabel,
         screen: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
@@ -539,7 +539,7 @@ impl Workspace {
                 titlebar: None,
                 ..Default::default()
             };
-            if let Ok(h) = cx.open_window(opts, |_, cx| cx.new(|_| DragLabel(label.to_owned()))) {
+            if let Ok(h) = cx.open_window(opts, |_, cx| cx.new(|_| label.clone())) {
                 self.drag.ghost = Some((h, screen))
             }
         }
@@ -605,7 +605,19 @@ impl Workspace {
     }
 }
 
-struct DragLabel(String);
+#[derive(Clone)]
+pub(super) struct DragLabel {
+    title: String,
+    mark: Option<&'static AgentMark>,
+}
+impl DragLabel {
+    pub(super) fn new(title: String, mark: Option<&'static AgentMark>) -> Self {
+        Self { title, mark }
+    }
+    pub(super) fn content(&self) -> Div {
+        agent_label(self.mark, self.title.clone())
+    }
+}
 impl Render for DragLabel {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         row()
@@ -617,7 +629,7 @@ impl Render for DragLabel {
             .border_color(rgb(0x5a5a5a))
             .text_color(rgb(TEXT))
             .truncate()
-            .child(self.0.clone())
+            .child(self.content())
     }
 }
 struct LivePreview {

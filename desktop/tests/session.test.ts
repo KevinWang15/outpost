@@ -216,6 +216,10 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   }
   const catalogue = await wait(e => e.event === 'accounts' && e.sessions.length > 0)
   cmd({ op: 'choose', value: catalogue.sessions[0].id })
+  const opened = await wait(e => e.event === 'opened')
+  assert.equal(opened.tool, catalogue.sessions[0].tool)
+  const metadata = await wait(e => e.event === 'session')
+  assert.equal(metadata.tool, session.tool)
   const connected = await wait(e => e.event === 'connection' && e.state.kind === 'connected')
   assert.equal(connected.state.routeLabel, 'Server-managed')
   assert.match(restored, /restored history/)

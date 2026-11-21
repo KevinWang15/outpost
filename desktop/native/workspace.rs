@@ -1,11 +1,12 @@
 mod drag;
 use crate::{
+    agent_mark::AgentMark,
     bridge::Bridge,
     layout::{Axis, Id, Layout, Tab, next_id},
     terminal::{Pane, PaneChanged},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
-use drag::DragState;
+use drag::{DragLabel, DragState};
 use gpui::components::InputEvent;
 use gpui::{
     components::*,
@@ -79,7 +80,7 @@ struct DragItem {
     pane: Id,
     window: u64,
     whole: bool,
-    label: String,
+    label: DragLabel,
 }
 #[derive(Clone, Copy, PartialEq)]
 enum Destination {
@@ -132,8 +133,16 @@ fn control(
     action: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
 ) -> Stateful<Div> {
     let label = label.into();
+    button(label.clone(), primary, cx, action).child(label)
+}
+fn button(
+    id: impl Into<ElementId>,
+    primary: bool,
+    cx: &Context<Workspace>,
+    action: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
+) -> Stateful<Div> {
     div()
-        .id(label.clone())
+        .id(id)
         .flex_none()
         .py(px(7.))
         .px(px(12.))
@@ -145,8 +154,12 @@ fn control(
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .hover(move |e| e.bg(rgb(if primary { 0xffffff } else { 0x242424 })))
-        .child(label)
         .on_click(cx.listener(move |s, _, w, cx| action(s, w, cx)))
+}
+fn agent_label(mark: Option<&'static AgentMark>, title: impl Into<SharedString>) -> Div {
+    row()
+        .children(mark.map(|m| m.icon(16.)))
+        .child(div().min_w_0().truncate().child(title.into()))
 }
 fn icon(
     id: impl Into<ElementId>,
@@ -593,11 +606,12 @@ impl Workspace {
     }
     fn selected_item(&self, whole: bool, cx: &App) -> Option<DragItem> {
         let tab = self.tabs.get(self.current)?;
+        let pane = self.panes.get(&tab.active)?.read(cx);
         Some(DragItem {
             pane: tab.active,
             window: self.id,
             whole,
-            label: self.panes.get(&tab.active)?.read(cx).title.clone(),
+            label: DragLabel::new(pane.title.clone(), pane.mark),
         })
     }
     fn detach(&mut self, whole: bool, w: &mut Window, cx: &mut Context<Self>) {
@@ -710,7 +724,17 @@ impl Workspace {
                     self.creating = false;
                     let fs = self.fontsize();
                     let p = cx.new(|cx| {
-                        Pane::remote(b, n, strval(&e, "title"), strval(&e, "server"), fs, w, cx)
+                        let mut pane = Pane::remote(
+                            b,
+                            n,
+                            strval(&e, "title"),
+                            strval(&e, "server"),
+                            fs,
+                            w,
+                            cx,
+                        );
+                        pane.mark = AgentMark::get(e["tool"].as_str());
+                        pane
                     });
                     let id = self.insert(p, w, cx);
                     self.remote.insert(n, id);
@@ -851,7 +875,10 @@ impl Workspace {
                                         .into()
                                 }
                             }
-                            "title" => p.title = strval(&e, "title"),
+                            "session" => {
+                                p.title = strval(&e, "title");
+                                p.mark = AgentMark::get(e["tool"].as_str());
+                            }
                             "deliveries" => p.waiting = e["waiting"].as_u64().unwrap_or(0),
                             "activity" => {
                                 p.activity = strval(&e["activity"], "state");
@@ -1099,7 +1126,7 @@ impl Workspace {
                         .bg(rgb(0x242424))
                         .border_b_2()
                         .border_color(rgb(0xd4d4d4))
-                        .child(preview.label.clone()),
+                        .child(preview.label.content()),
                 );
                 continue;
             };
@@ -1153,6 +1180,7 @@ impl Workspace {
                         0x4ade80
                     }
                 })))
+                .children(self.panes[&id].read(cx).mark.map(|m| m.icon(14.)))
                 .child(div().flex_1().truncate().child(title))
                 .when(!matches!(tab.layout, Layout::Pane(_)), |e| {
                     e.child(text(
@@ -1281,6 +1309,7 @@ impl Workspace {
                             .px(px(8.))
                             .flex_none()
                             .bg(rgb(if active { 0x191919 } else { 0x111111 }))
+                            .children(pane.mark.map(|m| m.icon(14.)))
                             .child(text(pane.title.clone(), 12., MUTED))
                             .child(div().flex_1())
                             .child(icon(
@@ -1434,12 +1463,14 @@ impl Workspace {
                    .child(section("Recent sessions"));
                 for item in items(&self.accounts["recent"]) {
                     let id = strval(item, "id");
-                    content = content.child(control(
-                        format!("{}   ·   {}", strval(item, "title"), strval(item, "server")),
-                        false,
-                        cx,
-                        move |s, _, _| s.choose(id.clone()),
-                    ))
+                    let label =
+                        format!("{}   ·   {}", strval(item, "title"), strval(item, "server"));
+                    content = content.child(
+                        button(SharedString::from(id.clone()), false, cx, move |s, _, _| {
+                            s.choose(id.clone())
+                        })
+                        .child(agent_label(AgentMark::get(item["tool"].as_str()), label)),
+                    )
                 }
                 if items(&self.accounts["recent"]).is_empty() {
                     content=content.child(text("Your 10 most recent managed sessions will appear here after connecting. Local terminals aren't saved.",13.,MUTED))
@@ -1573,25 +1604,29 @@ impl Workspace {
                 for (&id, p) in &self.panes {
                     let p = p.read(cx);
                     if p.title.to_lowercase().contains(&q) {
-                        content = content.child(control(
-                            format!(
-                                "{}    ·    {}",
-                                p.title,
-                                p.server.as_deref().unwrap_or("Local terminal")
-                            ),
-                            false,
-                            cx,
-                            move |s, w, cx| s.select(id, w, cx),
-                        ))
+                        let label = format!(
+                            "{}    ·    {}",
+                            p.title,
+                            p.server.as_deref().unwrap_or("Local terminal")
+                        );
+                        content = content.child(
+                            button(("open-pane", id), false, cx, move |s, w, cx| {
+                                s.select(id, w, cx)
+                            })
+                            .child(agent_label(p.mark, label)),
+                        )
                     }
                 }
                 for v in items(&self.accounts["sessions"]) {
                     let label = format!("{}    ·    {}", strval(v, "title"), strval(v, "server"));
                     let id = strval(v, "id");
                     if label.to_lowercase().contains(&q) {
-                        content = content.child(control(label, false, cx, move |s, _, _| {
-                            s.choose(id.clone())
-                        }))
+                        content = content.child(
+                            button(SharedString::from(id.clone()), false, cx, move |s, _, _| {
+                                s.choose(id.clone())
+                            })
+                            .child(agent_label(AgentMark::get(v["tool"].as_str()), label)),
+                        )
                     }
                 }
                 for a in items(&self.accounts["accounts"]) {
@@ -1633,15 +1668,21 @@ impl Workspace {
                 content = content.child(section("Tool"));
                 for t in items(&self.tools) {
                     let t = t.as_str().unwrap_or("").to_owned();
-                    content = content.child(row().child(control(
-                        t.clone(),
-                        self.tool == t,
-                        cx,
-                        move |s, _, cx| {
-                            s.tool = t.clone();
-                            cx.notify()
-                        },
-                    )))
+                    let label = agent_label(AgentMark::get(Some(&t)), t.clone());
+                    content = content.child(
+                        row().child(
+                            button(
+                                SharedString::from(t.clone()),
+                                self.tool == t,
+                                cx,
+                                move |s, _, cx| {
+                                    s.tool = t.clone();
+                                    cx.notify()
+                                },
+                            )
+                            .child(label),
+                        ),
+                    )
                 }
                 content = content
                     .child(section("Session name"))
@@ -1794,23 +1835,22 @@ impl Workspace {
                         .filter(|(i, _)| *i != self.current)
                     {
                         let dest = other.active;
-                        content = content.child(control(
-                            format!(
-                                "Move beside tab {} · {}",
-                                i + 1,
-                                self.panes[&dest].read(cx).title
-                            ),
-                            false,
-                            cx,
-                            move |s, w, cx| {
+                        let pane = self.panes[&dest].read(cx);
+                        let label = agent_label(
+                            pane.mark,
+                            format!("Move beside tab {} · {}", i + 1, pane.title),
+                        );
+                        content = content.child(
+                            button(("move-beside", dest), false, cx, move |s, w, cx| {
                                 s.place_selected(
                                     true,
                                     Destination::Split(dest, Axis::Across, false),
                                     w,
                                     cx,
                                 )
-                            },
-                        ));
+                            })
+                            .child(label),
+                        );
                     }
                     for h in cx
                         .windows()
@@ -1819,21 +1859,25 @@ impl Workspace {
                         .filter_map(|h| h.downcast::<Workspace>())
                     {
                         let Ok(other) = h.read(cx) else { continue };
-                        let title = other
-                            .active()
-                            .map_or_else(|| "Outpost".to_owned(), |p| p.read(cx).title.clone());
+                        let active = other.active();
+                        let pane = active.as_ref().map(|p| p.read(cx));
+                        let title = pane.map_or("Outpost", |p| p.title.as_str());
                         let mut actions = row();
                         for (whole, label) in [(true, "Move tab"), (false, "Move pane")] {
-                            actions = actions.child(control(
-                                format!("{label} to window {} · {title}", other.id),
-                                false,
-                                cx,
-                                move |s, w, cx| {
-                                    if let Some(item) = s.selected_item(whole, cx) {
-                                        s.transfer_to(&item, h, Destination::Tab, w, cx)
-                                    }
-                                },
-                            ));
+                            let label = format!("{label} to window {} · {title}", other.id);
+                            actions = actions.child(
+                                button(
+                                    SharedString::from(label.clone()),
+                                    false,
+                                    cx,
+                                    move |s, w, cx| {
+                                        if let Some(item) = s.selected_item(whole, cx) {
+                                            s.transfer_to(&item, h, Destination::Tab, w, cx)
+                                        }
+                                    },
+                                )
+                                .child(agent_label(pane.and_then(|p| p.mark), label)),
+                            );
                         }
                         content = content.child(actions);
                     }
@@ -2084,7 +2128,24 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     };
     if let Some(dir) = std::env::var_os("OUTPOST_TEST_SCREENSHOTS") {
         test.capture_screenshot(window.into())?
-            .save(PathBuf::from(dir).join("home.png"))?;
+            .save(PathBuf::from(&dir).join("home.png"))?;
+        // Only the agent changes. Identical frames would mean the marks failed to paint.
+        let mut frames = Vec::new();
+        for tool in ["claude", "codex", "kimi", "deepseek", "antigravity"] {
+            test.update_window(window.into(), |root, _, cx| {
+                root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+                    s.accounts = json!({"recent":[{"id":"fixture","title":"Session","server":"example","tool":tool}]});
+                    cx.notify();
+                });
+            })?;
+            draw(&mut test);
+            let frame = test.capture_screenshot(window.into())?;
+            anyhow::ensure!(
+                !frames.contains(&frame),
+                "Recent sessions did not render a distinct {tool} icon"
+            );
+            frames.push(frame);
+        }
     }
     // Drive remote panes through the same focus and window activation callbacks as the app.
     let (bridge, commands) = Bridge::recording();

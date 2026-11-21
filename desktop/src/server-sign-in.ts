@@ -10,7 +10,7 @@ import {
   type DesktopSessionReference,
 } from '../../shared/desktopAuth'
 import type { ServerSignInSummary, SignInPhase } from './server-accounts-api'
-import { serverRequest } from './server-api'
+import { revokeDesktopLogin, serverRequest } from './server-api'
 import { ServerLoginStore, type SavedServerLogin } from './server-login-store'
 
 interface Attempt {
@@ -156,19 +156,15 @@ export class ServerSignIn {
       await this.store.put(credential)
       saved = true
       this.host.accepted(credential)
-      if (previous) void this.revokeUnused(previous)
+      if (previous) revokeDesktopLogin(previous)
       return [...attempt.sessions.values()]
     } catch (error) {
       if (attempt.abort.signal.aborted) return
       throw error
     } finally {
       this.finish(attempt)
-      if (credential && !saved) await this.revokeUnused(credential)
+      if (credential && !saved) revokeDesktopLogin(credential)
     }
-  }
-  private async revokeUnused(entry: SavedServerLogin) {
-    // Unaccepted credentials are never persisted; server expiry also bounds their lifetime.
-    await serverRequest(entry.origin, '/logout', { token: entry.token, method: 'POST' }).catch(() => {})
   }
   async stop(origin: string) {
     const attempt = this.attempts.get(origin)

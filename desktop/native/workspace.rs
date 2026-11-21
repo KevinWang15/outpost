@@ -1464,9 +1464,10 @@ impl Workspace {
                     let origin = strval(acc, "origin");
                     let new = origin.clone();
                     let chat = origin.clone();
-                    let remove = origin.clone();
                     content = content.child(
-                        row().id(SharedString::from(origin.clone())).flex_wrap()
+                        row()
+                            .id(SharedString::from(origin.clone()))
+                            .flex_wrap()
                             .child(
                                 col()
                                     .flex_1()
@@ -1479,23 +1480,8 @@ impl Workspace {
                             .child(control("New session", false, cx, move |s, w, cx| {
                                 s.create_form(new.clone(), w, cx)
                             }))
-                            .child(control("Sign out", false, cx, move |_, w, cx| {
-                                let origin = origin.clone();
-                                confirm(
-                                    "Sign out of this server?",
-                                    &origin.clone(),
-                                    w,
-                                    cx,
-                                    move |s, _, _| s.call(json!({"op":"logout","origin":origin})),
-                                )
-                            }))
-                            .child(control("Remove from app", false, cx, move |_, w, cx| {
-                                let origin = remove.clone();
-                                confirm(
-                                    "Remove this server from Outpost Desktop?",
-                                    &format!("Forget the saved login, trust and recent sessions for {origin} on this device. Open panes for this server will close. The server-side login stays valid until revoked or expired."),
-                                    w, cx, move |s, _, _| s.call(json!({"op":"removeServer","origin":origin})),
-                                )
+                            .child(control("Sign out", false, cx, move |s, _, _| {
+                                s.call(json!({"op":"logout","origin":origin}))
                             })),
                     )
                 }

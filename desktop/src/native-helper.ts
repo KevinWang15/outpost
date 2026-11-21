@@ -372,23 +372,20 @@ async function handle(c: Cmd) {
       accounts.cancel(c.origin)
       return
     case 'logout':
-    case 'removeServer':
-      if (await accounts.disconnect(c.origin, c.op)) {
-        listing?.abort()
-        catalogue = catalogue.filter(ref => ref.server !== c.origin)
-        for (const [id, p] of panes)
-          if (p.launch.server === c.origin) {
-            p.activity.dispose()
-            p.socket.close()
-            p.rendering.dispose()
-            panes.delete(id)
-            emit('paneRemoved', { pane: id })
-          }
-        await recent.retain(ref => accounts.hasAccount(ref.server, ref.accountId))
-        snapshot()
-        await refresh()
-      }
-      return
+      await accounts.logout(c.origin)
+      listing?.abort()
+      catalogue = catalogue.filter(ref => ref.server !== c.origin)
+      for (const [id, p] of panes)
+        if (p.launch.server === c.origin) {
+          p.activity.dispose()
+          p.socket.close()
+          p.rendering.dispose()
+          panes.delete(id)
+          emit('paneRemoved', { pane: id })
+        }
+      await recent.retain(ref => accounts.hasAccount(ref.server, ref.accountId))
+      snapshot()
+      return refresh()
     case 'refresh':
       return refresh()
     case 'forget':

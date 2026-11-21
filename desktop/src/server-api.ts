@@ -64,6 +64,11 @@ export async function serverRequest(
   return data
 }
 
+/** Revocation is best effort. Local sign-out never waits for the network. */
+export function revokeDesktopLogin({ origin, token }: { origin: string; token: string }) {
+  void serverRequest(origin, '/logout', { token, method: 'POST' }).catch(() => {})
+}
+
 /** One queue per catalogue load, shared by target and session requests. */
 export function requestQueue(limit: number, signal?: AbortSignal) {
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Request queue limit must be positive.')

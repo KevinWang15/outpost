@@ -7,7 +7,7 @@ import {
 } from '../../shared/desktopAuth'
 import type { ServerTrust } from './server-trust'
 import type { ServerAccountsSnapshot, ServerConnection } from './server-accounts-api'
-import { ServerApiError, serverRequest, requestQueue } from './server-api'
+import { ServerApiError, serverRequest, requestQueue, revokeDesktopLogin } from './server-api'
 import { parseDesktopLaunch } from './launch'
 import { ServerLoginStore, type SavedServerLogin } from './server-login-store'
 import { ServerSignIn } from './server-sign-in'
@@ -27,7 +27,7 @@ export class ServerAccounts {
   private store: ServerLoginStore
   private signIn: ServerSignIn
   private connections = new Map<string, Connection>()
-  private signingOut = new Map<string, Promise<boolean>>()
+  private signingOut = new Map<string, Promise<void>>()
   private lifetime = new AbortController()
   private refreshWork: Promise<void> | null = null
   constructor(
@@ -185,38 +185,27 @@ export class ServerAccounts {
   complete(value: string) {
     return this.signIn.complete(value)
   }
-  disconnect(value: string, action: 'logout' | 'removeServer'): Promise<boolean> {
+  logout(value: string): Promise<void> {
     const origin = desktopOrigin(value)
     const pending = this.signingOut.get(origin)
-    if (pending) {
-      if (action === 'logout') return pending
-      return pending.catch(() => false).then(done => done || this.disconnect(origin, action))
-    }
-    const work = this.disconnectServer(origin, action).finally(() => {
-      if (this.signingOut.get(origin) === work) this.signingOut.delete(origin)
+    if (pending) return pending
+    const work = this.clearLogin(origin).finally(() => {
+      this.signingOut.delete(origin)
       this.host.changed()
     })
     this.signingOut.set(origin, work)
     this.host.changed()
     return work
   }
-  private async disconnectServer(origin: string, action: 'logout' | 'removeServer') {
+  private async clearLogin(origin: string) {
     await this.signIn.stop(origin)
     const entry = this.store.get(origin)
-    if (entry && action === 'logout') {
-      try {
-        await serverRequest(origin, '/logout', { token: entry.token, method: 'POST', signal: this.lifetime.signal })
-      } catch (error) {
-        if (!(error instanceof ServerApiError && error.status === 401))
-          throw new Error('Could not sign out on this server. Use Remove from app to forget it offline.', {
-            cause: error,
-          })
-      }
-    }
     await this.trust.forget(origin)
-    if (entry) await this.store.remove(entry)
+    if (entry) {
+      await this.store.remove(entry)
+      revokeDesktopLogin(entry)
+    }
     this.connections.delete(origin)
-    return this.store.get(origin) === undefined
   }
   refresh() {
     if (this.refreshWork) return this.refreshWork

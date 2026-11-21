@@ -38,17 +38,21 @@ export class ServerTrust {
     if (pending) return pending
     const work = this.prompt(origin)
       .then(async accepted => {
-        if (accepted) await this.remember(origin)
+        if (accepted) await this.setTrusted(origin, true)
         return accepted
       })
       .finally(() => this.prompts.delete(origin))
     this.prompts.set(origin, work)
     return work
   }
-  private remember(origin: string) {
+  forget(origin: string) {
+    return this.setTrusted(origin, false)
+  }
+  private setTrusted(origin: string, trusted: boolean) {
     const write = this.writes.then(async () => {
       const next = new Set(this.servers)
-      next.add(desktopOrigin(origin))
+      if (trusted) next.add(origin)
+      else next.delete(origin)
       await writeJsonFile(this.path, [...next])
       this.servers = next
     })

@@ -372,16 +372,20 @@ async function handle(c: Cmd) {
       accounts.cancel(c.origin)
       return
     case 'logout':
-      if (await accounts.logout(c.origin)) {
+    case 'removeServer':
+      if (await accounts.disconnect(c.origin, c.op)) {
+        listing?.abort()
+        catalogue = catalogue.filter(ref => ref.server !== c.origin)
         for (const [id, p] of panes)
           if (p.launch.server === c.origin) {
             p.activity.dispose()
             p.socket.close()
             p.rendering.dispose()
             panes.delete(id)
-            emit('connection', { pane: id, state: { kind: 'closed', message: 'Signed out' } })
+            emit('paneRemoved', { pane: id })
           }
         await recent.retain(ref => accounts.hasAccount(ref.server, ref.accountId))
+        snapshot()
         await refresh()
       }
       return

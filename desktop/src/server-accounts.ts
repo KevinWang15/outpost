@@ -177,7 +177,7 @@ export class ServerAccounts {
     // Sign-out can start while a native trust dialog is open.
     await this.signingOut.get(origin)
     this.lifetime.signal.throwIfAborted()
-    await this.signIn.start(origin, intent)
+    if (this.trust.has(origin)) await this.signIn.start(origin, intent)
   }
   cancel(value: string) {
     this.signIn.cancel(desktopOrigin(value))
@@ -185,11 +185,14 @@ export class ServerAccounts {
   complete(value: string) {
     return this.signIn.complete(value)
   }
-  logout(value: string): Promise<boolean> {
+  disconnect(value: string, action: 'logout' | 'removeServer'): Promise<boolean> {
     const origin = desktopOrigin(value)
     const pending = this.signingOut.get(origin)
-    if (pending) return pending
-    const work = this.signOut(origin).finally(() => {
+    if (pending) {
+      if (action === 'logout') return pending
+      return pending.catch(() => false).then(done => done || this.disconnect(origin, action))
+    }
+    const work = this.disconnectServer(origin, action).finally(() => {
       if (this.signingOut.get(origin) === work) this.signingOut.delete(origin)
       this.host.changed()
     })
@@ -197,17 +200,21 @@ export class ServerAccounts {
     this.host.changed()
     return work
   }
-  private async signOut(origin: string) {
+  private async disconnectServer(origin: string, action: 'logout' | 'removeServer') {
     await this.signIn.stop(origin)
     const entry = this.store.get(origin)
-    if (!entry) return true
-    try {
-      await serverRequest(origin, '/logout', { token: entry.token, method: 'POST', signal: this.lifetime.signal })
-    } catch (error) {
-      if (!(error instanceof ServerApiError && error.status === 401))
-        throw new Error('Could not sign out on this server. Check your connection and try again.', { cause: error })
+    if (entry && action === 'logout') {
+      try {
+        await serverRequest(origin, '/logout', { token: entry.token, method: 'POST', signal: this.lifetime.signal })
+      } catch (error) {
+        if (!(error instanceof ServerApiError && error.status === 401))
+          throw new Error('Could not sign out on this server. Use Remove from app to forget it offline.', {
+            cause: error,
+          })
+      }
     }
-    await this.store.remove(entry)
+    await this.trust.forget(origin)
+    if (entry) await this.store.remove(entry)
     this.connections.delete(origin)
     return this.store.get(origin) === undefined
   }

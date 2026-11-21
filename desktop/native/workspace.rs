@@ -501,10 +501,7 @@ impl Workspace {
                 }
                 for id in captured {
                     if s.in_scope(scope, id) {
-                        s.remove_leaf(id);
-                        s.watches.remove(&id);
-                        s.panes.remove(&id);
-                        s.remote.retain(|_, pane_id| *pane_id != id);
+                        s.remove_pane(id);
                     }
                 }
                 if s.panes.is_empty() {
@@ -654,6 +651,12 @@ impl Workspace {
             },
         );
     }
+    fn remove_pane(&mut self, id: Id) {
+        self.remove_leaf(id);
+        self.watches.remove(&id);
+        self.panes.remove(&id);
+        self.remote.retain(|_, pane_id| *pane_id != id);
+    }
     fn remove_leaf(&mut self, id: Id) {
         if let Some(i) = self.tabs.iter().position(|t| t.layout.contains(id)) {
             if let Some(layout) = self.tabs[i].layout.clone().remove(id) {
@@ -693,6 +696,15 @@ impl Workspace {
                 }
             }
             "accounts" => self.accounts = e,
+            "paneRemoved" => {
+                if let Some(&id) = self.remote.get(&n) {
+                    let selected = self.tabs.get(self.current).is_some_and(|t| t.active == id);
+                    self.remove_pane(id);
+                    if selected && self.page != Page::Home {
+                        self.show(Page::Terminal, w, cx);
+                    }
+                }
+            }
             "opened" => {
                 if let Some(b) = self.bridge.clone() {
                     self.creating = false;
@@ -1452,8 +1464,9 @@ impl Workspace {
                     let origin = strval(acc, "origin");
                     let new = origin.clone();
                     let chat = origin.clone();
+                    let remove = origin.clone();
                     content = content.child(
-                        row()
+                        row().id(SharedString::from(origin.clone())).flex_wrap()
                             .child(
                                 col()
                                     .flex_1()
@@ -1474,6 +1487,14 @@ impl Workspace {
                                     w,
                                     cx,
                                     move |s, _, _| s.call(json!({"op":"logout","origin":origin})),
+                                )
+                            }))
+                            .child(control("Remove from app", false, cx, move |_, w, cx| {
+                                let origin = remove.clone();
+                                confirm(
+                                    "Remove this server from Outpost Desktop?",
+                                    &format!("Forget the saved login, trust and recent sessions for {origin} on this device. Open panes for this server will close. The server-side login stays valid until revoked or expired."),
+                                    w, cx, move |s, _, _| s.call(json!({"op":"removeServer","origin":origin})),
                                 )
                             })),
                     )

@@ -253,7 +253,14 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   await sync('viewed-reconnect')
   assert.deepEqual(seen, [first, second, 'c'.repeat(64)])
   assert.equal(connections, 2)
-  cmd({ op: 'close', pane })
+  cmd({ op: 'removeServer', origin })
+  const removed = await wait(e => e.event === 'paneRemoved')
+  assert.equal(removed.pane, pane)
+  const empty = await wait(e => e.event === 'accounts' && !e.sessions.length)
+  assert.deepEqual(empty.accounts, [])
+  assert.deepEqual(empty.recent, [])
+  for (const file of ['server-logins.json', 'server-trust.json', 'recent-sessions.json'])
+    assert.deepEqual(JSON.parse(await readFile(join(dir, file), 'utf8')), [])
 }
 
 test('repeated machine requests notify desktop windows only when the account state changes', async t => {
@@ -301,4 +308,46 @@ test('repeated machine requests notify desktop windows only when the account sta
     ['offline', 'Connection reset'],
     ['connected', null],
   ])
+})
+
+test('an offline server can be forgotten without contacting it or clearing other servers', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'outpost-forget-server-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const trust = new ServerTrust(join(dir, 'trust.json'), async () => true)
+  const path = join(dir, 'logins.json')
+  const store = new ServerLoginStore(path)
+  const origins = ['https://retired.example', 'https://keep.example']
+  for (const origin of origins) {
+    await trust.ensure(origin)
+    await store.put({
+      origin,
+      token: 'op_app_' + 'a'.repeat(43),
+      account: { id: 'account', name: 'Test', email: null },
+      expiresAt: Date.now() + 600000,
+    })
+  }
+  const accounts = new ServerAccounts(path, trust, {
+    changed() {},
+    failed: assert.fail,
+    openBrowser: async () => assert.fail(),
+  })
+  await accounts.load()
+  const network = t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('Server offline')
+  })
+  await assert.rejects(accounts.disconnect(origins[0], 'logout'), /Remove from app/)
+  assert.equal(accounts.snapshot().accounts.length, 2)
+  await accounts.disconnect(origins[0], 'removeServer')
+  assert.equal(network.mock.callCount(), 1)
+  const restored = new ServerLoginStore(path)
+  await restored.load(() => true)
+  assert.deepEqual(
+    restored.list().map(x => x.origin),
+    [origins[1]],
+  )
+  const restoredTrust = new ServerTrust(join(dir, 'trust.json'), async () => false)
+  await restoredTrust.load()
+  assert.equal(await restoredTrust.ensure(origins[0]), false)
+  assert.equal(restoredTrust.has(origins[1]), true)
+  accounts.dispose()
 })

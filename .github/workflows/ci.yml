@@ -38,6 +38,7 @@ jobs:
       - run: npm run build:terminal
       - run: npm audit --audit-level=high
       - run: npm run check
+      - run: npm run build:terminal -- --fixtures
       - run: npm run test:integration
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui

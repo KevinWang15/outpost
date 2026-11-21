@@ -21,7 +21,7 @@ export interface RemoteError {
 
 export type MachineMessage =
   /** node → server, once, before anything else. */
-  | { type: 'hello'; version: string; protocol: number; pid: number }
+  | { type: 'hello'; version: string; protocol: number; pid: number; directOrigin?: string }
   | { type: 'call'; id: string; op: string; args: unknown }
   | { type: 'result'; id: string; ok: true; data: unknown }
   | { type: 'result'; id: string; ok: false; error: RemoteError }
@@ -62,6 +62,7 @@ export interface AgentCall {
 }
 
 export interface TerminalStreamArgs {
+  direct?: string
   session: string
   cols: number
   rows: number

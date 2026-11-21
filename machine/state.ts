@@ -88,8 +88,13 @@ const alive = (pid: number) => {
 
 /** Run `action` holding an exclusive lock shared by every Outpost process of
  * this user. The lock file names its holder; a dead holder's lock is broken. */
-export async function locked<T>(name: string, action: () => T | Promise<T>, timeoutMs = 15_000): Promise<T> {
-  const path = statePath('locks', `${name}.lock`)
+export async function locked<T>(
+  name: string,
+  action: () => T | Promise<T>,
+  timeoutMs = 15_000,
+  directory = state.directory,
+): Promise<T> {
+  const path = join(directory, 'locks', `${name}.lock`)
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
   const deadline = Date.now() + timeoutMs
   for (;;) {

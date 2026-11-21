@@ -1,6 +1,7 @@
 // The one connection Outpost keeps to each machine an account uses: the node
 // (`outpost-terminal node`) run over the machine's transport, carrying calls,
 // streams and agents' tool calls (docs/ARCHITECTURE.md, "Machines").
+import type { Duplex } from 'node:stream'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHmac, randomUUID } from 'node:crypto'
 import {
@@ -104,11 +105,14 @@ interface Options {
 
 export class MachineConnection {
   private child: ChildProcessWithoutNullStreams | null = null
+  directOrigin?: string
+  private incoming: Duplex | null = null
   private writer: BoundedWriter | null = null
   private starting: Promise<void> | null = null
   private startFailed: ((error: Error) => void) | null = null
   private decoder = new FrameDecoder()
   private prelude = Buffer.alloc(0)
+  private sawMagic = false
   private started = false
   private stderr = ''
   private calls = new Map<string, { resolve(data: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>()
@@ -123,10 +127,40 @@ export class MachineConnection {
     private options: Options,
   ) {}
 
+  /** The authenticated connector supplies the same framed node protocol as SSH. */
+  register(stream: Duplex) {
+    this.restart()
+    this.incoming = stream
+    this.decoder = new FrameDecoder()
+    this.prelude = Buffer.alloc(0)
+    this.sawMagic = false
+    this.started = false
+    const timer = setTimeout(() => {
+      if (this.incoming === stream) this.lost('The paired target did not finish its handshake.')
+    }, 10_000).unref()
+    this.writer = new BoundedWriter(stream, 64 * 1024 * 1024, 30_000, message => this.lost(message))
+    stream.on('data', (bytes: Buffer) => {
+      if (this.incoming !== stream) return
+      try {
+        this.output(bytes, () => {}, timer)
+      } catch {
+        this.lost('The paired target sent an invalid node message.')
+      }
+    })
+    const ended = () => {
+      clearTimeout(timer)
+      if (this.incoming === stream) this.lost('The paired target disconnected.')
+    }
+    stream.on('error', ended)
+    stream.once('close', ended)
+    stream.once('end', ended)
+  }
+
   /** Connect if needed; resolves once the node said hello. */
   private connect() {
     if (this.closed) return Promise.reject(new MachineError('Outpost is restarting. Try again shortly.', 503))
-    if (this.child && this.started) return Promise.resolve()
+    if (this.incoming && !this.started) return Promise.reject(new MachineError('The paired target is connecting.', 503))
+    if ((this.child || this.incoming) && this.started) return Promise.resolve()
     this.starting ??= new Promise<void>((resolve, reject) => {
       const command = this.transport.login(`exec "$HOME/.outpost/bin/outpost-terminal" node --socket ${this.socket}`)
       const timer = setTimeout(
@@ -142,6 +176,7 @@ export class MachineConnection {
       const launch = (args: string[], retry: Command['retry']) => {
         const child = spawn(command.executable, args, { stdio: 'pipe', env: this.options.env ?? process.env })
         this.child = child
+        this.sawMagic = false
         this.started = false
         this.prelude = Buffer.alloc(0)
         this.decoder = new FrameDecoder()
@@ -152,10 +187,15 @@ export class MachineConnection {
         child.stderr.setEncoding('utf8')
         child.stderr.on('data', (text: string) => (this.stderr = (this.stderr + text).slice(-4096)))
         child.stdout.on('data', (bytes: Buffer) => {
+          if (this.child !== child) return
           printed = true
-          this.output(bytes, resolve, timer)
+          try {
+            this.output(bytes, resolve, timer)
+          } catch {
+            this.lost('The machine sent an invalid node message.')
+          }
         })
-        child.on('error', error => this.lost(`Could not reach the machine: ${error.message}`))
+        child.on('error', error => this.child === child && this.lost(`Could not reach the machine: ${error.message}`))
         child.on('close', code => {
           if (this.child !== child) return
           const stderr = this.stderr.trim()
@@ -180,14 +220,17 @@ export class MachineConnection {
   }
 
   private output(bytes: Buffer, ready: () => void, timer: NodeJS.Timeout) {
-    if (!this.started) {
+    if (!this.sawMagic) {
       // Login shells may print before the node starts; keep a bounded tail.
-      this.prelude = Buffer.concat([this.prelude, bytes]).subarray(-64 * 1024)
+      this.prelude = Buffer.concat([this.prelude, bytes])
       const at = this.prelude.indexOf(magic)
-      if (at < 0) return
+      if (at < 0) {
+        this.prelude = this.prelude.subarray(-magic.length)
+        return
+      }
       bytes = this.prelude.subarray(at + magic.length)
       this.prelude = Buffer.alloc(0)
-      this.started = true
+      this.sawMagic = true
     }
     let frames
     try {
@@ -197,23 +240,28 @@ export class MachineConnection {
     }
     for (const frame of frames) {
       if (frame.kind === 'D') {
+        if (!this.started || frame.payload.length < 4) return this.lost('Unexpected machine data.')
         this.streams.get(frame.payload.readUInt32BE(0))?.deliver(Buffer.from(frame.payload.subarray(4)))
         continue
       }
       if (frame.kind !== 'C') return this.lost('The machine sent an invalid frame.')
       const message = JSON.parse(frame.payload.toString('utf8')) as MachineMessage
       if (message.type === 'hello') {
+        if (this.started) return this.lost('Duplicate machine handshake.')
         clearTimeout(timer)
         if (message.version !== terminalService.version || message.protocol !== machineProtocol) {
           const problem = `This machine runs Outpost Terminal ${message.version}; ${terminalService.version} is required. Open Required software to install it.`
           this.lost(problem, 409)
           return
         }
+        this.started = true
+        this.directOrigin = this.incoming && typeof message.directOrigin === 'string' ? message.directOrigin : undefined
         this.startFailed = null
         ready()
         this.options.events()
         continue
       }
+      if (!this.started) return this.lost('Expected a machine handshake.')
       this.receive(message)
     }
   }
@@ -279,15 +327,21 @@ export class MachineConnection {
   /** The connection ended: every caller learns now; the next use reconnects. */
   private lost(message: string, status = 502) {
     const child = this.child
-    if (!child) return
+    const incoming = this.incoming
+    if (!child && !incoming) return
+    this.incoming = null
+    this.directOrigin = undefined
     this.child = null
+    incoming?.destroy()
     this.startFailed?.(new MachineError(message, status))
     this.started = false
     this.writer?.dispose()
     this.writer = null
-    child.stdin.destroy()
-    child.kill('SIGTERM')
-    setTimeout(() => child.kill('SIGKILL'), 5000).unref()
+    if (child) {
+      child.stdin.destroy()
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 5000).unref()
+    }
     const error = new MachineError(message, status)
     for (const waiter of this.calls.values()) {
       clearTimeout(waiter.timer)
@@ -371,8 +425,7 @@ export class Machines {
     const key = `${owner.userId}\0${targetId}`
     let connection = this.connections.get(key)
     if (!connection) {
-      // The node's agent endpoint is named per account and machine; a session
-      // calls through the endpoint that last connected it.
+      // This stable node identity is pinned by the machine installation.
       const socket = `run/node-${createHmac('sha256', this.secret).update(`node\0${owner.userId}\0${targetId}`).digest('hex').slice(0, 32)}.sock`
       connection = new MachineConnection(socket, transport, {
         env: this.env,
@@ -382,6 +435,21 @@ export class Machines {
       this.connections.set(key, connection)
     }
     return connection
+  }
+
+  directOrigins(owner: Owner) {
+    const origins = new Set<string>()
+    for (const [key, machine] of this.connections) {
+      if (!key.startsWith(owner.userId + '\0') || !machine.directOrigin) continue
+      try {
+        const url = new URL(machine.directOrigin)
+        if (url.protocol === 'https:' && /^[a-z0-9.:[\]-]+$/i.test(url.host))
+          origins.add('wss://' + url.host + '/api/terminal/direct')
+      } catch {
+        /* Ignore malformed endpoint advertisements. */
+      }
+    }
+    return [...origins]
   }
 
   /** A target was removed or its software changed. */

@@ -12,7 +12,7 @@ The application uses native system font stacks and ships no font files.
 
 ## Dependencies
 
-React, CodeMirror, Radix UI, Fastify, Ajv, xterm.js and Electron are distributed under MIT
+React, CodeMirror, Radix UI, Fastify, Ajv, and xterm.js are distributed under MIT
 licenses. Lucide uses the ISC license and includes Feather-derived icons under
 the MIT license. dotenv uses the BSD 2-Clause license. Other installed packages
 retain the license notices supplied with their distributions in `node_modules`.
@@ -54,4 +54,7 @@ bundled web UI. It depends on Express, `ws` and `cors` (MIT Licenses).
   model, with the pinned [Xenova ONNX conversion](https://huggingface.co/Xenova/multilingual-e5-small).
   Model weights are cached separately from conversation data.
 
-Desktop packages retain Electron’s LICENSE and LICENSES.chromium.html notices.
+The desktop workspace uses the KevinWang15 GPUI fork and Alacritty's terminal
+library (Apache-2.0), and portable-pty (MIT). Desktop packages include a
+`licenses` directory with Rust dependency notices, Node's distribution
+license, and notices for the session helper dependencies.

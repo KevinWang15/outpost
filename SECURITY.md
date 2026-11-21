@@ -45,23 +45,18 @@ only on an owner-only Unix socket. Checkpoints transfer terminal state without r
 clipboard writes, bells or browser requests. Target binaries are installed
 from a fixed release after checksum and version validation.
 
-**Outpost Desktop.** The Electron app confirms trust before loading a server's
-terminal UI. Origins must use HTTPS, except localhost HTTP. Remote windows have
-no Node access, use sandboxing and context isolation, and expose only the
-versioned terminal bridge. IPC checks the exact window, main frame, origin and
-path; navigation, popups, webviews and downloads are restricted. Local app home
-has a separate preload. Trusting a server permits its UI to notify you, copy
-text and open validated HTTP(S) links. Do not trust servers you do not control.
+**Outpost Desktop.** The native workspace confirms first-use server trust and
+opens authorization in the system browser. A bundled Node process owns PKCE
+state, saved account credentials and scoped terminal grants. It checks server
+and account identity before opening a managed session. Credential-bearing HTTP
+requests disable redirects. The GPUI process exchanges messages with this
+helper over its inherited pipes. The profile's single-instance lock and a
+random per-run secret protect local protocol handoffs.
 
-Clipboard reads use native paste events. The paste bridge checks transient user
-activation in its isolated preload; web clipboard permissions are denied.
-Clipboard text is bounded to 1 MiB; OSC 52 queries are never answered. Links
-open via Electron's shell API, without interpolating commands. The app stores
-only trusted origins on disk; per-server Chromium sessions are nonpersistent.
-Launch links can briefly be visible to local processes. The fragment is erased
-before rendering, and resume tickets remain in window-scoped session storage.
-Removing server trust closes its windows; signing out revokes the underlying
-grants. These first installers are unsigned previews with manual updates.
+Local shells run with the signed-in user's privileges. Managed session output
+feeds Alacritty in the native process. Only HTTP and HTTPS links are eligible to
+open in the browser. Remote files are saved to a user-selected destination.
+
 
 **Logs and webhooks.** The activity log is served by an embedded log viewer
 under `/log-viewer`, behind the same admission checks as the rest of Outpost.

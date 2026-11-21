@@ -65,7 +65,7 @@ for (const mode of ['web', 'desktop'] as const) {
     await writeFile(`/proc/${pid}/fd/1`, '\r\nOUTPUT_WHILE_OFFLINE\r\n')
     await page.setViewportSize({ width: 1000, height: 700 })
     // The socket stays OPEN and no close event arrives. Model a wake event,
-    // through the same bridge used by Electron for the desktop variant.
+    // through the same bridge used by the V3 desktop bridge for the desktop variant.
     await page.evaluate(mode => {
       window.dispatchEvent(
         mode === 'desktop' ? new CustomEvent('outpost-test-command', { detail: 'resume' }) : new Event('pageshow'),

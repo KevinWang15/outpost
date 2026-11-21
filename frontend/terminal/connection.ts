@@ -1,14 +1,19 @@
+import type { SessionFile } from '../../shared/sessionFiles'
+import type { TerminalFileReader } from '../../shared/terminalFiles'
 import type { CloseReason } from '../../shared/protocol'
 
 export type TerminalState =
   | { kind: 'connecting' }
-  | { kind: 'connected' }
+  | { kind: 'connected'; route?: 'direct' | 'relay' }
   | { kind: 'reconnecting'; attempt: number; message: string }
   | { kind: 'closed'; reason: CloseReason; message: string }
 
 /** The terminal screen owns presentation; a connection owns delivery and lifecycle. */
 export interface TerminalConnection {
   readonly connected: boolean
+  readonly readFile?: TerminalFileReader
+  readonly listFiles?: (signal: AbortSignal) => Promise<SessionFile[]>
+  readonly removeFile?: (file: string, signal: AbortSignal) => Promise<void>
   open(): void
   reconnect(): void
   close(): void

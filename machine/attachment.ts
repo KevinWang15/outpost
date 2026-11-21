@@ -56,7 +56,7 @@ export class TerminalAttachment {
       for (const part of parts) await write(terminalControl({ type: 'restore', checkpoint: part }))
       // Enable input as soon as the snapshot is complete, even if output is
       // still catching up. In particular, Ctrl+C must be able to stop a flood.
-      await write(terminalControl({ type: 'ready' }))
+      await write(terminalControl({ type: 'ready', sessionTransfers: true }))
       // Output and geometry received while streaming the snapshot follow it in
       // their original order. Release each packet as it enters the socket.
       let first = 0

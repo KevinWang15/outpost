@@ -1,6 +1,7 @@
 // Terminal protocol between clients (web terminal and desktop app) and the
 // broker. Binary WebSocket frames carry raw terminal bytes; text frames carry
 // these JSON messages. See docs/ARCHITECTURE.md → "Terminal protocol".
+import type { FileRead, ImageWrite } from './terminalFiles'
 import type { SessionActivity } from './activity'
 import type { HarnessId } from './harnesses'
 import type { Checkpoint } from './terminalState'
@@ -10,7 +11,7 @@ import type { Checkpoint } from './terminalState'
 // a stale terminal page must reload after a breaking server update.
 export const protocolVersion = 14
 export const maxInputMessage = 64 * 1024
-// Interactive input only; binary image uploads use a separate HTTP request.
+// Interactive input queue. Files use bounded transfer requests on the attachment.
 export const maxInputQueue = 2 * 1024 * 1024
 export const terminalConnectionPolicy = {
   attachMs: 60_000,
@@ -24,6 +25,12 @@ export const terminalConnectionPolicy = {
 } as const
 
 export type ClientMessage =
+  | { type: 'direct-lease'; ticket: string }
+  | { type: 'route-choice'; slot: string; direct: boolean }
+  | FileRead
+  | ImageWrite
+  | { type: 'file-list'; id: string }
+  | { type: 'file-remove'; id: string; file: string }
   | { type: 'ping'; id: string }
   | { type: 'activate'; id: string; token: string }
   | { type: 'acknowledge'; id: string; completionId: string }
@@ -45,20 +52,24 @@ export interface SignalMessage {
   payload: unknown
 }
 export type ServerMessage =
+  | { type: 'direct-only'; origin: string; ticket: string; resume: string }
+  | { type: 'direct-lease'; ticket: string }
+  | { type: 'route-offer'; origin: string; slot: string; proof: string }
+  | { type: 'route-selected'; route: 'direct' | 'relay' }
   | {
       type: 'hello'
       resume: string
       session: { id: string; name: string; tool: HarnessId }
       target: { id: string; name: string }
     }
-  | { type: 'ready' }
+  | { type: 'ready'; sessionTransfers?: boolean }
   | { type: 'restore'; checkpoint: Checkpoint }
   | { type: 'geometry'; cols: number; rows: number }
   | { type: 'clear' }
   | { type: 'activity'; activity: SessionActivity }
   /** Messages from other sessions, channels or schedules waiting to be typed in. */
   | { type: 'deliveries'; waiting: number }
-  | { type: 'result'; id: string; ok: boolean; message?: string }
+  | { type: 'result'; id: string; ok: boolean; message?: string; chunk?: string; reference?: string; files?: unknown }
   | { type: 'signal'; signal: SignalMessage }
   | { type: 'closed'; reason: CloseReason; message: string }
 

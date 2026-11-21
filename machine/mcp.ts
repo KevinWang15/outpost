@@ -8,7 +8,8 @@ import historyTools from '../shared/historyTools.json' with { type: 'json' }
 import { filesChanged } from './commands'
 import { parseSessionFile } from '../shared/sessionFiles'
 import { contentPath, publish } from './files'
-import { readJson, socketAddress, statePath } from './state'
+import { socketAddress } from './state'
+import { installation } from './installation'
 
 type Driver = 'terminal' | 'chat'
 interface Binding {
@@ -106,10 +107,9 @@ const sessionTools = [
 async function remote(binding: Binding, tool: string, args: Record<string, unknown>) {
   const deadline = Date.now() + 20_000
   for (;;) {
-    const bound = readJson<{ socket?: string } | null>(statePath('bindings', `${binding.session}.json`), null)
-    const socket = bound?.socket
-    if (typeof socket !== 'string' || !/^run\/node-[0-9a-f]{32}\.sock$/.test(socket))
-      throw new Error('Connect this session in Outpost to use Outpost’s tools.')
+    const owner = installation()
+    const socket = owner && (owner.mode === 'ssh' || owner.mode === 'relay') ? owner.socket : undefined
+    if (!socket) throw Error('This tool requires a server-connected machine.')
     try {
       return await new Promise<unknown>((resolve, reject) => {
         const connection = connect(socketAddress(socket))
@@ -205,7 +205,12 @@ function binding(): Binding | null {
 
 export async function serveMcp() {
   const bound = binding()
-  const available = bound ? tools.filter(tool => tool.drivers.includes(bound.driver)) : []
+  const directOnly = bound && installation()?.mode === 'direct'
+  const available = bound
+    ? tools.filter(
+        tool => tool.drivers.includes(bound.driver) && (!directOnly || tool.definition.name === 'publish_file'),
+      )
+    : []
   const names = available.map(tool => tool.definition.name)
   const text =
     Object.entries(instructions)

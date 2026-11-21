@@ -426,3 +426,74 @@ test('a lost paste acknowledgement never causes an automatic second insertion', 
   await rejected
   assert.equal(socket.requests().filter(message => message.type === 'paste').length, 1)
 })
+
+test('published file bytes come back on the connected socket, alongside PTY input', async t => {
+  const { client, socket } = setup(t)
+  socket.readyState = FakeSocket.OPEN
+  socket.message({ type: 'ready', sessionTransfers: true })
+  const bytes = Buffer.alloc(64 * 1024 + 7, 0xa5)
+  const file = {
+    id: 'a'.repeat(32),
+    name: 'report.bin',
+    createdAt: new Date().toISOString(),
+    size: bytes.length,
+    source: 'published' as const,
+    mediaType: 'application/octet-stream',
+  }
+  const result = client.readFile(file, new AbortController().signal)
+  await settle()
+  const first = socket.requests().find(m => m.type === 'file-read')
+  assert.equal(first.file, file.id)
+  assert.equal(first.offset, 0)
+  assert.ok(client.input('x'))
+  socket.message({ type: 'result', id: first.id, ok: true, chunk: bytes.subarray(0, 65536).toString('base64') })
+  await settle()
+  const second = socket.requests().at(-1)
+  assert.equal(second.offset, 65536)
+  socket.message({ type: 'result', id: second.id, ok: true, chunk: bytes.subarray(65536).toString('base64') })
+  assert.deepEqual(Buffer.from(await (await result).arrayBuffer()), bytes)
+})
+
+test('image bytes, their acknowledgement and a single paste use the same terminal socket', async t => {
+  const { client, socket } = setup(t)
+  socket.readyState = FakeSocket.OPEN
+  socket.message({ type: 'ready', sessionTransfers: true })
+  const bytes = Buffer.alloc(65537, 0xb5)
+  const pasted = client.pasteImage(new File([bytes], 'image.png', { type: 'image/png' }))
+  const seen: Buffer[] = []
+  // File.arrayBuffer() resolves on a later Node turn.
+  for (let index = 0; index < 2; index++) {
+    await new Promise<void>(resolve => setImmediate(resolve))
+    const request = socket.requests().filter(m => m.type === 'image-write')[index]
+    assert.equal(request.offset, index * 65536)
+    seen.push(Buffer.from(request.chunk, 'base64'))
+    socket.message({
+      type: 'result',
+      id: request.id,
+      ok: true,
+      ...(index === 1 && { reference: '/target/clipboard/test.png' }),
+    })
+  }
+  await settle()
+  assert.deepEqual(Buffer.concat(seen), bytes)
+  const insertions = socket.requests().filter(m => m.type === 'paste')
+  assert.equal(insertions.length, 1)
+  assert.equal(insertions[0].data, '/target/clipboard/test.png')
+  socket.message({ type: 'result', id: insertions[0].id, ok: true })
+  assert.equal(await pasted, '/target/clipboard/test.png')
+})
+
+test('a direct-only terminal with an older PTY never uploads or downloads through the public HTTP API', async t => {
+  const { client, socket } = setup(t)
+  socket.readyState = FakeSocket.OPEN
+  socket.message({ type: 'direct-only', origin: 'https://machine.example', ticket: 'scoped', resume: 'resume' })
+  const peer = FakeSocket.instances[1]
+  peer.ready()
+  const fetcher = t.mock.method(globalThis, 'fetch', () => Promise.reject(Error('unexpected HTTP operation')))
+  await assert.rejects(client.listFiles(new AbortController().signal), /direct file transfers/)
+  await assert.rejects(
+    client.pasteImage(new File(['bytes'], 'image.png', { type: 'image/png' })),
+    /direct file transfers/,
+  )
+  assert.equal(fetcher.mock.callCount(), 0)
+})

@@ -1,3 +1,4 @@
+import { directResponse } from '../shared/directOnly'
 import type { InstallationEvent } from '../shared/model'
 
 export class ApiError extends Error {
@@ -15,7 +16,7 @@ function unauthorized(path: string, status: number) {
 }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const central = await fetch(`/api${path}`, {
     cache: 'no-store',
     signal,
     credentials: 'same-origin',
@@ -23,9 +24,10 @@ export async function api<T>(path: string, method = 'GET', body?: unknown, signa
     headers: { 'x-outpost-request': '1', ...(body ? { 'content-type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
+  const response = await directResponse(central, signal)
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: response.statusText }))
-    unauthorized(path, response.status)
+    if (response === central) unauthorized(path, response.status)
     throw new ApiError(error.message, response.status, error.code)
   }
   return response.status === 204 ? (undefined as T) : response.json()

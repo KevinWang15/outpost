@@ -105,7 +105,7 @@ export class HistoryHub {
     account.machines = targets.map(target => ({
       id: target.id,
       name: target.name,
-      host: target.kind === 'ssh' ? target.host : 'localhost',
+      host: target.kind === 'ssh' ? target.host : target.kind === 'local' ? 'localhost' : target.name,
     }))
     for (const id of account.states.keys()) if (!targets.some(target => target.id === id)) account.states.delete(id)
     return account.machines

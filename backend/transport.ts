@@ -172,5 +172,17 @@ export function transportFor(target: Target, identity: SshIdentity | null, optio
       return new SshTransport(target, identity, options)
     case 'local':
       return new LocalTransport(target)
+    case 'direct': {
+      const deny = (): never => {
+        throw new AppError('This direct-only machine requires a connection from your client.', 409)
+      }
+      return { label: 'Direct only', login: deny, management: deny }
+    }
+    case 'paired': {
+      const offline = (): never => {
+        throw new AppError('Start the Outpost connector on this machine. Install or update its software there.', 503)
+      }
+      return { label: 'Paired machine', login: offline, management: offline }
+    }
   }
 }

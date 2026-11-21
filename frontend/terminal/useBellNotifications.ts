@@ -33,7 +33,7 @@ const noticeFor = (permission: BellNotificationPermission): Notice => ({
   sticky: permission !== 'granted',
 })
 
-/** Browser permission is requested by the terminal's bell button. Electron
+/** Browser permission is requested by the terminal's bell button. the desktop app
  * supplies native notifications; an unanswered browser prompt must not trap the UI. */
 export function useBellNotifications(onNotice: (message: string, sticky: boolean) => void) {
   const [state, setState] = useState<State>(() => ({ permission: bellNotificationPermission(), requesting: false }))

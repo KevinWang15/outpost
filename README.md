@@ -29,7 +29,12 @@ default Outpost MCP tools and cross-machine history search.
 | Machines — where sessions run | Linux with Bash and Outpost Terminal, reachable over SSH as any user you choose (no root access needed). The computer running Outpost can be one too when it runs Linux (including WSL). Outpost can install missing software for you. |
 | Outpost server | Node.js 24+ and OpenSSH, on Linux, WSL or macOS. |
 | Web terminal | Any current browser, including on phones. |
-| Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Bundles Electron; no browser or WSL installation needed. |
+| Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Native GPUI terminal with local shells and managed Outpost sessions. |
+
+For corporate machines that cannot open an outbound Outpost connection, choose
+**Direct only** when adding the machine. The client connects to its HTTPS
+endpoint. See [installation, ownership and cleanup](docs/ARCHITECTURE.md#installing-and-removing-a-machine)
+and [direct-only setup](docs/ARCHITECTURE.md#direct-only-machines).
 
 ## Run the local tool
 
@@ -246,7 +251,7 @@ or desktop server trust requirements.
 | Choice | Opens in | Installation | Authorization |
 | --- | --- | --- | --- |
 | Web terminal | A regular browser window; also works on phones | None | Your Outpost browser login requests a session ticket |
-| Outpost Desktop | An Electron window with its own Outpost Dock/taskbar identity | Outpost Desktop | Transfers a session ticket from your signed-in browser; no second login |
+| Outpost Desktop | A native GPUI window with its own Outpost Dock/taskbar identity | Outpost Desktop | Transfers a session ticket from your signed-in browser; no second login |
 
 Every choice attaches to the same persistent session. Closing a client disconnects
 it; the coding session keeps running. You can change clients later.
@@ -512,203 +517,39 @@ require **System Settings → Privacy & Security → Open Anyway**. Windows may
 show **SmartScreen → More info → Run anyway**. Only proceed with a release
 you trust; release artifacts include checksums.
 
-The app arranges your sessions in tabbed windows, with its own Outpost
-icon and native notifications. Drag tabs to reorder, double-click to rename,
-or use the session switcher to find an open session by name or server.
-Click the Outpost logo to open the servers, sessions, and help page. It includes
-the keyboard shortcut guide, also available from **Help → Outpost guide and shortcuts**.
-Click a terminal tab to return; Escape does not dismiss this home page.
+The desktop workspace opens your local shell on startup. The **+** button opens
+another terminal. Right-click it to choose a shell or a managed Outpost
+session. Use the Outpost logo to connect a server, sign in through your browser,
+reopen recent sessions, or create a session on a machine. The **Chat** action
+opens the selected server in the system browser.
 
-**Local terminals:** the app opens a local shell at startup, and **+** opens another.
-Local tabs work offline without an Outpost server or account. macOS uses your login
-shell; Windows uses PowerShell 7 when available, otherwise Windows PowerShell.
-Right-click **+** or use **File → New terminal with profile** to choose another shell,
-including Command Prompt or the default WSL distribution on Windows. WSL must
-already have a distribution installed. Settings lets you choose the default shell.
-Local and remote tabs share splits, dragging between windows, clipboard handling,
-font settings, and bell notifications. Local shells start in your home directory.
+Use the split button to place a shell beside the focused terminal. Right-click
+it to split top and bottom. Drag the divider to resize, or double-click a pane
+header to zoom. Drag a tab or pane header onto another terminal to split at
+the nearest edge. Drop it on the tab strip to reorder or create a tab. The tab
+context menu also moves a tab or pane into its own window. Moving a pane keeps
+its output, shell or managed connection, and message draft.
 
-**⌘W** on macOS / **Ctrl+Shift+W** on Windows closes only the focused pane,
-after confirmation. Remaining panes expand; an empty tab and then an empty window
-are removed. To close every pane in a tab, use its **×** or **File → Close current tab**,
-which also asks for confirmation. Closing a window or
-quitting also asks when any terminal tabs remain. **Cancel** is the default.
-Closing a local tab or quitting the app ends its shell. Reloading a local terminal
-asks before restarting a running shell. Local terminal history is held in memory
-for that tab, up to 10,000 lines; it is not restored after quitting. Pasted images
-are saved in a private directory for the tab and removed when the tab closes.
-Managed Outpost sessions retain their existing persistence and reconnect behavior.
-
-Drag a tab outside the tab bar and release to give it a window. Drop it into
-another Outpost window's tab bar to merge it there; an insertion marker shows
-the position when reordering. Hovering over another window's tab bar shows the
-live terminal there and hides its empty source window. Release to keep the move;
-moving away or pressing **Esc** restores the original layouts. Hover at either
-edge to scroll a long tab bar. Right-click also offers **Move tab to new window**
-and **Move tab to window**.
-Moving a tab preserves its live connection, terminal buffer and message draft.
-Moving the last tab into another window closes the empty source window.
-
-Tabs share the top row with the native macOS or Windows window controls, with
-no separate title bar. Drag the empty space between **+** and
-the workspace tools to move the window, even when many tabs are open.
-
-Each tab can contain nested split panes, mixing local shells and remote sessions.
-Each pane owns its terminal; tabs group panes, and windows group tabs. Switching
-tabs restores that tab's focused pane. Workspace pages preserve the selection
-without letting pane shortcuts close or split a hidden terminal.
-
-**View → Split side by side / Split top and bottom** opens a new local shell
-beside the focused pane using your default shell profile. The split toolbar button
-splits side by side; right-click it for top and bottom. To split with an existing
-remote session, drag its tab to a terminal edge, or use **◫** in the session switcher.
-
-Sign in to one or more servers from the **Outpost logo → Logged-in Outpost
-servers** page. Enter a server URL, approve first-use trust, and finish sign-in
-and app approval in your system browser. The app never receives your password
-or browser cookies. An existing browser login provides SSO. App logins last
-30 days; expired logins show **Connect** so you can sign in again.
-
-Right-click a tab and choose **Split with Outpost terminal…**, or right-click
-**+** and choose **Outpost terminal…** for a new tab. The shared finder loads
-all sessions on your logged-in servers, including sessions you have never
-opened in the app. Type to filter by session, machine, tool, directory or server;
-use **↑ / ↓** and **Enter**, click a result, or choose **New session** in the
-finder; **Esc** cancels. Servers and unreachable machines report errors
-independently, so available results remain usable. An already-open session moves
-its existing pane into the chosen split or tab, preserving its connection and
-draft. A split uses the selected pane of the tab whose menu you opened.
-
-The finder's **New session** action opens the same dialog as **New session** beside
-a logged-in server. It temporarily hides the finder, then refreshes the full
-catalogue and highlights the created session so Enter opens it in the original
-destination. The server row preselects its server; splitting beside a remote
-pane preselects that pane's server and machine. All creation fields are shared:
-Outpost server, machine, then the website's session name, coding
-tool, project directory (with suggestions), directory creation, arguments and
-environment fields. A single available server or machine is selected
-automatically. You can change either selection.
-
-**Cancel** creates nothing and leaves the layout alone. **Create session**
-creates the session and opens it in the original new-tab or split destination.
-During creation, the dialog waits for the server to finish before it can close.
-If creation succeeds but opening fails, the session remains available in the
-finder. Missing software must first be installed from the machine's page in
-**Machines** on the website.
-This works with both local-mode and hosted Outpost servers.
-
-Drag a pane's header to reorganize it:
-
-- Drop on the left, right, top or bottom of another terminal to split there. A
-  translucent preview highlights the destination, including in another window.
-- Drop in a tab bar to make the pane its own tab at that position.
-- Drop outside all Outpost windows to create a window containing the pane.
-- Press **Esc** to cancel. Dropping onto itself or an invalid workspace area also cancels.
-
-Dragging a tab moves its entire pane group. Closing or moving the last pane removes
-the empty tab and window; remaining siblings expand into the space. Transfers keep
-the same terminal processes, connections, history and message drafts.
-Drag dividers to resize (arrow keys also work); double-click a divider to reset it.
-The divider is a one-pixel line with a wider grab area. Inactive panes are subtly
-gray; clicking them restores their normal appearance without resizing the terminal.
-On macOS, **⌘D** splits side by side and **⌘Shift+D** splits top and bottom.
-Double-click a pane header, or use **View → Zoom / restore pane**, to temporarily
-expand a pane without removing its siblings. The pane header menu also provides
-move, split, reload and close actions. Closing a pane or a whole tab asks for confirmation.
-Up to 32 terminal panes across 16 windows can stay open. Connecting an already-open
-session or clicking its notification focuses the correct pane, tab and window.
-
-**Ctrl+Tab** selects the next tab and **Ctrl+Shift+Tab** the previous one in the
-current window, wrapping at either end of the tab strip. Both shortcuts use
-Control on macOS and Windows and work while the terminal or a workspace panel
-has focus.
-
-Tab icons and the session switcher follow the session list's **Activity** field:
-a blue spinner means **Working**, a gray clock means **Idle**, and an amber
-bell means **Needs you** (unread completion) or **Waiting for you** (approval/input).
-A red alert means **Error**. Hover over a badge for its specific state.
-They come from the coding tool's own lifecycle hooks and transcript, with
-shared acknowledgement, and update as the agent works. **Unknown** has a
-diagnostic. Connection errors take priority, and an unread terminal bell remains
-highlighted until you return. The green check means connected while the first
-activity reading is pending. Tracking follows the agent when it switches
-conversations.
-
-Activating a tab clears its terminal bell and marks the displayed **Needs you**
-completion as seen. This works with clicks, keyboard tab switching and returning
-to the app window, without typing into the terminal. The icon updates immediately
-while the machine saves the acknowledgement shared with the session list. A later
-completion remains unread until you return or interact again. If saving fails,
-the unchecked state returns with an error. Browser terminals use the same logic
-when you return to their page.
-
-Settings remembers text size, bell sound, and the default local shell. The toolbar starts hidden in the
-app and can be revealed from the terminal context menu. The same xterm.js
-client handles input, selection, image paste and reconnects in both clients.
-WebGL accelerates rendering when available, with a DOM renderer fallback.
-Local panes use the same terminal screen with a native PTY connection and have no
-activity badge. A split tab aggregates its remote panes: connection problems,
-attention (bells, completions, approval waits and errors), then working activity take priority. Pane headers show each remote
-session’s own status, and hovering the tab lists all its panes. Focusing one pane
-acknowledges only that session.
-
-Desktop bells use Outpost's system notification permission. Allow **Outpost**
-in macOS or Windows notification settings and check Focus / Do Not Disturb.
-An inactive tab gets a bell indicator; clicking a system notification returns
-to that exact session, including when the app is minimized. Sound starts after
-you interact with the terminal. **Help → Check for updates** opens newer previews
-for manual installation; remote sessions survive closing or upgrading the app.
+Right-click a tab or the terminal to open terminal actions. You can search
+scrollback, compose a multiline message, clear the screen, copy a selection or
+paste text and images. Managed panes also list session files, preview raster
+images and save files through a native file dialog. Closing a local terminal
+ends its shell. A managed session continues running on its machine.
 
 | Action | macOS | Windows |
 | --- | --- | --- |
-| Copy selection | ⌘C | Ctrl+Shift+C |
-| Paste text or an image into the terminal | ⌘V or Ctrl+V | Ctrl+Shift+V |
-| Newline in coding tool | Shift+Enter | Shift+Enter |
 | New local terminal | ⌘T | Ctrl+Shift+T |
-| New window | ⌘Shift+N | Ctrl+Shift+N |
-| Cancel pane or tab drag | Esc | Esc |
-| Switch session | ⌘P | Ctrl+Shift+P |
-| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Ctrl+Tab / Ctrl+Shift+Tab |
-| Go to tab 1–8 / last tab | ⌘1–9 | Alt+1–9 |
-| Split with local shell, side by side | ⌘D | Ctrl+Shift+D |
-| Split with local shell, top and bottom | ⌘Shift+D | Ctrl+Alt+D |
-| Zoom / restore focused pane | ⌘Shift+Enter | Ctrl+Shift+Enter |
-| Close focused pane | ⌘W | Ctrl+Shift+W |
-| Focus other pane | ⌘Option+Right | Ctrl+Alt+Right |
-| Larger terminal text | ⌘= or ⌘Plus | Ctrl+= or Ctrl+Plus |
-| Smaller terminal text | ⌘Minus | Ctrl+Minus |
-| Reset terminal text size | ⌘0 | Ctrl+0 |
-| Close window | ⌘Shift+W | Alt+F4 |
+| Next or previous tab | Ctrl+Tab or Ctrl+Shift+Tab | Ctrl+Tab or Ctrl+Shift+Tab |
+| Split side by side | ⌘D | Ctrl+Shift+D |
+| Split top and bottom | ⌘Shift+D | Ctrl+Alt+D |
+| Focus another pane | ⌘Option+Right | Ctrl+Alt+Right |
+| Zoom or restore focused pane | ⌘Shift+Enter | Ctrl+Shift+Enter |
+| Find in scrollback | ⌘F | Ctrl+Shift+F |
+| Copy selection or paste | ⌘C or ⌘V | Ctrl+Shift+C or Ctrl+Shift+V |
+| Close focused terminal | ⌘W | Ctrl+Shift+W |
 
-Server badges distinguish **Connected**, **Offline**, and **Sign-in expired**.
-Pending browser sign-ins show temporary progress beneath the URL field. Click an offline badge to retry, **Cancel sign-in** to
-stop waiting, or **Sign out** to revoke that app login. Sign-out requires the
-server to be reachable. It does not end the coding processes on your machines.
-Trust is remembered independently of login and is not cleared by sign-out.
-The **Outpost logo → Recent sessions** list keeps your 10 most recent remote
-sessions across app restarts. Click an entry, or choose with ↑/↓ and press Enter,
-to reconnect. If it is already open, its existing tab and window are activated.
-Local shells are not included. **Remove** and **Clear recent sessions** forget
-saved connections without closing tabs or ending remote sessions.
-Signing out also removes that server's recent-session shortcuts. Existing
-terminals authorized by that app login disconnect; their remote processes keep running.
-Closing a tab includes any unsent message in its confirmation; hiding the message box preserves its draft.
-Recent-session references are stored in `recent-sessions.json` in the app's
-user-data directory, without credentials. Reopening a recent session requests
-fresh access using its server login. If that login expires, sign in again.
-App credentials are stored as plain JSON in `server-logins.json` and expire
-30 days after approval. Browser sign-out does not sign the app out;
-changing/resetting the account password invalidates app access. Account
-passwords, browser cookies and terminal reconnect credentials are never saved
-by the app. There is no silent renewal.
-
-You can start from the app's URL field or the website's **Open in Outpost
-Desktop** button. **Connect → Outpost Desktop** also signs in if needed, then opens the
-selected session. Approval happens in your browser. First use asks whether to
-trust that server; accepting is remembered, declining cancels only this attempt.
-There is no trusted-server list or management screen.
-Use HTTPS, or HTTP on localhost for a local Outpost server / SSH port forward.
-The app needs a network connection and an open terminal tab for bells.
+Build and run the native app from a checkout with the commands in
+[CONTRIBUTING.md](CONTRIBUTING.md#desktop-development-and-previews).
 
 ## Run a hosted service
 
@@ -748,17 +589,15 @@ instance per data directory.
 
 ## How it works
 
-```text
-web terminal / Outpost Desktop ⇄ WebSocket ⇄ Outpost ⇄ SSH or local shell ⇄ Outpost Terminal node ⇄ terminal service ⇄ PTY ⇄ coding tool
-```
+The client opens every managed terminal. A session runs in a persistent PTY on
+its machine. Terminal input, output, published files and image paste use the
+selected attachment.
 
-Every connection takes this one path. Outpost keeps one connection to each
-machine an account uses, running `outpost-terminal node` over SSH or the local
-shell; everything on that machine travels on it, including agents' calls to
-Outpost's tools. Machines never connect to Outpost or to each other: if Outpost
-can reach a machine, everything works there. A dedicated `outpost-terminal`
-process owns each session's PTY and terminal state on the machine, and another
-one each chat. Outpost Terminal has no listening network port.
+| Machine configuration | How the session is reached |
+| --- | --- |
+| Direct only | The client obtains authorization from Outpost and connects to the machine’s HTTPS endpoint. The machine verifies the grant locally. |
+| Paired with relay | The machine maintains an outbound link to Outpost. A reachable direct endpoint is preferred. Otherwise the server relays the attachment. |
+| Managed SSH or local shell | Outpost starts the machine node through SSH or a local login shell. |
 
 **Required software → Outpost Terminal → Install** downloads the matching Linux
 executable into `~/.outpost/bin`, verifies its SHA-256 checksum and installs it

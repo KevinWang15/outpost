@@ -1,3 +1,4 @@
+import { directRoutes } from './directOnly'
 import Fastify, { LogController } from 'fastify'
 import { readFile } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
@@ -17,6 +18,7 @@ import { ConnectTokens } from './terminal/tokens'
 import { sessionRoutes } from './routes/sessions'
 import { terminalRoutes } from './routes/terminal'
 import { sessionFileDownloads } from './routes/sessionFiles'
+import { pairedRoutes } from './paired'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
 import { pageHtml } from '../shared/pageHtml'
@@ -81,6 +83,7 @@ export async function createApp(options: AppOptions) {
   const active = (owner: Owner) => desktop.active(owner)
   const broker = new TerminalBroker({
     tokens,
+    directSecret: deployment.secret,
     active,
     sessions,
     resolve,
@@ -171,9 +174,28 @@ export async function createApp(options: AppOptions) {
     reply.header('X-Frame-Options', 'DENY')
     if (deployment.mode === 'hosted') {
       const origin = deployment.origin(request)
+      let direct: string[] = []
+      if (
+        [pagePaths.terminal, pagePaths.workspace, pagePaths.desktopTerminal].some(
+          path => path === request.url.split('?')[0],
+        )
+      ) {
+        try {
+          const owner = deployment.owner(request)
+          direct = machines.directOrigins(owner)
+          for (const target of await deployment.workspace(owner).list()) {
+            if (target.kind !== 'direct') continue
+            const url = new URL(target.endpoint)
+            if (!/^[a-z0-9.:[\]-]+$/i.test(url.host)) continue
+            direct.push(url.origin + '/api/direct/request', url.origin.replace(/^http/, 'ws') + '/api/direct/terminal')
+          }
+        } catch {
+          /* Signed-out pages use the public origin. */
+        }
+      }
       reply.header(
         'Content-Security-Policy',
-        `default-src 'self'; connect-src 'self' ${origin.replace(/^http/, 'ws')}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+        `default-src 'self'; connect-src 'self' ${[origin.replace(/^http/, 'ws'), ...direct].join(' ')}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
       )
     }
   })
@@ -190,9 +212,10 @@ export async function createApp(options: AppOptions) {
   })
 
   app.get('/health', async () => ({ status: 'ok' }))
+  directRoutes(app, services, desktop)
   deployment.register(app)
   desktopRoutes(app, services, desktop)
-  workspaceRoutes(app, services)
+  workspaceRoutes(app, services, pairedRoutes(app, services))
   sessionRoutes(app, services)
   const download = sessionFileDownloads(services)
   terminalRoutes(app, services, download)

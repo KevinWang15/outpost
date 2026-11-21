@@ -18,7 +18,7 @@ import type { TargetContext } from '../../backend/sessions'
 import { transportFor } from '../../backend/transport'
 
 export const terminalBinary = fileURLToPath(
-  new URL(`../../machine/dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
+  new URL(`../../machine/test-dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
 )
 
 export const fixtures = fileURLToPath(new URL('../fixtures/', import.meta.url))

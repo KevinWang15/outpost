@@ -1,6 +1,8 @@
 // A session's files, in both directions: files its agent published and files
 // sent to it in messages. Each is `<id>/metadata.json` beside
 // `<id>/content/<name>`, so the agent's own tools see the real filename.
+import { open } from 'node:fs/promises'
+import { terminalFileChunk } from '../shared/terminalFiles'
 import { randomUUID } from 'node:crypto'
 import {
   closeSync,
@@ -175,6 +177,26 @@ export function readFile(session: string, id: unknown) {
   const path = contentPath(session, file)
   if (statSync(path).size !== file.size) throw new RegistryError('The stored file is incomplete.', 500)
   return { file, path }
+}
+
+/** Read only the requested range from this session's immutable published file. */
+export async function readFileChunk(session: string, fileId: string, offset: number) {
+  const { file, path } = readFile(session, fileId)
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > file.size)
+    throw new RegistryError('Invalid session file offset.', 400)
+  const handle = await open(path, 'r')
+  try {
+    const chunk = Buffer.alloc(Math.min(file.size - offset, terminalFileChunk))
+    let filled = 0
+    while (filled < chunk.length) {
+      const { bytesRead } = await handle.read(chunk, filled, chunk.length - filled, offset + filled)
+      if (!bytesRead) throw new RegistryError('The stored file is incomplete.', 500)
+      filled += bytesRead
+    }
+    return chunk
+  } finally {
+    await handle.close()
+  }
 }
 
 export function removeFile(session: string, id: unknown) {

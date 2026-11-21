@@ -5,7 +5,7 @@
   },
   "include": [
     "tests/browser",
-    "tests/desktop",
+    "desktop/tests/*.ts",
     "tests/unit/desktop-*.test.ts",
     "tests/unit/activity.test.ts",
     "tests/machine",

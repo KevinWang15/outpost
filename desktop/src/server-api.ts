@@ -1,3 +1,4 @@
+import { directResponse } from '../../shared/directOnly'
 /** Native HTTP requests never follow redirects or share browser cookies. */
 export class ServerApiError extends Error {
   constructor(
@@ -14,7 +15,7 @@ export async function serverRequest(
 ): Promise<unknown> {
   const timeout = AbortSignal.timeout(30_000)
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
-  const response = await fetch(`${origin}/api/desktop${path}`, {
+  const central = await fetch(`${origin}/api/desktop${path}`, {
     method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
     redirect: 'error',
     credentials: 'omit',
@@ -26,6 +27,7 @@ export async function serverRequest(
     },
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   })
+  const response = await directResponse(central, signal)
   if (response.status === 204) return undefined
   const reader = response.body?.getReader()
   if (!reader) throw new Error('The server returned an empty response.')
@@ -57,7 +59,7 @@ export async function serverRequest(
       data && typeof data === 'object' && 'message' in data && typeof data.message === 'string'
         ? data.message.slice(0, 1024)
         : `Server returned ${response.status}.`
-    throw new ServerApiError(message, response.status)
+    throw new ServerApiError(message, response !== central && response.status === 401 ? 403 : response.status)
   }
   return data
 }

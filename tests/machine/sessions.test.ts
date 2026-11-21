@@ -296,3 +296,52 @@ test('a conversation the tool started fresh replaces the one that never started;
     [first, second],
   )
 })
+
+test('an attached viewer reads bounded file ranges scoped to its own session', async t => {
+  const { home } = setup(t)
+  const owner = record(home, 'codex', crypto.randomUUID())
+  const other = record(home, 'codex', crypto.randomUUID())
+  await register(owner, other)
+  const { publish, readFileChunk } = await import('../../machine/files')
+  const bytes = Buffer.alloc(65539, 0x2d)
+  const path = join(home, 'report.bin')
+  writeFileSync(path, bytes)
+  const file = await publish(owner.id, path)
+  assert.deepEqual(await readFileChunk(owner.id, file.id, 0), bytes.subarray(0, 65536))
+  assert.deepEqual(await readFileChunk(owner.id, file.id, 65536), bytes.subarray(65536))
+  await assert.rejects(readFileChunk(other.id, file.id, 0), /not found/)
+  await assert.rejects(readFileChunk(owner.id, file.id, bytes.length + 1), /offset/)
+})
+
+test('image chunks stay with their attachment and an interrupted upload cannot finish on a new one', async t => {
+  const { home } = setup(t)
+  const session = record(home, 'codex', crypto.randomUUID())
+  await register(session)
+  const { TerminalImages } = await import('../../machine/terminalImages')
+  const viewer = new TerminalImages(session.id)
+  const replacement = new TerminalImages(session.id)
+  try {
+    const image = Buffer.alloc(65539, 0xf3)
+    const start = {
+      type: 'image-write' as const,
+      id: 'first',
+      transfer: 'test',
+      mime: 'image/png',
+      size: image.length,
+      offset: 0,
+      chunk: image.subarray(0, 65536).toString('base64'),
+    }
+    const end = { ...start, id: 'last', offset: 65536, chunk: image.subarray(65536).toString('base64') }
+    assert.equal(viewer.write(start), undefined)
+    assert.throws(() => replacement.write(end), /transfer changed/)
+    const path = viewer.write(end)
+    assert.ok(path)
+    assert.deepEqual(readFileSync(path), image)
+    viewer.write(start)
+    viewer.close()
+    assert.throws(() => viewer.write(end), /transfer changed/)
+  } finally {
+    viewer.close()
+    replacement.close()
+  }
+})

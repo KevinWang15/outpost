@@ -10,6 +10,10 @@ import { checkpoint, clearTerminal, headlessColors, writeHeadless } from '../sha
 import { terminalService, terminalSize } from '../shared/terminalService'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { isUserInput, TerminalActivity } from './activity'
+import { TerminalImages } from './terminalImages'
+import { sessionFileId } from '../shared/sessionFiles'
+import { listFiles, removeFile, readFileChunk } from './files'
+import { validFileRead } from '../shared/terminalFiles'
 import { TerminalAttachment } from './attachment'
 import { Deliveries } from './delivery'
 import { endTree } from './drivers'
@@ -254,6 +258,8 @@ export async function serveTerminal() {
 
   const server = createServer(socket => {
     sockets.add(socket)
+    const images = new TerminalImages(record.id)
+    socket.once('close', () => images.close())
     socket.setTimeout(10_000, () => socket.destroy())
     socket.on('error', () => {})
     socket.on('close', () => {
@@ -264,6 +270,7 @@ export async function serveTerminal() {
     })
     const decoder = new FrameDecoder()
     let attached = false
+    let fileReads = 0
     socket.on('data', bytes => {
       try {
         for (const packet of decoder.feed(Buffer.from(bytes))) {
@@ -326,6 +333,67 @@ export async function serveTerminal() {
               })
             attachment.output(terminalControl({ type: 'activity', activity: activity.current }))
             attachment.output(terminalControl({ type: 'deliveries', waiting: deliveries.count }))
+          } else if (message.type === 'image-write') {
+            try {
+              const reference = images.write(message)
+              sendControl(socket, { type: 'result', id: message.id, ok: true, reference })
+            } catch (error) {
+              sendControl(socket, { type: 'result', id: message.id, ok: false, message: (error as Error).message })
+            }
+          } else if (message.type === 'file-list') {
+            clients
+              .get(socket)
+              ?.attachment.output(
+                terminalControl({ type: 'result', id: message.id, ok: true, files: listFiles(record.id) }),
+              )
+          } else if (message.type === 'file-remove') {
+            if (!sessionFileId(message.file)) throw new Error('Invalid session file ID.')
+            void removeFile(record.id, message.file)
+              .then(() => {
+                broadcast(terminalControl({ type: 'files' }))
+                sendControl(socket, { type: 'result', id: message.id, ok: true })
+              })
+              .catch(() =>
+                sendControl(socket, {
+                  type: 'result',
+                  id: message.id,
+                  ok: false,
+                  message: 'Could not remove the session file.',
+                }),
+              )
+          } else if (message.type === 'file-read') {
+            if (!validFileRead(message) || typeof message.id !== 'string' || message.id.length > 80)
+              throw new Error('Invalid session file request')
+            if (fileReads >= 4) {
+              sendControl(socket, {
+                type: 'result',
+                id: message.id,
+                ok: false,
+                message: 'Too many concurrent file reads.',
+              })
+              continue
+            }
+            fileReads++
+            void readFileChunk(record.id, message.file, message.offset)
+              .then(chunk => {
+                clients
+                  .get(socket)
+                  ?.attachment.output(
+                    terminalControl({ type: 'result', id: message.id, ok: true, chunk: chunk.toString('base64') }),
+                  )
+              })
+              .catch(() => {
+                if (!socket.destroyed)
+                  sendControl(socket, {
+                    type: 'result',
+                    id: message.id,
+                    ok: false,
+                    message: 'Could not read the session file.',
+                  })
+              })
+              .finally(() => {
+                fileReads--
+              })
           } else if (message.type === 'draft') {
             // The viewer's message box has text: messages wait until it is sent or cleared.
             if (typeof message.active !== 'boolean') throw new Error('Invalid draft state')

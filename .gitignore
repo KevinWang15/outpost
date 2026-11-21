@@ -43,3 +43,6 @@ dist-ssr
 # Generated desktop packages and native icon containers
 /desktop/release/
 /desktop/resources/
+/desktop/target/
+
+/machine/test-dist/

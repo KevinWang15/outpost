@@ -42,7 +42,7 @@ export default function TargetDialog({
 }) {
   const hosted = useAuth().mode === 'hosted'
   const [environment, setEnvironment] = useState<Environment | null>(null)
-  const [kind, setKind] = useState<'ssh' | 'local'>(target?.kind ?? 'ssh')
+  const [kind, setKind] = useState<Target['kind']>(target?.kind ?? 'ssh')
   const [tools, setTools] = useState<HarnessId[]>(target?.tools ?? ['claude'])
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('')
@@ -61,7 +61,8 @@ export default function TargetDialog({
     setError('')
     try {
       if (target) await onSave({ name: text('name'), tools })
-      else if (kind === 'local') await onSave({ kind, name: text('name'), tools })
+      else if (kind === 'direct') await onSave({ kind, name: text('name'), tools, endpoint: text('endpoint') })
+      else if (kind !== 'ssh') await onSave({ kind, name: text('name'), tools })
       else
         await onSave({
           kind,
@@ -96,16 +97,24 @@ export default function TargetDialog({
       }
     >
       <form id="target-form" className="form" onSubmit={submit}>
-        {!target && environment?.localTargets && (
+        {!target && (
           <div className="segmented" role="radiogroup" aria-label="Machine type">
             <button type="button" role="radio" aria-checked={kind === 'ssh'} onClick={() => setKind('ssh')}>
               <Server size={16} />
               SSH server
             </button>
-            <button type="button" role="radio" aria-checked={kind === 'local'} onClick={() => setKind('local')}>
-              <Monitor size={16} />
-              This computer
+            <button type="button" role="radio" aria-checked={kind === 'paired'} onClick={() => setKind('paired')}>
+              Paired machine
             </button>
+            <button type="button" role="radio" aria-checked={kind === 'direct'} onClick={() => setKind('direct')}>
+              Direct only
+            </button>
+            {environment?.localTargets && (
+              <button type="button" role="radio" aria-checked={kind === 'local'} onClick={() => setKind('local')}>
+                <Monitor size={16} />
+                This computer
+              </button>
+            )}
           </div>
         )}
         <label className="field">
@@ -119,6 +128,13 @@ export default function TargetDialog({
             placeholder={kind === 'local' ? 'This computer' : 'dev-box'}
           />
         </label>
+        {!target && kind === 'direct' && (
+          <label className="field">
+            <span className="label">Machine HTTPS address</span>
+            <input required name="endpoint" type="url" placeholder="https://terminal.corp.example" />
+            <small>Clients must reach this address. The machine stays disconnected from the Outpost server.</small>
+          </label>
+        )}
         {!target && kind === 'ssh' && (
           <>
             <div className="form-row">
@@ -153,6 +169,11 @@ export default function TargetDialog({
             )}
             {hosted && <AccountKey />}
           </>
+        )}
+        {!target && kind === 'paired' && (
+          <p className="hint">
+            This machine connects out to Outpost. After adding it, generate a pairing code on its page.
+          </p>
         )}
         {!target && kind === 'local' && (
           <p className="hint">Sessions run as your user on the computer running Outpost.</p>

@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { TerminalConnection } from './connection'
 import { Files, RefreshCw, X } from 'lucide-react'
 import { desktop } from '../desktop'
 import { FileThumbnail } from './FileThumbnail'
@@ -10,16 +11,18 @@ import { useSessionFiles } from './useSessionFiles'
 /** Overlay UI: list and viewer never participate in xterm's geometry. */
 export default function TerminalFiles({
   token,
+  connection,
   connected,
   revision,
   restoreFocus,
 }: {
   token: string
+  connection?: TerminalConnection
   connected: boolean
   revision: number
   restoreFocus(): void
 }) {
-  const access = useMemo(() => new SessionFiles(token, desktop?.files), [token])
+  const access = useMemo(() => new SessionFiles(token, desktop?.files, connection), [token, connection])
   const [nativeViewing, setNativeViewing] = useState(false)
   const state = useSessionFiles(access, connected && !nativeViewing, revision)
   const { files, error } = state

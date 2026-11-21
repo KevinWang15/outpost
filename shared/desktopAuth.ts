@@ -93,6 +93,19 @@ export function parseDesktopLoginCallback(value: string) {
   return { state: match[1], code: match[2] }
 }
 
+/** Start the normal trust and browser approval flow when only the server is known. */
+export function desktopConnectUrl(origin: string) {
+  const url = new URL('outpost://connect')
+  url.searchParams.set('origin', desktopOrigin(origin))
+  return url.href
+}
+export function parseDesktopConnectUrl(value: string) {
+  const url = new URL(value)
+  const origin = url.searchParams.get('origin')
+  if (!origin || desktopConnectUrl(origin) !== value) throw new Error('Invalid Outpost connection link.')
+  return desktopOrigin(origin)
+}
+
 /** A website hands off an address and optional session, never a credential. */
 export interface DesktopEntry {
   server: string

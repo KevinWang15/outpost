@@ -11,9 +11,9 @@ import { catalog, readBatch, readMessage } from '../../machine/history'
 import { Scan } from '../../machine/stores'
 import { machine, record, tools } from './fixtures'
 
-const binary = fileURLToPath(
-  new URL(`../../machine/dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
-)
+const binary =
+  process.env.TEST_TERMINAL ??
+  fileURLToPath(new URL(`../../machine/dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url))
 const put = (path: string, records: object[]) => {
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, records.map(record => JSON.stringify(record) + '\n').join(''))

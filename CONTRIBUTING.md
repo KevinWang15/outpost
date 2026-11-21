@@ -33,10 +33,10 @@ credentials, hosted development shows verification links in the UI.
 | Directory | Language | Runs on |
 | --- | --- | --- |
 | `backend/` | TypeScript | Outpost server |
-| `frontend/` | React + SCSS | Browser and Electron renderer |
+| `frontend/` | React + SCSS | Browser |
 | `shared/` | TypeScript | Server, frontend and desktop contracts |
 | `machine/` | TypeScript + bundled Bun | Linux targets, installed executable (Outpost Terminal) |
-| `desktop/` | TypeScript + Electron | Your computer (macOS, Windows) |
+| `desktop/` | Rust + GPUI, TypeScript session helper | Your computer (macOS, Windows) |
 
 Code in `machine/` runs in Bun on targets and in Node in its tests: use Node's
 APIs (Bun implements them), except in the terminal service's PTY handling.
@@ -63,66 +63,32 @@ Native GPU behavior and OS integration require checks on the supported systems.
 
 ## Desktop development and previews
 
+Use Node 24, a stable Rust toolchain and the native build tools for your platform.
+Run these commands from the repository root.
+
 ```sh
 ONNXRUNTIME_NODE_INSTALL=skip npm ci
 npm --prefix desktop ci
-npm --prefix desktop run typecheck
 npm --prefix desktop run dev
-# On macOS:
-npm --prefix desktop run package -- --mac --arm64 --x64
-# On Windows:
-npm --prefix desktop run package -- --win --x64
 ```
 
-The app starts with a local shell and works without a server. **+** opens another
-local terminal; right-click it to choose a shell profile. `npm run dev` rebuilds
-the native `node-pty` dependency for Electron before launching. Native compilation
-requires the platform's C++ build tools (Xcode tools on macOS, Visual Studio C++
-tools on Windows). Packaging rebuilds for each target architecture as well.
+`npm run test:desktop` exercises V3 session restore and reconnect against a
+loopback fixture and runs the Rust tests. `npm --prefix desktop run test:ui`
+opens a headless GPUI workspace, runs a real local shell and moves a live pane
+to a second window. Set `OUTPOST_DESKTOP_DATA_DIR` to use a separate profile.
+Set `OUTPOST_TEST_SCREENSHOTS` to an existing directory to save UI test frames.
 
-For managed sessions, run the server separately. Open it from the app logo, then select a session in the
-browser and use Connect → Outpost Desktop. macOS protocol handlers require a
-packaged app installed in Applications. Development Windows runs register the
-current Electron executable; reinstall the packaged app to restore its handler.
-
-The shell bundles native integration, local workspace chrome, and the shared
-terminal frontend for local shells. Remote sessions load the same terminal UI
-in an isolated `WebContentsView` from their trusted server.
-`layout.ts` owns tab order and split geometry; `workspace.ts` owns window layout,
-menus' actions and the local chrome bridge; `terminals.ts` owns terminal views
-and validates their native IPC. Keep UI metadata separate from grants and
-terminal contents. Never recreate a view to switch tabs or change a split.
-Desktop dependencies and its lockfile
-are isolated from the server package. `scripts/build-desktop.mjs` builds the
-preloads, shell, and local terminal frontend and wraps approved logo PNGs into ICNS/ICO containers.
-`npm run logo:generate` derives these PNGs from the canonical SVG.
-
-**Desktop previews** in GitHub Actions is manual. It builds both Mac architectures
-and Windows x64; artifacts expire after 14 days. Select **publish** to create an
-unsigned GitHub prerelease with checksums after both jobs succeed. Bump
-`desktop/package.json` and its lockfile before publishing a new version, and
-update `desktop/RELEASE_NOTES.md`. Existing releases are never overwritten.
-No signing credentials or automatic updater are used for previews.
-
-The existing **CI** workflow can also call this same packaging workflow with
-`suite=desktop` and `publish_preview=true`; its full checks are skipped in that
-mode. This entry works before GitHub registers `desktop.yml` on the default
-branch.
-
-On each native platform, exercise cold/warm `outpost://` launches, local
-login/PowerShell/WSL profiles, offline startup, local shell exit/restart,
-local/remote mixed splits, local resize and font changes, sustained output,
-tab switching and reordering, title-bar dragging with a full tab strip, native window controls,
-fullscreen entry/exit and display scaling, both split directions and divider
-dragging, focus between panes,
-hidden-tab output and bells, draft-close cancellation, multi-tab quit, trust
-cancellation/removal, clipboard text and images, notification click-through,
-reconnect/reload, GPU fallback and app identity before a stable release. Check
-shortcuts with the message box focused as well as the terminal. Do not infer
-OS behavior from a successful packaging job. The app and server must ship the
-same `desktopBridgeVersion`; there are no bridge compatibility shims.
+`npm --prefix desktop run package` builds an installer for the host platform
+and architecture in `desktop/release`. Use an official Node distribution so its
+runtime and license can be packaged together. macOS uses the system packaging
+tools. Windows uses NSIS (`MAKENSIS` may point to its executable).
+The desktop workflow builds Apple silicon, Intel Mac and Windows x64 on
+separate runners. Bump the desktop package and Cargo versions together before
+publishing a new release.
 
 ## Outpost Terminal
+
+For a self-hosted release, `OUTPOST_TERMINAL_RELEASE_BASE` can point to an HTTPS directory containing the four version-matched Linux executables and their `SHA256SUMS`. The installer checks the downloaded binary’s checksum and protocol version. For a bundled Apple silicon installer, set `VITE_OUTPOST_MAC_ARM64_INSTALLER` at web build time to its public download path.
 
 Run `npm run build:terminal` before machine, integration and browser tests. Use
 `npm run build:terminal -- arm64-glibc` (or `x64-musl`, `arm64-musl`) for other

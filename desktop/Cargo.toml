@@ -1,0 +1,35 @@
+[package]
+name = "outpost-desktop"
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+path = "native/lib.rs"
+
+[features]
+ui-tests = ["gpui_platform/test-support"]
+
+[[test]]
+name = "workspace"
+path = "tests/workspace.rs"
+harness = false
+required-features = ["ui-tests"]
+
+[[bin]]
+name = "outpost"
+path = "native/main.rs"
+
+[dependencies]
+gpui = { git = "https://github.com/KevinWang15/gpui", rev = "3e5581d9bee2ca6b15e0ae08200d2a20ca7dccc6", default-features = false, features = ["components", "lucide"] }
+gpui_platform = { git = "https://github.com/KevinWang15/gpui", rev = "3e5581d9bee2ca6b15e0ae08200d2a20ca7dccc6", default-features = false, features = ["font-kit", "wayland", "x11"] }
+alacritty_terminal = { version = "0.26", default-features = false }
+portable-pty = "0.9"
+anyhow = "1"
+async-channel = "2"
+base64 = "0.22"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+directories = "6"
+getrandom = "0.3"
+tempfile = "3"

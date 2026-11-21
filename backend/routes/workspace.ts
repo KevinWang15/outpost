@@ -1,3 +1,4 @@
+import { desktopOrigin } from '../../shared/desktopAuth'
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { Environment, SoftwareId, Target, TargetInput, TargetUpdate } from '../../shared/model'
@@ -11,7 +12,7 @@ import { inspectTargetSoftware } from '../session-actions'
 
 type Params = { targetId: string }
 
-export function workspaceRoutes(app: FastifyInstance, services: Services) {
+export function workspaceRoutes(app: FastifyInstance, services: Services, forgetPairing: (targetId: string) => void) {
   const { deployment, installations, log } = services
   app.get('/api/environment', async request => {
     deployment.owner(request)
@@ -20,6 +21,13 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
   app.get('/api/targets', async request => deployment.workspace(deployment.owner(request)).list())
   app.post<{ Body: TargetInput }>('/api/targets', { schema: { body: targetInput } }, async (request, reply) => {
     const owner = deployment.owner(request)
+    if (request.body.kind === 'direct') {
+      try {
+        request.body.endpoint = desktopOrigin(request.body.endpoint)
+      } catch {
+        throw new AppError('Enter the machine HTTPS origin, without a path.', 400)
+      }
+    }
     deployment.validateTarget(request.body)
     const target: Target = {
       ...request.body,
@@ -33,7 +41,16 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
       type: 'added',
       message: `${added.name} was added`,
       machine: { id: added.id, name: added.name },
-      details: { address: added.kind === 'ssh' ? `${added.user}@${added.host}` : 'this computer' },
+      details: {
+        address:
+          added.kind === 'ssh'
+            ? `${added.user}@${added.host}`
+            : added.kind === 'direct'
+              ? added.endpoint
+              : added.kind === 'paired'
+                ? 'paired machine'
+                : 'this computer',
+      },
     })
     return reply.code(201).send(added)
   })
@@ -58,6 +75,7 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
   app.delete<{ Params: Params }>('/api/targets/:targetId', async (request, reply) => {
     const { owner, workspace, target } = await services.context(request, request.params.targetId)
     await installations.removeTarget(owner, target.id, () => workspace.remove(target.id))
+    if (target.kind === 'paired') forgetPairing(target.id)
     services.broker.closeTarget(owner, target.id)
     services.machines.forget(owner, target.id)
     log.record(owner, {
@@ -77,10 +95,10 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
   app.get<{ Params: Params & { softwareId: SoftwareId } }>(
     '/api/targets/:targetId/software/:softwareId/script',
     async request => {
-      const { target } = await services.context(request, request.params.targetId)
+      const { target, machine } = await services.context(request, request.params.targetId)
       if (!requiredSoftware(target).includes(request.params.softwareId))
         throw new AppError('This machine does not need this software.', 400)
-      return planInstallation(request.params.softwareId)
+      return planInstallation(request.params.softwareId, machine.socket)
     },
   )
   app.post<{ Params: Params; Body: { softwareId: SoftwareId; script: string } }>(
@@ -90,6 +108,8 @@ export function workspaceRoutes(app: FastifyInstance, services: Services) {
     },
     async (request, reply) => {
       const context = await services.context(request, request.params.targetId)
+      if (context.target.kind === 'paired' || context.target.kind === 'direct')
+        throw new AppError('Install the required software on the paired machine, then check again.', 409)
       return reply.code(202).send(await installations.start(context, request.body.softwareId, request.body.script))
     },
   )

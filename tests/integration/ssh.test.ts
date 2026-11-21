@@ -11,7 +11,7 @@ import { createApp } from '../../backend/app'
 import { LocalDeployment, type Deployment } from '../../backend/deployment'
 import { HostedDeployment } from '../../backend/hosted/deployment'
 import { terminalService } from '../../shared/terminalService'
-import { fixtures, terminalBinary, TerminalClient } from './helpers'
+import { fixtures, TerminalClient } from './helpers'
 
 const execute = promisify(execFile)
 const acpFixture = join(fixtures, 'acp-agent-fixture.py')
@@ -25,7 +25,8 @@ async function container(t: test.TestContext) {
   await execute('docker', ['build', '-q', '-t', 'outpost-ssh-target', fixtures], { timeout: 600_000 })
   const id = (await execute('docker', ['run', '-d', '--rm', '-p', '127.0.0.1::22', 'outpost-ssh-target'])).stdout.trim()
   t.after(() => execute('docker', ['rm', '-f', id]).catch(() => {}))
-  await execute('docker', ['cp', terminalBinary, `${id}:/home/dev/.outpost/bin/outpost-terminal`])
+  const binary = join(process.cwd(), 'machine/dist/outpost-terminal-linux-' + process.arch + '-glibc')
+  await execute('docker', ['cp', binary, `${id}:/home/dev/.outpost/bin/outpost-terminal`])
   // Claude Code's ACP adapter for chat; the scripted ACP agent stands in for it.
   await execute('docker', ['cp', acpFixture, `${id}:/home/dev/.outpost/bin/claude-agent-acp`])
   await execute('docker', ['exec', id, 'chmod', '700', '/home/dev/.outpost/bin/claude-agent-acp'])
@@ -138,11 +139,11 @@ test(
   'SSH targets in local and hosted mode with the standalone terminal service',
   { timeout: 600_000, skip: !docker && 'Docker is unavailable' },
   async t => {
-    const target = await container(t)
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'outpost-ssh-')))
     t.after(() => rm(directory, { recursive: true, force: true }))
 
     await t.test('local mode uses your OpenSSH identity, with connection sharing', async t => {
+      const target = await container(t)
       await execute('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', join(directory, 'id')])
       await target.authorize(await readFile(join(directory, 'id.pub'), 'utf8'))
       // Keep host keys out of the real ~/.ssh: OpenSSH ignores $HOME for known_hosts.
@@ -166,6 +167,7 @@ test(
     })
 
     await t.test('hosted mode uses only the account key', async t => {
+      const target = await container(t)
       const deployment = await HostedDeployment.open({
         directory: join(directory, 'hosted'),
         publicUrl: 'http://127.0.0.1:5173',

@@ -229,7 +229,12 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
             </span>
           )}
           <strong>{name}</strong>
-          <span className={`terminal-state ${state.kind}`} role="status" aria-label={label}>
+          <span
+            className={`terminal-state ${state.kind}`}
+            role="status"
+            aria-label={label}
+            title={state.kind === 'connected' && state.route ? 'Connection route: ' + state.route : label}
+          >
             {state.kind === 'connecting' || state.kind === 'reconnecting' ? (
               <LoaderCircle className="spin" size={12} />
             ) : (
@@ -362,6 +367,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         {!local && fileAccess?.launch === token && (
           <TerminalFiles
             key={token}
+            connection={session.current?.connection}
             token={fileAccess!.resume}
             connected={connected}
             revision={filesRevision}

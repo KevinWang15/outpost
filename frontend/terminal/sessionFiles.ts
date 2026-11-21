@@ -1,3 +1,4 @@
+import type { TerminalConnection } from './connection'
 import { SessionFileCache } from '../../shared/sessionFileCache'
 import {
   fileRequest,
@@ -19,12 +20,17 @@ export class SessionFiles {
   constructor(
     token: string | (() => SessionFileAuthorization),
     readonly native?: SessionFileBridge,
+    connection?: TerminalConnection,
   ) {
     const auth = typeof token === 'string' ? () => ({ origin: '', token }) : token
-    this.originals = native ? null : new SessionFileCache((file, signal) => sessionFileBlob(auth(), file, signal))
-    this.list = signal => (native ? native.list() : listSessionFiles(auth(), signal))
+    this.originals = native
+      ? null
+      : new SessionFileCache(connection?.readFile ?? ((file, signal) => sessionFileBlob(auth(), file, signal)))
+    this.list = signal =>
+      native ? native.list() : (connection?.listFiles?.(signal) ?? listSessionFiles(auth(), signal))
     this.remove = async (id, signal) => {
       if (native) await native.remove(id)
+      else if (connection?.removeFile) await connection.removeFile(id, signal)
       else await fileRequest(auth(), '/' + id, signal, 'DELETE')
       this.originals?.remove(id)
       this.thumbnails.remove(id)

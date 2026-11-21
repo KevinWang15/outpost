@@ -11,64 +11,11 @@ import { harnesses } from '../shared/harnesses'
 import { AppError } from './errors'
 import { runCommand } from './process'
 import { quote } from '../shared/shell'
-import { supportingPath } from './shell'
+import { inspectionScript } from '../shared/node/softwareInspection'
+import type { CommandResult } from './process'
 import type { TargetContext } from './sessions'
 import { terminalService } from '../shared/terminalService'
 import chatAgents from '../shared/chatAgents.json' with { type: 'json' }
-
-const versionFlags: Record<string, string> = { bash: '--version' }
-
-// Read-only, POSIX sh: it must work before Bash is installed.
-function inspectionScript(ids: SoftwareId[], marker: string) {
-  return `set -eu
-${supportingPath}
-[ "$(uname -s)" = Linux ] || { echo "Outpost machines must run Linux." >&2; exit 1; }
-shell="\${SHELL:-/bin/bash}"
-case "\${shell##*/}" in bash|zsh) ;; *) shell=$(command -v bash || printf /bin/bash) ;; esac
-printf '\\000%s\\000%s\\000%s\\000%s\\000%s\\000' ${quote(marker)} "$HOME" "$(id -u)" "$(id -un)" "$shell"
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT HUP INT TERM
-probe() {
-  tool=$1
-  command=$2
-  flag=$3
-  path=$(command -v "$command" || true)
-  if [ "$tool" = outpost-terminal ] || [ "$tool" = claude-agent-acp ]; then
-    path="$HOME/.outpost/bin/$tool"
-    [ -x "$path" ] || path=''
-  fi
-  if [ -z "$path" ]; then
-    printf '%s\\000\\000127\\000\\000' "$tool"
-    return
-  fi
-  # Bound version probes, including a broken executable that waits for input.
-  rm -f "$work/finished"
-  (ulimit -f 32; exec "$path" "$flag") >"$work/output" 2>&1 < /dev/null &
-  pid=$!
-  (
-    sleeper=''
-    trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM
-    [ ! -f "$work/finished" ] || exit 0
-    sleep 4 & sleeper=$!
-    wait "$sleeper"
-    [ ! -f "$work/finished" ] || exit 0
-    : >"$work/timedout"
-    kill -KILL "$pid" 2>/dev/null || true
-  ) >/dev/null 2>&1 < /dev/null &
-  watchdog=$!
-  code=0
-  wait "$pid" || code=$?
-  : >"$work/finished"
-  kill "$watchdog" 2>/dev/null || true
-  wait "$watchdog" 2>/dev/null || true
-  output=$(head -c 4096 "$work/output" | tr -d '\\000')
-  if [ -f "$work/timedout" ]; then code=124; output='Version check timed out after 4 seconds'; rm "$work/timedout"; fi
-  printf '%s\\000%s\\000%s\\000%s\\000' "$tool" "$path" "$code" "$output"
-}
-${ids.map(id => `probe ${quote(id)} ${quote(harnesses.find(h => h.id === id)?.command ?? id)} ${quote(versionFlags[id] ?? '--version')}`).join('\n')}
-printf 'END\\000'
-`
-}
 
 function status(id: SoftwareId, path: string, code: number, output: string): SoftwareStatus {
   if (!path)
@@ -130,7 +77,7 @@ const packages = `install_packages() {
 }`
 
 /** Editable presets: shown to the user, and run only as submitted. */
-function installationScript(id: SoftwareId): string {
+function installationScript(id: SoftwareId, socket?: string): string {
   if (id === 'outpost-terminal')
     return `#!/bin/sh
 set -eu
@@ -151,7 +98,7 @@ if ldd --version 2>&1 | grep -qi musl; then
   [ -e /usr/lib/libstdc++.so.6 ] || install_packages libstdc++
 fi
 asset="outpost-terminal-linux-$arch-$libc"
-base='https://github.com/${terminalService.repository}/releases/download/terminal-v${terminalService.version}'
+base=${quote(process.env.OUTPOST_TERMINAL_RELEASE_BASE || `https://github.com/${terminalService.repository}/releases/download/terminal-v${terminalService.version}`)}
 umask 077
 mkdir -p "$HOME/.outpost/bin"
 # Stage on the destination filesystem, then atomically replace the executable.
@@ -166,6 +113,12 @@ echo 'Verifying download...'
 (cd "$work" && awk -v asset="$asset" '$2 == asset {print}' SHA256SUMS > selected.sha256 && test -s selected.sha256 && sha256sum -c selected.sha256)
 chmod 700 "$work/$asset"
 [ "$("$work/$asset" --version)" = 'outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}' ] || { echo 'Unexpected terminal build version.' >&2; exit 1; }
+# Reserve this Linux host for its execution account. Never take over an existing reservation.
+if [ ! -d /var/lib/outpost-machine ]; then
+  if [ "$(id -u)" = 0 ]; then mkdir -m 700 /var/lib/outpost-machine
+  else sudo -n sh -c 'mkdir -m 700 /var/lib/outpost-machine && chown "$1" /var/lib/outpost-machine' sh "$(id -u)"; fi
+fi
+${socket ? `"$work/$asset" pair --managed ${quote(socket)}` : ''}
 mv -f "$work/$asset" "$HOME/.outpost/bin/outpost-terminal"
 echo 'Outpost Terminal ${terminalService.version} installed.'
 `
@@ -251,39 +204,23 @@ export interface SoftwareService {
 
 export class SoftwareClient implements SoftwareService {
   constructor(private env: NodeJS.ProcessEnv = process.env) {}
-  async inspect({ target, transport }: TargetContext, signal?: AbortSignal) {
+  async inspect({ target, transport, machine }: TargetContext, signal?: AbortSignal) {
     const marker = `OUTPOST_SOFTWARE_${randomUUID()}`
     const ids = requiredSoftware(target)
-    const { code, stdout, stderr } = await runCommand(
-      transport.management('interactive'),
-      inspectionScript(ids, marker),
-      { env: this.env, signal, timeoutMs: 45_000, readOnly: true },
-    )
-    const start = stdout.indexOf(`\0${marker}\0`)
-    if (code !== 0 || start < 0)
-      throw new AppError(`Software check failed. ${stderr.trim() || 'Check access to the machine.'}`, 502)
-    const fields = stdout.slice(start + marker.length + 2).split('\0')
-    const [home, uid, username, shell] = fields.splice(0, 4)
-    const environment: ExecutionEnvironment = { home, uid: Number(uid), username, shell }
-    const software: SoftwareStatus[] = []
-    for (let index = 0; index < ids.length; index++) {
-      const [id, path, exit, output] = fields.splice(0, 4)
-      if (
-        [id, path, exit, output].some(value => typeof value !== 'string') ||
-        !ids.includes(id as SoftwareId) ||
-        software.some(item => item.id === id) ||
-        !/^\d+$/.test(exit)
-      )
-        throw new AppError('Invalid software check response', 502)
-      software.push(status(id as SoftwareId, path, Number(exit), output))
-    }
-    if (fields[0] !== 'END' || !home?.startsWith('/') || !/^\d+$/.test(uid) || !username || !shell?.startsWith('/'))
-      throw new AppError('Invalid execution environment response', 502)
-    return {
-      environment,
-      checkedAt: new Date().toISOString(),
-      software: ids.map(id => software.find(item => item.id === id)!),
-    }
+    const { code, stdout, stderr } =
+      target.kind === 'paired'
+        ? await machine.call<CommandResult>(
+            'software.inspect',
+            { tools: target.tools, marker },
+            { signal, timeoutMs: 50000 },
+          )
+        : await runCommand(transport.management('interactive'), inspectionScript(ids, marker), {
+            env: this.env,
+            signal,
+            timeoutMs: 45_000,
+            readOnly: true,
+          })
+    return softwareReport(ids, marker, { code, stdout, stderr })
   }
   async install({ transport }: TargetContext, script: string, onOutput: (text: string) => void, signal: AbortSignal) {
     return (
@@ -297,7 +234,35 @@ export class SoftwareClient implements SoftwareService {
   }
 }
 
-export const planInstallation = (id: SoftwareId): InstallationPlan => ({
+export const planInstallation = (id: SoftwareId, socket?: string): InstallationPlan => ({
   softwareId: id,
-  script: installationScript(id),
+  script: installationScript(id, socket),
 })
+
+export function softwareReport(ids: SoftwareId[], marker: string, { code, stdout, stderr }: CommandResult) {
+  const start = stdout.indexOf(`\0${marker}\0`)
+  if (code !== 0 || start < 0)
+    throw new AppError(`Software check failed. ${stderr.trim() || 'Check access to the machine.'}`, 502)
+  const fields = stdout.slice(start + marker.length + 2).split('\0')
+  const [home, uid, username, shell] = fields.splice(0, 4)
+  const environment: ExecutionEnvironment = { home, uid: Number(uid), username, shell }
+  const software: SoftwareStatus[] = []
+  for (let index = 0; index < ids.length; index++) {
+    const [id, path, exit, output] = fields.splice(0, 4)
+    if (
+      [id, path, exit, output].some(value => typeof value !== 'string') ||
+      !ids.includes(id as SoftwareId) ||
+      software.some(item => item.id === id) ||
+      !/^\d+$/.test(exit)
+    )
+      throw new AppError('Invalid software check response', 502)
+    software.push(status(id as SoftwareId, path, Number(exit), output))
+  }
+  if (fields[0] !== 'END' || !home?.startsWith('/') || !/^\d+$/.test(uid) || !username || !shell?.startsWith('/'))
+    throw new AppError('Invalid execution environment response', 502)
+  return {
+    environment,
+    checkedAt: new Date().toISOString(),
+    software: ids.map(id => software.find(item => item.id === id)!),
+  }
+}

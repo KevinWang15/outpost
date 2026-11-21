@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.outpost.desktop</string>
+<key>CFBundleName</key><string>Outpost</string>
+<key>CFBundleDisplayName</key><string>Outpost</string>
+<key>CFBundleExecutable</key><string>Outpost</string>
+<key>CFBundleIconFile</key><string>outpost.icns</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>@VERSION@</string>
+<key>CFBundleVersion</key><string>@VERSION@</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>Outpost session</string><key>CFBundleURLSchemes</key><array><string>outpost</string></array></dict></array>
+</dict></plist>

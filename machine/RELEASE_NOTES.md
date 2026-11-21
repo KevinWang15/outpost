@@ -1,8 +1,20 @@
-# Outpost Terminal 2.3.0
+# Outpost Terminal 2.5.0
 
 Everything Outpost runs on a machine, as one executable. Terminal service
 protocol 5, chat host protocol 3, node protocol 2.
 
+- Direct-only machines import a deployment verification key offline and accept
+  authenticated client requests on their HTTPS endpoint. They never establish
+  an Outpost relay link. The native and browser terminals use the same policy.
+- Linux installations reserve one execution account and one server/target
+  identity for the host. `outpost-terminal status` shows the owner and
+  `outpost-terminal unpair` disconnects the installation before reassignment.
+  Upgrade the server and machine executable together.
+- Paired targets enroll with `outpost-terminal pair SERVER` and stay online
+  with `outpost-terminal connect`. A client can reach a session through the
+  public server when both machines are behind NAT. An advertised HTTPS endpoint
+  enables direct connections. Terminal data, pasted images and published files
+  travel over the selected attachment.
 - `outpost-terminal node`: the machine end of the one connection Outpost keeps
   to each machine an account uses. It answers session, file, search and history
   operations, carries terminal and chat attachments and file transfers as

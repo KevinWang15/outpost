@@ -58,7 +58,7 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 | Harness adapters | `chat`, `chatResumable`, `chatServers` in `machine/harnesses/` | How each tool serves ACP |
 | Server | `backend/chat/` | Links, hub (routing), store, socket, tokens |
 | Web app | `frontend/chat/` | The chat UI, also loaded by Outpost Desktop |
-| Desktop | `desktop/src/chat-windows.ts`, `chat-preload.ts` | One chat window per server account |
+| Desktop | `desktop/native/workspace.rs` | Opens the selected server’s Chat page in the system browser |
 
 ## Coding tools over ACP
 
@@ -225,10 +225,7 @@ most once per matching minute while the server runs. A schedule's prompt runs in
 its session's own chat.
 
 **Authorization.** Browser pages use their login cookie; the socket is subject
-to the same origin checks as every route. Outpost Desktop's chat page has no
-login: its preload exchanges the app bearer (main process only) for a
-single-use, five-minute chat ticket (`POST /api/desktop/chat/connect`). The hello
-returns a 30-day resume grant bound to the login; file uploads and reads use it.
+to the same origin checks as every route. The GPUI workspace opens the server’s Chat page in that browser. Existing V3 desktop clients can still exchange their app login for a single-use chat ticket.
 Uploads are buffered (at most two at a time per account) before they are stored.
 
 ## Limits and known gaps

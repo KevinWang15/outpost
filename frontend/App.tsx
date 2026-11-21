@@ -184,7 +184,14 @@ export default function App() {
         <TargetDialog
           onClose={() => setAdding(false)}
           onSave={async input => {
-            dispatch({ type: 'added', target: await api<Target>('/targets', 'POST', input as TargetInput) })
+            const target = await api<Target>('/targets', 'POST', input as TargetInput)
+            if (target.kind === 'direct') {
+              const url = new URL(window.location.href)
+              url.searchParams.set('target', target.id)
+              window.location.assign(url.href)
+              return
+            }
+            dispatch({ type: 'added', target })
             setAdding(false)
           }}
         />

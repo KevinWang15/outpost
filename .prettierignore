@@ -12,3 +12,5 @@ desktop/dist
 desktop/release
 desktop/resources
 machine/vendor
+
+desktop/target

@@ -1,7 +1,6 @@
 import { createHmac } from 'node:crypto'
 import type { Services } from './services'
-import type { Session, SessionForkInput, SessionInput } from '../shared/model'
-import type { DesktopSession } from '../shared/desktopAuth'
+import type { SessionForkInput, SessionInput } from '../shared/model'
 import { AppError } from './errors'
 import { launchSize, type TargetContext } from './sessions'
 
@@ -36,15 +35,7 @@ export async function forkSession(services: Services, context: TargetContext, id
   return services.sessions.fork(context, source.id, input)
 }
 
-export function desktopSession(session: Session, target: { id: string; name: string }): DesktopSession {
-  return {
-    sessionId: session.id,
-    targetId: target.id,
-    title: `${session.name} · ${target.name}`,
-    detail: `${session.tool} · ${session.rootDir} · ${session.status}`.slice(0, 4096),
-    tool: session.tool,
-  }
-}
+export { desktopSession } from '../shared/desktopSession'
 
 export async function inspectTargetSoftware(services: Services, context: TargetContext, signal: AbortSignal) {
   const report = await services.software.inspect(context, signal)

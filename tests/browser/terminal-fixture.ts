@@ -85,7 +85,7 @@ export function restoreEmptyTerminal(socket: WebSocketRoute) {
   }
 }
 
-/** Obtain app-owned terminal grants through the same approval/exchange API as Electron. */
+/** Obtain app-owned terminal grants through the same approval/exchange API as the V3 desktop bridge. */
 export async function appConnection(
   request: APIRequestContext,
   targetId: string,

@@ -14,21 +14,32 @@ where sessions run; the code and API say target (`/api/targets`,
    owns each coding session's PTY, screen and 10,000-line in-memory scrollback.
    Clients and connections are disposable. Reconnect restores a checkpoint and then
    follows live output; disconnect never terminates the session.
-2. **One managed connection path.** Every managed Outpost terminal — browser or Electron —
-   uses the same chain:
+2. **The client opens each attachment.** For a paired machine, both client and target
+   connect out to the same deployment. The server authorizes the requested session.
+   A reachable advertised endpoint carries terminal data directly. Otherwise the
+   server relays it through the target's existing outbound connection.
 
    ```text
-   client ⇄ WebSocket ⇄ Outpost broker ⇄ machine connection (SSH or local shell) ⇄ node ⇄ terminal service ⇄ PTY
+   Direct data     client → target → session PTY
+   Relayed data    client → public Outpost server ← paired target → session PTY
    ```
+
+   Arrows show who opens the connection. Data flows both ways on each link.
+   SSH and local-shell targets use the existing server-to-node transport.
 
    Hosted and local server installations run the same code. Desktop local shells
    use a native PTY on the user's computer; they have no broker, authentication,
    remote dependency, or persistence daemon. Both use the same terminal UI.
-3. **Outpost is the hub.** The server connects to each machine; machines never
-   connect to the server or to each other. Everything between the server and a
-   machine, including an agent's call to Outpost's tools, travels on the one
-   connection the server keeps to it. If the server can reach a machine, every
-   feature works there; if it cannot, none is expected to.
+   When the target advertises `sessionTransfers` in its ready message, the
+   same terminal WebSocket and machine attachment carry file lists, published
+   file contents, deletes, and pasted images. Upload and download requests
+   carry at most 64 KiB of file content each. The client waits for the target
+   to confirm a complete image before pasting its path. Clients connected to
+   an earlier release use the existing session-scoped HTTP endpoints.
+
+3. **Outpost authorizes each attachment.** On the direct route, the client
+   holds a server control socket for revocation and reconnect grants. Terminal
+   input, output, image paste and file operations use the client-to-target socket.
 4. **Modes differ only in identity.** A *deployment* answers four questions:
    who owns this request, where is their workspace stored, which SSH identity
    do they use, and may they use this computer as a target. Everything else —
@@ -37,13 +48,12 @@ where sessions run; the code and API say target (`/api/targets`,
    Terminal, a versioned, self-contained Linux executable in `~/.outpost/bin`.
    It is everything Outpost runs on a machine: the node, terminal services, chat
    hosts, the MCP server and hooks. Its processes run as the machine's user and
-   open only private Unix sockets; no network listener or system-wide service
-   is needed.
+   use private Unix sockets for local communication. A paired target optionally
+   exposes a direct terminal endpoint through its HTTPS reverse proxy.
 6. **The client shims the platform.** Making a remote session feel native
    (paste an image with the usual shortcut, Shift+Enter for a newline, copying
    to your clipboard, opening links on your computer) is the client's job.
-   Electron owns a narrow native capability bridge; renderer and connection
-   code stay in the shared frontend.
+   GPUI owns desktop input and rendering. The browser and native helper share the terminal connection code.
 7. **Explicit gestures only.** The local clipboard is read only on a paste
    gesture, never polled. Remote programs can copy to your clipboard (OSC 52)
    and ask to open `http(s)` links, but can never read your clipboard.
@@ -55,8 +65,8 @@ where sessions run; the code and API say target (`/api/targets`,
 
 ```text
                  ┌──────────── your computer ────────────┐
-  Browser UI ────┤ web / Outpost Desktop (same xterm.js)  │
-                 │ Electron: OS links, clipboard, bells  │
+  Browser UI ────┤ Browser (xterm.js) / Desktop (Alacritty)│
+                 │ GPUI: OS links, clipboard, bells      │
                  └───────────────┬───────────────────────┘
                                  │ HTTPS + WebSocket (terminal protocol)
                  ┌───────────────┴───────────────────────┐
@@ -78,7 +88,7 @@ where sessions run; the code and API say target (`/api/targets`,
 | `frontend/` | Browser | Workspace UI, Connect dialog, web terminal client |
 | `backend/` | Outpost server | HTTP API, deployments, transports, machine connections, terminal broker, chat and history hubs |
 | `machine/` | Linux machines | Outpost Terminal: node, session registry, terminal service, chat host, MCP server, harness adapters |
-| `desktop/` | Your computer | Electron shell, native capabilities, server accounts, trust and installers |
+| `desktop/` | Your computer | GPUI workspace, native PTYs, server accounts, trust and installers |
 | `shared/` | Browser + desktop + server | Schemas, harness registry, terminal protocol, desktop bridge contract |
 
 **One definition per contract.** Request and stored-record shapes are TypeBox
@@ -98,7 +108,7 @@ browser page must be registered there so development and production agree.
 | Targets (where sessions run) | Linux with Bash, `setsid` (util-linux) and Outpost Terminal; Git for forks. SSH as the user named for the target (root is not required), or the Outpost computer itself when the server runs on Linux (including WSL). |
 | Outpost server | Node.js 24+ with OpenSSH, on Linux (including WSL) or macOS. Hosted deployments run on Linux. |
 | Web terminal | Any current browser, including phones. |
-| Outpost Desktop | Packaged Electron for macOS arm64/x64 and Windows x64. No WSL or installed browser required. |
+| Outpost Desktop | GPUI desktop for macOS arm64/x64 and Windows x64. |
 
 The web terminal pins a built package from the `outpost-6.0` branch of
 [KevinWang15/xterm.js](https://github.com/KevinWang15/xterm.js/tree/outpost-6.0).
@@ -158,7 +168,7 @@ authentication or desktop trust confirmation.
    `useDesktopEntry` builds this link synchronously in the browser click handler.
    It is only an intent and contains no credential; ownership is checked when
    the app requests a terminal grant. The website's **Open in Outpost Desktop**
-   button uses the same link without a session. Electron validates the URL and
+   button uses the same link without a session. The session helper validates the URL and
    confirms first-use server trust before contacting it.
 3. `ServerAccounts` uses an existing app login for the requested account, or
    starts browser approval (see below). Website entry binds the expected account;
@@ -184,23 +194,11 @@ authentication or desktop trust confirmation.
 | Choice | Entry | Authorization | Native integration |
 | --- | --- | --- | --- |
 | Web terminal | `TerminalPage`, `/terminal` | Browser login requests a grant | Browser permissions and clipboard APIs |
-| Outpost Desktop | `DesktopTerminalPage`, `/terminal/desktop` | The owning native tab supplies its launch or resume credential through `DesktopBridge.ticket()` | Versioned `DesktopBridge` through a sandboxed preload |
+| Outpost Desktop | GPUI workspace | The account helper requests a session grant | Native clipboard, file dialogs and PTYs |
 
-`/terminal/desktop` and `/desktop` (downloads) are public page shells. The terminal
-broker authorizes each connection; these pages confer no account API access.
-Desktop uses its independent app login; browser cookies are never copied into Electron.
-
-Native tabs keep their current credential in the main process. On `hello`,
-`DesktopTerminalPage` uses `saveResume()` to replace it with the reusable grant
-and remember the session. Reload requests the current credential again. A fresh
-launch routed to an already connected tab must not replace its resume credential
-with the single-use ticket consumed by `activate`.
-
-The desktop entry requires the current preload bridge. Opening it in an ordinary
-browser shows launch instructions; URL fragments and browser storage are never
-credential sources. Browser sessions use the authenticated `/terminal` entry.
-Electron uses nonpersistent partitions per server; no account cookies or passwords
-are copied into the app.
+The native connection stores the reusable grant from `hello` and reconnects
+without reopening the shell. The public V3 web entry pages remain available
+for existing clients.
 
 Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
@@ -290,19 +288,19 @@ Image paste, image file drops and the terminal's image picker all call
 16 MiB limit and saved-image response. The workspace has no separate upload
 control. Progress and success notices remain overlays and never resize xterm.
 
-For remote sessions, `TerminalSocket` POSTs raw bytes to `/api/terminal/image`,
-using its existing session-scoped resume token in the Authorization header.
-The route accepts resume tokens only and checks the originating login before
-buffering the bounded body. Launch tickets and workspace cookies cannot authorize
-an upload. Both web and desktop terminals use this same endpoint. `SessionClient`
-sends the bytes on an `image` stream of the machine connection, without Base64.
-The node checks the type and declared size before accepting bytes, saves the
-image atomically once all of them arrived, and returns its reference; it sends
-no PTY input and holds no registry lock while bytes arrive.
+With a current target, `TerminalSocket` sends a bounded `image-write` request
+on the attached socket, waits for acknowledgement, and sends the next chunk.
+The terminal service validates the declared media type, size, transfer identity
+and offset. It releases incomplete uploads on disconnect or idle timeout. Once
+complete it stores the image and returns its path. Published files travel in
+the other direction using `file-list` and offset-based `file-read` requests
+on the same socket. Each request is scoped to the attached session.
+
+For an older target, the client uploads via `POST /api/terminal/image` using
+the session resume token, then uses the same paste operation as a current peer.
 
 The client then sends `paste {id, data}` on the original terminal connection and
-waits for acknowledgement. Disconnect cancels the HTTP request; a reconnect
-cannot receive an old upload's paste. One image is processed at a time per terminal.
+waits for acknowledgement. Disconnect cancels the transfer. The paste is bound to the original attachment. One image is processed at a time per terminal.
 Neither uploads nor paste requests are automatically retried, and no Enter is
 appended. Failed/cancelled transfers can leave saved files but never submit a
 prompt; the existing newest-20 retention bounds remote clipboard storage.
@@ -315,7 +313,7 @@ quoted local/WSL path with the owning shell generation checked before insertion.
 without writing bytes to the coding process. A missing reply after 30 seconds
 replaces the attachment, including when an idle socket still claims to be OPEN.
 Returning to a visible page, browser focus, `pageshow`, or `online` checks it
-immediately with a shorter 5-second deadline. Desktop forwards Electron's system
+immediately with a shorter 5-second deadline. The browser adapter forwards system
 resume and screen-unlock events to **all** remote tabs, including hidden tabs and
 minimized windows. Local shell PTYs are left running. An in-flight probe is shared
 across these events; wake can shorten its deadline but never extend it.
@@ -458,15 +456,115 @@ target and session independently of the selected UI.
 
 ### Machine connection (server ⇄ node)
 
-`backend/machines.ts` keeps one connection per account and machine, opened on
-first use. It runs `outpost-terminal node` through the target's transport
-(`ssh -T … "$SHELL -lic …"`, or the login shell locally) and carries every
-operation on that machine: session calls, terminal and chat attachments, file
-and image transfers, history reads, and agents' calls to Outpost's tools.
+`backend/machines.ts` keeps one node link per account and target. For SSH and
+local targets the server starts the node on first use. A paired target starts
+its own node and registers an authenticated WebSocket at `/api/paired/node`.
+The link carries session management, chat, relay attachments and agent calls.
+
+#### Installing and removing a machine
+
+Outpost Terminal 2.5 reserves **one Linux host, one execution account, one
+server/target identity**. The ordinary executable still lives in
+`~/.outpost/bin/outpost-terminal`. A private installation record in
+`/var/lib/outpost-machine/machine.json` binds the account’s session directory to
+its owner and transport. SSH/local nodes and paired connectors check the same
+record. Removing an entry in the server UI revokes server access. Releasing
+the host for a new installation also requires action on the host.
+
+The SSH/local **Required software** installer creates the host directory on
+first installation. For a manually installed paired or direct-only host, run
+the following once as the intended execution user on a fresh Linux installation:
+
+```sh
+sudo mkdir -m 700 /var/lib/outpost-machine && sudo chown "$(id -u)" /var/lib/outpost-machine
+```
+
+If the directory already exists, inspect the installation as its current owner
+with `outpost-terminal status`. The command above leaves existing ownership
+intact. Install the matching executable in `~/.outpost/bin`, owned by that user
+and executable only by them. A restricted machine can receive the executable
+and configuration through the company's normal offline software distribution.
+
+**Upgrade.** Stop previous Outpost connectors and nodes for this host, including
+any under other Linux accounts. Upgrade the server and target binary together.
+A 2.4 relay enrollment in `~/.outpost/connector.json` migrates when the new
+connector starts. For managed SSH/local installations, the reviewed install
+script binds the server identity. An upgraded, unclaimed node can adopt the
+first managed connection. Subsequent identities require explicit local unpairing.
+Only the currently installed release enforces the host reservation.
+
+**Remove or transfer.** Stop and disable the connector in its service manager,
+then run `~/.outpost/bin/outpost-terminal unpair` under the execution account.
+This fences the old node/listener, clears enrollment credentials and cleans up
+obsolete session bindings. Relay installations also attempt to revoke their
+credential on the old server. Direct-only unpairing is entirely local. Remove
+the machine from its old workspace and, for SSH targets, remove that server's
+SSH key if its access should end. A disconnected marker prevents stale SSH
+retries from reclaiming the machine.
+
+To switch servers or change the host’s network policy, unpair it locally, add the
+new target in the workspace, then enroll it explicitly.
+Existing sessions and files in the same execution account become visible to its
+new owner. For a different data owner use a fresh Linux account and session
+directory. After unpairing, the administrator can archive the disconnected host
+reservation and provision a fresh directory for that account. To uninstall the managed executable, stop the coding tools and run
+`~/.outpost/bin/outpost-terminal uninstall`. It checks for running drivers,
+unpairs and removes the executable. The registry, coding-tool data and published
+files are retained.
+
+#### Direct-only machines
+
+Choose **Add machine → Direct only**, enter the HTTPS origin reachable by the
+client, and open **Show offline installation**. On the machine run
+`~/.outpost/bin/outpost-terminal pair --direct` and paste the JSON at the
+prompt. It contains the server origin, target ID, endpoint and a target-specific
+Ed25519 public verification key. Deliver it through a trusted administrative
+channel. Run `~/.outpost/bin/outpost-terminal connect` as that account.
+In this mode it listens on `127.0.0.1:8844` (overridable with
+`OUTPOST_DIRECT_PORT`). Route **POST/OPTIONS /api/direct/request** and the
+**WebSocket /api/direct/terminal** from the machine's HTTPS endpoint to that
+listener. Preserve the Origin header. The client must trust the TLS certificate.
+
+The client contacts its Outpost server for authentication and signed grants,
+then sends each grant directly to the machine. The machine verifies it locally.
+Terminal and file bytes stay between the client and machine. A live terminal
+requires a fresh server-signed lease carried by the client every 15 seconds.
+The machine closes it when its last lease expires (45 seconds). A client that
+loses direct connectivity cannot attach through the relay. Direct-only hosts
+support managing terminal sessions, image paste, and publishing files. Server
+background features such as chat, schedules and cross-machine MCP operations
+require a server-connected machine. Coding tools have their own network behavior.
+
+#### Connecting a paired target
+
+1. Add a **Paired machine** in the workspace, then choose **Generate pairing code**.
+2. On the Linux target, use a V3 `outpost-terminal` build containing the connector.
+   Run `~/.outpost/bin/outpost-terminal pair https://YOUR-OUTPOST-SERVER` and
+   enter the single-use code within five minutes.
+3. Run `~/.outpost/bin/outpost-terminal connect` as the account that owns the sessions.
+   Keep it running with your service manager. It reconnects after network loss.
+   Outbound HTTPS from the client and target to the deployment is sufficient for relay.
+4. To enable direct connections, set `OUTPOST_DIRECT_ORIGIN` to the target's
+   client-reachable HTTPS origin in the connector's environment. Configure that
+   host's TLS reverse proxy to forward WebSocket upgrades for `/api/terminal/direct`
+   to `127.0.0.1:8844` on the target and preserve the client Origin header.
+   Set `OUTPOST_DIRECT_PORT` to change the loopback listener port. Restart the
+   connector after changing these settings. Loopback HTTP also works for local tests.
+
+The server sends a one-time slot and proof through the authenticated attachment.
+The client sends the slot to the advertised endpoint and checks the returned proof
+before confirming the route with the server. The node binds the slot to that specific
+session. A slow or failed probe falls back to relay before either route attaches to
+the PTY. The native client shows the active route in the pane management menu.
+Hosted browsers can use endpoints present in their signed-in account's content
+security policy when the page loaded. Browser network permissions also apply.
+Deleting a target or enrolling a replacement invalidates its previous credential
+and closes attachments through the old link.
+
 Login shells may print first; the node then prints the marker
 `\0OUTPOST-NODE-1\0` and a `hello` with its version and protocol. A machine
-running another Outpost Terminal version is asked to reinstall it from
-Required software, before any operation runs.
+running an incompatible version is asked to update before any operation runs.
+The host ownership check requires a matching 2.5 machine build.
 
 Frames are length-prefixed as everywhere in Outpost (one type byte, a 4-byte
 big-endian length, the payload): `C` carries a JSON control message and `D`
@@ -497,16 +595,12 @@ connects the stream to `~/.outpost/terminals/<id>.sock` or
 asks to. Closing a stream closes only that socket.
 
 **Agents' tool calls.** The node also listens on `~/.outpost/run/node-<id>.sock`.
-Its name is an HMAC of the server secret, account and machine, so accounts
-sharing one Linux user do not collide; a newer node of the same account
-replaces it atomically. When the node creates, attaches or starts a session,
-it writes `~/.outpost/bindings/<session>.json` naming its endpoint. Outpost's
-MCP server reads that binding on each call, sends one line
-`{session, tool, arguments}`, and the node forwards it to the server as an
-`agent` call after checking that the session is bound to it. The server routes
-history tools to the history hub and the others to the chat hub. While the
-server reconnects, the endpoint is missing and the MCP server retries for
-20 seconds before reporting that Outpost is unreachable.
+Its name is an HMAC of the server secret, account and machine. The host's
+installation record pins that node identity. MCP clients read the installed
+socket for server-backed operations, and the node checks that the calling
+session exists in its registry. Direct-only machines expose local file
+publication to agents. Outpost terminal and file viewers communicate directly
+with the machine’s listener.
 
 Software inspection and installation use the separate POSIX script transport,
 which runs before Outpost Terminal is installed. Inspection loads the
@@ -1003,7 +1097,7 @@ disposes its cache and outstanding requests.
 
 `SessionFileViewer` owns a sandboxed, frameless native modal sized to its parent
 window, covering all split panes. It explicitly disables/re-enables its parent
-instead of using Electron's macOS sheet placement, so it retains the same
+independently of the desktop window manager, so it retains the same
 window-sized bounds across platforms. Its local page reuses `FileViewer` through a
 narrow file-only preload; it has no server credential or network access. Closing,
 reloading or losing its originating pane closes the viewer. Browser dialogs and
@@ -1013,481 +1107,33 @@ browser downloads and generic filesystem IPC remain disabled.
 
 ## Desktop shell and OS integration
 
-`desktop/` is a separate npm package, so server builds never download Electron.
-`main.ts` owns app lifecycle, menus, server trust and `outpost://` dispatch.
-`shared/desktopAuth.ts` validates OS intents and login callbacks; `launch.ts`
-validates terminal grants; `server-trust.ts` atomically serializes trusted
-origins, and `preferences.ts` serializes font size, bell sound, and the default
-local shell profile ID (`null` selects the platform default). All three keys are
-required in a saved preferences file. A missing file uses defaults; an unsupported
-saved shape is rejected with reset instructions, without rewriting it.
+The `v3` desktop executable in `desktop/native/` owns GPUI windows, tabs,
+nested pane layouts and the Alacritty grids. Each local pane owns a native
+PTY, a shell process and bounded I/O queues. Moving a pane moves its existing
+GPUI entity. Closing its last owner releases the PTY. Managed session panes
+attach to the same broker and terminal service as the browser.
 
-### Browser-based app login
+`desktop/src/native-helper.ts` runs in one bundled Node process per profile.
+It reuses the V3 TypeScript account, first-use trust, session discovery,
+creation and WebSocket clients. The GUI exchanges events and requests over
+private child-process pipes. Account credentials remain in the helper. The app
+retains the existing server logins, recent sessions and preference file
+formats. Browser authorization returns through the registered `outpost://`
+handler. On platforms that launch a second process, the profile lock and a
+per-run secret route links to the owner of the sign-in verifier.
 
-Trust, account login and terminal attachment are separate capabilities:
+The machine's versioned cell checkpoints are decoded in a temporary headless
+xterm grid. The helper translates the normal and alternate buffers, palette,
+margins, cursor, hyperlinks and input modes to the native terminal. After the
+checkpoint the temporary grid is disposed. Live bytes go directly to
+Alacritty. The native client acknowledges output after applying it. Local PTY
+programs receive terminal replies locally. Managed programs receive replies
+from the terminal service on the machine.
 
-- `server-trust.ts` privately remembers first-use origin trust in `server-trust.json`. Declining stops before any login
-  request; signing out never erases trust. There is no trusted-server management UI.
-- `server-accounts.ts` owns saved account identity, liveness and authenticated
-  requests. Its snapshot has separate `accounts` and `signIns` fields: account
-  rows require a saved login; attempts can only produce transient form progress.
-- `server-sign-in.ts` owns browser approval attempts, PKCE, cancellation and queued
-  session intents. It opens the system browser; no password or browser cookie
-  enters Electron. Saving starts a non-cancellable commit; sign-out waits for
-  it, then revokes the saved grant. Failed or cancelled attempts add no account
-  row, and never alter a previously saved login.
-- `server-login-store.ts` publishes credentials after an atomic disk commit.
-  `server-catalogue.ts` discovers sessions using scoped account request handles;
-  it knows nothing about trust, credential persistence or browser approval.
-  The renderer gets only presentation metadata through `server-accounts-api.ts`.
-- `backend/desktop-access.ts` owns browser approvals and durable app grants.
-  `backend/routes/desktop.ts` exposes the scoped catalogue, creation and connect APIs.
-  Browser workspace/account routes continue to require the browser login.
-
-The app generates random state and a PKCE S256 verifier, then starts a ten-minute
-request at `POST /api/desktop/authorizations`. The system browser opens
-`/desktop/authorize?request=…`; `AuthGate` preserves this destination through
-normal account sign-in and email verification. A visible consent page identifies
-the server/account and requires approval. The server returns a fixed
-`outpost://login/<state>/<code>` callback. The one-minute, single-use code is bound
-to the PKCE challenge and account credential revision. The main process matches
-state to its own pending origin and exchanges the code with the private verifier.
-It accepts neither unsolicited callbacks nor caller-supplied redirect destinations.
-This follows the external-browser and PKCE design described in
-[RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html) and
-[RFC 7636](https://www.rfc-editor.org/rfc/rfc7636.html); it is a first-party app
-protocol, not a general OAuth provider.
-
-App grants last 30 days. `desktop-logins.sqlite` stores token hashes, account ID,
-credential revision and expiry; `server-logins.json` in Electron userData stores
-the app bearer with filesystem mode 0600. An app login is independent of its
-approving browser login. Password changes/resets or loss of account verification
-invalidate it through the revision check. App sign-out revokes that grant;
-`Services.active` is the single liveness authority used by terminal connections
-and uploads for both browser and app owners. Pending approvals are memory-only
-and expire on server restart. App startup/wake and manual refresh check accounts;
-network failure is distinguished from authentication expiry. Expiry stays invalid
-until the user completes a new sign-in; a late success or network error cannot
-overwrite authentication expiry. Credentials expire without automatic renewal.
-
-Catalogue, session-creation endpoints and new terminal launches accept the app bearer. The
-app lists targets, then their sessions with at most four concurrent requests.
-Results stream into the finder; a slow or failed target does not block other
-servers. `server-api.ts` bounds response size, enforces timeouts/cancellation,
-and refuses redirects so credentials cannot move to another origin. Signing out
-requires successful revocation (an already-invalid grant also counts); network
-failure leaves the login visible for retry. Local deployments use the same
-approval and grant path, with their single local-workspace identity.
-
-### Creating sessions in the app
-
-`SessionCreator` owns a sandboxed native modal with a narrow IPC bridge.
-Its contract lives in `shared/sessionCreator.ts`, so frontend and server
-builds do not depend on the Electron package's source tree.
-The renderer reuses the web workspace's `SessionDialog` and `DirectoryInput`;
-`SessionCreatorPage` supplies server/target selectors and an IPC directory
-source. `shared/sessionCreation.ts` defines available tools and dependency
-readiness for both web and desktop. No parallel desktop form or readiness
-heuristic is maintained.
-
-`ServerAccounts.creationServers()` captures request capabilities for the exact
-saved logins when the modal opens. `server-session-creation.ts` adapts those
-capabilities into validated target, software, directory and create operations.
-The creator and catalogue use the same target response validator in
-`server-targets.ts`; `DesktopTarget` defines that shared API shape.
-Credentials stay in the main process; replacing or signing out a login
-invalidates its captured capability. App bearers resolve the same owner and
-target context as browser creation. `backend/session-actions.ts` shares the
-creation policy and software inspection between both route families. Reads are
-cancellable; an explicit Create starts a durable mutation. The native creator
-assigns a request UUID to each distinct server/target/form submission and retains
-it while the dialog is open. Retrying unchanged settings after an uncertain
-response sends the same UUID; the target's durable receipt recovers that session.
-App shutdown drains submissions before disposing account capabilities.
-
-The creation endpoint requires `{ requestId, input }` and returns the same
-validated display metadata as a catalogue row. No terminal credential is issued
-by creation. The modal returns that confirmed row. `DesktopWorkspace`
-captures the original `SessionTarget` and validates it before creating and
-again after authorization, then uses the same placement path as the existing
-session finder. Cancellation never opens a pane. A moved/closed destination
-never silently redirects the result to the currently selected tab. If a
-created session cannot open, it remains discoverable through the catalogue.
-Creation does not issue or store an independent terminal credential; opening
-uses `ServerAccounts.launch` like every other remote session entry point.
-
-`SessionFinderFlow` owns the complete create/select/connect interaction, its
-busy state, error state and cancellation lifetime; `SessionFinder` owns only
-the native window and authorized IPC boundary. The creator is a modal child of
-the still-visible picker, so closing it returns native focus to the picker.
-Only the outer workspace flow restores terminal focus when the interaction ends.
-
-Confirmed new rows are inserted and selected immediately, ahead of the bounded
-visible result list, and pinned for that picker invocation while a background
-refresh runs. Discovery retains previous rows for failed targets, replaces
-successful scopes (including empty/deleted scopes), and excludes invalid
-accounts. Refresh/Retry never discards the user's query or selection.
-Cancelling creation also refreshes discovery, since a response may have been
-lost after a successful create. These snapshots live only as long as the picker.
-
-Selecting a row keeps the picker open during authorization. Failed connections
-show an inline error and allow selecting again; success closes the picker.
-Duplicate submissions are blocked in the native flow as well as the renderer.
-Escape, closing the parent, or replacing the picker aborts pending discovery and
-authorization; late responses cannot open a pane. Each discovery pass also has
-its own cancellation generation so old results cannot replace a newer list.
-
-### Recent remote sessions
-
-`recent-sessions.ts` atomically serializes at most ten remote session references
-to `recent-sessions.json` in Electron's `userData` directory: server, account,
-target, session, title and last connection time. It contains no credentials.
-`desktopSessionId` is shared by this store, the finder and the open-pane registry.
-
-Records are refreshed after the authenticated `hello` or explicit activation.
-The main process derives identity from the pane, not renderer-supplied metadata.
-Workspace snapshots contain display metadata only. Opening a recent session uses
-`ServerAccounts.launch`, the same fresh app authorization path as the finder and
-website entry. An expired login reports an error and requires explicit sign-in.
-
-Remove/clear disables background re-saving by affected panes; explicit Connect
-can remember them again. Sign-out removes that server's references, and startup
-retains only references belonging to saved server accounts. Concurrent writes
-are serialized; app quit waits for pending writes.
-
-### Local shells
-
-The logo opens managed servers and sessions; **+**, the new-terminal shortcut,
-and a new window open a local shell. Right-click **+** or the File menu selects
-a profile. `shell-profiles.ts` resolves the login shell on macOS/Linux and
-PowerShell, Command Prompt, and WSL on Windows. Only native profile IDs cross
-the chrome bridge; the renderer cannot supply an executable, environment, or cwd.
-
-`TerminalPane.connection` distinguishes a remote launch from a local PTY owner.
-The same registry, window layout, tab transfer, split, focus, notification, and
-clipboard infrastructure serves both. Moving a local tab preserves its view and
-PTY. Closing it ends its shell; quitting ends all local shells. Tab, window and
-app close always ask for confirmation when tabs remain, and reload asks before
-restarting a running local shell. Single-tab confirmation names the tab and
-explains whether its shell ends or its remote session keeps running, including
-any unsent message in the same prompt. Cancel is the default action.
-Closing a remote tab never ends its session.
-
-`scripts/build-desktop.mjs` bundles `frontend/terminal/local-entry.tsx` and the
-shared `TerminalView` into the app. Local terminals work offline, without a server
-or account. `TerminalConnection` separates the screen from `TerminalSocket` and
-`LocalTerminalConnection`. The latter uses the separate `LocalTerminalBridge`,
-exposed only by `local-preload.ts` to the exact packaged local terminal page.
-Every native local operation resolves and validates its sender's owning tab and
-main frame; remote pages cannot invoke the PTY capability. Both page types remain
-sandboxed, isolated, and without Node integration. The local page's CSP denies
-network requests and its navigation is locked to its bundled entry.
-
-`local-terminal.ts` owns `node-pty`, using a native PTY on macOS and ConPTY on
-Windows. The local renderer is the terminal emulator: normal scrolling, alternate
-screen, terminal queries, bells, cursor reports, and application mouse input pass
-through xterm. The common `TerminalRenderer` serializes output, reset, and geometry;
-local mode starts with an empty buffer and does not install the remote query-reply
-suppression or restore a checkpoint. Resize events go to both xterm and the PTY.
-Output and geometry share one ordered IPC channel. Render acknowledgements pause
-PTY reads at 262,144 unrendered UTF-16 code units and resume below 65,536. A
-generation ID rejects stale data, input, and acknowledgements after a restart.
-
-Each local pane starts in the user's home directory and retains up to 10,000 lines
-in xterm memory. There is no local session recovery after renderer reload or app
-exit. Local panes report connection and bell state, without guessing coding-harness
-activity. Image paste sends raw bytes over IPC and saves a bounded file in the pane's private clipboard directory,
-quotes the path for its shell, and uses `wslpath` for the default WSL distribution.
-The renderer then pastes that path through xterm, so the running program sees a
-paste with its bracketed-paste mode rather than typing. The path names a file on
-this computer, which the notice says, because a program reached through `ssh`
-in a local tab cannot open it.
-Closing the pane cleans up those files. Native PTY bindings and spawn helpers are
-kept outside ASAR and rebuilt for Electron by the packaging tools. Windows uses
-node-pty's bundled ConPTY DLL; `desktop/scripts/native-assets.mjs` restores its
-DLL and OpenConsole helper beside rebuilt bindings after packaging and in dev.
-This avoids the older shutdown path's Node fork helper and keeps the Electron
-RunAsNode fuse disabled.
-
-### Shared workspace
-
-The hierarchy is **application → windows → tabs → pane trees**. A pane is a
-terminal instance; a tab is a layout container; a window owns an ordered list of
-tabs. `workspace-model.ts` defines these domain types independently of Electron
-and the renderer bridge. `workspace.ts` owns all windows, the pane-to-window
-ownership map and a single app-wide `TerminalPanes` registry. The registry owns
-terminal resources, connections, reload and disposal, and exposes a read-only map.
-Each pane ID has one owning `WorkspaceWindow`; duplicate launches and
-notification clicks resolve that owner dynamically, including after a transfer.
-`workspace-window.ts` owns one `BrowserWindow`, native view placement and local
-chrome. `WindowLayout` owns membership and selection: the window selects one tab,
-and each tab remembers one active pane in its binary split tree, with an optional
-label and a zoom flag. The active pane is derived from those selections, never
-stored a second time at window level. A workspace page preserves that selection
-but has no focused terminal; pane shortcuts do not act on hidden panes.
-
-Tab and split IDs are stable layout identities; leaf IDs identify the actual
-terminal web contents. Tab values and trees are read-only to callers; model
-operations replace them. Whole-layout restores and transfer insertions validate
-unique membership, valid ratios and selections before changing state. Removing a
-leaf collapses its parent, removing an empty group selects a neighboring tab, and
-zoom changes visibility without discarding the tree. One recursive `paneLayout`
-computes the native content rectangles, pane headers, dividers and hit-test bounds.
-Minimum sizes compress proportionally when the window is too small, leaving saved
-ratios intact. Dividers paint a one-pixel stroke inside a six-pixel native gap;
-the gap is also the pointer target and supports keyboard resizing. Menus resolve
-the focused or most recently focused window. Resolving an action never creates a
-window; explicit launch/new-window actions own creation and clean up failed pane
-attachments.
-`workspace-ui.ts` renders the tab strip, session switcher, server launcher and
-settings. `pane-ui.ts` renders keyed pane headers, keyboard-accessible dividers and
-error panels in the space reserved around native terminal views. The
-`workspace-preload.ts` bridge accepts only enumerated local UI actions; one IPC dispatcher verifies the bundled main frame and routes each call
-to that sender's window. Actions name their scope (`activateTab`, `activatePane`,
-`closeTab`, `closePane`, `splitPane`, `zoomPane`, `reloadPane`) and take explicit
-target IDs. Each action checks membership in that sender's window.
-`workspace-commands.ts` validates argument shapes at that IPC boundary. Command
-names and argument types are derived from `WorkspaceBridge`, used by both the
-preload and dispatcher; there is no separate string-alias registry. The window
-then applies ownership checks and executes the typed command. Invalid commands
-are rejected before cancelling a drag or changing window state.
-`keyed-elements.ts` preserves DOM nodes in the tab strip, server list, session
-switcher and error panels; metadata refreshes update their contents without
-resetting keyboard focus or icon animations. The switcher retains the selected
-session by ID across updates. Native host-state messages are sent only when
-focus or preferences change, not on every activity refresh.
-The local renderer receives separate pane and tab summaries, never grants,
-terminal bytes or draft contents. `workspace-summary.ts` projects tab labels,
-member IDs and aggregate status from the model and pane states. A tab summary
-does not inherit a representative pane's identity, origin, error or connection
-capability. This projection is shared with DOM fixtures, keeping presentation
-tests on the production aggregation rules.
-
-The tab menu's **Split with Outpost terminal** and the **+** menu's **Outpost
-terminal** action share `session-finder.ts`. Its sandboxed native child window
-floats above terminal views without resizing or hiding them. A separate preload
-exposes only catalogue display metadata, selection and cancellation; its IPC
-checks the exact bundled main frame and accepts only an offered session ID.
-Revisioned snapshots prevent the initial load from overwriting newer results.
-The UI retains selected identity as results arrive, uses keyed rows, and renders
-at most 200 matches while searching the full catalogue. Escape, blur, parent
-closure and replacement cancel the choice and outstanding HTTP work.
-
-The split action captures a tab and pane identity and revalidates ownership after
-both selection and the asynchronous terminal-launch request. `DesktopWorkspace`
-has one opening path: activate an existing pane in its current location, or place
-it explicitly. Explicit placement attaches a new native view or transfers the
-existing live pane using the same transaction as dragging. The recent-session
-home action continues to activate a session in its current location. Fresh app
-launches use the app-authorized `/api/desktop/targets/:t/sessions/:s/connect` endpoint;
-terminal views never receive the broader app-account bearer.
-
-`tab-status.ts` renders the same status icons and text in tabs and the session
-switcher. Connecting/reconnecting and disconnected states take priority. Connected
-tabs show a blue spinner for Working, a gray clock for Idle, a ringing bell for
-Needs you (`finished`), or a question mark for Unknown. An unread terminal bell
-takes priority over activity. The green connection check remains while waiting
-for the first activity observation. Hover descriptions and accessible tab names
-include connection, activity and bell state. Animations respect reduced motion;
-ordinary state updates keep the existing icon node so they do not restart them.
-Activating the session dismisses terminal-bell attention through the existing
-bell/focus path; unchecked completion follows the shared activity checkpoints.
-
-Activation applies view visibility before restoring or focusing the native window.
-Native focus events may select another visible split pane, but cannot override an
-activation in progress or reactivate a view already hidden by the current layout.
-`pane-appearance.ts` owns inactive-pane dimming in the native presentation layer,
-independent of the server page and terminal bridge. It inserts a fixed,
-click-through CSS overlay, serializes focus updates and reapplies after navigation.
-Focus never alters view bounds or xterm's layout. The active pane retains its
-normal appearance when the application loses focus.
-
-`workspace-shortcuts.ts` shares tab and pane accelerators between the native
-menu and the workspace guide: Cmd+T/W and Cmd+D/Shift+D on macOS,
-Ctrl+Shift+T/W and Ctrl+Shift+D/Ctrl+Alt+D on Windows. Zoom, pane close and pane
-cycling use the same definition in both places.
-Cmd+W / Ctrl+Shift+W closes only the focused pane, with confirmation. Layout removal
-collapses its split and removes empty tabs; an empty window closes afterward.
-Closing all panes in a tab is an explicit File/tab-menu or tab-close-button action.
-Cmd+Shift+W / Alt+F4 remains the separate native window-close action.
-`workspace-close.ts` handles all three close scopes through one policy. It permits
-one pending confirmation per window, captures the exact terminal instances, and
-rechecks membership after confirmation before disposing each pane. A moved pane,
-new arrival or replacement is not covered by the earlier confirmation. Empty
-tabs collapse in the model; empty native windows close after removal. App quit
-also checks for arrivals during confirmation and cleanup before exiting.
-Pane accelerators are intercepted in native `before-input-event` as well: terminal
-renderers can consume Enter before a menu accelerator runs. The shared definition
-drives matching and dispatch, suppressing repeat presses and duplicate menu delivery.
-Both the Outpost home page and Settings render the same shortcut list. The home
-page stays open until a tab or another page is selected; it has no Back/Escape
-control. Transient panels retain Escape dismissal.
-
-`workspace-shortcuts.ts` also reserves Ctrl+Tab and Ctrl+Shift+Tab in Electron's
-`before-input-event` for both the workspace and terminal web contents. It prevents
-renderer delivery and the duplicate menu accelerator, then uses the existing
-`WindowLayout.cycleTabs` order and activation path. Terminal callbacks resolve the
-current owner after cancelling provisional drags, so shortcuts follow moved tabs
-without adding renderer IPC or keeping a second tab order.
-The same native input handler consumes Escape during a drag, including repeats
-and key release. Keyboard focus can remain inside a terminal while the workspace
-holds pointer capture, so a workspace DOM listener alone cannot cancel reliably.
-
-`workspace-drag-ui.ts` handles both tab buttons and pane headers. It selects on
-press, starts a drag after an eight-pixel threshold, and moves pointer capture to
-the stable workspace body so removing a header or tab cannot cancel the gesture.
-`workspace-drag.ts` owns one drag across the app. Its payload contains only a
-layout kind and ID; it carries no grants, terminal data or message contents.
-A 32 ms timer resolves screen DIP coordinates against window bounds, measured tab
-bars and shared pane geometry, respecting the temporary native stacking order.
-`WorkspaceWindow.paneDropAt()` reports geometry without excluding the moving
-panes. The drag controller resolves an explicit placement, detachment or
-cancellation before updating either the preview or the drop action:
-
-- A tab-bar destination creates or reorders a tab for either drag handle.
-- A pane outside the dragged selection accepts a split, including across windows.
-- A tab title dropped over its own terminal area detaches the whole tab, preserving
-  its split tree. The rule is the same for one pane or many.
-- A pane header dropped onto itself cancels. Other panes remain split destinations.
-- Outside all windows, either handle detaches. Window controls, workspace pages
-  and other areas with no terminal or tab destination cancel.
-
-The handle determines the payload: a tab title moves its complete layout; a pane
-header moves only that pane. Detecting a self-hit belongs to this policy, so it
-cannot be confused with an area that has no drop target.
-
-`pane-transfer.ts` is the single transfer path for dragging, context menus and the
-session switcher. A small structural window interface keeps the transaction
-independent of Electron and testable with the real layout model. It snapshots source and destination layouts, extracts a pane or
-whole tab subtree, inserts it at a tab position or pane edge, and reparents the
-same native views while changing their app-wide owners. Failure or cancellation
-restores both layouts and ownership, including active panes, zoom and panels.
-No terminal process, connection, renderer, buffer or draft is recreated.
-
-Hover over another window's tab bar provisionally transfers the live view(s).
-The destination selects the incoming tab. An empty source uses native opacity to
-stay focused and keep pointer capture while becoming invisible; `hide()` would
-discard that capture. The destination is raised without taking focus. Hovering
-the inserted tab retains its anchor to avoid flex-width feedback. Leaving restores
-the layout, and release commits without another reparent. Esc, capture loss, blur,
-renderer failure, terminal disposal or closing either participating window cancels.
-Menu and launch actions cancel the drag before resolving current ownership.
-
-Pane-edge hover instead shows a click-through native highlight above terminal views.
-It does not mutate the tree or resize views while hit testing; therefore a stationary
-pointer cannot create a layout/measurement feedback loop. Release commits through
-the same transfer transaction. Detachment creates a window, or moves the existing
-native window when the payload contains all of its contents. Empty windows close
-only after a committed move.
-
-`drag-preview.ts` paints the split highlight or a title label for detachment,
-including detachment over the source terminal area. Every
-update supplies complete bounds from pane geometry or fixed label dimensions,
-never previous popup measurements. Windows resize insets are disabled. Loading
-asynchronously cannot reshow a hidden or destroyed preview. New window bounds are
-clamped to the destination display's work area.
-
-The tab strip replaces the system title bar using Electron's
-`titleBarStyle: 'hidden'` and [Window Controls Overlay](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar#custom-window-controls).
-Native window controls share the same
-36-pixel `tabBarHeight` as the HTML strip, terminal view offset, drag hit testing
-and fixed-size floating tab preview. CSS uses the overlay's
-safe-area geometry to reserve space for OS buttons, including RTL placement;
-the overlay visibility event releases this space in fullscreen. Only the local
-header has a window drag region. Its tab scroller and buttons opt out, and a
-flexible spacer always leaves room to drag the window with a full tab strip.
-Window close, minimize, maximize and fullscreen remain native operations.
-
-`tab-scroller.ts` uses the tab viewport's native `scrollLeft` as its only scroll
-state. Both native scrollbar axes are hidden. A three-pixel custom horizontal
-thumb overlays the tabs just above their active underline, with a larger pointer
-target. Tabs extend to the title-bar bottom border, without a reserved scrollbar
-lane. Its visibility and position cannot resize the viewport or change whether
-the tabs overflow. Thumb geometry is measured from
-the viewport and content, never from the thumb's previous dimensions.
-Mouse-wheel and trackpad deltas scroll horizontally, with line/page units
-normalized; Ctrl/pinch zoom gestures retain their default handling. Clicking the
-track or dragging the thumb scrolls directly, and keyboard users can use arrows,
-Page Up/Down and Home/End. Completing a pointer gesture restores the active
-terminal's focus; blur/capture cancellation never reactivates the window.
-Tab activation reveals the selected tab by changing only `scrollLeft`, avoiding
-`scrollIntoView()` changing a vertical or ancestor offset. The existing geometry
-report frame updates the thumb after tab changes, scrolling, resizing, font loads
-and viewport zoom; drag autoscroll uses the same viewport and position.
-
-Terminal views and workspace panels fill the remaining height to the bottom of
-the window. Connection state lives in the tabs; there is no persistent status
-bar. Workspace action errors use a native dialog owned by the calling window,
-with at most one open per window. This remains visible above native terminal
-views without reserving space. Drag destinations use their existing insertion
-markers, tab highlight and live terminal preview.
-
-`terminals.ts` owns each session's sandboxed `WebContentsView` and native bridge.
-Views use nonpersistent sessions partitioned by server origin. Switching tabs
-only changes visibility; hidden views retain their size and keep processing
-output and acknowledgements. Nested splits place existing views using the shared
-tree geometry. Moving/reordering panes never redeems another grant. There is a
-32-pane limit across at most 16 workspace windows. Closing a tab explicitly destroys
-its web contents; closing a window destroys only the views it still owns. Quit
-confirmation covers tabs and drafts across all windows. Shutdown has explicit
-confirmation, closing and closed states: once closing begins, new actions and
-browser callbacks cannot create panes. Pending credential commits and PTY cleanup
-finish before Electron exits. Renderer failures are
-shown per tab and do not reset the workspace or other sessions.
-
-Fresh launches for an existing tab wait in a bounded, in-memory queue until its
-renderer handles them. The preload subscribes before reading pending launches;
-only an explicit acknowledgement removes one, so loading and StrictMode cleanup
-do not lose a handoff. Repeated OS intents use the same session identity and
-activate the existing pane.
-
-Remote views use sandboxing, context isolation, no Node integration, no
-webviews and no popups/downloads. Top-level navigation is restricted to the
-selected server's desktop terminal entry; TLS failures are not bypassed.
-Clipboard reads use native paste events. The paste bridge checks transient user
-activation in its isolated preload; web clipboard permissions are denied.
-Only that view's main frame may invoke the bridge. External links pass the
-same HTTP(S), no-credentials validator as broker signals and open through
-Electron's shell API, without constructing shell commands. Clipboard copying
-requires the active, focused view and is bounded to 1 MiB. OSC 52 queries remain ignored.
-
-`TerminalContextMenu` is shared by browser and desktop terminals. It delegates
-clipboard actions to `attachClipboard` (including image paste and pending OSC 52
-copies), and display changes to `TerminalView`.
-The same clipboard controller maps macOS Ctrl+V to its explicit paste action;
-native paste shortcuts continue to use clipboard events. The alias runs only
-on a non-repeated keydown, within the user's clipboard permission gesture.
-Right-click and keyboard menu gestures stay local; opening the menu preserves
-the xterm selection. Radix handles menu navigation, dismissal and viewport
-positioning. The desktop native context menu is only for editable fields such
-as the message composer; there is no separate native list of terminal actions.
-
-The versioned bridge reports session metadata and receives focus, preferences
-and explicit terminal commands. Native focus is authoritative for bells, so a
-hidden tab can notify even while another tab is focused. Notification clicks
-activate the owning tab and restore the window. The frontend never infers tab
-focus from the BrowserWindow alone. Font size is applied to xterm and refitted
-through the existing resize path, without page zoom or reconnecting. The message
-composer keeps its draft while hidden; only a Boolean draft flag reaches the
-main process for close/reload/quit confirmation. Terminal input already sent to
-the remote harness is not inspected for drafts.
-
-Packaged apps register the protocol through Electron and installer metadata.
-macOS handles `open-url` before app readiness; Windows uses initial arguments
-and `second-instance`. A single app instance owns all workspaces; subsequent
-launches focus an existing tab or add one to the active window. Closing a remote
-tab or window never terminates its target session. Signing out revokes app access
-without terminating remote processes. Reopening the app starts a fresh
-workspace with its recent remote sessions available for explicit reconnect;
-layouts and running local shells are not restored. The app icon and Windows
-AppUserModelID belong to Outpost.
-
-`electron-builder.yml` packages unsigned preview DMG/ZIP files for both Mac
-architectures and an NSIS installer for Windows x64. Apple silicon uses ad-hoc
-signing, without Developer ID or notarization. All packaging workflows are
-manual; no build runs on push. `updates.ts` checks GitHub desktop releases only
-when asked and opens a newer release for manual installation. There is no
-background updater for these previews. See [desktop development](../CONTRIBUTING.md).
+The UI preserves the black title bar, shell tabs, splits and server launcher.
+The native app opens Chat in the system browser. `desktop/scripts/package.mjs`
+builds the macOS bundle, DMG and ZIP or the Windows per-user installer with
+the executable, session helper, Node runtime and third-party notices.
 
 ## Chat mode
 
@@ -1574,7 +1220,7 @@ current conversation.
 | --- | --- |
 | Session registry | `~/.outpost/registry.json` |
 | Locks | `~/.outpost/locks/<name>.lock` |
-| Node endpoints and session bindings | `~/.outpost/run/node-<id>.sock`, `~/.outpost/bindings/<session>.json` |
+| Installed owner and node endpoint | `/var/lib/outpost-machine/machine.json`, `~/.outpost/run/node-<id>.sock` |
 | Terminal services and chat hosts | `~/.outpost/terminals/<session>.sock`, `~/.outpost/chats/<session>.sock`, logs in `~/.outpost/logs/` |
 | Activity | `~/.outpost/activity/<session>.json` |
 | Messages waiting for a terminal | `~/.outpost/deliveries/<session>.json` |
@@ -1710,7 +1356,7 @@ the broker, and handle it in the shared client, delegating native actions throug
 | Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
 | Desktop model | `tests/unit/desktop-panes.test.ts` — split-tree invariants, small-window geometry, transfer/rollback and destroyed views, platform shortcuts and dimming races |
 | Workspace DOM | `tests/desktop/workspace-dom.spec.ts` — packaged chrome, real layout model, pane focus/zoom, divider input, drag cancellation, stable DOM identity, error actions and shortcut guide |
-| Native desktop | `tests/desktop/` via `npm run test:desktop` — Linux Electron, real preload/IPC/node-pty, native keyboard/mouse, cross-window pane/tab transfers, hover cancellation, drafts, dimming, PTY resize, close confirmation, wake recovery and image clipboard/cleanup |
+| Native desktop | `npm run test:desktop` exercises V3 restore, reconnect and layout logic. `npm --prefix desktop run test:ui` exercises GPUI controls, native shell I/O and moving a live pane across windows. |
 | Chat | `tests/unit/chat-*.test.ts` (journal, transcript, mentions, cron, prompts, desktop policy); `tests/integration/node-chat.test.ts` (chat host through the node: conversation timeline, one driver, Outpost tools, files, queue, DeepSeek and Kimi); `tests/integration/chat.test.ts` (hub with real chat hosts: channels, floor passing, session messages, schedules); `tests/browser/chat.spec.ts`; `tests/desktop/chat.spec.ts`. A scripted ACP agent (`tests/fixtures/acp-agent-fixture.py`) stands in for the tools; no model is called |
 | Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |
 

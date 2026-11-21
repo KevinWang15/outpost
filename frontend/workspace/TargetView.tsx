@@ -78,7 +78,8 @@ export default function TargetView({
     window.location.assign(chatHref(target.id, session.id, extra))
 
   /** The session's main action: chat when it runs there or has no terminal, else a terminal. */
-  const opensInChat = (session: Session) => session.driver === 'chat' || !supportsTerminal(session.tool)
+  const opensInChat = (session: Session) =>
+    target.kind !== 'direct' && (session.driver === 'chat' || !supportsTerminal(session.tool))
   function open(session: Session) {
     if (opensInChat(session)) inChat(session)
     else connect(session)
@@ -88,7 +89,7 @@ export default function TargetView({
   async function restart(session: Session) {
     try {
       await api(`${sessionPath(session)}/terminate`, 'POST')
-      if (session.driver === 'chat') inChat(session, { start: true })
+      if (target.kind !== 'direct' && session.driver === 'chat') inChat(session, { start: true })
       else connect(session)
       await refresh()
     } catch (problem) {
@@ -119,10 +120,12 @@ export default function TargetView({
       setChecking(current => current.filter(id => id !== session.id))
     }
   }
-  const TargetIcon = target.kind === 'ssh' ? Server : Monitor
+  const TargetIcon = target.kind === 'local' ? Monitor : Server
 
   return (
     <div className="target-view">
+      {target.kind === 'direct' && <DirectInstall key={target.id} id={target.id} />}
+      {target.kind === 'paired' && <PairMachine key={target.id} id={target.id} />}
       <header className="page-header">
         <div className="page-title">
           <span className="page-icon">
@@ -170,7 +173,12 @@ export default function TargetView({
           />
         </div>
       </header>
-      <SoftwarePanel targetId={target.id} state={software} onInstalled={() => void refresh()} />
+      <SoftwarePanel
+        paired={target.kind === 'paired' || target.kind === 'direct'}
+        targetId={target.id}
+        state={software}
+        onInstalled={() => void refresh()}
+      />
       <SessionTable
         sessions={sessions}
         error={error}
@@ -185,18 +193,20 @@ export default function TargetView({
             : { kind: 'terminal', connect: () => connect(session) }
         }
         actionsFor={session => ({
-          ...(opensInChat(session)
-            ? {
-                terminal: () =>
-                  session.driver === 'chat' ? setPanel({ kind: 'terminal', session }) : connect(session),
-              }
-            : {
-                chat: () => (session.driver === 'terminal' ? setPanel({ kind: 'chat', session }) : inChat(session)),
-              }),
+          ...(target.kind === 'direct'
+            ? {}
+            : opensInChat(session)
+              ? {
+                  terminal: () =>
+                    session.driver === 'chat' ? setPanel({ kind: 'terminal', session }) : connect(session),
+                }
+              : {
+                  chat: () => (session.driver === 'terminal' ? setPanel({ kind: 'chat', session }) : inChat(session)),
+                }),
           conversations: () => setPanel({ kind: 'conversations', session }),
           edit: () => setPanel({ kind: 'settings', session }),
           fork: () => setPanel({ kind: 'fork', session }),
-          schedule: () => inChat(session, { schedule: true }),
+          ...(target.kind !== 'direct' && { schedule: () => inChat(session, { schedule: true }) }),
           stop: () => setPanel({ kind: 'stop', session }),
           remove: () => setPanel({ kind: 'delete', session }),
         })}
@@ -334,5 +344,87 @@ export default function TargetView({
         />
       )}
     </div>
+  )
+}
+
+function PairMachine({ id }: { id: string }) {
+  const [pair, setPair] = useState<{ code: string; origin: string; expiresAt: string } | null>(null)
+  const [error, setError] = useState('')
+  const [generating, setGenerating] = useState(false)
+  useEffect(() => {
+    if (!pair) return
+    const timer = setTimeout(() => setPair(null), Math.max(0, Date.parse(pair.expiresAt) - Date.now()))
+    return () => clearTimeout(timer)
+  }, [pair])
+  return (
+    <section className="panel">
+      <button
+        className="button"
+        disabled={generating}
+        onClick={async () => {
+          setGenerating(true)
+          setPair(null)
+          setError('')
+          try {
+            setPair(await api('/targets/' + encodeURIComponent(id) + '/pair', 'POST', {}))
+          } catch (e) {
+            setError((e as Error).message)
+          } finally {
+            setGenerating(false)
+          }
+        }}
+      >
+        Generate pairing code
+      </button>
+      {error && <p role="alert">{error}</p>}
+      {pair && (
+        <div>
+          <p>
+            On the target run <code>outpost-terminal pair {pair.origin}</code>. Enter this code within five minutes.
+          </p>
+          <p>
+            <code>{pair.code}</code>
+          </p>
+          <p>
+            Then run <code>outpost-terminal connect</code>.
+          </p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function DirectInstall({ id }: { id: string }) {
+  const [config, setConfig] = useState(''),
+    [error, setError] = useState('')
+  return (
+    <section className="panel">
+      <button
+        className="button"
+        onClick={async () => {
+          try {
+            setConfig(JSON.stringify(await api('/targets/' + encodeURIComponent(id) + '/direct-install', 'POST', {})))
+            setError('')
+          } catch (e) {
+            setError((e as Error).message)
+          }
+        }}
+      >
+        Show offline installation
+      </button>
+      {error && <p role="alert">{error}</p>}
+      {config && (
+        <div>
+          <p>
+            Run <code>outpost-terminal pair --direct</code> on the machine and paste this configuration at the prompt.
+          </p>
+          <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{config}</pre>
+          <p>
+            Run <code>outpost-terminal connect</code> behind the machine’s HTTPS endpoint. To release ownership, stop
+            the service and run <code>outpost-terminal unpair</code>.
+          </p>
+        </div>
+      )}
+    </section>
   )
 }

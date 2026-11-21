@@ -17,7 +17,7 @@
     "test": "node --import tsx --test 'tests/unit/*.test.ts' 'tests/machine/*.test.ts'",
     "test:integration": "node --import tsx --test 'tests/integration/*.test.ts'",
     "test:ui": "playwright test",
-    "test:desktop": "playwright test --config playwright.desktop.config.ts",
+    "test:desktop": "npm --prefix desktop test",
     "test:mobile": "playwright test --config playwright.mobile.config.ts",
     "check": "npm run lint && npm run lint:python && npm run build && npm test",
     "logo:generate": "node scripts/logo/generate.mjs",

@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
+ARG VITE_OUTPOST_MAC_ARM64_INSTALLER
 # Application checks run here; desktop/browser test dependencies stay in CI.
 RUN npx tsc --noEmit && npx tsc --noEmit -p tsconfig.node.json \
     && npm run build:client && npm run build:server \

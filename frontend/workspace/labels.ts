@@ -13,11 +13,15 @@ export function relativeTime(value: string | null) {
 }
 
 export const address = (target: Target) =>
-  target.kind === 'ssh'
-    ? `${target.user}@${target.host}${target.port ? `:${target.port}` : ''}`
-    : target.environment?.username
-      ? `${target.environment.username} on this computer`
-      : 'This computer'
+  target.kind === 'direct'
+    ? 'Direct only · ' + target.endpoint
+    : target.kind === 'paired'
+      ? 'Paired machine'
+      : target.kind === 'ssh'
+        ? `${target.user}@${target.host}${target.port ? `:${target.port}` : ''}`
+        : target.environment?.username
+          ? `${target.environment.username} on this computer`
+          : 'This computer'
 
 /** Where a session runs now, in the words both modes use. */
 export function placeLabel(session: Pick<Session, 'driver' | 'status'>) {

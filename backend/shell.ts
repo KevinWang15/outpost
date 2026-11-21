@@ -1,6 +1,4 @@
-export const supportingPath =
-  'export PATH="$PATH:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin"'
-
+import { supportingPath } from '../shared/shell'
 export type LoginMode = 'interactive' | 'noninteractive'
 
 // Inspection needs the attachment's interactive PATH. Installers are batch jobs:

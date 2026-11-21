@@ -313,7 +313,6 @@ export async function deleteSession(id: unknown) {
     `logs/${record.id}.chat.log`,
     `activity/${record.id}.json`,
     `deliveries/${record.id}.json`,
-    `bindings/${record.id}.json`,
     `clipboard/${record.id}`,
   ])
     rmSync(statePath(path), { recursive: true, force: true })

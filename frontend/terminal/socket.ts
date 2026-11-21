@@ -1,6 +1,11 @@
+import { directTerminalPath } from '../../shared/directOnly'
+import { desktopOrigin } from '../../shared/desktopAuth'
+import { terminalFileChunk, type TerminalFileReader } from '../../shared/terminalFiles'
+import { fileRequest, listSessionFiles, sessionFileBlob } from '../../shared/sessionFileRequests'
+import { maxSessionFiles, parseSessionFile } from '../../shared/sessionFiles'
 import type { ClientMessage, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, maxInputQueue, protocolVersion, terminalConnectionPolicy } from '../../shared/protocol'
-import type { UploadedImage } from '../../shared/images'
+import { imageProblem, type UploadedImage } from '../../shared/images'
 import type { SessionActivity } from '../../shared/activity'
 import type { TerminalRendering } from './rendering'
 import type { TerminalConnection, TerminalState } from './connection'
@@ -18,6 +23,8 @@ interface Handlers {
  * with the resume token after drops; an ended session requires explicit reconnect. */
 export class TerminalSocket implements TerminalConnection {
   private socket: WebSocket | null = null
+  private direct: WebSocket | null = null
+  private preferRelayOnce = false
   private token: string
   private attempts = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -25,6 +32,9 @@ export class TerminalSocket implements TerminalConnection {
   private started = false
   private allowStart = true
   private ready = false
+  private directOnly = false
+  private sessionTransfers = false
+  private nextFileChunk = Promise.resolve()
   private readyAt = 0
   private receivedAt = 0
   private online = typeof navigator === 'undefined' || navigator.onLine !== false
@@ -45,6 +55,7 @@ export class TerminalSocket implements TerminalConnection {
     private size: () => { cols: number; rows: number },
     private rendering: TerminalRendering,
     private handlers: Handlers,
+    private endpoint?: { origin: string; open: (url: URL) => WebSocket },
   ) {
     this.token = token
   }
@@ -58,22 +69,26 @@ export class TerminalSocket implements TerminalConnection {
     this.started = true
     clearTimeout(this.retryTimer)
     this.retryTimer = undefined
+    const preferRelay = this.preferRelayOnce
+    this.preferRelayOnce = false
     this.detach()
     this.handlers.activity(null)
     const { cols, rows } = this.size()
-    const url = new URL('/api/terminal', window.location.href)
+    const url = new URL('/api/terminal', this.endpoint?.origin ?? window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     url.search = new URLSearchParams({
+      routes: '1',
       token: this.token,
       cols: String(cols),
       rows: String(rows),
       protocol: String(protocolVersion),
       start: this.allowStart ? '1' : '0',
     }).toString()
-    const socket = new WebSocket(url)
+    const socket = this.endpoint?.open(url) ?? new WebSocket(url)
     // Only a user opening/reconnecting a terminal may start an exited tool.
     // A dropped connection may have missed the original exit notification.
     this.allowStart = false
+    socket.onerror = () => {} // onclose owns retries, including failed upgrades.
     socket.binaryType = 'arraybuffer'
     this.socket = socket
     this.receivedAt = Date.now()
@@ -88,7 +103,23 @@ export class TerminalSocket implements TerminalConnection {
         this.lost(socket, { type: 'closed', reason: 'error', message: 'The terminal did not become ready in time.' }),
       terminalConnectionPolicy.clientAttachMs,
     )
+    let candidate: WebSocket | null = null
+    let probeTimer: ReturnType<typeof setTimeout> | undefined
+    let verified = false
+    let selected: 'direct' | 'relay' | undefined
+    const releaseDirect = () => {
+      clearTimeout(probeTimer)
+      this.direct = null
+      const peer = candidate
+      verified = false
+      candidate = null
+      if (peer) {
+        peer.onopen = peer.onmessage = peer.onclose = null
+        peer.close()
+      }
+    }
     this.cleanup = () => {
+      releaseDirect()
       clearTimeout(ackTimer)
       clearTimeout(attachTimer)
     }
@@ -108,7 +139,43 @@ export class TerminalSocket implements TerminalConnection {
       if (acknowledged >= 64 * 1024 && performance.now() - lastAck >= 10) acknowledge()
       else ackTimer ??= setTimeout(acknowledge, 20)
     }
-    socket.onmessage = event => {
+    const tryDirect = (offer: Extract<ServerMessage, { type: 'route-offer' }>) => {
+      const choice = (direct: boolean) => {
+        clearTimeout(probeTimer)
+        if (this.socket === socket && socket.readyState === WebSocket.OPEN)
+          socket.send(JSON.stringify({ type: 'route-choice', slot: offer.slot, direct }))
+        if (!direct) releaseDirect()
+      }
+      if (selected || candidate) return
+      if (preferRelay) return choice(false)
+      try {
+        if (![offer.slot, offer.proof].every(value => typeof value === 'string' && /^[A-Za-z0-9_-]{32}$/.test(value)))
+          return choice(false)
+        const address = new URL('/api/terminal/direct', desktopOrigin(offer.origin))
+        address.protocol = address.protocol === 'https:' ? 'wss:' : 'ws:'
+        const peer = this.endpoint?.open(address) ?? new WebSocket(address)
+        candidate = peer
+        peer.onerror = () => {} // Failed probes fall back when onclose fires.
+        peer.binaryType = 'arraybuffer'
+        probeTimer = setTimeout(() => choice(false), 1500)
+        peer.onopen = () => peer.send(offer.slot)
+        peer.onmessage = event => {
+          if (candidate !== peer) return
+          try {
+            if (typeof event.data !== 'string' || JSON.parse(event.data).proof !== offer.proof) return choice(false)
+            peer.onmessage = () => releaseDirect()
+            verified = true
+            choice(true)
+          } catch {
+            choice(false)
+          }
+        }
+        peer.onclose = () => choice(false)
+      } catch {
+        choice(false)
+      }
+    }
+    const receive = (event: MessageEvent, fromDirect: boolean) => {
       if (this.socket !== socket) return
       this.receivedAt = Date.now()
       if (event.data instanceof ArrayBuffer) {
@@ -124,13 +191,62 @@ export class TerminalSocket implements TerminalConnection {
         this.fail('Outpost sent an invalid terminal message. Reload this terminal before reconnecting.')
         return
       }
-      if (message.type === 'hello') {
+      if (fromDirect && ['direct-only', 'direct-lease', 'route-offer', 'route-selected'].includes(message.type)) return
+      if (message.type === 'direct-only') {
+        if (selected || candidate) return
+        this.directOnly = true
+        this.token = message.resume
+        selected = 'direct'
+        try {
+          const address = new URL(directTerminalPath, desktopOrigin(message.origin))
+          address.protocol = address.protocol === 'https:' ? 'wss:' : 'ws:'
+          const peer = this.endpoint?.open(address) ?? new WebSocket(address)
+          candidate = this.direct = peer
+          peer.binaryType = 'arraybuffer'
+          peer.onerror = () => {}
+          peer.onopen = () => peer.send(message.ticket)
+          peer.onmessage = event => receive(event, true)
+          peer.onclose = () =>
+            this.lost(socket, {
+              type: 'closed',
+              reason: 'error',
+              message: 'The direct-only machine is unreachable. Check its address and your network connection.',
+            })
+        } catch {
+          this.fail('Invalid direct-only machine address.')
+        }
+        return
+      }
+      if (message.type === 'direct-lease') {
+        if (this.direct?.readyState === WebSocket.OPEN) this.direct.send(JSON.stringify(message))
+        return
+      }
+      if (fromDirect && message.type === 'hello') {
+        this.handlers.hello({ ...message, resume: this.token })
+        return
+      }
+      if (message.type === 'route-offer') {
+        tryDirect(message)
+      } else if (message.type === 'route-selected') {
+        if (selected) return
+        selected = message.route
+        if (selected === 'relay') return releaseDirect()
+        if (!verified || !candidate || candidate.readyState !== WebSocket.OPEN) {
+          this.preferRelayOnce = true
+          return this.unresponsive(socket)
+        }
+        this.direct = candidate
+        candidate.onmessage = event => receive(event, true)
+        candidate.onclose = () => this.unresponsive(socket)
+        candidate.send('attach')
+      } else if (message.type === 'hello') {
         this.token = message.resume
         this.handlers.hello(message)
       } else if (message.type === 'restore' || message.type === 'geometry' || message.type === 'clear') {
         const length = new TextEncoder().encode(event.data).length
         this.rendering.restore(message, () => rendered(length))
       } else if (message.type === 'ready') {
+        this.sessionTransfers = message.sessionTransfers === true
         this.rendering.flush(() => {
           if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
           if (this.ready) return this.fail('Outpost sent duplicate terminal readiness.')
@@ -138,7 +254,7 @@ export class TerminalSocket implements TerminalConnection {
           this.readyAt = Date.now()
           clearTimeout(attachTimer)
           this.scheduleProbe()
-          this.handlers.state({ kind: 'connected' })
+          this.handlers.state(selected ? { kind: 'connected', route: selected } : { kind: 'connected' })
           const { cols, rows } = this.size()
           this.resize(cols, rows)
           this.send({ type: 'focus', active: this.active })
@@ -162,6 +278,7 @@ export class TerminalSocket implements TerminalConnection {
       } else if (message.type === 'signal') this.handlers.signal(message)
       else if (message.type === 'closed') this.lost(socket, message)
     }
+    socket.onmessage = event => receive(event, false)
     socket.onclose = event =>
       this.lost(socket, {
         type: 'closed',
@@ -180,6 +297,7 @@ export class TerminalSocket implements TerminalConnection {
    * Transient failures keep retrying; backoff, not a retry limit, bounds the load. */
   private lost(socket: WebSocket, message: Extract<ServerMessage, { type: 'closed' }>) {
     if (this.socket !== socket) return
+    if (this.direct && message.reason === 'error') this.preferRelayOnce = true
     this.detach()
     this.handlers.activity(null)
     this.failPending('The connection closed before Outpost confirmed it. Check the terminal before retrying.')
@@ -333,12 +451,13 @@ export class TerminalSocket implements TerminalConnection {
 
   private send(message: ClientMessage) {
     const data = JSON.stringify(message)
-    if (this.canSend(new TextEncoder().encode(data).length)) this.socket!.send(data)
+    const wire = (message.type === 'activate' ? null : this.direct) ?? this.socket
+    if (wire && this.canSend(new TextEncoder().encode(data).length, wire)) wire.send(data)
   }
 
-  private canSend(bytes: number) {
-    if (this.socket?.readyState !== WebSocket.OPEN) return false
-    if (bytes + this.socket.bufferedAmount > maxInputQueue) {
+  private canSend(bytes: number, wire: WebSocket) {
+    if (wire.readyState !== WebSocket.OPEN) return false
+    if (bytes + wire.bufferedAmount > maxInputQueue) {
       this.fail('Terminal input is backed up. Check the terminal before reconnecting; unsent input is not retried.')
       return false
     }
@@ -352,9 +471,10 @@ export class TerminalSocket implements TerminalConnection {
       this.fail('Terminal input is limited to 1 MiB at a time. Reconnect and paste smaller sections.')
       return false
     }
-    if (!this.canSend(bytes.length)) return false
+    const wire = this.direct ?? this.socket
+    if (!wire || !this.canSend(bytes.length, wire)) return false
     for (let offset = 0; offset < bytes.length; offset += maxInputMessage)
-      this.socket!.send(bytes.subarray(offset, offset + maxInputMessage))
+      wire.send(bytes.subarray(offset, offset + maxInputMessage))
     return true
   }
 
@@ -407,6 +527,66 @@ export class TerminalSocket implements TerminalConnection {
     })
   }
 
+  private fileAuthorization() {
+    if (this.directOnly)
+      throw Error(
+        'This session requires an updated terminal service for direct file transfers. Restart its coding tool to enable them.',
+      )
+    return { origin: this.endpoint?.origin ?? '', token: this.token }
+  }
+  readonly listFiles = async (signal: AbortSignal) => {
+    signal.throwIfAborted()
+    if (!this.sessionTransfers) return listSessionFiles(this.fileAuthorization(), signal)
+    const result = await this.request({ type: 'file-list', id: crypto.randomUUID() })
+    signal.throwIfAborted()
+    if (!result.ok) throw new Error(result.message || 'Could not list session files.')
+    if (!Array.isArray(result.files) || result.files.length > maxSessionFiles)
+      throw new Error('Invalid session file list.')
+    return result.files.map(parseSessionFile)
+  }
+  readonly removeFile = async (file: string, signal: AbortSignal) => {
+    signal.throwIfAborted()
+    if (!this.sessionTransfers) {
+      await fileRequest(this.fileAuthorization(), '/' + file, signal, 'DELETE')
+      return
+    }
+    const result = await this.request({ type: 'file-remove', id: crypto.randomUUID(), file })
+    if (!result.ok) throw new Error(result.message || 'Could not remove the session file.')
+  }
+
+  readonly readFile: TerminalFileReader = async (metadata, signal) => {
+    const file = parseSessionFile(metadata)
+    if (!this.connected) throw new Error('Connect the terminal before downloading a file.')
+    if (!this.sessionTransfers) return sessionFileBlob(this.fileAuthorization(), file, signal)
+    const attachment = this.socket
+    const parts: Uint8Array<ArrayBuffer>[] = []
+    let offset = 0
+    do {
+      signal.throwIfAborted()
+      if (!attachment || this.socket !== attachment) throw new Error('The terminal connection changed.')
+      const read = this.nextFileChunk.then(() => {
+        signal.throwIfAborted()
+        if (this.socket !== attachment) throw new Error('The terminal connection changed.')
+        return this.request({ type: 'file-read', id: crypto.randomUUID(), file: file.id, offset })
+      })
+      this.nextFileChunk = read.then(
+        () => {},
+        () => {},
+      )
+      const result = await read
+      signal.throwIfAborted()
+      if (!result.ok) throw new Error(result.message || 'Could not read the session file.')
+      const expected = Math.min(terminalFileChunk, file.size - offset)
+      if (typeof result.chunk !== 'string' || result.chunk.length !== 4 * Math.ceil(expected / 3))
+        throw new Error('The session sent an incomplete file.')
+      const bytes = Uint8Array.from(atob(result.chunk), c => c.charCodeAt(0))
+      if (bytes.length !== expected) throw new Error('The session sent an incomplete file.')
+      parts.push(bytes)
+      offset += bytes.length
+    } while (offset < file.size)
+    return new Blob(parts, { type: file.mediaType })
+  }
+
   /** Send a draft and wait until it reached the target. */
   async submit(data: string) {
     const result = await this.request({ type: 'send', id: crypto.randomUUID(), data })
@@ -424,6 +604,52 @@ export class TerminalSocket implements TerminalConnection {
     if (!result.ok) throw new Error(result.message)
   }
 
+  private async uploadOnSocket(file: File, signal: AbortSignal) {
+    const problem = imageProblem(file)
+    if (problem) throw new Error(problem)
+    const transfer = crypto.randomUUID()
+    const socket = this.socket
+    for (let offset = 0; offset < file.size; offset += terminalFileChunk) {
+      const bytes = new Uint8Array(await file.slice(offset, offset + terminalFileChunk).arrayBuffer())
+      signal.throwIfAborted()
+      if (!socket || this.socket !== socket) throw new Error('The terminal changed during image upload.')
+      let binary = ''
+      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
+      const reply = await this.request({
+        type: 'image-write',
+        id: crypto.randomUUID(),
+        transfer,
+        mime: file.type,
+        size: file.size,
+        offset,
+        chunk: btoa(binary),
+      })
+      if (!reply.ok) throw new Error(reply.message || 'Image upload failed.')
+      if (offset + bytes.length === file.size && reply.reference) return { reference: reply.reference }
+    }
+    throw new Error('The session did not confirm the image upload.')
+  }
+
+  private async uploadOverHttp(file: File, signal: AbortSignal) {
+    const auth = this.fileAuthorization()
+    const response = await fetch(
+      this.endpoint ? new URL('/api/terminal/image', this.endpoint.origin) : '/api/terminal/image',
+      {
+        method: 'POST',
+        credentials: 'omit',
+        redirect: 'error',
+        headers: { authorization: `Bearer ${auth.token}`, 'x-outpost-request': '1', 'content-type': file.type },
+        body: file,
+        signal: signal,
+      },
+    )
+    if (!response.ok) {
+      const error = await response.json().catch(() => null)
+      throw new Error(error?.message || `Image upload failed (${response.status}).`)
+    }
+    return (await response.json()) as UploadedImage
+  }
+
   /** Upload independently of interactive input, then paste into this attachment only. */
   async pasteImage(file: File) {
     if (!this.connected) throw new Error('Connect the terminal before attaching an image.')
@@ -436,18 +662,9 @@ export class TerminalSocket implements TerminalConnection {
       150_000,
     )
     try {
-      const response = await fetch('/api/terminal/image', {
-        method: 'POST',
-        credentials: 'omit',
-        headers: { authorization: `Bearer ${this.token}`, 'x-outpost-request': '1', 'content-type': file.type },
-        body: file,
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        const error = await response.json().catch(() => null)
-        throw new Error(error?.message || `Image upload failed (${response.status}).`)
-      }
-      const image: UploadedImage = await response.json()
+      const image = this.sessionTransfers
+        ? await this.uploadOnSocket(file, controller.signal)
+        : await this.uploadOverHttp(file, controller.signal)
       controller.signal.throwIfAborted()
       if (!this.connected || this.socket !== socket)
         throw new Error('The terminal changed before the image was pasted. Attach it again.')

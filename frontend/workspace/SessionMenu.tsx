@@ -26,7 +26,7 @@ export interface SessionActions {
   conversations: () => void
   edit: () => void
   fork: () => void
-  schedule: () => void
+  schedule?: () => void
   stop: () => void
   remove: () => void
 }
@@ -52,7 +52,9 @@ export function SessionMenu({ session, label, actions }: { session: Session; lab
     { label: 'Conversations', icon: <History size={14} />, onSelect: actions.conversations },
     { label: 'Edit session', icon: <Pencil size={14} />, onSelect: actions.edit },
     { label: 'Fork', icon: <GitFork size={14} />, onSelect: actions.fork },
-    { label: 'Schedule a task', icon: <CalendarClock size={14} />, onSelect: actions.schedule },
+    ...(actions.schedule
+      ? [{ label: 'Schedule a task', icon: <CalendarClock size={14} />, onSelect: actions.schedule }]
+      : []),
     'separator',
     session.driver
       ? { label: 'Stop coding tool', icon: <Square size={14} />, danger: true, onSelect: actions.stop }

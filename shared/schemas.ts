@@ -26,16 +26,25 @@ const ssh = {
   ),
 }
 const local = { kind: Type.Literal('local'), name, tools }
+const direct = { kind: Type.Literal('direct'), name, tools, endpoint: text(2048) }
+const paired = { kind: Type.Literal('paired'), name, tools }
 export const environment = Type.Object(
   { home: absolutePath, username: text(256), uid: Type.Integer({ minimum: 0 }), shell: absolutePath },
   strict,
 )
 const metadata = { id: text(80), createdAt: text(80), environment: Type.Optional(environment) }
 
-export const targetInput = Type.Union([Type.Object(ssh, strict), Type.Object(local, strict)])
+export const targetInput = Type.Union([
+  Type.Object(ssh, strict),
+  Type.Object(local, strict),
+  Type.Object(paired, strict),
+  Type.Object(direct, strict),
+])
 export const targetRecord = Type.Union([
   Type.Object({ ...ssh, ...metadata }, strict),
   Type.Object({ ...local, ...metadata }, strict),
+  Type.Object({ ...paired, ...metadata }, strict),
+  Type.Object({ ...direct, ...metadata }, strict),
 ])
 export const targetUpdate = Type.Object(
   { name: Type.Optional(name), tools: Type.Optional(tools) },

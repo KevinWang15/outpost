@@ -1,38 +1,22 @@
-import type { TerminalConnection } from './connection'
+import type { TerminalSocket } from './socket'
 import { SessionFileCache } from '../../shared/sessionFileCache'
-import {
-  fileRequest,
-  listSessionFiles,
-  sessionFileBlob,
-  type SessionFileAuthorization,
-} from '../../shared/sessionFileRequests'
-import type { SessionFile, SessionFileBridge } from '../../shared/sessionFiles'
+import type { SessionFile } from '../../shared/sessionFiles'
 
-export { fileSize } from '../../shared/sessionFileRequests'
+export function fileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
 
-/** One owner for browser bytes, thumbnail decoding and native file capabilities.
- * Native originals live in the main process so a window-wide viewer and Save
- * dialog share the same cache as the terminal's thumbnail list. */
 export class SessionFiles {
-  private originals: SessionFileCache | null
+  private originals: SessionFileCache
   readonly thumbnails: SessionFileCache
-  /** `token` is a terminal grant, or a function for a credential that is renewed (chat). */
-  constructor(
-    token: string | (() => SessionFileAuthorization),
-    readonly native?: SessionFileBridge,
-    connection?: TerminalConnection,
-  ) {
-    const auth = typeof token === 'string' ? () => ({ origin: '', token }) : token
-    this.originals = native
-      ? null
-      : new SessionFileCache(connection?.readFile ?? ((file, signal) => sessionFileBlob(auth(), file, signal)))
-    this.list = signal =>
-      native ? native.list() : (connection?.listFiles?.(signal) ?? listSessionFiles(auth(), signal))
+  constructor(source: Pick<TerminalSocket, 'readFile' | 'listFiles' | 'removeFile'>) {
+    this.originals = new SessionFileCache(source.readFile)
+    this.list = source.listFiles
     this.remove = async (id, signal) => {
-      if (native) await native.remove(id)
-      else if (connection?.removeFile) await connection.removeFile(id, signal)
-      else await fileRequest(auth(), '/' + id, signal, 'DELETE')
-      this.originals?.remove(id)
+      await source.removeFile(id, signal)
+      this.originals.remove(id)
       this.thumbnails.remove(id)
     }
     this.thumbnails = new SessionFileCache(
@@ -64,12 +48,9 @@ export class SessionFiles {
   list: (signal: AbortSignal) => Promise<SessionFile[]>
   remove: (id: string, signal: AbortSignal) => Promise<void>
   async read(file: SessionFile) {
-    return this.originals
-      ? this.originals.read(file)
-      : new Blob([await this.native!.read(file)], { type: file.mediaType })
+    return this.originals.read(file)
   }
   async download(file: SessionFile) {
-    if (this.native) return this.native.download(file)
     const blob = await this.read(file)
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -82,11 +63,11 @@ export class SessionFiles {
     return true
   }
   retain(files: SessionFile[]) {
-    this.originals?.retain(files)
+    this.originals.retain(files)
     this.thumbnails.retain(files)
   }
   clear() {
-    this.originals?.clear()
+    this.originals.clear()
     this.thumbnails.clear()
   }
 }

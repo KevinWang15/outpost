@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { SessionFile } from '../../shared/sessionFiles'
 import type { SessionFiles } from './sessionFiles'
 
-/** Shared list reconciliation and actions for the dropdown and native viewer. */
+/** Shared list reconciliation and actions for the dropdown and browser viewer. */
 export function useSessionFiles(access: SessionFiles, connected: boolean, revision = 0) {
   const [files, setFiles] = useState<SessionFile[]>([])
   const [error, setError] = useState('')

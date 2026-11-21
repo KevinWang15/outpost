@@ -79,7 +79,7 @@ function ChannelRow({ channel, active }: { channel: ChannelView; active: boolean
 }
 
 export default function Sidebar({ selection }: { selection: Selection }) {
-  const { client, open, bridge } = useChat()
+  const { client, open } = useChat()
   const [query, setQuery] = useState('')
   const search = useRef<HTMLInputElement>(null)
   // Whatever the search led to, or what was just created, shows in the full list.
@@ -124,7 +124,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
     .filter(group => group.sessions.length || !filter)
   const schedules = [...client.schedules.values()]
   return (
-    <AppSidebar mode="chat" embedded={Boolean(bridge)}>
+    <AppSidebar mode="chat">
       <label className="chat-search">
         <Search size={14} aria-hidden="true" />
         <input

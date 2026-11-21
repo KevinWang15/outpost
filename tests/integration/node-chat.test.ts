@@ -125,7 +125,7 @@ test(
 
     chat.prompt('p1', 'Check with permission', [], 'k1')
     const queued = await chat.result('p1')
-    assert.equal(queued.ok, true, queued.message)
+    assert.equal(queued.ok, true, queued.message ?? 'Request failed')
     const turn = (queued.data as { turn: string }).turn
     const asked = await chat.entry('permission')
     assert.equal((await sessions.get(context, session.id)).activity.state, 'waiting')

@@ -77,7 +77,7 @@ const packages = `install_packages() {
 }`
 
 /** Editable presets: shown to the user, and run only as submitted. */
-function installationScript(id: SoftwareId, socket?: string): string {
+function installationScript(id: SoftwareId, socket: string): string {
   if (id === 'outpost-terminal')
     return `#!/bin/sh
 set -eu
@@ -118,7 +118,7 @@ if [ ! -d /var/lib/outpost-machine ]; then
   if [ "$(id -u)" = 0 ]; then mkdir -m 700 /var/lib/outpost-machine
   else sudo -n sh -c 'mkdir -m 700 /var/lib/outpost-machine && chown "$1" /var/lib/outpost-machine' sh "$(id -u)"; fi
 fi
-${socket ? `"$work/$asset" pair --managed ${quote(socket)}` : ''}
+"$work/$asset" pair --managed ${quote(socket)}
 mv -f "$work/$asset" "$HOME/.outpost/bin/outpost-terminal"
 echo 'Outpost Terminal ${terminalService.version} installed.'
 `
@@ -214,7 +214,7 @@ export class SoftwareClient implements SoftwareService {
             { tools: target.tools, marker },
             { signal, timeoutMs: 50000 },
           )
-        : await runCommand(transport.management('interactive'), inspectionScript(ids, marker), {
+        : await runCommand(transport.management('interactive'), inspectionScript(ids, marker, machine.socket), {
             env: this.env,
             signal,
             timeoutMs: 45_000,
@@ -234,7 +234,7 @@ export class SoftwareClient implements SoftwareService {
   }
 }
 
-export const planInstallation = (id: SoftwareId, socket?: string): InstallationPlan => ({
+export const planInstallation = (id: SoftwareId, socket: string): InstallationPlan => ({
   softwareId: id,
   script: installationScript(id, socket),
 })

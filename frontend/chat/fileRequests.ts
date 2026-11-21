@@ -1,16 +1,14 @@
-import { maxSessionFileBytes, maxSessionFiles, parseSessionFile, type SessionFile } from './sessionFiles'
+import { maxSessionFileBytes, maxSessionFiles, parseSessionFile, type SessionFile } from '../../shared/sessionFiles'
 
 export interface SessionFileAuthorization {
-  origin: string
   token: string
-  /** The session's files endpoint; terminal grants name their session themselves. */
-  base?: string
+  base: string
 }
 
-/** Attachment requests never expose the resume credential in a URL. */
+/** Attachment requests never expose the chat file grant in a URL. */
 export async function fileRequest(auth: SessionFileAuthorization, path: string, signal: AbortSignal, method = 'GET') {
   const request = () =>
-    fetch(auth.origin + (auth.base ?? '/api/terminal/files') + path, {
+    fetch(auth.base + path, {
       method,
       signal,
       redirect: 'error',
@@ -65,10 +63,4 @@ export async function sessionFileBlob(
     await reader.cancel().catch(() => {})
     reader.releaseLock()
   }
-}
-
-export function fileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
 }

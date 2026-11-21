@@ -1,5 +1,4 @@
 import type { Terminal } from '@xterm/xterm'
-import { desktop } from '../desktop'
 import { touchInput } from '../browser'
 
 /** Only text already visible in xterm; no remote history request or mode change. */
@@ -37,9 +36,7 @@ export function attachClipboard(
     try {
       // Background tabs keep the text for an explicit Copy action.
       if (!document.hasFocus()) throw new Error('inactive')
-      if (desktop) {
-        if (!(await desktop.copyText(text))) throw new Error('Copy unavailable')
-      } else await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(text)
       pendingCopy = null
       if (!disposed) options.status('Copied to your clipboard')
     } catch {
@@ -139,11 +136,6 @@ export function attachClipboard(
     async paste() {
       if (disposed || !options.connected()) return
       try {
-        if (desktop) {
-          term.focus()
-          if (!(await desktop.pasteClipboard())) throw new Error('Paste unavailable')
-          return
-        }
         let value: string | undefined
         if (navigator.clipboard.read) {
           const items = await navigator.clipboard.read()

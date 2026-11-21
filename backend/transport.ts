@@ -32,6 +32,13 @@ interface TransportOptions {
 // target platforms. Native Windows OpenSSH does not support ControlMaster.
 export const supportsSshMultiplexing = () => process.platform !== 'win32'
 
+// OpenSSH appends a 17-byte temporary suffix when binding a master socket.
+function canShare(directory: string | undefined): directory is string {
+  if (!directory || !supportsSshMultiplexing()) return false
+  const pathBytes = Buffer.byteLength(join(directory, 'a'.repeat(12 + 1 + 40 + 17)))
+  return pathBytes < (process.platform === 'darwin' ? 104 : 108)
+}
+
 const expandHome = (value: string) => (value.startsWith('~/') ? join(homedir(), value.slice(2)) : value)
 
 const multiplexDiagnostics = [
@@ -97,7 +104,7 @@ export function sshArgs(
       identity.identityFile,
     )
   } else if (target.identityFile) args.push('-i', expandHome(target.identityFile))
-  if (options.multiplex && supportsSshMultiplexing()) {
+  if (canShare(options.multiplex)) {
     // Shared masters authenticate once. Scope them by owner and identity so a
     // connection opened with one credential is never reused by another.
     const scope = createHash('sha256')
@@ -134,7 +141,7 @@ class SshTransport implements Transport {
       args: [...sshArgs(this.target, this.identity, this.options), operation],
       label: this.label,
     }
-    if (this.options.multiplex && supportsSshMultiplexing()) {
+    if (canShare(this.options.multiplex)) {
       command.retry = {
         args: [...sshArgs(this.target, this.identity, { scope: this.options.scope }), operation],
         when: multiplexFailure,

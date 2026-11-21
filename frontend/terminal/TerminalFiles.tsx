@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { TerminalConnection } from './connection'
+import type { TerminalSocket } from './socket'
 import { Files, RefreshCw, X } from 'lucide-react'
-import { desktop } from '../desktop'
 import { FileThumbnail } from './FileThumbnail'
 import { FileViewer } from './FileViewer'
 import { FileActions } from './FileActions'
@@ -10,21 +9,18 @@ import { useSessionFiles } from './useSessionFiles'
 
 /** Overlay UI: list and viewer never participate in xterm's geometry. */
 export default function TerminalFiles({
-  token,
   connection,
   connected,
   revision,
   restoreFocus,
 }: {
-  token: string
-  connection?: TerminalConnection
+  connection: TerminalSocket
   connected: boolean
   revision: number
   restoreFocus(): void
 }) {
-  const access = useMemo(() => new SessionFiles(token, desktop?.files, connection), [token, connection])
-  const [nativeViewing, setNativeViewing] = useState(false)
-  const state = useSessionFiles(access, connected && !nativeViewing, revision)
+  const access = useMemo(() => new SessionFiles(connection), [connection])
+  const state = useSessionFiles(access, connected, revision)
   const { files, error } = state
   const [open, setOpen] = useState(false)
   const [preview, setPreview] = useState<string | null>(null)
@@ -40,20 +36,6 @@ export default function TerminalFiles({
     return () => document.removeEventListener('pointerdown', outside)
   }, [open, preview])
 
-  const view = (id: string) => {
-    if (desktop) {
-      if (nativeViewing) return
-      setNativeViewing(true)
-      void desktop
-        .viewFiles(id)
-        .then(() => {
-          state.refresh()
-          trigger.current?.focus()
-        })
-        .catch(error => state.setError((error as Error).message))
-        .finally(() => setNativeViewing(false))
-    } else setPreview(id)
-  }
   if (!files.length && !open && !preview) return null
   return (
     <div
@@ -80,7 +62,7 @@ export default function TerminalFiles({
         <Files size={18} />
         <span>{files.length}</span>
       </button>
-      {open && !nativeViewing && (
+      {open && (
         <section id={id} className="terminal-files-panel" aria-label="Session files">
           <header>
             <strong>
@@ -109,7 +91,11 @@ export default function TerminalFiles({
           <ul>
             {files.map(file => (
               <li key={file.id}>
-                <button className="terminal-file-details" title={`View ${file.name}`} onClick={() => view(file.id)}>
+                <button
+                  className="terminal-file-details"
+                  title={`View ${file.name}`}
+                  onClick={() => setPreview(file.id)}
+                >
                   <FileThumbnail file={file} access={access} />
                   <span className="terminal-file-description">
                     <strong>{file.name}</strong>

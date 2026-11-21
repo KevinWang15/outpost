@@ -1,14 +1,13 @@
 import { directTerminalPath } from '../../shared/directOnly'
 import { desktopOrigin } from '../../shared/desktopAuth'
 import { terminalFileChunk, type TerminalFileReader } from '../../shared/terminalFiles'
-import { fileRequest, listSessionFiles, sessionFileBlob } from '../../shared/sessionFileRequests'
 import { maxSessionFiles, parseSessionFile } from '../../shared/sessionFiles'
 import type { ClientMessage, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, maxInputQueue, protocolVersion, terminalConnectionPolicy } from '../../shared/protocol'
-import { imageProblem, type UploadedImage } from '../../shared/images'
+import { imageProblem } from '../../shared/images'
 import type { SessionActivity } from '../../shared/activity'
 import type { TerminalRendering } from './rendering'
-import type { TerminalConnection, TerminalState } from './connection'
+import type { TerminalState } from './connection'
 
 interface Handlers {
   state(state: TerminalState): void
@@ -21,7 +20,7 @@ interface Handlers {
 
 /** The web client of the terminal protocol (shared/protocol.ts). Reconnects
  * with the resume token after drops; an ended session requires explicit reconnect. */
-export class TerminalSocket implements TerminalConnection {
+export class TerminalSocket {
   private socket: WebSocket | null = null
   private direct: WebSocket | null = null
   private preferRelayOnce = false
@@ -32,8 +31,6 @@ export class TerminalSocket implements TerminalConnection {
   private started = false
   private allowStart = true
   private ready = false
-  private directOnly = false
-  private sessionTransfers = false
   private nextFileChunk = Promise.resolve()
   private readyAt = 0
   private receivedAt = 0
@@ -77,7 +74,6 @@ export class TerminalSocket implements TerminalConnection {
     const url = new URL('/api/terminal', this.endpoint?.origin ?? window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     url.search = new URLSearchParams({
-      routes: '1',
       token: this.token,
       cols: String(cols),
       rows: String(rows),
@@ -194,7 +190,6 @@ export class TerminalSocket implements TerminalConnection {
       if (fromDirect && ['direct-only', 'direct-lease', 'route-offer', 'route-selected'].includes(message.type)) return
       if (message.type === 'direct-only') {
         if (selected || candidate) return
-        this.directOnly = true
         this.token = message.resume
         selected = 'direct'
         try {
@@ -246,7 +241,8 @@ export class TerminalSocket implements TerminalConnection {
         const length = new TextEncoder().encode(event.data).length
         this.rendering.restore(message, () => rendered(length))
       } else if (message.type === 'ready') {
-        this.sessionTransfers = message.sessionTransfers === true
+        const route = selected
+        if (!route) return this.fail('The terminal became ready before a route was selected.')
         this.rendering.flush(() => {
           if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
           if (this.ready) return this.fail('Outpost sent duplicate terminal readiness.')
@@ -254,7 +250,7 @@ export class TerminalSocket implements TerminalConnection {
           this.readyAt = Date.now()
           clearTimeout(attachTimer)
           this.scheduleProbe()
-          this.handlers.state(selected ? { kind: 'connected', route: selected } : { kind: 'connected' })
+          this.handlers.state({ kind: 'connected', route })
           const { cols, rows } = this.size()
           this.resize(cols, rows)
           this.send({ type: 'focus', active: this.active })
@@ -527,16 +523,8 @@ export class TerminalSocket implements TerminalConnection {
     })
   }
 
-  private fileAuthorization() {
-    if (this.directOnly)
-      throw Error(
-        'This session requires an updated terminal service for direct file transfers. Restart its coding tool to enable them.',
-      )
-    return { origin: this.endpoint?.origin ?? '', token: this.token }
-  }
   readonly listFiles = async (signal: AbortSignal) => {
     signal.throwIfAborted()
-    if (!this.sessionTransfers) return listSessionFiles(this.fileAuthorization(), signal)
     const result = await this.request({ type: 'file-list', id: crypto.randomUUID() })
     signal.throwIfAborted()
     if (!result.ok) throw new Error(result.message || 'Could not list session files.')
@@ -546,10 +534,6 @@ export class TerminalSocket implements TerminalConnection {
   }
   readonly removeFile = async (file: string, signal: AbortSignal) => {
     signal.throwIfAborted()
-    if (!this.sessionTransfers) {
-      await fileRequest(this.fileAuthorization(), '/' + file, signal, 'DELETE')
-      return
-    }
     const result = await this.request({ type: 'file-remove', id: crypto.randomUUID(), file })
     if (!result.ok) throw new Error(result.message || 'Could not remove the session file.')
   }
@@ -557,7 +541,6 @@ export class TerminalSocket implements TerminalConnection {
   readonly readFile: TerminalFileReader = async (metadata, signal) => {
     const file = parseSessionFile(metadata)
     if (!this.connected) throw new Error('Connect the terminal before downloading a file.')
-    if (!this.sessionTransfers) return sessionFileBlob(this.fileAuthorization(), file, signal)
     const attachment = this.socket
     const parts: Uint8Array<ArrayBuffer>[] = []
     let offset = 0
@@ -625,29 +608,10 @@ export class TerminalSocket implements TerminalConnection {
         chunk: btoa(binary),
       })
       if (!reply.ok) throw new Error(reply.message || 'Image upload failed.')
-      if (offset + bytes.length === file.size && reply.reference) return { reference: reply.reference }
+      if (offset + bytes.length === file.size && typeof reply.reference === 'string' && reply.reference)
+        return reply.reference
     }
     throw new Error('The session did not confirm the image upload.')
-  }
-
-  private async uploadOverHttp(file: File, signal: AbortSignal) {
-    const auth = this.fileAuthorization()
-    const response = await fetch(
-      this.endpoint ? new URL('/api/terminal/image', this.endpoint.origin) : '/api/terminal/image',
-      {
-        method: 'POST',
-        credentials: 'omit',
-        redirect: 'error',
-        headers: { authorization: `Bearer ${auth.token}`, 'x-outpost-request': '1', 'content-type': file.type },
-        body: file,
-        signal: signal,
-      },
-    )
-    if (!response.ok) {
-      const error = await response.json().catch(() => null)
-      throw new Error(error?.message || `Image upload failed (${response.status}).`)
-    }
-    return (await response.json()) as UploadedImage
   }
 
   /** Upload independently of interactive input, then paste into this attachment only. */
@@ -662,19 +626,15 @@ export class TerminalSocket implements TerminalConnection {
       150_000,
     )
     try {
-      const image = this.sessionTransfers
-        ? await this.uploadOnSocket(file, controller.signal)
-        : await this.uploadOverHttp(file, controller.signal)
+      const reference = await this.uploadOnSocket(file, controller.signal)
       controller.signal.throwIfAborted()
       if (!this.connected || this.socket !== socket)
         throw new Error('The terminal changed before the image was pasted. Attach it again.')
-      if (typeof image.reference !== 'string' || !image.reference)
-        throw new Error('Outpost did not return an image reference.')
       // The service applies the running application's bracketed-paste mode.
       // A successful upload never submits the prompt or retries a paste.
-      const result = await this.request({ type: 'paste', id: crypto.randomUUID(), data: image.reference })
+      const result = await this.request({ type: 'paste', id: crypto.randomUUID(), data: reference })
       if (!result.ok) throw new Error(result.message)
-      return image.reference
+      return reference
     } finally {
       clearTimeout(timeout)
       if (this.upload === controller) this.upload = null

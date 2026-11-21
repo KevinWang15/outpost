@@ -6,13 +6,13 @@
 
 import type { ActivityState } from './activity'
 
-export const machineProtocol = 2
+export const machineProtocol = 3
 /** Printed by the node before its first frame; login shells may print before it. */
 export const nodeMagic = '\0OUTPOST-NODE-1\0'
 /** Bytes a stream may send before the receiver grants more. */
 export const streamWindow = 4 * 1024 * 1024
 
-export type StreamKind = 'terminal' | 'chat' | 'file-read' | 'file-receive' | 'image'
+export type StreamKind = 'terminal' | 'chat' | 'file-read' | 'file-receive'
 
 export interface RemoteError {
   message: string
@@ -79,10 +79,5 @@ export interface FileReadArgs {
 export interface FileReceiveArgs {
   session: string
   name: string
-  size: number
-}
-export interface ImageArgs {
-  session: string
-  extension: string
   size: number
 }

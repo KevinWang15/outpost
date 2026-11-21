@@ -9,6 +9,7 @@ export type TargetInput = Static<typeof schemas.targetInput>
 export type TargetUpdate = Static<typeof schemas.targetUpdate>
 export type Target = Static<typeof schemas.targetRecord>
 export type SshTarget = Extract<Target, { kind: 'ssh' }>
+export type SessionCreationRequest = Static<typeof schemas.desktopSessionCreationInput>
 export type SessionInput = Static<typeof schemas.sessionInput>
 export type SessionForkInput = Static<typeof schemas.sessionForkInput>
 export type ConversationSearch = Static<typeof schemas.conversationSearch>

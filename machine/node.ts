@@ -1,14 +1,14 @@
+// `outpost-terminal node --socket run/node-<key>.sock`: the machine end of the
+// one connection Outpost keeps to it. It runs for as long as that connection
+// (stdio) is open. Drivers it starts outlive it.
 import { prepareTerminal } from './terminalAttach'
-import { authorizeNode, watchInstallation, nodeLock, installation } from './installation'
+import { authorizeNode, validNodeSocket, watchInstallation, nodeLock, installation } from './installation'
 import { inspectionScript } from '../shared/node/softwareInspection'
 import { requiredSoftware } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
 import { runCommand } from '../backend/process'
 import { loginScriptShell } from '../backend/shell'
 import { directEndpoint } from './direct'
-// `outpost-terminal node --socket run/node-<key>.sock`: the machine end of the
-// one connection Outpost keeps to it. It runs for as long as that connection
-// (stdio) is open. Drivers it starts outlive it.
 import { randomUUID } from 'node:crypto'
 import { createReadStream, mkdirSync, renameSync, rmSync, statSync, watch } from 'node:fs'
 import { connect, createServer, type Socket } from 'node:net'
@@ -19,7 +19,6 @@ import {
   type ChatStreamArgs,
   type FileReadArgs,
   type FileReceiveArgs,
-  type ImageArgs,
   type MachineMessage,
   type RemoteError,
   type TerminalStreamArgs,
@@ -30,7 +29,7 @@ import { chatHost } from '../shared/chatHost'
 import { terminalService } from '../shared/terminalService'
 import { driverStatus, request } from './drivers'
 import { eventsDirectory, readEvents } from './events'
-import { checkImage, listFiles, readFile, removeFile, saveImage, StoredFile } from './files'
+import { listFiles, readFile, removeFile, StoredFile } from './files'
 import { catalog, readBatch, readMessage } from './history'
 import { chatSocket, startChat, terminalSocket } from './launch'
 import { readRegistry, RegistryError, session as findSession } from './registry'
@@ -64,8 +63,8 @@ interface Stream {
 }
 
 export async function serveNode(socketName: string) {
-  if (!/^run\/node-[0-9a-f]{32}\.sock$/.test(socketName)) throw new Error('Invalid node socket')
-  const owner = await authorizeNode(socketName)
+  if (!validNodeSocket(socketName)) throw new Error('Invalid node socket')
+  const owner = authorizeNode(socketName)
   return nodeLock(async () => {
     if (installation()?.generation !== owner.generation) throw Error('Ownership changed.')
     watchInstallation(owner, () => process.exit(0))
@@ -240,30 +239,6 @@ export async function serveNode(socketName: string) {
               file => closeStream(stream, { data: file }),
               error => closeStream(stream, { error: remoteError(error) }),
             )
-          },
-          credit() {},
-        })
-        send({ type: 'opened', stream, data: null })
-      },
-      async image(stream: number, args: ImageArgs) {
-        checkImage(args.session, args.extension, args.size)
-        const parts: Buffer[] = []
-        let received = 0
-        streams.set(stream, {
-          data(bytes) {
-            received += bytes.length
-            if (received <= args.size) parts.push(bytes)
-            send({ type: 'credit', stream, bytes: bytes.length })
-          },
-          close() {
-            streams.set(stream, { data() {}, close() {}, credit() {} })
-            if (received !== args.size)
-              return closeStream(stream, { error: { message: 'Incomplete or invalid image upload.', status: 400 } })
-            try {
-              closeStream(stream, { data: saveImage(args.session, args.extension, Buffer.concat(parts)) })
-            } catch (error) {
-              closeStream(stream, { error: remoteError(error) })
-            }
           },
           credit() {},
         })

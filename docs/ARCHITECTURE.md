@@ -29,13 +29,10 @@ where sessions run; the code and API say target (`/api/targets`,
 
    Hosted and local server installations run the same code. Desktop local shells
    use a native PTY on the user's computer; they have no broker, authentication,
-   remote dependency, or persistence daemon. Both use the same terminal UI.
-   When the target advertises `sessionTransfers` in its ready message, the
-   same terminal WebSocket and machine attachment carry file lists, published
-   file contents, deletes, and pasted images. Upload and download requests
-   carry at most 64 KiB of file content each. The client waits for the target
-   to confirm a complete image before pasting its path. Clients connected to
-   an earlier release use the existing session-scoped HTTP endpoints.
+   remote service or persistence daemon. For a managed session the selected
+   attachment carries file lists, published bytes, removals and image uploads.
+   Each upload or download request can carry at most 64 KiB of file content each. The client waits for the target
+   to confirm a complete image before pasting its path.
 
 3. **Outpost authorizes each attachment.** On the direct route, the client
    holds a server control socket for revocation and reconnect grants. Terminal
@@ -89,7 +86,7 @@ where sessions run; the code and API say target (`/api/targets`,
 | `backend/` | Outpost server | HTTP API, deployments, transports, machine connections, terminal broker, chat and history hubs |
 | `machine/` | Linux machines | Outpost Terminal: node, session registry, terminal service, chat host, MCP server, harness adapters |
 | `desktop/` | Your computer | GPUI workspace, native PTYs, server accounts, trust and installers |
-| `shared/` | Browser + desktop + server | Schemas, harness registry, terminal protocol, desktop bridge contract |
+| `shared/` | Browser + desktop + server | Schemas, harness registry, terminal protocols and desktop account contracts |
 
 **One definition per contract.** Request and stored-record shapes are TypeBox
 schemas in `shared/schemas.ts`; the server and the machine validate with them,
@@ -175,7 +172,7 @@ authentication or desktop trust confirmation.
    browser consent refuses a different one. Pending session intents complete
    after login. Every app entry point requests a fresh scoped launch through
    `/api/desktop/targets/:t/sessions/:s/connect`.
-4. Both entry pages render `TerminalView` and use `TerminalSocket` to connect
+4. The web terminal and the native session helper use `TerminalSocket` to connect
    to `/api/terminal`. The broker returns a 30-day resume token in `hello`.
    Grants remain bound to their issuing login and one session; revoking that
    login closes its live connections. Resume tokens stay in memory, never in
@@ -197,18 +194,16 @@ authentication or desktop trust confirmation.
 | Outpost Desktop | GPUI workspace | The account helper requests a session grant | Native clipboard, file dialogs and PTYs |
 
 The native connection stores the reusable grant from `hello` and reconnects
-without reopening the shell. The public V3 web entry pages remain available
-for existing clients.
+without reopening the shell.
 
-Toolbar visibility is a UI preference in the shared `TerminalView`; resizing
+Toolbar visibility is a browser preference in `TerminalView`; resizing
 uses its existing observer and never opens another connection. Keyboard,
 clipboard, composer, links, bells and notifications have one web implementation.
-`terminal/session.ts` owns the emulator, connection, input handlers, host events
+`terminal/session.ts` owns the emulator, connection, input handlers, browser events
 and resource cleanup for one mounted terminal. `TerminalView` owns React state,
 drafts and presentation. Subscriptions are paired with cleanup when acquired and
 released in reverse order, including after partial initialization; late async
-results cannot update a disposed session. A title or callback update does not
-recreate the connection. A failed initialization can be retried explicitly.
+results cannot update a disposed session. A failed initialization can be retried explicitly.
 Transient status messages, message-send errors, session link prompts, and bell alerts share an
 absolutely positioned notice stack inside the terminal body. The stack is bounded
 and scrolls independently on small screens. Showing, updating, or dismissing a
@@ -222,7 +217,7 @@ touch, or keyboard input. Recovery receives focus when the terminal had it;
 desktop activation preserves focused UI controls and otherwise selects a recovery
 button instead of the inactive terminal.
 
-`TerminalContextMenu` owns the terminal menu in both clients. Application mouse
+`TerminalContextMenu` owns the browser terminal menu. Application mouse
 modes pass through to xterm without a multiplexer interpreting clicks.
 Without a mouse request, xterm selects text locally. Shift-drag
 on Windows/Linux or Option-drag on macOS forces local selection when an application
@@ -288,7 +283,7 @@ Image paste, image file drops and the terminal's image picker all call
 16 MiB limit and saved-image response. The workspace has no separate upload
 control. Progress and success notices remain overlays and never resize xterm.
 
-With a current target, `TerminalSocket` sends a bounded `image-write` request
+`TerminalSocket` sends a bounded `image-write` request
 on the attached socket, waits for acknowledgement, and sends the next chunk.
 The terminal service validates the declared media type, size, transfer identity
 and offset. It releases incomplete uploads on disconnect or idle timeout. Once
@@ -296,15 +291,12 @@ complete it stores the image and returns its path. Published files travel in
 the other direction using `file-list` and offset-based `file-read` requests
 on the same socket. Each request is scoped to the attached session.
 
-For an older target, the client uploads via `POST /api/terminal/image` using
-the session resume token, then uses the same paste operation as a current peer.
-
 The client then sends `paste {id, data}` on the original terminal connection and
 waits for acknowledgement. Disconnect cancels the transfer. The paste is bound to the original attachment. One image is processed at a time per terminal.
 Neither uploads nor paste requests are automatically retried, and no Enter is
 appended. Failed/cancelled transfers can leave saved files but never submit a
 prompt; the existing newest-20 retention bounds remote clipboard storage.
-Local shells save raw bytes through their private desktop IPC, then paste the
+Local shells save raw bytes in their native app profile, then paste the
 quoted local/WSL path with the owning shell generation checked before insertion.
 
 `TerminalSocket` owns recovery for both web and desktop remote terminals. Every
@@ -349,12 +341,7 @@ that sends no rendering acknowledgements for 60 seconds while output is paused
 is disconnected for resynchronization. WebSocket ping/pong detects lost clients.
 
 `useBellNotifications` manages browser permission requests, with an eight-second
-busy timeout and permission refresh on focus. Desktop uses the bridge's native
-notification capability; no browser permission prompt is involved. The shell
-rechecks that the window is in the background, groups pending notifications,
-and focuses the owning window when clicked. System Focus / Do Not Disturb
-and notification settings still apply. Shared `bell.ts` owns attention state
-and the chime; the native notification is silent to avoid duplicate sound.
+busy timeout and permission refresh on focus.
 
 Browser alerts use `notificationTransport.ts` and a notification-only service
 worker (`public/terminal-notifications.js`, scope `/terminal`). Registration and
@@ -370,7 +357,7 @@ setup instructions instead of an unusable permission prompt. Permission is
 labelled as allowed, not as a promise of background delivery: suspended pages
 cannot receive live bells, and server-side Web Push is not implemented.
 
-Both clients load xterm's WebGL addon after opening the terminal. Initialization
+The browser loads xterm's WebGL addon after opening the terminal. Initialization
 failure or context loss disposes the addon and falls back to the DOM renderer.
 Terminal parsing and broker flow control do not depend on the renderer. Output
 acknowledgements are batched at 64 KiB or 20 ms, at most every 10 ms, after
@@ -381,13 +368,12 @@ crossing checkpoint, geometry or readiness barriers. This avoids scheduling an
 xterm write for each tiny network frame during a burst. A single larger source
 frame remains intact; xterm's parser still yields according to its own budget.
 
-`terminal/links.ts` owns OSC 8 hyperlinks and detected HTTP(S) URLs for both
-clients. OSC 8 activation confirms the actual destination before invoking the
+`terminal/links.ts` owns OSC 8 hyperlinks and detected HTTP(S) URLs in the web terminal. OSC 8 activation confirms the actual destination before invoking the
 shared browser opener; cancellation invokes no opener and creates no retry notice.
 When application mouse reporting is active, a link's press and drag stay local
 instead of also reaching the harness and triggering an independent browser request.
 Local text selection and Shift/Option selection gestures retain xterm's normal
-behavior. Confirmed desktop links use the native bridge, not xterm's default popup.
+behavior.
 
 ### Terminal protocol (client ⇄ broker, WebSocket)
 
@@ -445,13 +431,7 @@ never automatically restarts a tool that deliberately exited.
 
 **Current contracts.** Both clients send `protocolVersion` from `shared/protocol.ts`.
 A mismatch returns `outdated` before redeeming the launch ticket and asks the
-user to reload. Desktop loads the same frontend from its server. Changes to the
-native bridge use `desktopBridgeVersion`; new native capabilities require an
-app release. The desktop page shows an update error for a mismatched bridge.
-The shell also detects pages that never report state after loading, so an older
-server cannot silently leave the tab showing Connecting while native actions fail.
-Version checks reject unsupported input; there are no protocol
-translators or historical readers. Connection grants authorize an owner/login,
+client to update. Connection grants authorize an owner/login,
 target and session independently of the selected UI.
 
 ### Machine connection (server ⇄ node)
@@ -463,7 +443,7 @@ The link carries session management, chat, relay attachments and agent calls.
 
 #### Installing and removing a machine
 
-Outpost Terminal 2.5 reserves **one Linux host, one execution account, one
+Outpost Terminal reserves **one Linux host, one execution account, one
 server/target identity**. The ordinary executable still lives in
 `~/.outpost/bin/outpost-terminal`. A private installation record in
 `/var/lib/outpost-machine/machine.json` binds the account’s session directory to
@@ -485,22 +465,16 @@ intact. Install the matching executable in `~/.outpost/bin`, owned by that user
 and executable only by them. A restricted machine can receive the executable
 and configuration through the company's normal offline software distribution.
 
-**Upgrade.** Stop previous Outpost connectors and nodes for this host, including
-any under other Linux accounts. Upgrade the server and target binary together.
-A 2.4 relay enrollment in `~/.outpost/connector.json` migrates when the new
-connector starts. For managed SSH/local installations, the reviewed install
-script binds the server identity. An upgraded, unclaimed node can adopt the
-first managed connection. Subsequent identities require explicit local unpairing.
-Only the currently installed release enforces the host reservation.
+**Installation.** The reviewed SSH/local install script runs `pair --managed`
+with the node socket identity for this server, account and target. Starting a node
+requires an installed identity that matches that socket.
 
 **Remove or transfer.** Stop and disable the connector in its service manager,
 then run `~/.outpost/bin/outpost-terminal unpair` under the execution account.
-This fences the old node/listener, clears enrollment credentials and cleans up
-obsolete session bindings. Relay installations also attempt to revoke their
+This fences the old node/listener, clears enrollment credentials and releases its registered node socket. Relay installations also attempt to revoke their
 credential on the old server. Direct-only unpairing is entirely local. Remove
 the machine from its old workspace and, for SSH targets, remove that server's
-SSH key if its access should end. A disconnected marker prevents stale SSH
-retries from reclaiming the machine.
+SSH key if its access should end. A new installation requires explicit enrollment.
 
 To switch servers or change the host’s network policy, unpair it locally, add the
 new target in the workspace, then enroll it explicitly.
@@ -705,7 +679,7 @@ the same geometry before subsequent output. Input from attached clients is
 ordered into one PTY. Focus messages express UI activation separately from
 application-generated terminal focus escape sequences.
 
-This contract uses Outpost Terminal 2.1.0 / protocol 5 and client protocol 14.
+This contract uses the versions declared in `shared/terminalService.ts` and `shared/protocol.ts`.
 Publish the matching Outpost Terminal before deploying the server. Replacing the
 executable does not alter a running PTY service: after a service protocol
 change, existing sessions restart explicitly to use it.
@@ -859,9 +833,7 @@ before fresh metadata waits for a current observation. Stale completions are not
 automatically acknowledged. Later completions require a new interaction.
 
 The app and list share all states. Unknown has a diagnostic; `null` means no
-observation yet. Server and app must use the same `desktopBridgeVersion`. Terminal
-bells remain a separate renderer-owned signal; the desktop does not independently
-rewrite agent state. Local shell tabs have no coding-agent badge.
+observation yet. The clients render terminal bells independently of agent state. Local shell tabs have no coding-agent badge.
 
 Tests in `tests/machine/activity.test.ts` drive the activity model with native
 records and hook payloads. `OUTPOST_TEST_NATIVE_ACTIVITY=1 node --import tsx
@@ -895,10 +867,7 @@ Highlights are capped at 1,000 and the UI reports that bound rather than a misle
 Closing search clears decorations and restores terminal (or recovery) focus.
 The query stays with its tab until that view is destroyed.
 
-The shared controller captures Cmd+F/Ctrl+F before xterm and browser Find. The
-desktop Edit menu sends the typed `find` command through `DesktopBridge` to the
-active terminal, including local shells. Toolbar and context-menu actions use
-the same controller. Search input and match navigation are entirely local.
+Browser search handles Cmd+F/Ctrl+F, toolbar and context-menu actions locally. The native workspace searches its own terminal buffer.
 
 ### Clear screen
 
@@ -1045,13 +1014,9 @@ formats and lifecycle setup live in each adapter in `machine/harnesses/`;
 shared code contains no harness dispatch. A running agent keeps the
 integration it started with.
 
-The MCP server trusts the machine's user account, like the rest of Outpost
-Terminal; file HTTP requests require an active resume grant scoped to owner, target and session.
-`SessionFileClient` reaches the machine over its connection: file bytes travel
-on their own streams, with cancellation and size checks, and are never
-base64-encoded into the model context or mixed with PTY output.
-Downloads are capped at two per owner and four globally, with slots retained
-until the HTTP response closes. Grants are not placed in download URLs.
+Terminal file requests are scoped to the attached viewer. Chat downloads use
+the chat page’s grant and the server’s session file client. The server limits
+concurrent chat downloads to two per owner and four in total.
 
 After committing a file, the MCP server sends the session's driver a
 best-effort hint, which the driver passes to its viewers.
@@ -1060,11 +1025,10 @@ and managed session. The receipt means **stored**, not delivered to a viewer.
 The files themselves are durable; they can be published with no attached client.
 Clients load the list on connection, refresh on hints and visibility changes,
 and reconcile every 30 seconds while connected to recover lost hints. Removal
-also broadcasts a refresh. Late HTTP responses are cancelled when the token,
-connection or mounted session changes.
+also broadcasts a refresh. Changing the terminal attachment cancels its outstanding requests.
 
 `TerminalFiles` owns the dropdown. `useSessionFiles` reconciles metadata and owns
-download/removal actions for both the dropdown and the native viewer. `FileViewer`
+download/removal actions for the browser dropdown and viewer. `FileViewer`
 is shared UI: a window-filling modal with filename, timestamp and size, download
 and remove actions, previous/next buttons, arrow-key cycling and Escape to close.
 It follows file identity across refreshes; removing the selected file advances
@@ -1085,25 +1049,7 @@ eviction or a new client/session scope can require another download. Budgets cov
 cached blobs; actively displayed images and in-flight transfers also use memory.
 HTTP responses remain `no-store`, and authorization never enters a download URL.
 
-Browser caches live with the mounted terminal. In desktop, `NativeSessionFiles`
-owns the cache in the main process, bound to the pane's server, account and
-session; it shares bytes across terminal thumbnails, the viewer and native saves.
-Bridge version 9 exposes only session-file list/read/remove/save and a
-gesture-gated open-viewer operation. The host supplies the pane's credential;
-callers cannot select another origin, session or filesystem path. Native saves
-use a Save dialog, validate the byte count and atomically replace the selected
-path through a temporary file. Pane navigation, destruction or renderer failure
-disposes its cache and outstanding requests.
-
-`SessionFileViewer` owns a sandboxed, frameless native modal sized to its parent
-window, covering all split panes. It explicitly disables/re-enables its parent
-independently of the desktop window manager, so it retains the same
-window-sized bounds across platforms. Its local page reuses `FileViewer` through a
-narrow file-only preload; it has no server credential or network access. Closing,
-reloading or losing its originating pane closes the viewer. Browser dialogs and
-native viewer windows remain outside xterm's layout and input surface: opening
-either never changes terminal bounds or PTY dimensions. Redirects, unsolicited
-browser downloads and generic filesystem IPC remain disabled.
+Browser caches live with the mounted terminal. The native session helper reads files over its pane’s attached socket.
 
 ## Desktop shell and OS integration
 
@@ -1310,10 +1256,7 @@ connects to the address it checked.
 
 ## Extending Outpost
 
-**Add a desktop capability.** Define its narrow contract in `shared/desktop.ts`,
-expose one method in the preload and validate the sender and all arguments in
-the main process. Keep terminal behavior in the frontend; do not create another
-broker, authentication scheme or desktop copy of `TerminalView`.
+**Add a desktop capability.** Implement workspace controls in GPUI. Route session operations through the native helper and the shared terminal protocol.
 
 **Add a coding harness.** Add an entry to `shared/harnesses.ts`, then a
 `Harness` subclass in `machine/harnesses/<id>.ts`, registered in
@@ -1354,10 +1297,8 @@ the broker, and handle it in the shared client, delegating native actions throug
 | Whole path | `tests/integration/` — local targets over WebSocket; SSH in Docker with the built service in both modes; conversation discovery and history over real machine connections; chat through the node |
 | Browser | `tests/browser/` — real backend: add target, create session, web terminal, desktop ticket flow, phone layout; mobile WebGL rendering, real clipboard copying, and GPU context-loss fallback |
 | Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
-| Desktop model | `tests/unit/desktop-panes.test.ts` — split-tree invariants, small-window geometry, transfer/rollback and destroyed views, platform shortcuts and dimming races |
-| Workspace DOM | `tests/desktop/workspace-dom.spec.ts` — packaged chrome, real layout model, pane focus/zoom, divider input, drag cancellation, stable DOM identity, error actions and shortcut guide |
 | Native desktop | `npm run test:desktop` exercises V3 restore, reconnect and layout logic. `npm --prefix desktop run test:ui` exercises GPUI controls, native shell I/O and moving a live pane across windows. |
-| Chat | `tests/unit/chat-*.test.ts` (journal, transcript, mentions, cron, prompts, desktop policy); `tests/integration/node-chat.test.ts` (chat host through the node: conversation timeline, one driver, Outpost tools, files, queue, DeepSeek and Kimi); `tests/integration/chat.test.ts` (hub with real chat hosts: channels, floor passing, session messages, schedules); `tests/browser/chat.spec.ts`; `tests/desktop/chat.spec.ts`. A scripted ACP agent (`tests/fixtures/acp-agent-fixture.py`) stands in for the tools; no model is called |
+| Chat | `tests/unit/chat-*.test.ts` (journal, transcript, mentions, cron and prompts); `tests/integration/node-chat.test.ts` (chat host through the node: conversation timeline, one driver, Outpost tools, files, queue, DeepSeek and Kimi); `tests/integration/chat.test.ts` (hub with real chat hosts: channels, floor passing, session messages, schedules); `tests/browser/chat.spec.ts`. A scripted ACP agent (`tests/fixtures/acp-agent-fixture.py`) stands in for the tools; no model is called |
 | Desktop packaging | Manual `desktop.yml` workflow builds macOS arm64/x64 and Windows x64 installers; OS integration still needs native manual verification |
 
 Mobile automation uses real browser engines with emulated device sizes. Android swipes use Chromium's trusted
@@ -1367,14 +1308,6 @@ cleanup races with browser API doubles, plus actual worker activation in both en
 registration in Chromium. They do not prove physical iOS selection handles, OS banners, Home Screen installation, or
 background suspension behavior. Those still need a physical iPhone/iPad and Android device check.
 
-For Linux native desktop checks, install `desktop/` dependencies, run
-`npm --prefix desktop run native` and `npm --prefix desktop run build`, then
-`xvfb-run -a --server-args='-screen 0 2400x1400x24' npm run test:desktop` on a headless
-host with `xdotool` installed. The large virtual display fits multiple native windows
-and an outside drop target. The suite uses isolated app profiles and disposable
-input/resize recorders; it exercises real OS pointer capture and menu/input routing.
-macOS/Windows accelerator definitions are unit-tested, but native window management,
-scaling and keyboard behavior still need checks on those operating systems.
 Browser image checks compare saved
 bytes and exact bracketed-paste input, including no automatic Enter; API and machine
 checks cover 16 MiB boundaries, authorization/revocation, cancellation, retention,

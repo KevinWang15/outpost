@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { bellNotificationPermission, type BellNotificationPermission } from './bell'
-import { desktop } from '../desktop'
 import { prepareBrowserNotifications } from './notificationTransport'
 
 export const notificationLabels: Record<BellNotificationPermission, string> = {
@@ -26,15 +25,10 @@ type Notice = { text: string; sticky: boolean }
 type PermissionRequest = { timer?: ReturnType<typeof setTimeout> }
 type State = { permission: BellNotificationPermission; requesting: boolean }
 const noticeFor = (permission: BellNotificationPermission): Notice => ({
-  text:
-    desktop && permission === 'granted'
-      ? 'Outpost desktop alerts are enabled. If they do not appear, allow Outpost in your system notification settings and check Focus / Do Not Disturb.'
-      : notificationMessages[permission],
+  text: notificationMessages[permission],
   sticky: permission !== 'granted',
 })
 
-/** Browser permission is requested by the terminal's bell button. the desktop app
- * supplies native notifications; an unanswered browser prompt must not trap the UI. */
 export function useBellNotifications(onNotice: (message: string, sticky: boolean) => void) {
   const [state, setState] = useState<State>(() => ({ permission: bellNotificationPermission(), requesting: false }))
   const current = useRef(state)
@@ -62,7 +56,7 @@ export function useBellNotifications(onNotice: (message: string, sticky: boolean
   }, [clearPending, publish])
 
   useEffect(() => {
-    if (desktop || state.permission !== 'granted') return
+    if (state.permission !== 'granted') return
     let disposed = false
     void prepareBrowserNotifications().catch(() => {
       if (!disposed) onNotice('Notifications are allowed, but setup failed. Tap the bell to retry.', true)
@@ -79,16 +73,15 @@ export function useBellNotifications(onNotice: (message: string, sticky: boolean
     document.addEventListener('visibilitychange', refresh)
     // Watch site-setting changes while open; focus also refreshes browsers
     // without a notification Permissions API implementation.
-    if (!desktop)
-      void navigator.permissions
-        ?.query({ name: 'notifications' })
-        .then(status => {
-          if (disposed) return
-          permissionStatus = status
-          status.addEventListener('change', refresh)
-          refresh()
-        })
-        .catch(() => {})
+    void navigator.permissions
+      ?.query({ name: 'notifications' })
+      .then(status => {
+        if (disposed) return
+        permissionStatus = status
+        status.addEventListener('change', refresh)
+        refresh()
+      })
+      .catch(() => {})
     return () => {
       disposed = true
       clearPending()

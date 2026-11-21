@@ -32,11 +32,6 @@ export function unavailableActivity(detail: string): SessionActivity {
   }
 }
 
-/** Unread completion is dismissible; a current approval or error is not. */
-export function activityNeedsAttention(activity: SessionActivity | null) {
-  return activity !== null && ['waiting', 'finished', 'error'].includes(activity.state)
-}
-
 export const activityLabel = (activity: SessionActivity) => activityLabels[activity.state]
 
 /** Bound and copy data at the connection and native IPC boundaries. */

@@ -219,19 +219,15 @@ export const removeSessionFiles = (session: string) =>
 
 // Images pasted into a terminal: saved where the coding tool can read them by path.
 
-/** Check an image upload before its bytes arrive. */
-export function checkImage(session: string, extension: unknown, size: unknown) {
-  findSession(readRegistry(), session)
-  if (!Object.values(imageExtensions).includes(extension as never))
-    throw new RegistryError('Unsupported image type. Use a PNG, JPEG, GIF, or WebP image.', 400)
-  if (!Number.isSafeInteger(size) || (size as number) <= 0 || (size as number) > maxImageBytes)
-    throw new RegistryError('Images must be between 1 byte and 16 MB.', 413)
-}
-
 let pasted = 0
 
 /** Save a pasted image, keeping each session's newest 20. Names sort by age. */
 export function saveImage(session: string, extension: string, data: Buffer) {
+  findSession(readRegistry(), session)
+  if (!Object.values(imageExtensions).includes(extension))
+    throw new RegistryError('Unsupported image type. Use a PNG, JPEG, GIF, or WebP image.', 400)
+  if (!data.length || data.length > maxImageBytes)
+    throw new RegistryError('Images must be between 1 byte and 16 MB.', 413)
   const directory = statePath('clipboard', session)
   const order = `${new Date().toISOString().replace(/[-:.]/g, '')}-${String(++pasted % 1e6).padStart(6, '0')}`
   const name = `${order}-${randomUUID().slice(0, 8)}.${extension}`
@@ -242,5 +238,5 @@ export function saveImage(session: string, extension: string, data: Buffer) {
     .sort()
     .slice(0, -20))
     rmSync(join(directory, stale), { force: true })
-  return { path, reference: path }
+  return path
 }

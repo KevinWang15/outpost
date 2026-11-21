@@ -5,7 +5,7 @@ import type { SoftwareId } from '../model'
 const versionFlags: Record<string, string> = { bash: '--version' }
 
 // Read-only, POSIX sh: it must work before Bash is installed.
-export function inspectionScript(ids: SoftwareId[], marker: string) {
+export function inspectionScript(ids: SoftwareId[], marker: string, managedSocket?: string) {
   return `set -eu
 ${supportingPath}
 [ "$(uname -s)" = Linux ] || { echo "Outpost machines must run Linux." >&2; exit 1; }
@@ -29,7 +29,9 @@ probe() {
   fi
   # Bound version probes, including a broken executable that waits for input.
   rm -f "$work/finished"
-  (ulimit -f 32; exec "$path" "$flag") >"$work/output" 2>&1 < /dev/null &
+  set -- "$flag"
+  ${managedSocket ? `if [ "$tool" = outpost-terminal ]; then set -- "$flag" --managed ${quote(managedSocket)}; fi` : ''}
+  (ulimit -f 32; exec "$path" "$@") >"$work/output" 2>&1 < /dev/null &
   pid=$!
   (
     sleeper=''

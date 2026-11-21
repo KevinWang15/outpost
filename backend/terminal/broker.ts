@@ -17,11 +17,10 @@ export interface TerminalQuery {
   rows?: string
   protocol?: string
   start?: string
-  routes?: string
 }
 
 interface Dependencies {
-  directSecret?: string
+  directSecret: string
   tokens: ConnectTokens
   active(owner: Owner): boolean
   sessions: SessionService
@@ -99,8 +98,6 @@ export class TerminalBroker {
       const context = await this.dependencies.resolve(grant.owner, grant.targetId)
       if (connection.abort.signal.aborted) return
       if (context.target.kind === 'direct') {
-        if (query.routes !== '1' || !this.dependencies.directSecret)
-          return connection.close('outdated', 'Update your terminal to use a direct-only machine.')
         const authority = directAuthority(this.dependencies.directSecret, grant.owner.userId, grant.targetId)
         const lease = randomUUID()
         const resume = this.dependencies.tokens.resume(redeemed.id, grant)
@@ -139,7 +136,7 @@ export class TerminalBroker {
       })
       let direct: string | undefined
       const origin = context.machine?.directOrigin
-      if (query.routes === '1' && context.target.kind === 'paired' && origin) {
+      if (context.target.kind === 'paired' && origin) {
         const offer = await context.machine
           .call<{ slot: string; proof: string }>(
             'viewer.offer',
@@ -165,7 +162,7 @@ export class TerminalBroker {
         connection.abort.signal,
         direct,
       )
-      if (query.routes === '1' && (stream.opened as { route?: string } | null)?.route !== 'direct')
+      if ((stream.opened as { route?: string } | null)?.route !== 'direct')
         connection.send({ type: 'route-selected', route: 'relay' })
       connection.start(stream)
     } catch (error) {

@@ -1,22 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { desktopOrigin } from '../../shared/desktopAuth'
-import { chatProtocol } from '../../shared/chatApi'
 import { AppError } from '../errors'
 import type { Services } from '../services'
-import type { DesktopAccess } from '../desktop-access'
 import type { ChatServer } from '../chat/socket'
 import type { Owner } from '../deployment'
 import { maxSessionFileBytes, sessionFileId, sessionFileName } from '../../shared/sessionFiles'
 import { withRequestSignal } from '../request'
 import { sendAttachment, type SessionFileDownload } from './sessionFiles'
 
-export function chatRoutes(
-  app: FastifyInstance,
-  services: Services,
-  chat: ChatServer,
-  access: DesktopAccess,
-  download: SessionFileDownload,
-) {
+export function chatRoutes(app: FastifyInstance, services: Services, chat: ChatServer, download: SessionFileDownload) {
   /** The page's chat grant, as for image uploads; resolving the target checks ownership. */
   const owner = (authorization: string | undefined) => {
     const match = /^Bearer ([A-Za-z0-9_.-]{1,4096})$/.exec(authorization ?? '')
@@ -60,13 +51,9 @@ export function chatRoutes(
     return reply.send({ ok: true })
   })
 
-  app.get<{ Querystring: { ticket?: string; protocol?: string } }>(
-    '/api/chat',
-    { websocket: true },
-    (socket, request) => {
-      void chat.accept(socket, request)
-    },
-  )
+  app.get<{ Querystring: { protocol?: string } }>('/api/chat', { websocket: true }, (socket, request) => {
+    void chat.accept(socket, request)
+  })
 
   // Files the user attaches: raw bytes, authenticated with the page's chat grant
   // before buffering. A session's go to its store on the target; a channel's
@@ -136,16 +123,4 @@ export function chatRoutes(
       return sendAttachment(reply, file, bytes)
     },
   )
-
-  /** Outpost Desktop's chat window: a ticket for one chat socket, from the app login. */
-  app.post('/api/desktop/chat/connect', async request => {
-    const owner = access.authorize(request)
-    if (!services.active(owner)) throw new AppError('App sign-in expired.', 401)
-    return {
-      server: desktopOrigin(services.deployment.origin(request)),
-      accountId: owner.userId,
-      ticket: chat.tokens.ticket(owner),
-      protocol: chatProtocol,
-    }
-  })
 }

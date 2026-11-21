@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { currentConversation, type SessionInput } from '../../shared/model'
-import { checkImage, saveImage } from '../../machine/files'
+import { saveImage } from '../../machine/files'
 import { changeRegistry, readRegistry, switchConversation } from '../../machine/registry'
 import {
   createSession,
@@ -269,17 +269,17 @@ test('pasted images: valid types and sizes, private files, the newest 20 kept', 
   )
   const directory = statePath('clipboard', session.id)
   assert.equal(readdirSync(directory).length, 20)
-  assert.equal(existsSync(saved[0].path), false)
+  assert.equal(existsSync(saved[0]), false)
   for (const image of saved.slice(-20)) {
-    assert.deepEqual(readFileSync(image.path), data)
-    assert.equal(statSync(image.path).mode & 0o777, 0o600)
-    assert.ok(image.reference.startsWith(directory))
+    assert.deepEqual(readFileSync(image), data)
+    assert.equal(statSync(image).mode & 0o777, 0o600)
+    assert.ok(image.startsWith(directory))
   }
-  for (const size of [0, -1, 16 * 1024 * 1024 + 1, 1.5])
-    assert.throws(() => checkImage(session.id, 'png', size), { status: 413 })
+  for (const size of [0, 16 * 1024 * 1024 + 1])
+    assert.throws(() => saveImage(session.id, 'png', Buffer.alloc(size)), { status: 413 })
   for (const extension of ['../png', 'svg', 'PNG'])
-    assert.throws(() => checkImage(session.id, extension, 1), { status: 400 })
-  assert.throws(() => checkImage(crypto.randomUUID(), 'png', 1), { status: 404 })
+    assert.throws(() => saveImage(session.id, extension, Buffer.alloc(1)), { status: 400 })
+  assert.throws(() => saveImage(crypto.randomUUID(), 'png', Buffer.alloc(1)), { status: 404 })
   await deleteSession(session.id)
   assert.equal(existsSync(directory), false, 'deleting a session removes its images')
 })

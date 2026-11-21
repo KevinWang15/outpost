@@ -105,7 +105,7 @@ test('notification click data cannot open another origin, scheme, or application
     '',
     'https://evil.example/terminal?target=x&session=y',
     'javascript:alert(1)',
-    '/terminal/desktop#token=secret',
+    '/desktop#token=secret',
     '/api/targets',
     '/terminal?target=x',
     'http://[',

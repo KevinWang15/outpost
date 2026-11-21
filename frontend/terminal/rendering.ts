@@ -35,11 +35,10 @@ export class TerminalRenderer implements TerminalRendering {
   constructor(
     private terminal: Terminal,
     private failed: (message: string) => void,
-    private local = false,
     private bufferChanged: () => void = () => {},
   ) {
     this.checkpoints = new CheckpointReader(terminal)
-    if (!local) remoteTerminalReplies(terminal)
+    remoteTerminalReplies(terminal)
   }
 
   get restoring() {
@@ -50,16 +49,8 @@ export class TerminalRenderer implements TerminalRendering {
     this.generation++
     this.pendingWrite = null
     this.stopped = false
-    this.phase = this.local ? 'live' : 'waiting'
+    this.phase = 'waiting'
     this.checkpoints = new CheckpointReader(this.terminal)
-    if (this.local)
-      this.enqueue(
-        () => {
-          this.terminal.reset()
-          this.bufferChanged()
-        },
-        () => {},
-      )
   }
 
   output(bytes: Uint8Array, rendered: () => void) {

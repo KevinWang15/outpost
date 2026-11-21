@@ -53,7 +53,7 @@ export class TerminalImages {
     upload.timer.refresh()
     if (upload.offset === upload.bytes.length) {
       try {
-        return saveImage(this.session, imageExtensions[upload.mime as ImageMediaType], upload.bytes).reference
+        return saveImage(this.session, imageExtensions[upload.mime as ImageMediaType], upload.bytes)
       } finally {
         this.close()
       }

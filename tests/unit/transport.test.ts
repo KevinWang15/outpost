@@ -151,3 +151,10 @@ test('only unambiguous control-connection failures qualify for recovery', () => 
   for (const stdout of ['partial output', '\0OUTPOST-NODE-1\0', ' ']) assert.equal(accepts(mux, stdout), false)
   for (const code of [0, 1, null]) assert.equal(accepts(mux, '', code), false)
 })
+
+test('an overlong master socket path uses an ordinary SSH connection', () => {
+  const transport = transportFor(target, null, { scope: 'local', multiplex: '/' + 'x'.repeat(100) })
+  const command = transport.login('true')
+  assert.equal(option(command.args, 'ControlPath'), 'ControlPath=none')
+  assert.equal(command.retry, undefined)
+})

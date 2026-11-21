@@ -1,12 +1,10 @@
 import type { Terminal } from '@xterm/xterm'
-import { desktop } from '../desktop'
 import { appleMobile, standaloneBrowser } from '../browser'
 import { showBrowserNotification, type BrowserBellNotification } from './notificationTransport'
 
 export type BellNotificationPermission = NotificationPermission | 'unsupported' | 'insecure' | 'home-screen'
 
 export function bellNotificationPermission(): BellNotificationPermission {
-  if (desktop) return desktop.notificationsSupported ? 'granted' : 'unsupported'
   if (!window.isSecureContext) return 'insecure'
   if (appleMobile() && !standaloneBrowser()) return 'home-screen'
   if (typeof window.Notification !== 'function') return 'unsupported'
@@ -19,7 +17,6 @@ export function attachBell(
   term: Terminal,
   changed: (ringing: boolean) => void,
   session: () => { id: string; name: string },
-  preferences?: { active: () => boolean; sound: () => boolean },
   onNotificationError?: (message: string) => void,
 ) {
   let audio: AudioContext | null = null
@@ -28,10 +25,9 @@ export function attachBell(
   let notified = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastSound = -Infinity
-  const active = preferences?.active ?? (() => document.visibilityState === 'visible' && document.hasFocus())
+  const active = () => document.visibilityState === 'visible' && document.hasFocus()
   const closeNotification = () => {
     generation++
-    if (desktop) void desktop.dismissBell().catch(() => {})
     const current = notification
     notification = null
     if (!current) return
@@ -51,17 +47,6 @@ export function attachBell(
     if (active() || notified || bellNotificationPermission() !== 'granted') return
     const attempt = ++generation
     notified = true
-    if (desktop) {
-      void desktop.notifyBell(session().name).then(
-        shown => {
-          if (!shown && generation === attempt) notified = false
-        },
-        () => {
-          if (generation === attempt) notified = false
-        },
-      )
-      return
-    }
     const failed = () => {
       if (generation !== attempt) return
       closeNotification()
@@ -98,7 +83,6 @@ export function attachBell(
     }
   }
   const playSound = () => {
-    if (preferences && !preferences.sound()) return
     prepareSound()
     if (!audio || audio.state !== 'running' || performance.now() - lastSound < 1000) return
     try {

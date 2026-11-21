@@ -1,3 +1,5 @@
+import { managedSocket } from '../../backend/machines'
+import { provisionMachine } from './helpers'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -41,6 +43,7 @@ test(
       await writeFile(join(home, 'bin', 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o700 })
       await mkdir(join(home, '.outpost', 'bin'), { recursive: true })
       await copyFile(terminalBinary, join(home, '.outpost', 'bin', 'outpost-terminal'))
+      provisionMachine(home, managedSocket('history', deployment.owner(), id))
       await deployment.workspace().add({
         id,
         kind: 'local',

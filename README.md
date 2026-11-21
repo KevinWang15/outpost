@@ -319,19 +319,9 @@ in both the browser and Outpost Desktop. **Command+V** continues to work.
 The browser may ask for clipboard permission for Ctrl+V; if access is blocked,
 use Command+V instead.
 
-Use **Hide terminal toolbar** for more screen space. In the browser, the small
-button at the top right restores it; in Outpost Desktop, right-click the terminal
-and enable **Terminal toolbar**. This preference is shared by both clients.
-Connection errors, link prompts and bell notices remain visible while the toolbar
-is hidden.
-
-Right-click the terminal (or press **Shift+F10** / the **Menu** key) for **Copy**,
-**Paste**, **Select all**, image upload, and toggles for the toolbar, message box
-and on-screen keys. This menu is shared by the web terminal and Outpost Desktop
-on macOS and Windows. Copy uses the terminal selection; Select all selects
-output currently loaded in the terminal, not the entire remote conversation.
-Browser clipboard access may ask for permission; if Paste is blocked, use your
-normal paste shortcut. The message box keeps its usual text-editing menu.
+In the web terminal, **Hide terminal toolbar** frees screen space. The button at
+the top right restores it. The terminal context menu also offers copy, paste,
+image upload, the message box and on-screen keys.
 
 Attach images directly in the terminal: paste from the clipboard, drop a file
 onto the terminal, or use the image button (also available in the context menu).
@@ -348,7 +338,7 @@ next match, **Shift+Enter** to the previous one, and **Esc** closes search and
 returns focus to the terminal. **Aa** toggles case sensitivity. Search is also
 available from the terminal toolbar and right-click menu, and **Edit → Find in
 terminal** in the desktop app. Web, remote desktop, and local shell tabs share
-this feature. It searches the screen and scrollback currently held by xterm,
+this feature. It searches the screen and scrollback held by the active client,
 not files or output that has already left the buffer.
 Highlights update with terminal output, including applications that redraw their
 screen to scroll their own history. That history is searchable as the application
@@ -415,7 +405,7 @@ visible; unsupported formats show **Preview not supported**. In the desktop app
 the viewer covers the whole window, including split panes.
 Windows and macOS downloads use the native Save dialog; web terminals use the
 browser's download handling. The panel and viewer do not resize the terminal.
-Thumbnails, previews and downloads share a bounded session cache, avoiding repeat
+In the browser, thumbnails, previews and downloads share a bounded session cache, avoiding repeat
 transfers while the file remains cached. Closing the file panel keeps the cache;
 closing the session clears it.
 

@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import type { HistoryBatch, HistoryMachine, HistorySource } from '../../shared/history'
 import { HistoryIndex } from '../../backend/history/index'
@@ -376,4 +380,22 @@ test('history: results group by Outpost session across its timeline, and session
     'native-first',
     'native-second',
   ])
+})
+
+test('opening an unsupported history index preserves its contents', t => {
+  const folder = mkdtempSync(join(tmpdir(), 'outpost-history-'))
+  t.after(() => rmSync(folder, { recursive: true, force: true }))
+  const path = join(folder, 'history.db')
+  const original = new DatabaseSync(path)
+  original.exec(
+    "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT); INSERT INTO settings VALUES ('schema','unknown'), ('marker','preserved')",
+  )
+  original.close()
+  assert.throws(() => new HistoryIndex(path, 'account-secret', embed), /Unsupported history index schema/)
+  const reopened = new DatabaseSync(path, { readOnly: true })
+  try {
+    assert.equal(reopened.prepare("SELECT value FROM settings WHERE key='marker'").get()?.value, 'preserved')
+  } finally {
+    reopened.close()
+  }
 })

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { terminalService } from '../shared/terminalService'
 import { serveChat } from './chat'
 import { command, hook } from './commands'
-import { unpair, loadInstalled, installManaged } from './installation'
+import { unpair, installation, installManaged, authorizeNode } from './installation'
 import { pairTarget, runConnector, installDirect } from './connector'
 import { serveMcp } from './mcp'
 import { serveNode } from './node'
@@ -14,6 +14,7 @@ const usage = `Usage: outpost-terminal COMMAND
   node --socket PATH   the machine end of Outpost's connection (Outpost runs it)
   serve | chat-serve   a session's terminal service or chat host (the node runs them)
   pair SERVER          enroll using the code from Add machine → Paired machine
+  pair --managed PATH  bind a server-managed installation to its node socket
   pair --direct        import the server-provided direct installation JSON on stdin (offline)
   connect              serve this installation using its configured network policy
   status | unpair      inspect ownership or disconnect locally and release it for reinstallation
@@ -36,6 +37,11 @@ const run = async () => {
   if (role !== 'agent' && role !== '--version') enterState()
   switch (role) {
     case '--version':
+      if (args.length) {
+        if (args.length !== 2 || args[0] !== '--managed') throw Error(usage)
+        const owner = authorizeNode(args[1])
+        if (owner.mode !== 'ssh') throw Error('This installation is paired through its connector.')
+      }
       return console.log(`outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`)
     case 'pair':
       if (args.length === 2 && args[0] === '--managed') return installManaged(args[1])
@@ -47,9 +53,9 @@ const run = async () => {
       return unpair(role === 'uninstall')
     case 'status': {
       if (args.length) throw Error(usage)
-      const r = await loadInstalled()
+      const r = installation()
       console.log(
-        !r || r.mode === 'unpaired'
+        !r
           ? 'Unpaired'
           : r.mode === 'ssh'
             ? 'Server-managed node ' + r.socket

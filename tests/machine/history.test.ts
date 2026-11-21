@@ -199,57 +199,61 @@ test('Kimi: the current wire format reads canonical messages without duplicate c
   )
 })
 
-test("Outpost's MCP server offers each driver its tools, and fails closed on a partial binding", async t => {
-  const home = machine(t)
-  const session = crypto.randomUUID()
-  const state = join(home, '.outpost')
-  const requests = [
-    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
-    { jsonrpc: '2.0', id: 2, method: 'tools/list' },
-  ]
-  const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('OUTPOST_')))
-  const run = (env: Record<string, string>) =>
-    spawnSync(binary, ['mcp'], {
-      input: requests.map(request => JSON.stringify(request) + '\n').join(''),
-      encoding: 'utf8',
-      env: { ...clean, HOME: home, ...env },
-    })
-  const every = [
-    'publish_file',
-    'search_history',
-    'read_context',
-    'read_message',
-    'get_session',
-    'refresh_index',
-    'list_machines',
-    'list_sessions',
-    'message_session',
-    'post_to_channel',
-    'fetch_file',
-  ]
-  for (const [driver, expected] of [
-    ['terminal', every],
-    ['chat', every],
-    [null, []],
-  ] as const) {
-    const result = run(
-      driver ? { OUTPOST_SESSION_ID: session, OUTPOST_STATE_DIRECTORY: state, OUTPOST_DRIVER: driver } : {},
-    )
-    assert.equal(result.status, 0, result.stderr)
-    const replies = result.stdout
-      .trim()
-      .split('\n')
-      .map(line => JSON.parse(line))
-    assert.deepEqual(
-      new Set(replies[1].result.tools.map((tool: { name: string }) => tool.name)),
-      new Set(expected),
-      String(driver),
-    )
-    if (driver) assert.match(replies[0].result.instructions, /untrusted/)
-  }
-  const partial = run({ OUTPOST_SESSION_ID: session, OUTPOST_STATE_DIRECTORY: state })
-  assert.equal(partial.status, 1)
-})
+test(
+  "Outpost's MCP server offers each driver its tools, and fails closed on a partial binding",
+  { skip: process.platform !== 'linux' && !process.env.TEST_TERMINAL },
+  async t => {
+    const home = machine(t)
+    const session = crypto.randomUUID()
+    const state = join(home, '.outpost')
+    const requests = [
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
+      { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+    ]
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('OUTPOST_')))
+    const run = (env: Record<string, string>) =>
+      spawnSync(binary, ['mcp'], {
+        input: requests.map(request => JSON.stringify(request) + '\n').join(''),
+        encoding: 'utf8',
+        env: { ...clean, HOME: home, ...env },
+      })
+    const every = [
+      'publish_file',
+      'search_history',
+      'read_context',
+      'read_message',
+      'get_session',
+      'refresh_index',
+      'list_machines',
+      'list_sessions',
+      'message_session',
+      'post_to_channel',
+      'fetch_file',
+    ]
+    for (const [driver, expected] of [
+      ['terminal', every],
+      ['chat', every],
+      [null, []],
+    ] as const) {
+      const result = run(
+        driver ? { OUTPOST_SESSION_ID: session, OUTPOST_STATE_DIRECTORY: state, OUTPOST_DRIVER: driver } : {},
+      )
+      assert.equal(result.status, 0, result.stderr)
+      const replies = result.stdout
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line))
+      assert.deepEqual(
+        new Set(replies[1].result.tools.map((tool: { name: string }) => tool.name)),
+        new Set(expected),
+        String(driver),
+      )
+      if (driver) assert.match(replies[0].result.instructions, /untrusted/)
+    }
+    const partial = run({ OUTPOST_SESSION_ID: session, OUTPOST_STATE_DIRECTORY: state })
+    assert.equal(partial.status, 1)
+  },
+)
 
 test("a composed prompt's title is its header and what was asked, without Outpost's instructions", async t => {
   const home = machine(t)

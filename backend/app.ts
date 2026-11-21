@@ -21,7 +21,6 @@ import { sessionFileDownloads } from './routes/sessionFiles'
 import { pairedRoutes } from './paired'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
-import { pageHtml } from '../shared/pageHtml'
 import { DesktopAccess } from './desktop-access'
 import { desktopRoutes } from './routes/desktop'
 import { ChatHub } from './chat/hub'
@@ -175,11 +174,7 @@ export async function createApp(options: AppOptions) {
     if (deployment.mode === 'hosted') {
       const origin = deployment.origin(request)
       let direct: string[] = []
-      if (
-        [pagePaths.terminal, pagePaths.workspace, pagePaths.desktopTerminal].some(
-          path => path === request.url.split('?')[0],
-        )
-      ) {
+      if ([pagePaths.terminal, pagePaths.workspace].some(path => path === request.url.split('?')[0])) {
         try {
           const owner = deployment.owner(request)
           direct = machines.directOrigins(owner)
@@ -218,8 +213,8 @@ export async function createApp(options: AppOptions) {
   workspaceRoutes(app, services, pairedRoutes(app, services))
   sessionRoutes(app, services)
   const download = sessionFileDownloads(services)
-  terminalRoutes(app, services, download)
-  chatRoutes(app, services, chat, desktop, download)
+  terminalRoutes(app, services)
+  chatRoutes(app, services, chat, download)
   logRoutes(app, services)
   await app.register(async viewer => {
     // The viewer reads its own request bodies.
@@ -235,8 +230,7 @@ export async function createApp(options: AppOptions) {
     const pages = new Set<string>(Object.values(pagePaths))
     app.setNotFoundHandler((request, reply) => {
       const pathname = request.url.split('?')[0]
-      if (['GET', 'HEAD'].includes(request.method) && pages.has(pathname))
-        return reply.type('text/html').send(pageHtml(html, pathname))
+      if (['GET', 'HEAD'].includes(request.method) && pages.has(pathname)) return reply.type('text/html').send(html)
       return reply.code(404).send({ message: 'Not found' })
     })
   }

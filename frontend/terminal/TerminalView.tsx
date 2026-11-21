@@ -14,9 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
-import type { SessionActivity } from '../../shared/activity'
 import type { CloseReason } from '../../shared/protocol'
-import type { LocalTerminalBridge } from '../../shared/localTerminal'
 import { imageMediaTypes } from '../../shared/images'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
@@ -34,7 +32,6 @@ import { useTerminalViewport } from './viewport'
 import type { TerminalModifiers } from './keys'
 import type { TerminalState } from './connection'
 import { TerminalSession } from './session'
-import { desktop } from '../desktop'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
 
 const closedTitles: Record<CloseReason, string> = {
@@ -46,22 +43,22 @@ const closedTitles: Record<CloseReason, string> = {
 }
 
 type Props = {
+  token: string
   title: string
   onClose: () => void
-  onResume?: (token: string, title: string, tool: HarnessId) => void | Promise<void>
-} & ({ token: string; local?: never } | { token?: never; local: LocalTerminalBridge })
+}
 
 const toolbarPreference = 'outpost.terminal.toolbar-hidden'
 function savedToolbar() {
   try {
     const stored = localStorage.getItem(toolbarPreference)
-    return stored === null ? !desktop : stored !== 'true'
+    return stored !== 'true'
   } catch {
     return true
   }
 }
 
-export default function TerminalView({ token, local, title, onClose, onResume }: Props) {
+export default function TerminalView({ token, title, onClose }: Props) {
   const container = useRef<HTMLDivElement>(null)
   useTerminalViewport(container)
   const surface = useRef<HTMLDivElement>(null),
@@ -70,14 +67,13 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
   const session = useRef<TerminalSession | null>(null)
   const [state, setState] = useState<TerminalState>({ kind: 'connecting' })
   const [mountAttempt, setMountAttempt] = useState(0)
-  const [activity, setActivity] = useState<SessionActivity | null>(null)
   /** Messages from other sessions, channels or schedules waiting to be typed in. */
   const [waiting, setWaiting] = useState(0)
   const [name, setName] = useState(title)
   const [tool, setTool] = useState<HarnessId>()
   const [bellRinging, setBellRinging] = useState(false)
   const [status, setStatus] = useState('')
-  const [fileAccess, setFileAccess] = useState<{ launch: string; resume: string } | null>(null)
+  const [connection, setConnection] = useState<{ token: string; socket: TerminalSession['connection'] } | null>(null)
   const [filesRevision, setFilesRevision] = useState(0)
   const [blockedLink, setBlockedLink] = useState<string | null>(null)
   const [keysShown, setKeysShown] = useState(touch)
@@ -89,10 +85,6 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
   const statusTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const connected = state.kind === 'connected'
   const [toolbarShown, setToolbarShown] = useState(savedToolbar)
-  const lifecycle = useRef({ onResume, title })
-  useEffect(() => {
-    lifecycle.current = { onResume, title }
-  }, [onResume, title])
   const showToolbar = (shown: boolean) => {
     setToolbarShown(shown)
     try {
@@ -116,8 +108,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
   const { attach: attachSearch, open: openSearch, bufferChanged } = search
 
   useLayoutEffect(() => {
-    if (state.kind !== 'closed' || !document.hasFocus() || (desktop && session.current && !session.current.focused))
-      return
+    if (state.kind !== 'closed' || !document.hasFocus()) return
     // Inert removes focus from xterm. Give keyboard users a recovery action,
     // while preserving any toolbar, message-box, or dialog control they are using.
     const active = document.activeElement
@@ -132,15 +123,9 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
     }
   }, [name, bellRinging])
 
-  useEffect(() => {
-    void desktop
-      ?.reportState({ title: name, tool, connection: state.kind, activity, attention: bellRinging, hasDraft })
-      .catch(() => {})
-  }, [name, tool, state.kind, activity, bellRinging, hasDraft])
-
   // A message from another session never goes in over your draft.
   useEffect(() => {
-    session.current?.connection.draft?.(hasDraft)
+    session.current?.connection.draft(hasDraft)
   }, [hasDraft, state.kind])
 
   const notify = useCallback((message: string, sticky = false) => {
@@ -164,10 +149,12 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
       current = new TerminalSession({
         surface: surface.current!,
         container: container.current!,
-        title: lifecycle.current.title,
-        source: local ? { kind: 'local', bridge: local } : { kind: 'remote', token: token! },
-        state: setState,
-        activity: setActivity,
+        title,
+        token,
+        state: next => {
+          setState(next)
+          if (next.kind === 'connected') setConnection({ token, socket: current.connection })
+        },
         deliveries: setWaiting,
         titleChanged: setName,
         toolChanged: setTool,
@@ -179,12 +166,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         showComposer: () => setComposerShown(true),
         focusRecovery,
         attachSearch,
-        openSearch,
         bufferChanged,
-        resume: (resume, title, tool) => {
-          setFileAccess({ launch: token!, resume })
-          return lifecycle.current.onResume?.(resume, title, tool)
-        },
       })
     } catch (error) {
       // A discarded StrictMode mount must not publish a stale initialization failure.
@@ -204,7 +186,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
       session.current = null
       current.dispose()
     }
-  }, [token, local, mountAttempt, notify, focusRecovery, attachSearch, openSearch, bufferChanged])
+  }, [token, title, mountAttempt, notify, focusRecovery, attachSearch, bufferChanged])
 
   const send = async (text: string) => {
     if (!session.current) throw new Error('The terminal is not available. Your draft is kept.')
@@ -233,7 +215,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
             className={`terminal-state ${state.kind}`}
             role="status"
             aria-label={label}
-            title={state.kind === 'connected' && state.route ? 'Connection route: ' + state.route : label}
+            title={state.kind === 'connected' ? 'Connection route: ' + state.route : label}
           >
             {state.kind === 'connecting' || state.kind === 'reconnecting' ? (
               <LoaderCircle className="spin" size={12} />
@@ -321,7 +303,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
           </button>
           <button
             className="icon-button"
-            title={local ? 'Close terminal and end the local shell' : 'Close terminal (the session keeps running)'}
+            title="Close terminal (the session keeps running)"
             aria-label="Close terminal"
             onClick={onClose}
           >
@@ -329,8 +311,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
           </button>
         </div>
       </header>
-      {/* Desktop panes use their context menu to reveal this optional toolbar. */}
-      {!toolbarShown && !desktop && (
+      {!toolbarShown && (
         <button
           className="icon-button terminal-show-toolbar"
           title="Show terminal toolbar"
@@ -364,11 +345,10 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         >
           <div className="terminal-surface" ref={surface} inert={state.kind === 'closed'} />
         </TerminalContextMenu>
-        {!local && fileAccess?.launch === token && (
+        {connection?.token === token && (
           <TerminalFiles
             key={token}
-            connection={session.current?.connection}
-            token={fileAccess!.resume}
+            connection={connection.socket}
             connected={connected}
             revision={filesRevision}
             restoreFocus={restoreTerminalFocus}
@@ -376,7 +356,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
         )}
         {search.visible && state.kind !== 'closed' && <TerminalSearch search={search} />}
         {/* Notices float over the screen; they must never change PTY geometry. */}
-        <div className={`terminal-notices${!toolbarShown && !desktop ? ' toolbar-hidden' : ''}`}>
+        <div className={`terminal-notices${!toolbarShown ? ' toolbar-hidden' : ''}`}>
           {(status || (!toolbarShown && (state.kind === 'connecting' || state.kind === 'reconnecting'))) && (
             <div className="terminal-notice" role="status">
               <span>{status || label}</span>
@@ -397,13 +377,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
                 onClick={() => {
                   void openBrowserTab(blockedLink).then(opened => {
                     if (opened) setBlockedLink(null)
-                    else
-                      notify(
-                        desktop
-                          ? 'Could not open your default browser. Copy the link and open it in your browser.'
-                          : 'Allow pop-ups for Outpost, then try again, or copy the link into your browser.',
-                        true,
-                      )
+                    else notify('Allow pop-ups for Outpost, then try again, or copy the link into your browser.', true)
                   })
                 }}
               >
@@ -417,7 +391,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
           {waiting > 0 && connected && (
             <div className="terminal-notice" role="status">
               <span>{waiting === 1 ? '1 message' : `${waiting} messages`} from other sessions waiting</span>
-              <button className="button small" onClick={() => session.current?.connection.deliverNow?.()}>
+              <button className="button small" onClick={() => session.current?.connection.deliverNow()}>
                 Deliver now
               </button>
             </div>
@@ -456,7 +430,7 @@ export default function TerminalView({ token, local, title, onClose, onResume }:
                     }}
                   >
                     <RotateCw size={15} />
-                    {local ? 'Start new shell' : 'Reconnect'}
+                    Reconnect
                   </button>
                 )
               )}

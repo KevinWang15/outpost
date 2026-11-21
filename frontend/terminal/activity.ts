@@ -1,8 +1,8 @@
 import type { SessionActivity } from '../../shared/activity'
-import type { TerminalConnection } from './connection'
+import type { TerminalSocket } from './socket'
 
 /** Acknowledge the completion visible on activation, never a later turn.
- * Keep local feedback immediate while the target persists the shared check. */
+ * Discard late replies after reconnect and suppress duplicate acknowledgements. */
 export class TerminalActivity {
   private state: SessionActivity | null = null
   private active = false
@@ -12,8 +12,7 @@ export class TerminalActivity {
   private checked = new Set<string>()
 
   constructor(
-    private client: Pick<TerminalConnection, 'acknowledge'>,
-    private changed: (state: SessionActivity | null) => void,
+    private client: Pick<TerminalSocket, 'acknowledge'>,
     private notice: (message: string) => void,
   ) {}
 
@@ -26,7 +25,6 @@ export class TerminalActivity {
       this.awaitingObservation = this.active
     }
     if (state && this.awaitingObservation) this.acknowledge()
-    this.publish()
   }
 
   setActive(active: boolean) {
@@ -37,7 +35,7 @@ export class TerminalActivity {
   }
 
   acknowledge() {
-    if (!this.active || !this.client.acknowledge) return
+    if (!this.active) return
     if (this.state && this.state.observation !== 'current') {
       this.awaitingObservation = true
       return
@@ -47,31 +45,18 @@ export class TerminalActivity {
     if (!token || this.checked.has(token) || this.pending.has(token) || this.pending.size >= 32) return
     const generation = this.generation
     this.pending.add(token)
-    this.publish()
     void this.client.acknowledge(token).then(
       () => {
         if (generation !== this.generation) return
         this.pending.delete(token)
         this.checked.add(token)
         if (this.checked.size > 32) this.checked.delete(this.checked.values().next().value!)
-        this.publish()
       },
       error => {
         if (generation !== this.generation) return
         this.pending.delete(token)
-        this.publish()
         this.notice(`Could not mark this completion as seen: ${(error as Error).message}`)
       },
-    )
-  }
-
-  private publish() {
-    const state = this.state
-    const token = state?.state === 'finished' ? state.completionId : null
-    this.changed(
-      token && (this.pending.has(token) || this.checked.has(token))
-        ? { ...state!, state: 'idle', completionId: null }
-        : state,
     )
   }
 

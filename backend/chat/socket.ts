@@ -79,7 +79,7 @@ class Connection implements ChatClient {
     this.send({
       type: 'hello',
       protocol: chatProtocol,
-      token: this.server.tokens.resume(this.owner),
+      token: this.server.tokens.issueFileGrant(this.owner),
       ...attached.hello,
     })
     this.send({ type: 'sessions', ...attached.sessions })
@@ -299,8 +299,7 @@ export class ChatServer {
     this.connections.delete(connection)
   }
 
-  /** Browser pages authenticate with their login cookie; Outpost Desktop with a ticket. */
-  async accept(socket: WebSocket, request: FastifyRequest<{ Querystring: { ticket?: string; protocol?: string } }>) {
+  async accept(socket: WebSocket, request: FastifyRequest<{ Querystring: { protocol?: string } }>) {
     const reject = (message: string) => {
       socket.send(JSON.stringify({ type: 'closed', message } satisfies ChatServerMessage))
       socket.close(1000)
@@ -308,7 +307,7 @@ export class ChatServer {
     if (request.query.protocol !== String(chatProtocol)) return reject('Outpost was updated. Reload this page.')
     let owner: Owner | null = null
     try {
-      owner = request.query.ticket ? this.tokens.redeem(request.query.ticket) : this.services.deployment.owner(request)
+      owner = this.services.deployment.owner(request)
     } catch {
       owner = null
     }

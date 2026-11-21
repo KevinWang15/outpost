@@ -1,6 +1,10 @@
 import { readFile } from 'node:fs/promises'
-import type { TerminalPreferences } from '../../shared/desktop'
 import { writeJsonFile } from '../../shared/node/jsonFile'
+
+interface TerminalPreferences {
+  fontSize: number
+  sound: boolean
+}
 
 export const defaultPreferences: TerminalPreferences = { fontSize: 13.5, sound: true }
 export function validPreferences(value: unknown): value is TerminalPreferences {

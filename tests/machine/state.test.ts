@@ -47,7 +47,7 @@ test('files are replaced whole, privately, with no temporary left', async t => {
 test('a socket whose path is too long is addressed relative to the working directory', async t => {
   machine(t)
   const previous = state.directory
-  state.directory = join(process.cwd(), 'a'.repeat(100 - process.cwd().length))
+  state.directory = join(process.cwd(), 'a'.repeat(100 - Buffer.byteLength('/run/x.sock')))
   t.after(() => (state.directory = previous))
   assert.equal(socketAddress('run', 'x.sock'), relative(process.cwd(), statePath('run', 'x.sock')))
   state.directory = '/tmp/short'

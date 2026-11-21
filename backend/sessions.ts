@@ -8,7 +8,6 @@ import type {
   SessionUpdate,
   Target,
 } from '../shared/model'
-import { imageExtensions, imageProblem, type ImageMediaType, type UploadedImage } from '../shared/images'
 import type { Owner } from './deployment'
 import { AppError } from './errors'
 import type { MachineConnection, Stream } from './machines'
@@ -90,22 +89,6 @@ export class SessionClient {
   }
   search({ machine }: TargetContext, input: ConversationSearch, signal?: AbortSignal) {
     return machine.call<ConversationResults>('conversations.search', input, { signal, timeoutMs: 60_000 })
-  }
-  async uploadImage(
-    { machine }: TargetContext,
-    id: string,
-    data: Buffer,
-    mediaType: ImageMediaType,
-    signal: AbortSignal,
-  ) {
-    const problem = imageProblem({ type: mediaType, size: data.length })
-    if (problem) throw new AppError(problem, 400)
-    const stream = await machine.open(
-      'image',
-      { session: id, extension: imageExtensions[mediaType], size: data.length },
-      signal,
-    )
-    return (await upload(stream, data, signal)) as UploadedImage
   }
   /** A terminal attachment: the terminal service's own protocol, carried as a stream. */
   attach(

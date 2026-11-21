@@ -1,26 +1,21 @@
 import { Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
-import type { SessionActivity } from '../../shared/activity'
-import type { TerminalHostState } from '../../shared/desktop'
-import type { LocalTerminalBridge } from '../../shared/localTerminal'
 import { imageProblem } from '../../shared/images'
 import { browserUrl } from '../../shared/signals'
 import { terminalService } from '../../shared/terminalService'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
-import { desktopTerminalTheme, terminalTheme } from '../../shared/terminalTheme'
+import { terminalTheme } from '../../shared/terminalTheme'
 import type { HarnessId } from '../../shared/harnesses'
 import { touchInput } from '../browser'
-import { desktop } from '../desktop'
 import { TerminalActivity } from './activity'
 import { attachBell } from './bell'
 import { openBrowserTab } from './browser'
 import { attachClipboard } from './clipboard'
-import type { TerminalConnection, TerminalState } from './connection'
+import type { TerminalState } from './connection'
 import { TerminalGeometry } from './geometry'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { attachTerminalLinks } from './links'
-import { LocalTerminalConnection } from './local'
 import { TerminalRenderer } from './rendering'
 import { TerminalSocket } from './socket'
 import { attachTouchScroll } from './touch'
@@ -29,9 +24,8 @@ interface SessionOptions {
   surface: HTMLElement
   container: HTMLElement
   title: string
-  source: { kind: 'remote'; token: string } | { kind: 'local'; bridge: LocalTerminalBridge }
+  token: string
   state(value: TerminalState): void
-  activity(value: SessionActivity | null): void
   deliveries(waiting: number): void
   titleChanged(value: string): void
   toolChanged(value: HarnessId): void
@@ -43,9 +37,7 @@ interface SessionOptions {
   showComposer(): void
   focusRecovery(): boolean
   attachSearch(term: Terminal, container: HTMLElement): () => void
-  openSearch(): void
   bufferChanged(): void
-  resume(token: string, title: string, tool: HarnessId): void | Promise<void>
 }
 
 /** Owns one terminal's imperative lifetime. React owns presentation and drafts;
@@ -53,12 +45,11 @@ interface SessionOptions {
  * including when initialization fails before a connection can be opened. */
 export class TerminalSession {
   readonly terminal: Terminal
-  readonly connection: TerminalConnection
+  readonly connection: TerminalSocket
   readonly clipboard: ReturnType<typeof attachClipboard>
   readonly bells: ReturnType<typeof attachBell>
   private geometry: TerminalGeometry
   private activity: TerminalActivity
-  private host: TerminalHostState = { focused: false, fontSize: 13.5, sound: true }
   private info: { id: string; name: string }
   private modifiers: TerminalModifiers = {}
   private cleanups: (() => void)[] = []
@@ -67,12 +58,11 @@ export class TerminalSession {
 
   constructor(private options: SessionOptions) {
     this.info = { id: '', name: options.title }
-    const local = options.source.kind === 'local'
     const term = (this.terminal = new Terminal({
       fontSize: 13.5,
       lineHeight: 1.15,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
-      theme: document.documentElement.dataset.theme === 'terminal' ? desktopTerminalTheme : terminalTheme,
+      theme: terminalTheme,
       cursorBlink: true,
       scrollback: terminalService.scrollback,
       allowProposedApi: true,
@@ -83,12 +73,7 @@ export class TerminalSession {
     }))
     this.own(() => term.dispose())
     try {
-      const rendering = new TerminalRenderer(
-        term,
-        message => this.connection.fail(message),
-        local,
-        options.bufferChanged,
-      )
+      const rendering = new TerminalRenderer(term, message => this.connection.fail(message), options.bufferChanged)
       this.own(() => rendering.dispose())
       term.loadAddon(new Unicode11Addon())
       term.unicode.activeVersion = '11'
@@ -104,67 +89,50 @@ export class TerminalSession {
       const state = (next: TerminalState) => {
         if (this.disposed) return
         options.state(next)
-        if (next.kind === 'connected' && !touchInput() && (!desktop || (this.focused && document.hasFocus())))
-          this.focus()
+        if (next.kind === 'connected' && !touchInput()) this.focus()
       }
-      const localTitle = (value: string) => this.setTitle('local', `${value.slice(0, 480)} · Local`)
-      if (local) {
-        const titleListener = term.onTitleChange(localTitle)
-        this.own(() => titleListener.dispose())
-      }
-      this.connection =
-        options.source.kind === 'local'
-          ? new LocalTerminalConnection(options.source.bridge, size, rendering, state, localTitle, this.notice, text =>
-              this.terminal.paste(text),
-            )
-          : new TerminalSocket(options.source.token, size, rendering, {
-              state,
-              hello: message => {
-                this.setTitle(
-                  `${message.target.id}/${message.session.id}`,
-                  `${message.session.name} · ${message.target.name}`,
-                )
-                const tool = message.session.tool
-                if (!this.disposed) options.toolChanged(tool)
-                void Promise.resolve()
-                  .then(() => {
-                    if (!this.disposed) return options.resume(message.resume, this.info.name, tool)
-                  })
-                  .catch(() => this.notice('Could not save this session in Recent sessions.', true))
-              },
-              activity: value => {
-                if (!this.disposed) this.activity.update(value)
-              },
-              deliveries: waiting => {
-                if (!this.disposed) options.deliveries(waiting)
-              },
-              signal: ({ signal }) => {
-                if (signal.type === 'files.changed') {
-                  if (!this.disposed) options.filesChanged()
-                  return
-                }
-                if (signal.type !== 'browser.open') return
-                let url: string
-                try {
-                  url = browserUrl(signal.payload)
-                } catch {
-                  return
-                }
-                void openBrowserTab(url).then(opened => {
-                  if (!this.disposed && !opened) options.blockedLink(url)
-                })
-              },
-            })
+      this.connection = new TerminalSocket(options.token, size, rendering, {
+        state,
+        hello: message => {
+          this.setTitle(
+            `${message.target.id}/${message.session.id}`,
+            `${message.session.name} · ${message.target.name}`,
+          )
+          const tool = message.session.tool
+          if (!this.disposed) options.toolChanged(tool)
+        },
+        activity: value => {
+          if (!this.disposed) this.activity.update(value)
+        },
+        deliveries: waiting => {
+          if (!this.disposed) options.deliveries(waiting)
+        },
+        signal: ({ signal }) => {
+          if (signal.type === 'files.changed') {
+            if (!this.disposed) options.filesChanged()
+            return
+          }
+          if (signal.type !== 'browser.open') return
+          let url: string
+          try {
+            url = browserUrl(signal.payload)
+          } catch {
+            return
+          }
+          void openBrowserTab(url).then(opened => {
+            if (!this.disposed && !opened) options.blockedLink(url)
+          })
+        },
+      })
       this.own(() => this.connection.close())
       this.geometry = new TerminalGeometry(term, options.surface, (cols, rows) => this.connection.resize(cols, rows))
       this.own(() => this.geometry.dispose())
-      this.activity = new TerminalActivity(this.connection, options.activity, message => this.notice(message, true))
+      this.activity = new TerminalActivity(this.connection, message => this.notice(message, true))
       this.own(() => this.activity.dispose())
       this.bells = attachBell(
         term,
         options.bellChanged,
         () => this.info,
-        desktop ? { active: () => this.focused, sound: () => this.host.sound } : undefined,
         message => this.notice(message, true),
       )
       this.own(() => this.bells.dispose())
@@ -177,7 +145,6 @@ export class TerminalSession {
       this.own(() => this.clipboard.dispose())
       this.attachInput()
       this.attachActivity()
-      this.attachHost()
       const initial = size()
       term.resize(initial.cols, initial.rows)
       this.open()
@@ -188,7 +155,7 @@ export class TerminalSession {
   }
 
   get focused() {
-    return desktop ? this.host.focused : document.visibilityState === 'visible' && document.hasFocus()
+    return document.visibilityState === 'visible' && document.hasFocus()
   }
 
   private notice = (message: string, sticky = false) => {
@@ -253,11 +220,10 @@ export class TerminalSession {
     const problem = imageProblem(file)
     if (problem) return this.notice(problem)
     this.imageBusy = true
-    this.notice(this.options.source.kind === 'local' ? 'Saving image…' : 'Uploading image…', true)
+    this.notice('Uploading image…', true)
     try {
       await this.connection.pasteImage(file)
-      // A local shell may be running ssh; its path names a file on this computer.
-      this.notice(this.options.source.kind === 'local' ? 'Image saved on this computer and pasted' : 'Image pasted')
+      this.notice('Image pasted')
     } catch (error) {
       this.notice((error as Error).message)
     } finally {
@@ -319,7 +285,7 @@ export class TerminalSession {
 
   private updateFocus = () => {
     this.activity.setActive(this.focused)
-    this.connection.setActive?.(this.focused)
+    this.connection.setActive(this.focused)
   }
 
   private acknowledgeActivity = () => {
@@ -335,82 +301,19 @@ export class TerminalSession {
     this.listen(window, 'click', this.acknowledgeActivity, true)
     this.listen(window, 'keydown', this.acknowledgeActivity, true)
     const resume = () => {
-      if (document.visibilityState === 'visible') this.connection.resume?.()
+      if (document.visibilityState === 'visible') this.connection.resume()
     }
     this.listen(window, 'pageshow', resume)
     this.listen(window, 'focus', resume)
-    this.listen(window, 'online', () => this.connection.networkChanged?.(true))
-    this.listen(window, 'offline', () => this.connection.networkChanged?.(false))
+    this.listen(window, 'online', () => this.connection.networkChanged(true))
+    this.listen(window, 'offline', () => this.connection.networkChanged(false))
     this.listen(document, 'visibilitychange', resume)
-  }
-
-  private attachHost() {
-    this.own(
-      desktop?.onCommand(command => {
-        if (command === 'focus') {
-          this.geometry.refresh(true)
-          // Native window reactivation must win over a stale toolbar control
-          // that remained focused while the app was backgrounded.
-          this.focus(true)
-          if (this.focused) {
-            this.bells.acknowledge()
-            this.acknowledgeActivity()
-          }
-        } else if (command === 'resume') this.connection.resume?.()
-        else if (command === 'reconnect') this.connection.reconnect()
-        else if (command === 'find') this.options.openSearch()
-        else if (command === 'clear') this.clearScreen()
-        else if (command === 'select-all') {
-          const active = document.activeElement
-          if (
-            active !== this.terminal.textarea &&
-            (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement)
-          )
-            active.select()
-          else if (!this.options.surface.inert) this.terminal.selectAll()
-        }
-      }),
-    )
-    this.own(
-      desktop?.onHostState(next => {
-        // Only focus commands move input focus. Delayed state updates must not
-        // steal focus from the tab strip during a click or drag.
-        const focused = next.focused && !this.host.focused
-        this.host = next
-        this.updateFocus()
-        if (this.terminal.options.fontSize !== next.fontSize) {
-          this.terminal.options.fontSize = next.fontSize
-          this.geometry.refresh(true)
-        }
-        if (focused) {
-          this.geometry.refresh(true)
-          this.bells.acknowledge()
-          this.connection.resume?.()
-        }
-      }),
-    )
   }
 
   private open() {
     // Defer consuming a single-use token until after StrictMode's discarded mount.
     const start = setTimeout(() => this.connection.open(), 0)
     this.own(() => clearTimeout(start))
-    const activate = this.connection.activate?.bind(this.connection)
-    if (!activate) return
-    const launches = new Set<string>()
-    this.own(
-      desktop?.onLaunch(launch => {
-        if (launches.has(launch)) return
-        launches.add(launch)
-        if (launches.size > 32) launches.delete(launches.values().next().value!)
-        clearTimeout(start)
-        void activate(launch)
-          .catch(error => this.notice((error as Error).message))
-          .finally(() => {
-            void desktop?.launchHandled(launch).catch(() => {})
-          })
-      }),
-    )
   }
 
   private own(cleanup: (() => void) | undefined) {
@@ -426,7 +329,7 @@ export class TerminalSession {
     if (this.disposed) return
     this.disposed = true
     // Unsubscribe first, close the connection, then dispose rendering and xterm.
-    // A cleanup failure must not leave other listeners or a local PTY alive.
+    // A cleanup failure must not leave other listeners active.
     for (const cleanup of this.cleanups.splice(0).reverse()) {
       try {
         cleanup()

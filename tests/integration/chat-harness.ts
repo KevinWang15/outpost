@@ -1,6 +1,7 @@
 // The chat hub with real chat hosts, the real Outpost MCP server and the
 // scripted ACP agent, connected in-process instead of through a machine
 // connection, with faults a test can inject into that connection.
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
@@ -22,7 +23,7 @@ import { ChatHost } from '../../machine/chat'
 import { listFiles, readFile as storedFile, StoredFile } from '../../machine/files'
 import { changeRegistry } from '../../machine/registry'
 import { listSessions } from '../../machine/sessions'
-import { state as machineState, statePath, writeJson } from '../../machine/state'
+import { state as machineState, statePath } from '../../machine/state'
 import type { TerminalDelivery } from '../../backend/sessions'
 import { terminalBinary } from './helpers'
 
@@ -44,7 +45,8 @@ export const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, 
 
 export async function chatHarness(names: string[], options: { idleMs?: number; terminal?: string[] } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'outpost-chat-hub-')))
-  const state = join(directory, 'state')
+  execFileSync(terminalBinary, ['pair', '--managed', nodeSocket], { env: { ...process.env, HOME: directory } })
+  const state = join(directory, '.outpost')
   await mkdir(join(state, 'chats'), { recursive: true })
   const home = join(directory, 'claude')
   // The machine's own modules (registry, files, sessions) run in-process on this state.
@@ -74,8 +76,6 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
   await changeRegistry(registry => void registry.sessions.push(...created))
 
   function startHost(session: SessionRecord) {
-    // As the node does: the session's agent calls Outpost through this node.
-    writeJson(statePath('bindings', `${session.id}.json`), { socket: nodeSocket })
     const host = new ChatHost(
       {
         socket: `chats/${session.id}.sock`,
@@ -97,6 +97,8 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
             ],
           },
         ],
+        model: null,
+        mode: null,
         instructions: null,
       },
       { onExit: () => hosts.get(session.id) === host && hosts.delete(session.id), idleMs: options.idleMs },

@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs'
 import { basename, delimiter, join } from 'node:path'
 import { userInfo } from 'node:os'
-import type { ShellProfileSummary } from '../../shared/localTerminal'
 
-export interface ShellProfile extends ShellProfileSummary {
+export interface ShellProfile {
+  id: string
+  name: string
   executable: string
   args: string[]
   syntax: 'posix' | 'powershell' | 'cmd'

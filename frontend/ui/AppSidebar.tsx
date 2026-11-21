@@ -15,16 +15,13 @@ const modes = [
 ] as const
 
 /** The sidebar both modes share: the brand and mode switch, the mode's own
- * content, and the account footer. Outpost Desktop's chat window is `embedded`:
- * it has no browser login and stays on chat. */
+ * content, and the account footer. */
 export function AppSidebar({
   mode,
-  embedded = false,
   children,
 }: {
   /** The mode shown; null on pages of neither, such as Logs. */
   mode: AppMode | null
-  embedded?: boolean
   children: ReactNode
 }) {
   return (
@@ -33,25 +30,23 @@ export function AppSidebar({
         <a className="brand" href={modes.find(item => item.mode === mode)?.href ?? pagePaths.workspace}>
           <img src="/outpost.svg" width="26" height="26" alt="" />
           <span>Outpost</span>
-          {!embedded && <DeploymentBadge />}
+          <DeploymentBadge />
         </a>
-        {!embedded && (
-          <nav className="mode-switch" aria-label="Mode">
-            {modes.map(({ mode: item, label, href, Icon }) => (
-              <a
-                key={item}
-                href={href}
-                aria-current={item === mode ? 'page' : undefined}
-                onClick={() => rememberMode(item)}
-              >
-                <Icon size={14} /> {label}
-              </a>
-            ))}
-          </nav>
-        )}
+        <nav className="mode-switch" aria-label="Mode">
+          {modes.map(({ mode: item, label, href, Icon }) => (
+            <a
+              key={item}
+              href={href}
+              aria-current={item === mode ? 'page' : undefined}
+              onClick={() => rememberMode(item)}
+            >
+              <Icon size={14} /> {label}
+            </a>
+          ))}
+        </nav>
       </div>
       <div className="sidebar-body">{children}</div>
-      {!embedded && <SidebarFooter logs={mode === null} />}
+      <SidebarFooter logs={mode === null} />
     </aside>
   )
 }

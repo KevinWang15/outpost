@@ -110,7 +110,7 @@ export class ActivityLog {
     return this.viewer.start()
   }
   async close() {
-    this.webhooks.close()
+    await this.webhooks.close()
     await this.viewer.close()
   }
 

@@ -58,58 +58,6 @@
   -webkit-font-smoothing: antialiased;
   font-synthesis: none;
 }
-// Desktop documents (terminals, file viewer, session creator) use the app's
-// neutral black palette before React mounts and throughout loading, reconnect
-// instructions and update errors. Only the logo keeps the brand blue.
-:root[data-theme='terminal'] {
-  color-scheme: dark;
-  --canvas: #0c0c0c;
-  --surface: #0c0c0c;
-  --surface-muted: #1a1a1a;
-  --ink: #e6e6e6;
-  --text: #c8c8c8;
-  --muted: #8f8f8f;
-  --border: #262626;
-  --border-strong: #3a3a3a;
-  --accent: #e6e6e6;
-  --accent-hover: #ffffff;
-  --accent-soft: #262626;
-  --accent-border: #4a4a4a;
-  --on-accent: #0c0c0c;
-  --success: #4ade80;
-  --success-soft: #4ade801a;
-  --warning: #fbbf24;
-  --warning-soft: #fbbf241a;
-  --danger: #f87171;
-  --danger-soft: #f871711f;
-  --shadow: 0 1px 2px #0008;
-  --shadow-raised: 0 12px 32px #000a, 0 2px 6px #0006;
-  --hover: #222;
-  --hover-border: #5a5a5a;
-  --focus-shadow: #ffffff1f;
-  --selection: #3d3d3d;
-  --link: #d4d4d4;
-  --term-bg: #0c0c0c;
-  --term-bg-overlay: #0c0c0ceb;
-  --term-raised: #1a1a1a;
-  --term-panel: #141414;
-  --term-badge: #161616;
-  --term-active: #2e2e2e;
-  --term-line: #1f1f1f;
-  --term-border: #2e2e2e;
-  --term-border-strong: #404040;
-  --term-ink: #e6e6e6;
-  --term-bright: #fafafa;
-  --term-text: #c8c8c8;
-  --term-muted: #8f8f8f;
-  --term-faint: #5e5e5e;
-  --term-accent: #f0f0f0;
-  --term-focus: #a3a3a3;
-  --term-pressed: #3a3a3a;
-  .button.danger {
-    color: #0c0c0c;
-  }
-}
 * {
   box-sizing: border-box;
 }

@@ -1,35 +1,7 @@
-import type { SessionFile } from '../../shared/sessionFiles'
-import type { TerminalFileReader } from '../../shared/terminalFiles'
 import type { CloseReason } from '../../shared/protocol'
 
 export type TerminalState =
   | { kind: 'connecting' }
-  | { kind: 'connected'; route?: 'direct' | 'relay' }
+  | { kind: 'connected'; route: 'direct' | 'relay' }
   | { kind: 'reconnecting'; attempt: number; message: string }
   | { kind: 'closed'; reason: CloseReason; message: string }
-
-/** The terminal screen owns presentation; a connection owns delivery and lifecycle. */
-export interface TerminalConnection {
-  readonly connected: boolean
-  readonly readFile?: TerminalFileReader
-  readonly listFiles?: (signal: AbortSignal) => Promise<SessionFile[]>
-  readonly removeFile?: (file: string, signal: AbortSignal) => Promise<void>
-  open(): void
-  reconnect(): void
-  close(): void
-  fail(message: string): void
-  input(data: string | Uint8Array<ArrayBuffer>): boolean
-  resize(cols: number, rows: number): void
-  setActive?(active: boolean): void
-  submit(data: string): Promise<void>
-  clear(): Promise<void>
-  pasteImage(file: File): Promise<string>
-  resume?(): void
-  networkChanged?(online: boolean): void
-  activate?(token: string): Promise<void>
-  acknowledge?(completionId: string): Promise<void>
-  /** The message box has text; messages from other sessions wait while it does. */
-  draft?(active: boolean): void
-  /** Type the next waiting message in once the agent is idle. */
-  deliverNow?(): void
-}

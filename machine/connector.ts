@@ -7,12 +7,12 @@ import { setTimeout as delay } from 'node:timers/promises'
 import WebSocket from 'ws'
 import { desktopOrigin } from '../shared/desktopAuth'
 import {
-  pinRelaySocket,
+  validNodeSocket,
+  validRelayIdentity,
   installation,
   installationLock,
   requireUnpaired,
   writeInstallation,
-  loadInstalled,
   watchInstallation,
   runtimeLock,
   validateDirect,
@@ -52,12 +52,7 @@ export async function pairTarget(address: string) {
     })
     if (!res.ok) throw new Error('Pairing failed. Generate a new code on the Outpost server.')
     const pair = (await res.json()) as RelayInstall
-    if (
-      typeof pair.credential !== 'string' ||
-      typeof pair.targetId !== 'string' ||
-      !pair.credential.startsWith(pair.targetId + '.')
-    )
-      throw new Error('Invalid pairing reply.')
+    if (!validRelayIdentity(pair)) throw new Error('Invalid pairing reply.')
     writeInstallation({
       mode: 'relay',
       origin,
@@ -102,20 +97,11 @@ function connectOnce(pair: RelayInstall, signal: AbortSignal): Promise<boolean> 
         } catch {
           return ws.close(1002)
         }
-        if (typeof socket !== 'string' || !/^run\/node-[a-f0-9]{32}\.sock$/.test(socket)) return ws.close(1002)
+        if (!validNodeSocket(socket) || socket !== pair.socket) return ws.close(1008, 'Incorrect node identity')
         // In a compiled release argv[0] is outpost-terminal; in development it is Bun.
         const args = process.argv[1]?.endsWith('/main.ts')
           ? [process.argv[1], 'node', '--socket', socket]
           : ['node', '--socket', socket]
-        if (!pair.socket) {
-          // Migrate a legacy relay credential only after the enrolled server authenticates.
-          void pinRelaySocket(pair, socket).then(
-            () => ws.close(),
-            () => ws.terminate(),
-          )
-          return
-        }
-        if (socket !== pair.socket) return ws.close(1008, 'Incorrect node identity')
         node = spawn(process.execPath, args, {
           env: { ...process.env, OUTPOST_PAIR_ORIGIN: pair.origin },
           stdio: ['pipe', 'pipe', 'inherit'],
@@ -151,7 +137,7 @@ function connectOnce(pair: RelayInstall, signal: AbortSignal): Promise<boolean> 
   })
 }
 export async function runConnector() {
-  const initial = await loadInstalled()
+  const initial = installation()
   if (!initial || (initial.mode !== 'relay' && initial.mode !== 'direct')) throw Error('Pair this machine first.')
   return runtimeLock(async () => {
     const pair = installation()

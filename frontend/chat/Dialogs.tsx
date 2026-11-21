@@ -552,9 +552,8 @@ export function ScheduleDialog({
   )
 }
 
-/** The browser's terminal chooser (web terminal or Outpost Desktop). It needs the
- * browser login, so Outpost Desktop's chat window uses its bridge instead. */
-function BrowserTerminalDialog({ target, onClose }: { target: SessionRef; onClose: () => void }) {
+export function TerminalDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
+  const target = plainRef(selected)
   const { client } = useChat()
   const session = client.session(target)
   const connector = useConnect({ id: target.targetId, name: session?.target ?? '' }, onClose)
@@ -576,23 +575,6 @@ function BrowserTerminalDialog({ target, onClose }: { target: SessionRef; onClos
       session={session}
       stop={() => client.call({ type: 'stop', ...target })}
       onOpen={() => connector.connect(session)}
-      onClose={onClose}
-    />
-  )
-}
-
-/** Open a session in a terminal; one that runs in chat stops there first. */
-export function TerminalDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
-  const { bridge, client } = useChat()
-  const target = plainRef(selected)
-  const session = client.session(target)
-  if (!bridge) return <BrowserTerminalDialog target={target} onClose={onClose} />
-  if (!session) return null
-  return (
-    <MoveToTerminal
-      session={session}
-      stop={() => client.call({ type: 'stop', ...target })}
-      onOpen={() => bridge.openTerminal(target.targetId, target.sessionId).then(onClose)}
       onClose={onClose}
     />
   )
@@ -678,22 +660,9 @@ export function FindChatDialog({ query, onClose }: { query: string; onClose: () 
   )
 }
 
-/** A machine's page in Machines; Outpost Desktop's chat window opens it in the browser. */
 export function MachineLink({ targetId, children }: { targetId?: string; children: React.ReactNode }) {
-  const { bridge } = useChat()
   const href = targetId
     ? `${pagePaths.workspace}?target=${encodeURIComponent(targetId)}`
     : `${pagePaths.workspace}?add=1`
-  return (
-    <a
-      href={href}
-      onClick={event => {
-        if (!bridge) return
-        event.preventDefault()
-        bridge.openLink(new URL(href, window.location.origin).href)
-      }}
-    >
-      {children}
-    </a>
-  )
+  return <a href={href}>{children}</a>
 }

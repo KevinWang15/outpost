@@ -102,6 +102,7 @@ async function fixture(
       tools: ['claude'],
       createdAt: '',
     },
+    machine: { socket: 'run/node-' + '0'.repeat(32) + '.sock' },
     workspace: new Workspace(directory),
     transport: { label: command.label, login: () => command, management: () => command },
   } as unknown as TargetContext

@@ -6,8 +6,8 @@ import type { DesktopAccess } from '../desktop-access'
 import { RateLimit } from '../rate-limit'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
-import type { SessionCreationRequest } from '../../shared/sessionCreator'
-import { directoryQuery, desktopSessionCreationInput } from '../../shared/schemas'
+import type { SessionCreationRequest } from '../../shared/model'
+import { desktopSessionCreationInput } from '../../shared/schemas'
 import { sessionCreationOptions } from '../../shared/sessionCreation'
 import { createSession, desktopSession, inspectTargetSoftware } from '../session-actions'
 
@@ -89,18 +89,6 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
       const report = await inspectTargetSoftware(services, context, signal)
       return sessionCreationOptions(context.target, report.software)
     }),
-  )
-  app.get<{ Params: TargetParams; Querystring: { path: string } }>(
-    '/api/desktop/targets/:targetId/directories',
-    { schema: { querystring: directoryQuery } },
-    async (request, reply) =>
-      withRequestSignal(reply, async signal => {
-        const owner = access.authorize(request)
-        const context = await services.resolve(owner, request.params.targetId)
-        const result = await sessions.directories(context, request.query.path, signal)
-        if (!access.active(owner)) throw new AppError('App sign-in expired.', 401)
-        return result
-      }),
   )
   app.post<{ Params: TargetParams; Body: SessionCreationRequest }>(
     '/api/desktop/targets/:targetId/sessions',

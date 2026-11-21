@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pastedImage } from '../terminal-fixture'
 import { test, expect, viewport, fitsScreen } from './helpers'
 import type { Session, Target } from '../../../shared/model'
 
@@ -87,6 +88,8 @@ test('create and connect on a phone, send to the real process, resize, and resum
   expect(await terminal.evaluate(() => window.opener)).toBeNull()
   expect(new URL(terminal.url()).searchParams.has('token')).toBe(false)
   const field = terminal.getByLabel('Message to the session')
+  const screen = terminal.locator('.xterm-screen')
+  const imageGeometry = await screen.boundingBox()
   const message = 'Mobile real input 你好 📱\nSecond line'
   await field.fill(message)
   await terminal.getByRole('button', { name: 'Send', exact: true }).tap()
@@ -94,22 +97,21 @@ test('create and connect on a phone, send to the real process, resize, and resum
   const input = () => readFile(join(session.rootDir, 'input.bin'), 'utf8').catch(() => '')
   await expect.poll(input).toContain(message.replace('\n', '\r'))
   expect((await input()).split(message.replace('\n', '\r'))).toHaveLength(2)
-  const imageGeometry = await terminal.locator('.xterm-screen').boundingBox()
-  const imageResponse = terminal.waitForResponse(response => response.url().endsWith('/api/terminal/image'))
+  // The multiline composer temporarily takes a row from the terminal. Wait for its empty layout.
+  await expect.poll(() => screen.boundingBox()).toEqual(imageGeometry)
   await terminal.locator('input[type=file]').setInputFiles({
     name: 'mobile-image.png',
     mimeType: 'image/png',
     buffer: Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)]),
   })
   await expect(terminal.getByRole('status').filter({ hasText: 'Image pasted' })).toBeVisible()
-  const uploaded = await imageResponse
-  expect(uploaded.status()).toBe(200)
-  const image = await uploaded.json()
-  expect(await readFile(image.path)).toEqual(
+  await expect.poll(async () => pastedImage(await input())).toContain('/.outpost/clipboard/')
+  const path = pastedImage(await input())
+  expect(await readFile(path)).toEqual(
     Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)]),
   )
-  expect(await terminal.locator('.xterm-screen').boundingBox()).toEqual(imageGeometry)
-  await expect.poll(input).toContain(`\x1b[200~${image.reference}\x1b[201~`)
+  expect(await screen.boundingBox()).toEqual(imageGeometry)
+  await expect.poll(input).toContain(`\x1b[200~${path}\x1b[201~`)
   expect((await input()).endsWith('\x1b[201~')).toBe(true)
   await expect.poll(input).toContain(`/.outpost/clipboard/${session.id}/`)
   const starts = await readFile(join(session.rootDir, 'starts.log'), 'utf8')

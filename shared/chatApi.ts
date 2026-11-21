@@ -8,7 +8,7 @@ import type { Session } from './model'
 import { conversationSearch, sessionForkInput, sessionInput, sessionUpdate } from './schemas'
 import type { SessionFile } from './sessionFiles'
 
-export const chatProtocol = 2
+export const chatProtocol = 3
 export const chatLimits = {
   text: 32 * 1024,
   members: 24,
@@ -203,8 +203,7 @@ export const chatClientMessage = Type.Union([
   message('schedule-delete', { id, scheduleId: uuid }),
   message('schedule-run', { id, scheduleId: uuid }),
   message('refresh', { id }),
-  // Session creation through the chat socket, so Outpost Desktop's chat window
-  // needs no browser login.
+  // Session management uses the authenticated chat connection.
   message('session-options', { id, targetId }),
   message('directories', {
     id,

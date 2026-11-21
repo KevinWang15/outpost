@@ -1,6 +1,7 @@
 // Webhooks: an account's subscriptions to its activity log. Each one receives
 // matching events as a POST with Outpost's JSON body and the owner's headers,
 // one request at a time, retried on network errors, 429 and 5xx.
+import { setTimeout as delay } from 'node:timers/promises'
 import { randomUUID } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { request as httpRequest, type RequestOptions } from 'node:http'
@@ -38,7 +39,6 @@ const maxWebhooks = 20
 const queueLimit = 200
 const timeoutMs = 10_000
 const levelRank = (level: LogEvent['level']) => logLevels.indexOf(level)
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms).unref())
 
 /** Addresses a hosted server must not be made to call: its own network. */
 function internal(address: string) {
@@ -65,7 +65,7 @@ export class Webhooks {
   private accounts = new Map<string, Promise<Account>>()
   private queues = new Map<string, Job[]>()
   private running = new Set<string>()
-  private closed = false
+  private shutdown = new AbortController()
   /** A webhook started failing, or delivers again; logged as events of their
    * own, never sent to that webhook. Only changes are reported, so a receiver
    * that stays down is one warning, not one per event. */
@@ -191,15 +191,16 @@ export class Webhooks {
   async test(owner: Owner, id: string, event: LogEvent) {
     const { account, webhook } = await this.find(owner, id)
     webhook.lastDelivery = await this.post(webhook, event)
-    await this.save(owner, account)
+    if (!this.shutdown.signal.aborted) await this.save(owner, account)
     return webhook.lastDelivery
   }
 
   /** Queue the event for every enabled webhook that subscribes to it. */
   publish(owner: Owner, event: LogEvent, except: string | null = null) {
-    if (this.closed) return
+    if (this.shutdown.signal.aborted) return
     void this.account(owner).then(
       account => {
+        if (this.shutdown.signal.aborted) return
         for (const webhook of account.webhooks) {
           if (!webhook.enabled || webhook.id === except) continue
           if (webhook.kinds.length && !webhook.kinds.includes(event.kind)) continue
@@ -220,24 +221,29 @@ export class Webhooks {
     if (this.running.has(id)) return
     this.running.add(id)
     try {
-      for (let job = this.queues.get(id)?.shift(); job && !this.closed; job = this.queues.get(id)?.shift()) {
+      for (
+        let job = this.queues.get(id)?.shift();
+        job && !this.shutdown.signal.aborted;
+        job = this.queues.get(id)?.shift()
+      ) {
         let delivery = await this.post(job.webhook, job.event)
-        for (const delay of this.retryMs) {
+        for (const ms of this.retryMs) {
           if (
             delivery.ok ||
-            this.closed ||
+            this.shutdown.signal.aborted ||
             (delivery.status !== null && delivery.status !== 429 && delivery.status < 500)
           )
             break
-          await sleep(delay)
+          await delay(ms, undefined, { ref: false, signal: this.shutdown.signal }).catch(() => {})
+          if (this.shutdown.signal.aborted) return
           delivery = await this.post(job.webhook, job.event)
         }
         const account = await this.account(job.owner)
-        if (!account.webhooks.includes(job.webhook)) continue
+        if (this.shutdown.signal.aborted || !account.webhooks.includes(job.webhook)) continue
         const failing = job.webhook.lastDelivery?.ok === false
         job.webhook.lastDelivery = delivery
         await this.save(job.owner, account).catch(() => {})
-        if (failing !== !delivery.ok) this.changed(job.owner, job.webhook, delivery)
+        if (!this.shutdown.signal.aborted && failing !== !delivery.ok) this.changed(job.owner, job.webhook, delivery)
       }
     } finally {
       this.running.delete(id)
@@ -265,6 +271,7 @@ export class Webhooks {
           'user-agent': 'Outpost',
         },
         timeout: timeoutMs,
+        signal: this.shutdown.signal,
         lookup: (_hostname, _options, callback) => callback(null, resolved.address, resolved.family),
       }
       const status = await new Promise<number>((resolve, reject) => {
@@ -285,8 +292,9 @@ export class Webhooks {
     }
   }
 
-  close() {
-    this.closed = true
+  async close() {
+    this.shutdown.abort()
     this.queues.clear()
+    await Promise.allSettled([...this.accounts.values()].map(async account => (await account).saving))
   }
 }

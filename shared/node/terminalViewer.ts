@@ -194,7 +194,7 @@ export class Connection<Identity> {
       this.pending = []
       this.pendingBytes = 0
       for (const frame of pending) this.write(frame)
-      this.send({ type: 'ready', ...(message.sessionTransfers === true && { sessionTransfers: true }) })
+      this.send({ type: 'ready' })
       this.broker.logged(this, 'opened')
       this.checkTarget()
     } else if (message.type === 'deliveries') {

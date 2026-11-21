@@ -11,7 +11,7 @@ const launchLifetime = 5 * 60_000
 const resumeLifetime = 30 * 24 * 60 * 60_000
 
 /** Launch tokens start one connection (short-lived and single use). Resume tokens are returned over the WebSocket and used
- * for reconnection and image uploads, never in launcher links. Both are bound to
+ * for reconnection, never in launcher links. Both are bound to
  * one owner, target and session. */
 export class ConnectTokens {
   private signer: Signer
@@ -72,11 +72,6 @@ export class ConnectTokens {
         sessionId: payload.s,
       },
     }
-  }
-  /** Authorize ancillary requests without accepting or consuming launch tickets. */
-  authorize(token: string): Grant | null {
-    const verified = this.verify(token)
-    return verified?.kind === 'resume' ? verified.grant : null
   }
   /** Verify a token; a launch token is consumed. */
   redeem(token: string, expectedGrant?: Grant) {

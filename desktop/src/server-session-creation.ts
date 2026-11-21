@@ -3,21 +3,20 @@ import {
   validDesktopId,
   validDesktopSession,
   type DesktopSessionChoice,
+  type DesktopAccount,
 } from '../../shared/desktopAuth'
-import type { DirectorySuggestions, SessionInput } from '../../shared/model'
+import type { SessionInput } from '../../shared/model'
 import { harnessIds, supportsTerminal } from '../../shared/harnesses'
 import { softwareIds } from '../../shared/schemas'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
-import type { SessionCreatorServerSummary } from '../../shared/sessionCreator'
 import { parseServerTargets } from './server-targets'
 import { ServerApiError } from './server-api'
 
 type Request = (path: string, options?: { signal?: AbortSignal; body?: unknown }) => Promise<unknown>
-const text = (value: unknown, limit: number): value is string => typeof value === 'string' && value.length <= limit
 
 /** A creation capability bound to one saved login. ServerAccounts rechecks that
  * login before and after every request; the dialog never selects a credential. */
-export function sessionCreationServer(summary: SessionCreatorServerSummary, request: Request) {
+export function sessionCreationServer(summary: { origin: string; account: DesktopAccount }, request: Request) {
   const path = (targetId: string) => {
     if (!validDesktopId(targetId)) throw new Error('Choose a machine.')
     return `/targets/${encodeURIComponent(targetId)}`
@@ -40,20 +39,6 @@ export function sessionCreationServer(summary: SessionCreatorServerSummary, requ
       )
         throw new Error('Invalid session creation options.')
       return { tools: result.tools.filter(supportsTerminal), missing: result.missing }
-    },
-    async directories(targetId: string, value: string, signal: AbortSignal): Promise<DirectorySuggestions> {
-      const result = (await request(`${path(targetId)}/directories?path=${encodeURIComponent(value)}`, {
-        signal,
-      })) as DirectorySuggestions
-      if (
-        !result ||
-        !Array.isArray(result.directories) ||
-        result.directories.length > 50 ||
-        !result.directories.every(item => text(item, 4096)) ||
-        typeof result.truncated !== 'boolean'
-      )
-        throw new Error('Invalid directory suggestions.')
-      return { directories: result.directories, truncated: result.truncated }
     },
     async create(targetId: string, input: SessionInput, requestId: string): Promise<DesktopSessionChoice> {
       try {
@@ -82,4 +67,3 @@ export function sessionCreationServer(summary: SessionCreatorServerSummary, requ
     },
   }
 }
-export type SessionCreationServer = ReturnType<typeof sessionCreationServer>

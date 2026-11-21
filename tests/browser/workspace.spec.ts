@@ -1,6 +1,6 @@
 import type { Target, Session } from '../../shared/model'
 import { expect, test, type Page } from '@playwright/test'
-import { desktopTerminal, appConnection } from './terminal-fixture'
+import { appConnection } from './terminal-fixture'
 
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)])
 
@@ -73,7 +73,7 @@ test('add a machine, create a session, and work in the web terminal', async ({ p
   await expect(row).toContainText('Not running')
 })
 
-test('Outpost Desktop hands off a session reference and uses app-owned access', async ({ page, context }) => {
+test('Outpost Desktop hands off a session reference and uses app-owned access', async ({ page }) => {
   await addMachine(page, 'Desktop app box')
   await createSession(page, 'Desktop app session', '~/desktop-app-project')
   await page
@@ -96,12 +96,9 @@ test('Outpost Desktop hands off a session reference and uses app-owned access', 
     sessions: Session[]
   }
   const session = sessions.find(item => item.name === 'Desktop app session')!
-  const app = await context.newPage()
-  const launch = await appConnection(app.request, target.id, session.id)
-  await desktopTerminal(app, launch.token)
-  await app.goto('/terminal/desktop')
-  await expect(app.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
-  await app.close()
+  const launch = await appConnection(page.request, target.id, session.id)
+  expect(launch.token).toBeTruthy()
+  expect(launch.sessionId).toBe(session.id)
 })
 
 test('phones get on-screen keys and a message box', async ({ browser }) => {

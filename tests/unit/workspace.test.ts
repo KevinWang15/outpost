@@ -24,7 +24,8 @@ test('workspace stores targets atomically with a strict schema', async t => {
   const workspace = new Workspace(directory)
   const added = await workspace.add(target())
   await assert.rejects(workspace.add(target({ name: 'DEV' })), /name already exists/)
-  await assert.rejects(workspace.add({ ...target(), extra: true } as Target), /Invalid machine/)
+  const invalid = { ...target(), extra: true }
+  await assert.rejects(workspace.add(invalid), /Invalid machine/)
   assert.deepEqual((await workspace.edit(added.id, { tools: ['codex', 'kimi'] })).tools, ['codex', 'kimi'])
   await assert.rejects(workspace.edit(added.id, { tools: [] }), /Invalid machine/)
   await workspace.setEnvironment(added.id, { home: '/root', username: 'root', uid: 0, shell: '/bin/bash' })

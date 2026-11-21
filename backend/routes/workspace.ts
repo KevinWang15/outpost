@@ -96,6 +96,8 @@ export function workspaceRoutes(app: FastifyInstance, services: Services, forget
     '/api/targets/:targetId/software/:softwareId/script',
     async request => {
       const { target, machine } = await services.context(request, request.params.targetId)
+      if (target.kind === 'paired' || target.kind === 'direct')
+        throw new AppError('Install software locally on this machine.', 409)
       if (!requiredSoftware(target).includes(request.params.softwareId))
         throw new AppError('This machine does not need this software.', 400)
       return planInstallation(request.params.softwareId, machine.socket)

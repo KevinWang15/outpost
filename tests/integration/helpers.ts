@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,7 @@ import type { Target } from '../../shared/model'
 import type { ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
 import { quote } from '../../shared/shell'
+import { terminalFileChunk } from '../../shared/terminalFiles'
 import { stopDriver } from '../../machine/drivers'
 import { state } from '../../machine/state'
 import headless from '@xterm/headless'
@@ -20,6 +22,12 @@ import { transportFor } from '../../backend/transport'
 export const terminalBinary = fileURLToPath(
   new URL(`../../machine/test-dist/outpost-terminal-linux-${process.arch}-glibc`, import.meta.url),
 )
+
+export function provisionMachine(home: string, socket: string) {
+  execFileSync(join(home, '.outpost/bin/outpost-terminal'), ['pair', '--managed', socket], {
+    env: { ...process.env, HOME: home },
+  })
+}
 
 export const fixtures = fileURLToPath(new URL('../fixtures/', import.meta.url))
 
@@ -74,6 +82,7 @@ export async function localMachine(t: TestContext, prefix: string, settings: Tar
     machine: machines.get(owner, settings.id, transport),
     workspace: null,
   } as unknown as TargetContext
+  provisionMachine(home, context.machine.socket)
   const streams: Stream[] = []
   t.after(async () => {
     for (const stream of streams) stream.end()
@@ -188,6 +197,26 @@ export class TerminalClient {
   }
   send(message: unknown) {
     this.socket.send(JSON.stringify(message))
+  }
+  async uploadImage(data: Buffer) {
+    const transfer = crypto.randomUUID()
+    for (let offset = 0; offset < data.length; offset += terminalFileChunk) {
+      const id = crypto.randomUUID()
+      this.send({
+        type: 'image-write',
+        id,
+        transfer,
+        mime: 'image/png',
+        size: data.length,
+        offset,
+        chunk: data.subarray(offset, offset + terminalFileChunk).toString('base64'),
+      })
+      const result = await this.take('result')
+      assert.equal(result.id, id)
+      assert.ok(result.ok, result.message ?? 'Image transfer failed')
+      if (result.reference) return result.reference
+    }
+    throw new Error('Missing image reference.')
   }
   input(data: string) {
     this.socket.send(Buffer.from(data))

@@ -50,6 +50,7 @@ are tested in `tests/unit/contracts.test.ts`; extend it when you add one.
 
 ```sh
 npm run check             # lint (incl. ruff), typecheck, build, unit and machine tests
+npm run build:terminal -- --fixtures  # isolated machine binary for integration and browser tests
 npm run test:integration  # persistent PTYs; the SSH test also needs Docker
 npx playwright install chromium
 npm run test:ui           # browser tests against a real local backend
@@ -90,7 +91,8 @@ publishing a new release.
 
 For a self-hosted release, `OUTPOST_TERMINAL_RELEASE_BASE` can point to an HTTPS directory containing the four version-matched Linux executables and their `SHA256SUMS`. The installer checks the downloaded binary’s checksum and protocol version. For a bundled Apple silicon installer, set `VITE_OUTPOST_MAC_ARM64_INSTALLER` at web build time to its public download path.
 
-Run `npm run build:terminal` before machine, integration and browser tests. Use
+Build the machine binary with `npm run build:terminal`. Integration and browser tests use
+`npm run build:terminal -- --fixtures` so each simulated machine has its own installation directory. Use
 `npm run build:terminal -- arm64-glibc` (or `x64-musl`, `arm64-musl`) for other
 targets. The build pins Bun; the resulting executable embeds its runtime.
 

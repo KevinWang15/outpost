@@ -1,5 +1,6 @@
 // The activity log end to end: what a machine's drivers record reaches the
 // account's log through the node, with Outpost's own events around it.
+import { managedSocket } from '../../backend/machines'
 import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -9,16 +10,17 @@ import type { Session, Target } from '../../shared/model'
 import type { TerminalTicket } from '../../shared/protocol'
 import { createApp } from '../../backend/app'
 import { LocalDeployment } from '../../backend/deployment'
-import { api, fixtureHome, removeHome, TerminalClient } from './helpers'
+import { api, provisionMachine, fixtureHome, removeHome, TerminalClient } from './helpers'
 
 test(
   'a terminal session’s start, turn and stop reach the log from its machine',
   { timeout: 120_000, skip: process.platform !== 'linux' },
   async t => {
     const { directory, home, env } = await fixtureHome('outpost-logs-')
+    const deployment = await LocalDeployment.open(join(directory, 'data'))
     const app = await createApp({
       history: false,
-      deployment: await LocalDeployment.open(join(directory, 'data')),
+      deployment,
       env,
       multiplex: false,
     })
@@ -52,6 +54,7 @@ test(
       { kind: 'local', name: 'Workstation', tools: ['claude'] },
       201,
     )
+    provisionMachine(home, managedSocket(deployment.secret, deployment.owner(), target.id))
     await request('GET', `/targets/${target.id}/software`)
     const session = await request<Session>(
       'POST',

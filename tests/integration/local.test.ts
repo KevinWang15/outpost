@@ -1,3 +1,4 @@
+import { managedSocket } from '../../backend/machines'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -8,7 +9,7 @@ import type { Session, SoftwareReport, Target } from '../../shared/model'
 import type { TerminalTicket } from '../../shared/protocol'
 import { createApp } from '../../backend/app'
 import { LocalDeployment } from '../../backend/deployment'
-import { api, fixtureHome, removeHome, TerminalClient } from './helpers'
+import { api, provisionMachine, fixtureHome, removeHome, TerminalClient } from './helpers'
 
 const execute = promisify(execFile)
 /** An Outpost server on loopback whose local target is a fixture home. */
@@ -24,7 +25,8 @@ async function localApp(t: TestContext) {
     await app.close()
     await removeHome(directory, home)
   })
-  return { home, env, port, request: api(`http://127.0.0.1:${port}`), clients }
+  const provision = (id: string) => provisionMachine(home, managedSocket(deployment.secret, deployment.owner(), id))
+  return { provision, home, env, port, request: api(`http://127.0.0.1:${port}`), clients }
 }
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)])
 
@@ -32,7 +34,7 @@ test(
   'local target: create, connect from a web client, paste, signal, reconnect, detach, terminate',
   { timeout: 120_000, skip: process.platform !== 'linux' },
   async t => {
-    const { home, env, port, request, clients } = await localApp(t)
+    const { provision, home, env, port, request, clients } = await localApp(t)
 
     const target = await request<Target>(
       'POST',
@@ -40,6 +42,7 @@ test(
       { kind: 'local', name: 'This computer', tools: ['claude', 'codex', 'kimi', 'deepseek', 'antigravity'] },
       201,
     )
+    provision(target.id)
     const report = await request<SoftwareReport>('GET', `/targets/${target.id}/software`)
     assert.deepEqual(
       report.software.map(item => [item.id, item.status]),
@@ -122,25 +125,16 @@ test(
     })
 
     await t.test('images are uploaded separately and their reference pasted once', async () => {
-      const headers = { authorization: `Bearer ${hello.resume}`, 'x-outpost-request': '1', 'content-type': 'image/png' }
-      const upload = await fetch(`http://127.0.0.1:${port}/api/terminal/image`, { method: 'POST', headers, body: png })
-      assert.equal(upload.status, 200)
-      const image = (await upload.json()) as { path: string; reference: string }
-      assert.ok(image.path.startsWith(join(home, '.outpost', 'clipboard', session.id)))
-      assert.deepEqual(await readFile(image.path), png)
-      client.send({ type: 'paste', id: 'image-1', data: image.reference })
+      const reference = await client.uploadImage(png)
+      assert.ok(reference.startsWith(join(home, '.outpost', 'clipboard', session.id)))
+      assert.deepEqual(await readFile(reference), png)
+      client.send({ type: 'paste', id: 'image-1', data: reference })
       const result = await client.take('result')
-      assert.equal(result.ok, true, result.message)
+      assert.equal(result.ok, true, result.message ?? 'Request failed')
       await client.until(
-        async () => (await readFile(join(project, 'input.bin'), 'utf8').catch(() => '')).includes(image.reference),
+        async () => (await readFile(join(project, 'input.bin'), 'utf8').catch(() => '')).includes(reference),
         'pasted reference',
       )
-      const empty = await fetch(`http://127.0.0.1:${port}/api/terminal/image`, {
-        method: 'POST',
-        headers,
-        body: Buffer.alloc(0),
-      })
-      assert.equal(empty.status, 400)
     })
 
     await t.test('a full 16 MiB binary upload preserves bytes and does not send input by itself', async () => {
@@ -148,14 +142,8 @@ test(
       png.copy(data)
       data.set([0, 255, 13, 10, 32], data.length - 5)
       const before = await readFile(join(project, 'input.bin'))
-      const upload = await fetch(`http://127.0.0.1:${port}/api/terminal/image`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${hello.resume}`, 'x-outpost-request': '1', 'content-type': 'image/png' },
-        body: data,
-      })
-      assert.equal(upload.status, 200)
-      const image = (await upload.json()) as { path: string }
-      assert.deepEqual(await readFile(image.path), data)
+      const reference = await client.uploadImage(data)
+      assert.deepEqual(await readFile(reference), data)
       assert.deepEqual(await readFile(join(project, 'input.bin')), before)
     })
 
@@ -266,8 +254,9 @@ test(
   'local sessions connect without a prior software check',
   { timeout: 60_000, skip: process.platform !== 'linux' },
   async t => {
-    const { port, request, clients } = await localApp(t)
+    const { provision, port, request, clients } = await localApp(t)
     const target = await request<Target>('POST', '/targets', { kind: 'local', name: 'Fresh', tools: ['codex'] }, 201)
+    provision(target.id)
     assert.equal(target.environment, undefined)
     const session = await request<Session>(
       'POST',

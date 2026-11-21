@@ -9,7 +9,7 @@ import type { Checkpoint } from './terminalState'
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 14
+export const protocolVersion = 15
 export const maxInputMessage = 64 * 1024
 // Interactive input queue. Files use bounded transfer requests on the attachment.
 export const maxInputQueue = 2 * 1024 * 1024
@@ -62,7 +62,7 @@ export type ServerMessage =
       session: { id: string; name: string; tool: HarnessId }
       target: { id: string; name: string }
     }
-  | { type: 'ready'; sessionTransfers?: boolean }
+  | { type: 'ready' }
   | { type: 'restore'; checkpoint: Checkpoint }
   | { type: 'geometry'; cols: number; rows: number }
   | { type: 'clear' }

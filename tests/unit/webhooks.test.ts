@@ -40,7 +40,7 @@ async function setup(t: TestContext, mode: 'local' | 'hosted' = 'local', statuse
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/hook`
   t.after(async () => {
-    webhooks.close()
+    await webhooks.close()
     server.close()
     await rm(directory, { recursive: true, force: true })
   })

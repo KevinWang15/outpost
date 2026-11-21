@@ -4,7 +4,7 @@ Outpost has two ways to work with the same sessions:
 
 - **Machines** (`/`): sessions by machine; each session can open the coding
   tool's own terminal interface in a persistent PTY.
-- **Chat** (`/chat`, and a Chat window in Outpost Desktop): each session is a
+- **Chat** (`/chat` in the browser): each session is a
   conversation with streamed replies, folded steps, inline permission requests
   and the agent's mode and model. Sessions can share **channels**, message each
   other, and run on **schedules**.
@@ -39,7 +39,7 @@ conversation started in one mode continues in the other.
 ## Components
 
 ```text
-browser / Outpost Desktop chat window
+browser (including Chat opened from Outpost Desktop)
         ⇅  one WebSocket per page: /api/chat (session lists, journals, actions)
 Outpost server — ChatHub: links to chat hosts, channels, deliveries, schedules
         ⇅  the machine connection, as for terminals: a chat stream through the node
@@ -57,7 +57,7 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 | Node | `machine/node.ts`, `machine/launch.ts` | Starts the host, enforces one driver, connects chat streams to it |
 | Harness adapters | `chat`, `chatResumable`, `chatServers` in `machine/harnesses/` | How each tool serves ACP |
 | Server | `backend/chat/` | Links, hub (routing), store, socket, tokens |
-| Web app | `frontend/chat/` | The chat UI, also loaded by Outpost Desktop |
+| Web app | `frontend/chat/` | The browser chat UI |
 | Desktop | `desktop/native/workspace.rs` | Opens the selected server’s Chat page in the system browser |
 
 ## Coding tools over ACP
@@ -193,8 +193,7 @@ messages.
 (`~/.outpost/files/<session>`, at most 100 files and 256 MiB, 32 MiB each);
 files stay until removed. The session header's Files panel lists all of them.
 Pages read files over HTTP with their chat grant
-(`/api/chat/files/:target/:session`); Outpost Desktop saves them through its
-save dialog.
+(`/api/chat/files/:target/:session`).
 
 - *From the agent.* It shares a file with Outpost's `publish_file` MCP tool (or
   `outpost publish FILE`), as in terminal mode. Publishing also tells the
@@ -225,7 +224,7 @@ most once per matching minute while the server runs. A schedule's prompt runs in
 its session's own chat.
 
 **Authorization.** Browser pages use their login cookie; the socket is subject
-to the same origin checks as every route. The GPUI workspace opens the server’s Chat page in that browser. Existing V3 desktop clients can still exchange their app login for a single-use chat ticket.
+to the same origin checks as every route. The GPUI workspace opens the server’s Chat page in that browser.
 Uploads are buffered (at most two at a time per account) before they are stored.
 
 ## Limits and known gaps

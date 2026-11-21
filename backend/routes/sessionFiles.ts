@@ -1,10 +1,9 @@
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyReply } from 'fastify'
 import { sessionFileId, type SessionFile } from '../../shared/sessionFiles'
 import type { Owner } from '../deployment'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
-import { terminalGrant } from '../terminal/authorization'
 
 /** A stored file's bytes as a download, never rendered by the browser. */
 export const sendAttachment = (reply: FastifyReply, file: SessionFile, bytes: Buffer) =>
@@ -50,28 +49,4 @@ export function sessionFileDownloads(services: Services) {
         throw error
       }
     })
-}
-
-export function sessionFileRoutes(app: FastifyInstance, services: Services, download: SessionFileDownload) {
-  const files = services.files
-  app.get('/api/terminal/files', (request, reply) =>
-    withRequestSignal(reply, async signal => {
-      const grant = terminalGrant(services, request)
-      reply.header('Cache-Control', 'no-store')
-      const result = await files.list(await services.resolve(grant.owner, grant.targetId), grant.sessionId, signal)
-      if (!services.active(grant.owner)) throw new AppError('Sign-in ended. Connect again.', 401)
-      return result
-    }),
-  )
-  app.get<{ Params: { fileId: string } }>('/api/terminal/files/:fileId', (request, reply) => {
-    const grant = terminalGrant(services, request)
-    return download(reply, grant.owner, grant.targetId, grant.sessionId, request.params.fileId)
-  })
-  app.delete<{ Params: { fileId: string } }>('/api/terminal/files/:fileId', async (request, reply) => {
-    const grant = terminalGrant(services, request)
-    if (!sessionFileId(request.params.fileId)) throw new AppError('Invalid session file ID.')
-    await files.remove(await services.resolve(grant.owner, grant.targetId), grant.sessionId, request.params.fileId)
-    services.broker.filesChanged(grant)
-    return reply.send({ ok: true })
-  })
 }

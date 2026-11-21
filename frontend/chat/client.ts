@@ -1,5 +1,6 @@
 // The chat page's connection and state: one WebSocket to /api/chat, the session
 // list across targets, one journal per open session, and channel messages.
+import { fileRequest, listSessionFiles, sessionFileBlob } from './fileRequests'
 import {
   chatProtocol,
   sessionKey,
@@ -77,11 +78,8 @@ export class ChatClient {
   private retry: ReturnType<typeof setTimeout> | null = null
   private attempts = 0
   /** Changes on every connect/dispose; late callbacks of an older one are ignored. */
-  private epoch = 0
   private disposed = false
   private sessionFiles = new Map<string, SessionFiles>()
-
-  constructor(private ticket: (() => Promise<string>) | null) {}
 
   /** A session's files, read with this page's chat grant. One per session, so
    * its panel, cards and channel messages share thumbnails. */
@@ -100,7 +98,14 @@ export class ChatClient {
   private fileAccess(key: string, base: string) {
     let files = this.sessionFiles.get(key)
     if (!files) {
-      files = new SessionFiles(() => ({ origin: '', token: this.token, base }))
+      const auth = () => ({ token: this.token, base })
+      files = new SessionFiles({
+        readFile: (file, signal) => sessionFileBlob(auth(), file, signal),
+        listFiles: signal => listSessionFiles(auth(), signal),
+        removeFile: async (id, signal) => {
+          await fileRequest(auth(), '/' + id, signal, 'DELETE')
+        },
+      })
       this.sessionFiles.set(key, files)
     }
     return files
@@ -149,19 +154,10 @@ export class ChatClient {
 
   async connect() {
     this.disposed = false
-    const epoch = ++this.epoch
     this.status = 'connecting'
     this.changed()
-    let query = `protocol=${chatProtocol}`
-    try {
-      if (this.ticket) query += `&ticket=${encodeURIComponent(await this.ticket())}`
-    } catch (error) {
-      if (epoch === this.epoch) this.lost((error as Error).message || 'Could not sign in to the server.')
-      return
-    }
-    if (epoch !== this.epoch) return
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
-    const socket = new WebSocket(`${scheme}://${location.host}/api/chat?${query}`)
+    const socket = new WebSocket(`${scheme}://${location.host}/api/chat?protocol=${chatProtocol}`)
     this.socket = socket
     socket.onmessage = event => {
       if (this.socket !== socket) return
@@ -189,7 +185,7 @@ export class ChatClient {
     for (const conversation of this.conversations.values()) conversation.link = 'starting'
     this.changed()
     if (this.disposed || message === 'Outpost was updated. Reload this page.') return
-    if (message === 'Sign in to continue.' && !this.ticket) {
+    if (message === 'Sign in to continue.') {
       window.dispatchEvent(new Event('outpost:unauthorized'))
       return
     }
@@ -208,7 +204,6 @@ export class ChatClient {
   /** Close the connection; connect() may start it again (React remounts effects). */
   dispose() {
     this.disposed = true
-    this.epoch++
     if (this.retry) clearTimeout(this.retry)
     this.retry = null
     const socket = this.socket

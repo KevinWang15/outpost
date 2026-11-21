@@ -14,7 +14,7 @@ export const uuid = '12345678-1234-4123-8123-123456789012'
 
 /** Point the machine modules at a fresh state directory below a fresh home. */
 export function machine(t: TestContext) {
-  const home = realpathSync(mkdtempSync(join(tmpdir(), 'outpost-machine-')))
+  const home = realpathSync(mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'outpost-machine-')))
   const previous = state.directory
   state.directory = join(home, '.outpost')
   t.after(() => {

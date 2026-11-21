@@ -3,12 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": [
-    "tests/browser",
-    "desktop/tests/*.ts",
-    "tests/unit/desktop-*.test.ts",
-    "tests/unit/activity.test.ts",
-    "tests/machine",
-    "shared"
-  ]
+  "include": ["tests", "desktop/tests/*.ts", "shared"]
 }

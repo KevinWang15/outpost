@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MessagesSquare, Plus } from 'lucide-react'
 import { sessionKey } from '../../shared/chatApi'
-import type { ChatBridge } from '../../shared/chatBridge'
 import ChannelView from './ChannelView'
 import { ChatClient } from './client'
 import {
@@ -170,28 +169,24 @@ function Shell() {
   )
 }
 
-/** The chat app: browser pages use their login; Outpost Desktop passes a bridge. */
-export default function ChatApp({ bridge = null }: { bridge?: ChatBridge | null }) {
-  const client = useMemo(() => new ChatClient(bridge ? async () => (await bridge.ticket()).ticket : null), [bridge])
+export default function ChatApp() {
+  const client = useMemo(() => new ChatClient(), [])
   useEffect(() => {
     void client.connect()
     const wake = () => document.visibilityState === 'visible' && client.wake()
     document.addEventListener('visibilitychange', wake)
     window.addEventListener('online', wake)
     window.addEventListener('focus', wake)
-    if (!bridge) rememberMode('chat')
+    rememberMode('chat')
     return () => {
       document.removeEventListener('visibilitychange', wake)
       window.removeEventListener('online', wake)
       window.removeEventListener('focus', wake)
       client.dispose()
     }
-  }, [client, bridge])
-  const openLink = useCallback(
-    (url: string) => (bridge ? bridge.openLink(url) : void window.open(url, '_blank', 'noopener,noreferrer')),
-    [bridge],
-  )
-  const app = useMemo<App>(() => ({ client, bridge, openLink }), [client, bridge, openLink])
+  }, [client])
+  const openLink = useCallback((url: string) => void window.open(url, '_blank', 'noopener,noreferrer'), [])
+  const app = useMemo<App>(() => ({ client, openLink }), [client, openLink])
   return (
     <ChatAppContext.Provider value={app}>
       <MarkdownContext.Provider value={{ handles: [], openLink }}>

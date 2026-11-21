@@ -7,6 +7,7 @@ import { createWebSocketStream } from 'ws'
 import type { Services } from './services'
 import type { Owner } from './deployment'
 import { AppError } from './errors'
+import { managedSocket } from './machines'
 
 const digest = (s: string) => createHash('sha256').update(s).digest('hex')
 const credential = () => randomBytes(32).toString('base64url')
@@ -74,8 +75,11 @@ export function pairedRoutes(app: FastifyInstance, services: Services) {
       )
       renameSync(path + '.new', path)
       services.machines.forget(item.owner, item.targetId)
-      const { machine } = await services.resolve(item.owner, item.targetId)
-      return { targetId: item.targetId, socket: machine.socket, credential: item.targetId + '.' + secret }
+      return {
+        targetId: item.targetId,
+        socket: managedSocket(services.deployment.secret, item.owner, item.targetId),
+        credential: item.targetId + '.' + secret,
+      }
     },
   )
   app.post('/api/paired/revoke', async (req, reply) => {

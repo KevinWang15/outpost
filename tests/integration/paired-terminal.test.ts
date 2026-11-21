@@ -1,8 +1,8 @@
+// Production client, broker, outbound node and a real PTY. Run on Linux with
+// the built target binary, or set TEST_BUN to a Bun executable for source mode.
 import { serverRequest } from '../../desktop/src/server-api'
 import { parseDesktopLoginCallback } from '../../shared/desktopAuth'
 import { directResponse } from '../../shared/directOnly'
-// Production client, broker, outbound node and a real PTY. Run on Linux with
-// the built target binary, or set TEST_BUN to a Bun executable for source mode.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -90,6 +90,8 @@ for (const directOnly of [false, true])
           })
           return child
         }
+        const uninstalledNode = run('node', '--socket', 'run/node-' + '0'.repeat(32) + '.sock')
+        assert.notEqual((await once(uninstalledNode, 'exit'))[0], 0)
         const service = run('serve')
         const path = 'terminals/' + session.id + '.sock'
         service.stdin.end(

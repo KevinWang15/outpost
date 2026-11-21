@@ -4,19 +4,15 @@ import AuthGate from './auth/AuthGate'
 import { pagePaths } from '../shared/pages'
 import { rememberedMode } from './mode'
 
-const DesktopTerminalPage = lazy(() => import('./terminal/DesktopTerminalPage'))
 const DesktopDownloadPage = lazy(() => import('./desktop/DesktopDownloadPage'))
 const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
 const DesktopAuthorizePage = lazy(() => import('./desktop/DesktopAuthorizePage'))
 const ChatApp = lazy(() => import('./chat/ChatApp'))
 const LogsPage = lazy(() => import('./logs/LogsPage'))
-const DesktopChatPage = lazy(() => import('./chat/DesktopChatPage'))
 
 if (window.location.pathname === pagePaths.workspace && !window.location.search && rememberedMode() === 'chat')
   window.history.replaceState(null, '', pagePaths.chat)
 
-/** Scoped terminal grants authorize desktop views. Browser app approval and
- * workspace pages require the normal AuthGate. */
 export default function Root() {
   return (
     <Suspense
@@ -28,10 +24,6 @@ export default function Root() {
     >
       {window.location.pathname === pagePaths.desktop ? (
         <DesktopDownloadPage />
-      ) : window.location.pathname === pagePaths.desktopTerminal ? (
-        <DesktopTerminalPage />
-      ) : window.location.pathname === pagePaths.desktopChat ? (
-        <DesktopChatPage />
       ) : window.location.pathname === pagePaths.desktopAuthorize ? (
         <AuthGate>
           <DesktopAuthorizePage requestId={new URLSearchParams(window.location.search).get('request') ?? ''} />

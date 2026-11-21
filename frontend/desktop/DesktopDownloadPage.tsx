@@ -1,6 +1,7 @@
-import { desktopReleases } from '../../shared/desktop'
 import { desktopConnectUrl } from '../../shared/desktopAuth'
 import { pagePaths } from '../../shared/pages'
+
+const desktopReleases = 'https://github.com/KevinWang15/outpost/releases'
 
 export default function DesktopDownloadPage() {
   const macInstaller = import.meta.env.VITE_OUTPOST_MAC_ARM64_INSTALLER

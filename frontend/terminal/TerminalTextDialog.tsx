@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react'
 import { Dialog } from '../ui/Dialog'
-import { desktop } from '../desktop'
 import { touchInput } from '../browser'
 
 export default function TerminalTextDialog({ text, onClose }: { text: string; onClose: () => void }) {
@@ -12,9 +11,7 @@ export default function TerminalTextDialog({ text, onClose }: { text: string; on
     const value =
       element.selectionStart !== element.selectionEnd ? text.slice(element.selectionStart, element.selectionEnd) : text
     try {
-      if (desktop) {
-        if (!(await desktop.copyText(value))) throw new Error('Copy unavailable')
-      } else await navigator.clipboard.writeText(value)
+      await navigator.clipboard.writeText(value)
       setStatus('Copied')
     } catch {
       setStatus('Select the text and use Copy from its context menu.')

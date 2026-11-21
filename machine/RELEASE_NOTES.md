@@ -1,7 +1,7 @@
-# Outpost Terminal 2.5.0
+# Outpost Terminal 2.6.0
 
 Everything Outpost runs on a machine, as one executable. Terminal service
-protocol 5, chat host protocol 3, node protocol 2.
+protocol 6, chat host protocol 3, node protocol 3.
 
 - Direct-only machines import a deployment verification key offline and accept
   authenticated client requests on their HTTPS endpoint. They never establish

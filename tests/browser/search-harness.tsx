@@ -1,3 +1,4 @@
+import { checkpoint } from '../../shared/terminalCheckpoint'
 import { useCallback, useLayoutEffect, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Terminal, type IDecoration } from '@xterm/xterm'
@@ -85,10 +86,10 @@ function Harness() {
       message => {
         throw new Error(message)
       },
-      !options.has('remote'),
       bufferChanged,
     )
     renderer.begin()
+    for (const part of checkpoint(term)) renderer.restore({ type: 'restore', checkpoint: part }, () => {})
     const frames: Sample[] = []
     const rendered = term.onRender(() =>
       queueMicrotask(() => {

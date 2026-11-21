@@ -37,7 +37,7 @@ function Preview({ file, access }: { file: SessionFile; access: SessionFiles }) 
   )
 }
 
-/** The same window-filling viewer is used in browser dialogs and native modals. */
+/** Window-filling file preview for the browser. */
 export function FileViewer({
   selected,
   access,

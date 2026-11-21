@@ -107,23 +107,7 @@ test(
       'terminal grants are not account sessions',
     )
 
-    const upload = (token: string, cookie = '') =>
-      app.inject({
-        method: 'POST',
-        url: '/api/terminal/image',
-        payload: Buffer.from([137, 80, 78, 71]),
-        headers: {
-          host: `127.0.0.1:${port}`,
-          'x-outpost-request': '1',
-          'content-type': 'image/png',
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-          ...(cookie ? { cookie } : {}),
-        },
-      })
-    assert.equal((await upload('', alice)).statusCode, 401, 'account cookie cannot replace scoped authorization')
-    assert.equal((await upload(hello.resume)).statusCode, 200, 'upload needs no cookie')
     assert.equal((await call('POST', '/auth/logout', undefined, alice)).status, 204)
-    assert.equal((await upload(hello.resume)).statusCode, 401, 'logout also revokes image uploads')
     const closed = await terminal.message('closed')
     assert.equal(closed.reason, 'expired', 'open terminals close within the revocation sweep')
     const resumed = new TerminalClient(`ws://127.0.0.1:${port}/api/terminal?token=${encodeURIComponent(hello.resume)}`)

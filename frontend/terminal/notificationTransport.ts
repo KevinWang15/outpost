@@ -1,5 +1,3 @@
-import { desktop } from '../desktop'
-
 let registration: Promise<ServiceWorkerRegistration | null> | null = null
 
 function activate(worker: ServiceWorker) {
@@ -22,7 +20,7 @@ function activate(worker: ServiceWorker) {
 
 /** Notifications only: no fetch handler, offline cache, credentials, or background session connection. */
 export function prepareBrowserNotifications() {
-  if (desktop || !('serviceWorker' in navigator)) return Promise.resolve(null)
+  if (!('serviceWorker' in navigator)) return Promise.resolve(null)
   if (!registration) {
     const setup = async () => {
       const result = await navigator.serviceWorker.register('/terminal-notifications.js', {

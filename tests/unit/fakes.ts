@@ -1,4 +1,3 @@
-import { imageExtensions, imageProblem, type ImageMediaType } from '../../shared/images'
 import type { Session, SessionForkInput, SessionInput, SessionUpdate } from '../../shared/model'
 import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
 import { AppError } from '../../backend/errors'
@@ -172,14 +171,6 @@ export class FakeSessions implements SessionService {
       context.target.id,
       this.all(context).filter(item => item.id !== id),
     )
-  }
-  async uploadImage(context: TargetContext, id: string, data: Buffer, type: ImageMediaType, signal: AbortSignal) {
-    signal.throwIfAborted()
-    this.find(context, id)
-    const problem = imageProblem({ type, size: data.length })
-    if (problem) throw new AppError(problem, 400)
-    const path = '/x.' + imageExtensions[type]
-    return { path, reference: path }
   }
   async directories() {
     return { directories: [], truncated: false }

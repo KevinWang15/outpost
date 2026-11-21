@@ -2,72 +2,9 @@ import { randomBytes, createHash } from 'node:crypto'
 import type { APIRequestContext } from '@playwright/test'
 import { parseDesktopLoginCallback } from '../../shared/desktopAuth'
 import type { DesktopLaunch } from '../../shared/desktopAuth'
-import type { Page, WebSocketRoute } from '@playwright/test'
+import type { WebSocketRoute } from '@playwright/test'
 import headless from '@xterm/headless'
 import { checkpoint } from '../../shared/terminalCheckpoint'
-import { desktopBridgeVersion, type DesktopBridge } from '../../shared/desktop'
-
-declare global {
-  interface Window {
-    outpostTestTicket(): Promise<string>
-    outpostTestResume(token: string): Promise<void>
-  }
-}
-
-/** Model the preload with credentials held by the host across page reloads. */
-export async function desktopTerminal(page: Page, token: string) {
-  const host = { token }
-  await page.exposeFunction('outpostTestTicket', () => host.token)
-  await page.exposeFunction('outpostTestResume', (token: string) => {
-    host.token = token
-  })
-  await page.addInitScript(version => {
-    const bridge: DesktopBridge = {
-      version,
-      notificationsSupported: true,
-      ticket: () => window.outpostTestTicket(),
-      saveResume: token => window.outpostTestResume(token),
-      openExternal: async () => false,
-      files: {
-        list: async () => [],
-        read: async () => new ArrayBuffer(0),
-        remove: async () => {},
-        download: async () => false,
-      },
-      viewFiles: async () => {},
-      onCommand: listener => {
-        const command = (event: Event) => listener((event as CustomEvent).detail)
-        window.addEventListener('outpost-test-command', command)
-        return () => window.removeEventListener('outpost-test-command', command)
-      },
-      onLaunch: () => () => {},
-      launchHandled: async () => {},
-      onHostState: listener => {
-        let disposed = false
-        queueMicrotask(() => {
-          if (!disposed) listener({ focused: true, fontSize: 13.5, sound: false })
-        })
-        return () => {
-          disposed = true
-        }
-      },
-      reportState: async () => {},
-      pasteClipboard: async () => false,
-      copyText: async () => false,
-      notifyBell: async () => true,
-      dismissBell: async () => {},
-      close: async () => window.close(),
-    }
-    Object.defineProperty(window, 'outpostDesktop', { value: bridge })
-  }, desktopBridgeVersion)
-  return host
-}
-
-/** Desktop panes keep the optional terminal toolbar behind the terminal menu. */
-export async function showTerminalToolbar(page: Page) {
-  await page.locator('.terminal-surface').click({ button: 'right' })
-  await page.getByRole('menuitemcheckbox', { name: 'Terminal toolbar', exact: true }).click()
-}
 
 /** Browser socket fixtures use the same initial checkpoint as the real service. */
 export function restoreEmptyTerminal(socket: WebSocketRoute) {
@@ -78,6 +15,7 @@ export function restoreEmptyTerminal(socket: WebSocketRoute) {
     allowProposedApi: true,
   })
   try {
+    socket.send(JSON.stringify({ type: 'route-selected', route: 'relay' }))
     for (const part of checkpoint(terminal)) socket.send(JSON.stringify({ type: 'restore', checkpoint: part }))
     socket.send(JSON.stringify({ type: 'ready' }))
   } finally {
@@ -113,4 +51,10 @@ export async function appConnection(
       headers: { ...headers, authorization: `Bearer ${token}` },
     })
   ).json()
+}
+
+/** Extract the path actually delivered to the fixture tool in bracketed paste mode. */
+export function pastedImage(input: string) {
+  const start = input.lastIndexOf('\x1b[200~')
+  return start >= 0 && input.endsWith('\x1b[201~') ? input.slice(start + 6, -6) : ''
 }

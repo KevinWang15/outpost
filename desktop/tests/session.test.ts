@@ -100,6 +100,7 @@ test('V3 browser sign-in, checkpoint restore, live input, resize and reconnect',
     const send = (v: unknown) => socket.send(JSON.stringify(v))
     send({ type: 'hello', resume: 'fixture.resume', session: { id: 'session', name: 'Fixture', tool: 'codex' } })
     for (const part of parts) send({ type: 'restore', checkpoint: part })
+    send({ type: 'route-selected', route: 'relay' })
     send({ type: 'ready' })
     socket.on('message', (bytes, binary) => {
       if (binary) socket.send(bytes)

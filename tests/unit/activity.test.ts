@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   activityLabel,
-  activityNeedsAttention,
   activityStates,
   parseSessionActivity,
   unavailableActivity,
@@ -28,7 +27,6 @@ test('the activity boundary shares all native states and rejects invalid metadat
   for (const value of activityStates) {
     const activity = state({ state: value, completionId: value === 'finished' ? token('a') : null })
     assert.deepEqual(parseSessionActivity(activity), activity)
-    assert.equal(activityNeedsAttention(activity), ['finished', 'waiting', 'error'].includes(value))
   }
   for (const value of [
     null,
@@ -49,16 +47,14 @@ test('the activity boundary shares all native states and rejects invalid metadat
 
 function fixture() {
   const requests: { id: string; resolve(): void; reject(error: Error): void }[] = []
-  const changes: (SessionActivity | null)[] = []
   const notices: string[] = []
   const activity = new TerminalActivity(
     {
       acknowledge: id => new Promise<void>((resolve, reject) => requests.push({ id, resolve, reject })),
     },
-    value => changes.push(value),
     value => notices.push(value),
   )
-  return { activity, requests, changes, notices, current: () => changes.at(-1) }
+  return { activity, requests, notices }
 }
 
 test('activation waits for a fresh observation and never acknowledges approvals or errors', () => {
@@ -68,7 +64,6 @@ test('activation waits for a fresh observation and never acknowledges approvals 
   assert.equal(f.requests.length, 0)
   f.activity.update(completion())
   assert.equal(f.requests.length, 1)
-  assert.equal(f.current()?.state, 'idle')
   f.activity.update(state({ state: 'waiting' }))
   f.activity.acknowledge()
   f.activity.update(state({ state: 'error' }))
@@ -83,13 +78,10 @@ test('only the displayed completion is cleared; new completions require another 
   f.activity.update(completion('b'))
   f.requests[0].resolve()
   await tick()
-  assert.equal(f.current()?.completionId, token('b'))
-  assert.equal(f.current()?.state, 'finished')
   f.activity.acknowledge()
   assert.equal(f.requests[1].id, token('b'))
   f.requests[1].reject(new Error('offline'))
   await tick()
-  assert.equal(f.current()?.state, 'finished')
   assert.equal(f.notices.length, 1)
 })
 
@@ -100,7 +92,6 @@ test('reconnection drops old acknowledgement replies and waits for the current g
   f.activity.update(null)
   f.requests[0].resolve()
   await tick()
-  assert.equal(f.current(), null)
   f.activity.update(completion('b'))
   assert.equal(f.requests[1].id, token('b'))
   f.activity.dispose()

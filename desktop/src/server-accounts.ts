@@ -13,7 +13,6 @@ import { ServerLoginStore, type SavedServerLogin } from './server-login-store'
 import { ServerSignIn } from './server-sign-in'
 import { loadSessionCatalogue, type SessionCatalogue } from './server-catalogue'
 import { sessionCreationServer } from './server-session-creation'
-import { validChatTicket } from './chat-policy'
 
 interface Host {
   openBrowser(url: string): Promise<void>
@@ -267,15 +266,6 @@ export class ServerAccounts {
     )
       throw new Error('The server returned a different session. Connect again.')
     return launch
-  }
-  /** A single-use ticket for one chat socket of this server account. */
-  async chatTicket(server: string) {
-    const origin = desktopOrigin(server)
-    const entry = this.store.get(origin)
-    if (!entry) throw new Error('Sign in to this server from the Outpost tab.')
-    const result = await this.request(entry, '/chat/connect', { method: 'POST' })
-    if (!validChatTicket(result, origin, entry.account.id)) throw new Error('Invalid chat ticket response.')
-    return { ticket: result.ticket }
   }
   accountId(server: string) {
     return this.store.get(desktopOrigin(server))?.account.id ?? null

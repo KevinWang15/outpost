@@ -72,7 +72,7 @@ test('chat hub: channels pass the floor, sessions message each other, schedules 
       prompt: [{ type: 'text', text: 'message @reviewer: please review the release notes' }],
       files: [],
     })
-    assert.equal(sent.ok, true, sent.message)
+    assert.equal(sent.ok, true, sent.message ?? 'Request failed')
     const back = await until(
       () =>
         chat
@@ -177,7 +177,7 @@ test('files the user attaches reach the agent as links it can read, in its sessi
       prompt: [{ type: 'text', text: 'summarize' }],
       files: [notes.id],
     })
-    assert.equal(sent.ok, true, sent.message)
+    assert.equal(sent.ok, true, sent.message ?? 'Request failed')
     const turn = (sent.data as { turn: string }).turn
     const queued = link.journal.entries.find(entry => entry.kind === 'queued' && entry.turn === turn)
     const block = queued?.kind === 'queued' ? queued.prompt.find(item => item.type === 'resource_link') : undefined
@@ -251,7 +251,7 @@ test('a chat agent messages a session running in a terminal, and its reply comes
       prompt: [{ type: 'text', text: 'message @builder: please run the tests' }],
       files: [],
     })
-    assert.equal(sent.ok, true, sent.message)
+    assert.equal(sent.ok, true, sent.message ?? 'Request failed')
     // The message goes to the terminal, marked with its sender.
     const typed = await until(() => chat.terminal.typed.find(item => item.session === builder.id), 'the typed message')
     assert.match(typed.text, /^\[Outpost: .*@coder.*\]\n/)

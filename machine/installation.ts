@@ -1,18 +1,17 @@
 // The Linux host has one durable owner directory. Private session data remains
 // in the execution account's home across disconnection and unenrollment.
-import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, readdirSync, rmdirSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { driverStatus } from './drivers'
 import { readRegistry } from './registry'
 import { randomUUID } from 'node:crypto'
-import { connect } from 'node:net'
 import { desktopOrigin } from '../shared/desktopAuth'
 import { DirectTickets } from '../shared/node/directTickets'
 import { locked, readJson, state, statePath, writeJson } from './state'
 
-export type RelayInstall = { mode: 'relay'; origin: string; targetId: string; credential: string; socket?: string }
+export type RelayInstall = { mode: 'relay'; origin: string; targetId: string; credential: string; socket: string }
 export type DirectInstall = { mode: 'direct'; origin: string; targetId: string; publicKey: string; endpoint: string }
-type Configuration = RelayInstall | DirectInstall | { mode: 'ssh'; socket: string } | { mode: 'unpaired' }
+type Configuration = RelayInstall | DirectInstall | { mode: 'ssh'; socket: string }
 export type Installation = Configuration & { home: string; generation: string }
 declare const OUTPOST_ISOLATED_TEST_HOST: boolean
 export const hostDirectory = () =>
@@ -38,56 +37,71 @@ function directory() {
   return path
 }
 const file = () => join(directory(), 'machine.json')
-const generation = () => randomUUID()
+const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
+export function validRelayIdentity(pair: Pick<RelayInstall, 'targetId' | 'credential' | 'socket'>) {
+  return (
+    pair &&
+    typeof pair.targetId === 'string' &&
+    uuid.test(pair.targetId) &&
+    validNodeSocket(pair.socket) &&
+    typeof pair.credential === 'string' &&
+    pair.credential.startsWith(pair.targetId + '.') &&
+    /^[A-Za-z0-9_-]{43}$/.test(pair.credential.slice(pair.targetId.length + 1))
+  )
+}
+
+function validConfiguration(config: Configuration) {
+  switch (config.mode) {
+    case 'ssh':
+      return validNodeSocket(config.socket)
+    case 'relay':
+      return validRelayIdentity(config) && desktopOrigin(config.origin) === config.origin
+    case 'direct':
+      return (
+        uuid.test(config.targetId) &&
+        typeof config.publicKey === 'string' &&
+        config.publicKey.length > 0 &&
+        desktopOrigin(config.origin) === config.origin &&
+        desktopOrigin(config.endpoint) === config.endpoint
+      )
+    default:
+      return false
+  }
+}
+
 export function installation() {
   if (!existsSync(hostDirectory())) return null
-  const current = readJson<Installation | null>(file(), null)
-  if (current && current.home !== realpathSync(state.directory))
+  const current = readJson<Installation | undefined>(file(), undefined)
+  if (current === undefined) return null
+  if (!current || !uuid.test(current.generation) || !validConfiguration(current))
+    throw Error('Invalid machine installation record.')
+  if (current.home !== realpathSync(state.directory))
     throw Error('This host already belongs to another Outpost installation.')
   return current
 }
 export function writeInstallation(c: Configuration) {
-  const record = { ...c, generation: generation(), home: realpathSync(state.directory) }
+  const record = { ...c, generation: randomUUID(), home: realpathSync(state.directory) }
   writeJson(file(), record)
-  if (c.mode !== 'unpaired') removeLegacyBindings()
   return record
 }
 export const installationLock = <T>(action: () => Promise<T> | T) => locked('ownership', action, 15000, directory())
 export const runtimeLock = <T>(action: () => Promise<T> | T, timeout = 300) =>
   locked('connector', action, timeout, directory())
-function legacy() {
-  return readJson<Omit<RelayInstall, 'mode'> | null>(statePath('connector.json'), null)
-}
 export async function requireUnpaired() {
   const current = installation()
-  if ((current && current.mode !== 'unpaired') || legacy())
+  if (current)
     throw Error(
       'This machine already has an owner. Stop its Outpost service and run outpost-terminal unpair before changing servers.',
     )
-  if (current?.mode === 'unpaired') {
-    await runtimeLock(() => {})
-    await nodeLock(() => {}, 300)
-  }
-  await checkLegacyNodes()
-}
-export function loadInstalled() {
-  return installationLock(async () => {
-    const current = installation()
-    if (current) return current
-    const old = legacy()
-    if (!old) return null
-    await checkLegacyNodes()
-    const migrated = writeInstallation({ ...old, mode: 'relay' })
-    rmSync(statePath('connector.json'), { force: true })
-    return migrated
-  })
+  await runtimeLock(() => {})
+  await nodeLock(() => {}, 300)
 }
 export function validateDirect(value: unknown): DirectInstall {
   const c = value as DirectInstall
   if (
     !c ||
     typeof c.targetId !== 'string' ||
-    !/^[0-9a-f-]{36}$/.test(c.targetId) ||
+    !uuid.test(c.targetId) ||
     typeof c.publicKey !== 'string' ||
     c.publicKey.length > 128
   )
@@ -100,14 +114,6 @@ export function validateDirect(value: unknown): DirectInstall {
     targetId: c.targetId,
     publicKey: c.publicKey,
   }
-}
-function removeLegacyBindings() {
-  const path = statePath('bindings')
-  if (!existsSync(path) || !lstatSync(path).isDirectory()) return
-  for (const entry of readdirSync(path, { withFileTypes: true })) {
-    if (entry.isFile() && /^[a-f0-9-]{36}\.json$/.test(entry.name)) rmSync(join(path, entry.name))
-  }
-  if (!readdirSync(path).length) rmdirSync(path)
 }
 export const nodeLock = <T>(action: () => Promise<T> | T, timeout = 5000) =>
   locked('node-runtime', action, timeout, directory())
@@ -125,16 +131,21 @@ async function removableExecutable() {
   return path
 }
 export async function unpair(removeExecutable = false) {
+  if (!removeExecutable && !existsSync(hostDirectory())) {
+    console.log('Machine is unpaired.')
+    return
+  }
   const previous = await installationLock(async () => {
-    const previous = installation() ?? legacy()
+    const previous = installation()
     if (removeExecutable) await removableExecutable()
-    writeInstallation({ mode: 'unpaired' })
-    rmSync(statePath('connector.json'), { force: true })
+    rmSync(file(), { force: true })
     // Pinning the ownership lock here prevents a new install during teardown.
     await runtimeLock(() => {}, 10000)
     await nodeLock(() => {}, 10000)
-    await checkLegacyNodes()
-    removeLegacyBindings()
+    if (previous && 'socket' in previous && validNodeSocket(previous.socket)) {
+      const path = statePath(previous.socket)
+      if (lstatSync(path, { throwIfNoEntry: false })?.isSocket()) rmSync(path)
+    }
     if (removeExecutable) rmSync(await removableExecutable())
     return previous
   })
@@ -166,64 +177,22 @@ export function watchInstallation(record: Installation, onChange: () => void) {
   }, 250)
   return () => clearInterval(timer)
 }
-export async function authorizeNode(socket: string) {
-  return installationLock(async () => {
-    const current = installation()
-    if (!current) {
-      if (legacy()) throw Error('Start the paired connector to migrate this installation first.')
-      await checkLegacyNodes()
-      return writeInstallation({ mode: 'ssh', socket })
-    }
-    if ((current.mode === 'ssh' || current.mode === 'relay') && current.socket === socket) return current
-    throw Error('This node does not belong to the installed Outpost server.')
-  })
+export function authorizeNode(socket: string) {
+  const current = installation()
+  if (current && (current.mode === 'ssh' || current.mode === 'relay') && current.socket === socket) return current
+  throw Error('This node does not belong to the installed Outpost server.')
 }
 
-// Pre-ownership releases could leave several nodes accepting agent requests.
-async function checkLegacyNodes() {
-  const dir = statePath('run')
-  if (!existsSync(dir)) return
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isSocket() || !/^node-[0-9a-f]{32}\.sock$/.test(entry.name)) continue
-    const path = join(dir, entry.name)
-    const inode = lstatSync(path).ino
-    const active = await new Promise<boolean>(resolve => {
-      const peer = connect(path)
-      peer.setTimeout(500)
-      peer.on('connect', () => {
-        peer.destroy()
-        resolve(true)
-      })
-      peer.on('timeout', () => {
-        peer.destroy()
-        resolve(true)
-      })
-      peer.on('error', (e: NodeJS.ErrnoException) => resolve(e.code !== 'ECONNREFUSED' && e.code !== 'ENOENT'))
-    })
-    if (active) throw Error('Stop the previous Outpost node or connector before changing machine ownership.')
-    if (existsSync(path) && lstatSync(path).ino === inode) rmSync(path, { force: true })
-  }
+export function validNodeSocket(value: unknown): value is string {
+  return typeof value === 'string' && /^run\/node-[0-9a-f]{32}\.sock$/.test(value)
 }
 
 export async function installManaged(socket: string) {
-  if (!/^run\/node-[0-9a-f]{32}\.sock$/.test(socket)) throw Error('Invalid managed installation identity.')
+  if (!validNodeSocket(socket)) throw Error('Invalid managed installation identity.')
   await installationLock(async () => {
     const current = installation()
     if (current?.mode === 'ssh' && current.socket === socket) return
     await requireUnpaired()
     writeInstallation({ mode: 'ssh', socket })
-  })
-}
-export async function pinRelaySocket(pair: RelayInstall, socket: string) {
-  await installationLock(() => {
-    const current = installation()
-    if (
-      current?.mode !== 'relay' ||
-      current.credential !== pair.credential ||
-      (current.socket && current.socket !== socket)
-    )
-      throw Error('Relay ownership changed.')
-    writeJson(file(), { ...current, socket })
-    pair.socket = socket
   })
 }

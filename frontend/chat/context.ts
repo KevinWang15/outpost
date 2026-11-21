@@ -1,7 +1,6 @@
 import { createContext, useContext, useSyncExternalStore } from 'react'
 import type { SessionRef } from '../../shared/chatApi'
 import type { ConversationMatch } from '../../shared/model'
-import type { ChatBridge } from '../../shared/chatBridge'
 import type { ChatClient } from './client'
 import type { SessionFiles } from '../terminal/sessionFiles'
 import type { SessionFilesState } from '../terminal/useSessionFiles'
@@ -18,7 +17,6 @@ export type ChatDialog =
 
 export interface ChatApp {
   client: ChatClient
-  bridge: ChatBridge | null
   openLink(url: string): void
 }
 interface ChatShell {

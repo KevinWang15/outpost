@@ -51,6 +51,7 @@ async function container(t: test.TestContext) {
 /** Exercise one deployment end to end against the SSH container. */
 async function lifecycle(
   t: test.TestContext,
+  containerId: string,
   deployment: Deployment,
   env: NodeJS.ProcessEnv,
   target: Record<string, unknown>,
@@ -71,6 +72,20 @@ async function lifecycle(
     return (response.body ? JSON.parse(response.body) : undefined) as T
   }
   const added = await call<Target>('POST', '/targets', target)
+  const plan = await call<{ script: string }>('GET', `/targets/${added.id}/software/outpost-terminal/script`)
+  const socket = /pair --managed '(run\/node-[a-f0-9]{32}\.sock)'/.exec(plan.script)![1]
+  await execute('docker', [
+    'exec',
+    '-u',
+    'dev',
+    '-e',
+    'HOME=/home/dev',
+    containerId,
+    '/home/dev/.outpost/bin/outpost-terminal',
+    'pair',
+    '--managed',
+    socket,
+  ])
   const report = await call<SoftwareReport>('GET', `/targets/${added.id}/software`)
   assert.deepEqual(
     report.software.filter(item => item.status !== 'installed'),
@@ -107,17 +122,11 @@ async function lifecycle(
   await client.text(/OUTPOST_FIXTURE_READY \d+ 90x28/)
   client.send({ type: 'resize', cols: 70, rows: 20 })
   await client.text('70x20')
-  const upload = await fetch(`http://127.0.0.1:${port}/api/terminal/image`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${hello.resume}`, 'x-outpost-request': '1', 'content-type': 'image/png' },
-    body: png,
-  })
-  assert.equal(upload.status, 200)
-  const image = (await upload.json()) as { reference: string }
-  assert.match(image.reference, /^\/home\/dev\/\.outpost\/clipboard\/.+\.png$/)
-  client.send({ type: 'paste', id: 'img', data: image.reference })
+  const reference = await client.uploadImage(png)
+  assert.match(reference, /^\/home\/dev\/\.outpost\/clipboard\/.+\.png$/)
+  client.send({ type: 'paste', id: 'img', data: reference })
   const pasted = await client.take('result')
-  assert.equal(pasted.ok, true, pasted.message)
+  assert.equal(pasted.ok, true, pasted.message ?? 'Request failed')
   const pid = /OUTPOST_FIXTURE_READY (\d+)/.exec(client.output)![1]
   // Abrupt transport loss (no WebSocket close handshake) must only detach the
   // viewer. Repeated attachments restore the same process and its screen.
@@ -139,7 +148,7 @@ test(
   'SSH targets in local and hosted mode with the standalone terminal service',
   { timeout: 600_000, skip: !docker && 'Docker is unavailable' },
   async t => {
-    const directory = await realpath(await mkdtemp(join(tmpdir(), 'outpost-ssh-')))
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'ops-')))
     t.after(() => rm(directory, { recursive: true, force: true }))
 
     await t.test('local mode uses your OpenSSH identity, with connection sharing', async t => {
@@ -155,7 +164,7 @@ test(
         { mode: 0o700 },
       )
       const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` }
-      await lifecycle(t, await LocalDeployment.open(join(directory, 'local')), env, {
+      await lifecycle(t, target.id, await LocalDeployment.open(join(directory, 'local')), env, {
         kind: 'ssh',
         name: 'Container',
         host: '127.0.0.1',
@@ -183,6 +192,7 @@ test(
       await target.authorize((await deployment.keys.publicKey(user.id)).publicKey)
       await lifecycle(
         t,
+        target.id,
         deployment,
         process.env,
         { kind: 'ssh', name: 'Container', host: '127.0.0.1', user: 'dev', port: target.port, tools: ['claude'] },

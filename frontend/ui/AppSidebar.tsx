@@ -1,52 +1,32 @@
 import { useState, type ReactNode } from 'react'
-import { LogOut, MessagesSquare, Monitor, ScrollText, Server, Settings2, UserRound } from 'lucide-react'
+import { ArrowLeft, LogOut, MessagesSquare, Monitor, ScrollText, Settings2, UserRound } from 'lucide-react'
 import { pagePaths } from '../../shared/pages'
 import AccountDialog from '../auth/AccountDialog'
 import { useAuth } from '../auth/useAuth'
 import ConnectionPreferences from '../connect/ConnectionPreferences'
 import { useDesktopEntry } from '../desktop/useDesktopEntry'
-import { rememberMode, type AppMode } from '../mode'
 import { Menu } from './Menu'
 import { useToast } from './toast-context'
 
-const modes = [
-  { mode: 'chat', label: 'Chat', href: pagePaths.chat, Icon: MessagesSquare },
-  { mode: 'machines', label: 'Machines', href: pagePaths.workspace, Icon: Server },
-] as const
+type SidebarPage = 'machines' | 'chat' | 'logs'
 
-/** The sidebar both modes share: the brand and mode switch, the mode's own
- * content, and the account footer. */
-export function AppSidebar({
-  mode,
-  children,
-}: {
-  /** The mode shown; null on pages of neither, such as Logs. */
-  mode: AppMode | null
-  children: ReactNode
-}) {
+export function AppSidebar({ page, children }: { page: SidebarPage; children: ReactNode }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
-        <a className="brand" href={modes.find(item => item.mode === mode)?.href ?? pagePaths.workspace}>
+        <a className="brand" href={pagePaths.workspace}>
           <img src="/outpost.svg" width="26" height="26" alt="" />
           <span>Outpost</span>
           <DeploymentBadge />
         </a>
-        <nav className="mode-switch" aria-label="Mode">
-          {modes.map(({ mode: item, label, href, Icon }) => (
-            <a
-              key={item}
-              href={href}
-              aria-current={item === mode ? 'page' : undefined}
-              onClick={() => rememberMode(item)}
-            >
-              <Icon size={14} /> {label}
-            </a>
-          ))}
-        </nav>
+        {page !== 'machines' && (
+          <a className="sidebar-link" href={pagePaths.workspace}>
+            <ArrowLeft size={15} /> Back to machines
+          </a>
+        )}
       </div>
       <div className="sidebar-body">{children}</div>
-      <SidebarFooter logs={mode === null} />
+      <SidebarFooter page={page} />
     </aside>
   )
 }
@@ -56,7 +36,7 @@ function DeploymentBadge() {
   return <span className="mode">{mode === 'hosted' ? 'Hosted' : 'Local'}</span>
 }
 
-function SidebarFooter({ logs }: { logs: boolean }) {
+function SidebarFooter({ page }: { page: SidebarPage }) {
   const { mode, user, signOut } = useAuth()
   const toast = useToast()
   const openDesktop = useDesktopEntry()
@@ -64,14 +44,14 @@ function SidebarFooter({ logs }: { logs: boolean }) {
     [preferences, setPreferences] = useState(false)
   return (
     <div className="sidebar-footer">
-      <a
-        className={`sidebar-link ${logs ? 'active' : ''}`}
-        href={pagePaths.logs}
-        aria-current={logs ? 'page' : undefined}
-      >
-        <ScrollText size={16} />
-        Logs and webhooks
-      </a>
+      <nav className="workspace-tools" aria-label="Workspace tools">
+        <a className="sidebar-link" href={pagePaths.chat} aria-current={page === 'chat' ? 'page' : undefined}>
+          <MessagesSquare size={16} /> Chat
+        </a>
+        <a className="sidebar-link" href={pagePaths.logs} aria-current={page === 'logs' ? 'page' : undefined}>
+          <ScrollText size={16} /> Logs and webhooks
+        </a>
+      </nav>
       <button
         className="sidebar-link desktop-entry"
         onClick={() => {

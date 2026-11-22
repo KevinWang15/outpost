@@ -1520,7 +1520,7 @@ impl Workspace {
                 for acc in items(&self.accounts["accounts"]) {
                     let origin = strval(acc, "origin");
                     let new = origin.clone();
-                    let chat = origin.clone();
+                    let machines = origin.clone();
                     content = content.child(
                         row()
                             .id(SharedString::from(origin.clone()))
@@ -1531,8 +1531,8 @@ impl Workspace {
                                     .child(text(origin.clone(), 14., TEXT))
                                     .child(text(strval(acc, "status"), 12., MUTED)),
                             )
-                            .child(control("Chat", false, cx, move |_, _, cx| {
-                                cx.open_url(&format!("{chat}/chat"))
+                            .child(control("Machines ↗", false, cx, move |_, _, cx| {
+                                cx.open_url(&machines)
                             }))
                             .child(control("New session", false, cx, move |s, w, cx| {
                                 s.create_form(new.clone(), w, cx)

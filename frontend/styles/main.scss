@@ -475,7 +475,6 @@ textarea.code,
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 100dvh;
 }
-/* The sidebar both modes share: brand and mode switch, the mode's own content, the account footer. */
 .sidebar {
   position: sticky;
   top: 0;
@@ -518,34 +517,10 @@ textarea.code,
     font-weight: 500;
   }
 }
-.mode-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 3px;
-  margin: 0 4px;
-  padding: 3px;
-  border-radius: 8px;
-  background: #e8edf4;
-  a {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    height: 28px;
-    border-radius: 6px;
-    color: var(--text);
-    font-size: 13px;
-    font-weight: 500;
-    text-decoration: none;
-    &[aria-current='page'] {
-      background: var(--surface);
-      color: var(--ink);
-      box-shadow: var(--shadow);
-    }
-    &:not([aria-current]):hover {
-      color: var(--ink);
-    }
-  }
+.workspace-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
 }
 .sidebar-heading {
   display: flex;
@@ -629,7 +604,7 @@ textarea.code,
   &:hover {
     background: var(--sidebar-hover);
   }
-  &.active {
+  &[aria-current='page'] {
     background: var(--accent-soft);
     color: var(--accent-hover);
   }
@@ -2153,9 +2128,6 @@ textarea.code,
   .brand {
     padding: 0;
   }
-  .brand-sub {
-    display: none;
-  }
 }
 .auth-story-copy {
   max-width: 480px;
@@ -2171,32 +2143,6 @@ textarea.code,
     color: var(--text);
     font-size: 15px;
   }
-}
-.eyebrow {
-  color: var(--accent);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.6px;
-}
-.auth-story-feature {
-  display: flex;
-  gap: 12px;
-  margin-top: 22px;
-  color: var(--muted);
-  font-size: 13px;
-  > svg {
-    margin-top: 2px;
-    color: var(--accent);
-  }
-  strong {
-    display: block;
-    margin-bottom: 2px;
-    color: var(--ink);
-  }
-}
-.auth-story-footer {
-  color: var(--muted);
-  font-size: 12px;
 }
 .auth-main {
   display: flex;
@@ -2365,8 +2311,7 @@ textarea.code,
   .auth-story {
     border-right: 0;
     border-bottom: 1px solid var(--border);
-    .auth-story-copy,
-    .auth-story-footer {
+    .auth-story-copy {
       display: none;
     }
   }

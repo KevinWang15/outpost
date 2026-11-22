@@ -5,7 +5,7 @@ test('a chat session follows its conversations, resumes an earlier one, and appl
   page,
 }) => {
   await addClaudeTarget(page, 'Timeline box')
-  await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Chat' }).click()
+  await page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('link', { name: 'Chat' }).click()
   await newSession(page, 'Planner', '~/timeline-planner')
   const composer = page.getByRole('textbox', { name: 'Message' })
   await composer.fill('First topic')

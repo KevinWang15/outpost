@@ -124,7 +124,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
     .filter(group => group.sessions.length || !filter)
   const schedules = [...client.schedules.values()]
   return (
-    <AppSidebar mode="chat">
+    <AppSidebar page="chat">
       <label className="chat-search">
         <Search size={14} aria-hidden="true" />
         <input

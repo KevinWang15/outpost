@@ -68,7 +68,7 @@ export default function LogsPage() {
 
   return (
     <div className="app logs-app">
-      <AppSidebar mode={null}>
+      <AppSidebar page="logs">
         <div className="sidebar-heading">
           <span>Show</span>
         </div>

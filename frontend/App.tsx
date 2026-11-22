@@ -2,7 +2,6 @@ import { useEffect, useReducer, useState } from 'react'
 import { LoaderCircle, Monitor, Plus, Server } from 'lucide-react'
 import type { ConversationResults, ConversationSearch, Target, TargetInput } from '../shared/model'
 import { api } from './api'
-import { rememberMode } from './mode'
 import { AppSidebar } from './ui/AppSidebar'
 import FinderDialog from './workspace/FinderDialog'
 import TargetDialog from './workspace/TargetDialog'
@@ -68,7 +67,6 @@ export default function App() {
   const [finding, setFinding] = useState(false)
   const target = targets?.find(item => item.id === selected)
 
-  useEffect(() => rememberMode('machines'), [])
   useEffect(() => {
     const controller = new AbortController()
     api<Target[]>('/targets', 'GET', undefined, controller.signal).then(
@@ -90,7 +88,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <AppSidebar mode="machines">
+      <AppSidebar page="machines">
         <div className="sidebar-heading">
           <span>Machines</span>
           <button
@@ -149,9 +147,8 @@ export default function App() {
             <img src="/outpost.svg" width="48" height="48" alt="" />
             <h1>Run your coding agents on your own machines</h1>
             <p>
-              Outpost keeps Claude Code, Codex, Kimi Code and DeepSeek Harness running in sessions on your Linux
-              machines. Work with a session in a terminal from your browser, Outpost Desktop or your phone, or chat with
-              it and bring several into a channel. Sessions keep running when you close the page.
+              Add the Linux machine where you work, then choose a project and a coding tool. Your sessions keep running
+              on that machine when you disconnect.
             </p>
             <button className="button primary" onClick={() => setAdding(true)}>
               <Plus size={15} />
@@ -167,8 +164,8 @@ export default function App() {
                 <span>Pick a coding tool and a project directory.</span>
               </li>
               <li>
-                <strong>Work in a terminal or in chat</strong>
-                <span>Connect a terminal from anywhere, or message the session in Chat.</span>
+                <strong>Connect to your session</strong>
+                <span>Open the terminal in your browser or Outpost Desktop.</span>
               </li>
             </ol>
           </section>

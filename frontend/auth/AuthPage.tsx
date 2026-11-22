@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
 import { pagePaths } from '../../shared/pages'
-import { ArrowRight, CheckCircle2, Eye, EyeOff, Mail, ShieldCheck, Terminal } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Eye, EyeOff, Mail } from 'lucide-react'
 import type { AuthMessage } from '../../shared/auth'
 import { api, ApiError } from '../api'
 import { useAuth } from './useAuth'
@@ -53,7 +53,7 @@ export default function AuthPage({ path }: { path: string }) {
     reset: 'Choose a new password.',
   }
   const subtitles = {
-    login: 'Sign in to pick up your coding sessions.',
+    login: 'Sign in to open your machines and sessions.',
     signup: 'Your own workspace for AI sessions across your dev servers.',
     verify: token
       ? 'Confirm your email to open your Outpost workspace.'
@@ -116,36 +116,18 @@ export default function AuthPage({ path }: { path: string }) {
       <div className="auth-story">
         <a className="brand" href={pagePaths.workspace}>
           <img className="brand-mark" src="/outpost.svg" width="42" height="42" alt="" />
-          <span>
-            Outpost<span className="brand-sub">AI Session Manager</span>
-          </span>
+          <span>Outpost</span>
         </a>
         <div className="auth-story-copy">
-          <span className="eyebrow">KEEP THE SESSION. KEEP YOUR FLOW.</span>
-          <h1>
-            Your work keeps going.
-            <br />
-            Come back from anywhere.
-          </h1>
-          <p>One place for Codex, Claude Code, and Kimi sessions across your development servers.</p>
-          <div className="auth-story-feature">
-            <Terminal />
-            <span>
-              <strong>Pick up where you left off.</strong>Your agents keep running when your terminal closes.
-            </span>
-          </div>
-          <div className="auth-story-feature">
-            <ShieldCheck />
-            <span>
-              <strong>A workspace of your own.</strong>Your servers, your sessions, and your account.
-            </span>
-          </div>
+          <h1>Run coding agents on your machines.</h1>
+          <p>
+            Start a session in a project directory and reconnect from your browser or Outpost Desktop. Your agent keeps
+            working on the machine when you disconnect.
+          </p>
         </div>
-        <p className="auth-story-footer">Built for the way you code.</p>
       </div>
       <main className="auth-main">
         <div className="auth-card">
-          <span className="eyebrow">YOUR OUTPOST WORKSPACE</span>
           <h2>{titles[kind]}</h2>
           <p className="auth-subtitle">{subtitles[kind]}</p>
           {message && (

@@ -2,7 +2,6 @@ import { lazy, Suspense } from 'react'
 import App from './App'
 import AuthGate from './auth/AuthGate'
 import { pagePaths } from '../shared/pages'
-import { rememberedMode } from './mode'
 
 const DesktopDownloadPage = lazy(() => import('./desktop/DesktopDownloadPage'))
 const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
@@ -10,15 +9,12 @@ const DesktopAuthorizePage = lazy(() => import('./desktop/DesktopAuthorizePage')
 const ChatApp = lazy(() => import('./chat/ChatApp'))
 const LogsPage = lazy(() => import('./logs/LogsPage'))
 
-if (window.location.pathname === pagePaths.workspace && !window.location.search && rememberedMode() === 'chat')
-  window.history.replaceState(null, '', pagePaths.chat)
-
 export default function Root() {
   return (
     <Suspense
       fallback={
         <div className="auth-loading" role="status">
-          Opening terminal…
+          Opening Outpost…
         </div>
       }
     >

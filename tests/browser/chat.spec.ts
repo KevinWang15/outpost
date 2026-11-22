@@ -1,6 +1,18 @@
 import { expect, test } from '@playwright/test'
 import { addClaudeTarget, newSession } from './chat-fixture'
 
+test('Machines remains the home page after visiting Chat', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('outpost:mode', 'chat'))
+  await page.goto('/')
+  await expect(page.getByRole('navigation', { name: 'Machines' })).toBeVisible()
+  await page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('link', { name: 'Chat' }).click()
+  await expect(page).toHaveURL(/\/chat$/)
+  await page.reload()
+  await expect(page.getByRole('link', { name: 'Back to machines' })).toBeVisible()
+  await page.locator('a.brand').click()
+  await expect(page.getByRole('navigation', { name: 'Machines' })).toBeVisible()
+})
+
 test('chat mode: talk to a session, approve a step, and work with sessions in a channel', async ({ page }) => {
   if (process.env.CHAT_DEBUG)
     page.on('websocket', socket => {
@@ -10,7 +22,7 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
       socket.on('close', () => console.log('WS CLOSED'))
     })
   await addClaudeTarget(page, 'Chat box')
-  await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Chat' }).click()
+  await page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('link', { name: 'Chat' }).click()
   await expect(page).toHaveURL(/\/chat$/)
 
   await newSession(page, 'Coder', '~/chat-coder', 'Be brief.')
@@ -106,7 +118,7 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
   await expect(reply.locator('.member-steps')).toContainText('Worked')
 
   // The same conversation, seen from Machines, is running in chat.
-  await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Machines' }).click()
+  await page.getByRole('link', { name: 'Back to machines' }).click()
   await expect(page).toHaveURL(/\/(\?.*)?$/)
   await expect(page.getByRole('row').filter({ has: page.getByText('Coder', { exact: true }) })).toBeVisible()
 })
@@ -114,7 +126,7 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
 test('a remembered web terminal opens once, from the click that moves a chat session', async ({ page, context }) => {
   await addClaudeTarget(page, 'Handoff box')
   await page.evaluate(() => localStorage.setItem('outpost.connection.terminal', 'web'))
-  await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Chat' }).click()
+  await page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('link', { name: 'Chat' }).click()
   await newSession(page, 'Handoff', '~/chat-handoff')
   const popups: string[] = []
   context.on('page', popup => popups.push(popup.url()))

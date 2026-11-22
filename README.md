@@ -59,9 +59,9 @@ http://127.0.0.1:3000.
 
 ## Chat with your sessions
 
-The sidebar switches between **Chat** and **Machines**. Both list the same
-sessions: Machines groups them by machine, with their software and terminals;
-Chat is a Slack-like view where each session is a conversation: replies stream in, the steps the agent took fold into
+Outpost opens on Machines. Select a machine to manage its software and sessions
+or connect to a terminal. Open **Chat** from the sidebar to message a session or
+a channel. Replies stream in, the steps the agent took fold into
 one line you can open (commands and their output, file edits as diffs), and
 permission requests appear as buttons. Choose the agent's mode and model in the
 header, attach files and images (paste, drop or the paperclip), and use its

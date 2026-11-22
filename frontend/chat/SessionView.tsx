@@ -20,6 +20,7 @@ import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { FileViewer } from '../terminal/FileViewer'
 import { useSessionFiles } from '../terminal/useSessionFiles'
 import { SessionMenu } from '../workspace/SessionMenu'
+import { MachineLink } from './Dialogs'
 import { FilesPanel } from './Files'
 import { Avatar } from './Avatar'
 import { transcriptOf } from './client'
@@ -214,8 +215,8 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               <p>
                 <span className={`presence-label ${state}`}>{presenceLabel[state]}</span>
                 {' · '}
-                {harnessLabel(session.tool)} on {session.target} ·{' '}
-                <code title={session.rootDir}>{session.rootDir}</code>
+                {harnessLabel(session.tool)} on <MachineLink targetId={session.targetId}>{session.target}</MachineLink>{' '}
+                · <code title={session.rootDir}>{session.rootDir}</code>
               </p>
             </div>
             {(files.files.length > 0 || panel) && (

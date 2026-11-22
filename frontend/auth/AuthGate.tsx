@@ -17,12 +17,19 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     desktopReturnPath(window.location.pathname + window.location.search) ??
       desktopReturnPath(new URLSearchParams(window.location.search).get('returnTo')),
   )
+  const entry = useRef(
+    [pagePaths.workspace, pagePaths.chat, pagePaths.terminal, pagePaths.logs].some(
+      route => route === window.location.pathname,
+    )
+      ? window.location.pathname + window.location.search
+      : pagePaths.workspace,
+  )
   const navigate = useCallback((destination: string) => {
+    if (destination === pagePaths.workspace) {
+      window.location.assign(returnTo.current ?? entry.current)
+      return
+    }
     if (returnTo.current) {
-      if (destination === pagePaths.workspace) {
-        window.location.assign(returnTo.current)
-        return
-      }
       const url = new URL(destination, window.location.origin)
       url.searchParams.set('returnTo', returnTo.current)
       destination = url.pathname + url.search
@@ -78,6 +85,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }, [state?.mode, load, navigate])
   async function signOut() {
     await api('/auth/logout', 'POST')
+    entry.current = pagePaths.workspace
+    returnTo.current = null
     generation.current++
     setState({ mode: 'hosted', user: null })
     channel.current?.postMessage('changed')

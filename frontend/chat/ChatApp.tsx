@@ -21,7 +21,6 @@ import {
 import { needsYou } from './format'
 import SessionView from './SessionView'
 import Sidebar from './Sidebar'
-import { rememberMode } from '../mode'
 import '../styles/chat.scss'
 
 function selectionFromUrl(): Selection {
@@ -171,7 +170,6 @@ export default function ChatApp() {
     document.addEventListener('visibilitychange', wake)
     window.addEventListener('online', wake)
     window.addEventListener('focus', wake)
-    rememberMode('chat')
     return () => {
       document.removeEventListener('visibilitychange', wake)
       window.removeEventListener('online', wake)

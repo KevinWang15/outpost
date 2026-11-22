@@ -1,17 +1,10 @@
 # Chat mode
 
-Outpost has two ways to work with the same sessions:
-
-- **Machines** (`/`): sessions by machine; each session can open the coding
-  tool's own terminal interface in a persistent PTY.
-- **Chat** (`/chat` in the browser): each session is a
-  conversation with streamed replies, folded steps, inline permission requests
-  and the agent's mode and model. Sessions can share **channels**, message each
-  other, and run on **schedules**.
-
-Both modes are views of one managed session and one native conversation (Claude
-Code's transcript, Codex's rollout, Kimi's or DeepSeek's session). A
-conversation started in one mode continues in the other.
+Outpost opens the Machines workspace at `/`. Select a machine to manage sessions
+and open a coding tool’s terminal. Choose **Chat** in the sidebar or **Open in chat**
+on a session to work with streamed replies, agent steps, and permission requests.
+Chat also supports channels and schedules. Each session still runs on its machine
+and keeps its conversation when you switch interfaces.
 
 ## Principles
 

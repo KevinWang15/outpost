@@ -30,7 +30,7 @@ test('logs show what sessions did, filter by kind, and webhooks deliver it', asy
   await create.getByRole('button', { name: 'Create webhook' }).click()
   await expect(create).toBeHidden()
 
-  await page.getByRole('navigation', { name: 'Mode' }).getByRole('link', { name: 'Chat' }).click()
+  await page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('link', { name: 'Chat' }).click()
   await newSession(page, 'Logger', '~/logs-logger')
   const composer = page.getByRole('textbox', { name: 'Message' })
   await composer.fill('Check the build')

@@ -168,7 +168,8 @@ export class MachineConnection {
     const transport = this.transport
     if (!transport)
       return Promise.reject(new MachineError('The outbound machine is offline. Check its Outpost service.', 503))
-    this.starting ??= new Promise<void>((resolve, reject) => {
+    if (this.starting) return this.starting
+    const starting: Promise<void> = new Promise<void>((resolve, reject) => {
       const command = transport.login(`exec "$HOME/.outpost/bin/outpost-terminal" node --socket ${this.socket}`)
       const timer = setTimeout(
         () => this.lost('The machine did not answer in time. Check that it is reachable.'),
@@ -221,9 +222,10 @@ export class MachineConnection {
       }
       launch(command.args, command.retry)
     }).finally(() => {
-      this.starting = null
+      if (this.starting === starting) this.starting = null
     })
-    return this.starting
+    this.starting = starting
+    return starting
   }
 
   private output(bytes: Buffer, ready: () => void, timer: NodeJS.Timeout) {
@@ -343,6 +345,8 @@ export class MachineConnection {
     if (!child && !incoming) return
     this.incoming = null
     this.child = null
+    // The next call can start a handshake before the interrupted one settles.
+    this.starting = null
     incoming?.destroy()
     this.startFailed?.(new MachineError(message, status))
     this.started = false

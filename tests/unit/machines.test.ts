@@ -92,6 +92,28 @@ test('cancelling during the handshake prevents calls and streams from starting',
   assert.equal(await machine.call('open-count'), 0)
 })
 
+test('verification after a service update starts a fresh shared SSH handshake immediately', async t => {
+  const ssh = transport(node.slice(1))
+  let launches = 0
+  const machine = connection({
+    ...ssh,
+    login(command) {
+      launches++
+      return ssh.login(command)
+    },
+  })
+  t.after(() => machine.close())
+
+  const interrupted = assert.rejects(machine.call('echo'), /service was updated/)
+  machine.restart()
+  const verification = machine.call('echo', { value: 1 })
+  await interrupted
+  const concurrent = machine.call('echo', { value: 2 })
+
+  assert.deepEqual(await Promise.all([verification, concurrent]), [{ value: 1 }, { value: 2 }])
+  assert.equal(launches, 2)
+})
+
 test('cancelling while a stream is opening releases a late stream on the node', async t => {
   const machine = connection(transport(node.slice(1)))
   t.after(() => machine.close())

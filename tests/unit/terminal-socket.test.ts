@@ -317,6 +317,7 @@ test('published file bytes come back on the connected socket, alongside PTY inpu
   const { client, socket } = setup(t)
   socket.ready()
   const bytes = Buffer.alloc(64 * 1024 + 7, 0xa5)
+  bytes.fill(0x3b, 65536)
   const file = {
     id: 'a'.repeat(32),
     name: 'report.bin',
@@ -325,18 +326,18 @@ test('published file bytes come back on the connected socket, alongside PTY inpu
     source: 'published' as const,
     mediaType: 'application/octet-stream',
   }
-  const result = client.readFile(file, new AbortController().signal)
+  const progress: number[] = []
+  const result = client.readFile(file, new AbortController().signal, count => progress.push(count))
   await settle()
-  const first = socket.requests().find(m => m.type === 'file-read')
+  const [first, second] = socket.requests().filter(m => m.type === 'file-read')
   assert.equal(first.file, file.id)
   assert.equal(first.offset, 0)
-  assert.ok(client.input('x'))
-  socket.message({ type: 'result', id: first.id, ok: true, chunk: bytes.subarray(0, 65536).toString('base64') })
-  await settle()
-  const second = socket.requests().at(-1)
   assert.equal(second.offset, 65536)
+  assert.ok(client.input('x'))
   socket.message({ type: 'result', id: second.id, ok: true, chunk: bytes.subarray(65536).toString('base64') })
+  socket.message({ type: 'result', id: first.id, ok: true, chunk: bytes.subarray(0, 65536).toString('base64') })
   assert.deepEqual(Buffer.from(await (await result).arrayBuffer()), bytes)
+  assert.deepEqual(progress, [7, bytes.length])
 })
 
 test('image bytes, their acknowledgement and a single paste use the same terminal socket', async t => {

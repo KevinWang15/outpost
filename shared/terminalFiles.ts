@@ -1,7 +1,7 @@
 import { imageProblem } from './images'
 import { maxSessionFileBytes, sessionFileId, type SessionFile } from './sessionFiles'
 
-// One request in flight per reader. A small response leaves room for interactive
+// Small chunks leave room for interactive
 // output and avoids buffering a file on the relay or the persistent PTY process.
 export const terminalFileChunk = 64 * 1024
 
@@ -22,7 +22,11 @@ export function validFileRead(request: FileRead) {
   )
 }
 
-export type TerminalFileReader = (file: SessionFile, signal: AbortSignal) => Promise<Blob>
+export type TerminalFileReader = (
+  file: SessionFile,
+  signal: AbortSignal,
+  progress?: (received: number) => void,
+) => Promise<Blob>
 
 export interface ImageWrite {
   type: 'image-write'

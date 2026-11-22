@@ -28,6 +28,7 @@ import {
   type DesktopSessionChoice,
 } from '../../shared/desktopAuth'
 import { browserUrl } from '../../shared/signals'
+import { SessionFileCache } from '../../shared/sessionFileCache'
 import { parseSessionFile, previewImage } from '../../shared/sessionFiles'
 import type { SessionInput } from '../../shared/model'
 import type { ServerMessage } from '../../shared/protocol'
@@ -230,6 +231,7 @@ interface Attachment {
   launch: DesktopLaunch
   socket: TerminalSocket
   rendering: NativeRendering
+  files: SessionFileCache
   activity: TerminalActivity
   focused: boolean
   cols: number
@@ -315,6 +317,9 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
     key,
     launch,
     socket,
+    files: new SessionFileCache((file, signal) =>
+      socket.readFile(file, signal, received => emit('fileProgress', { pane, id: file.id, received })),
+    ),
     rendering,
     cols: 80,
     rows: 24,
@@ -462,6 +467,7 @@ async function handle(c: Cmd) {
       p.activity.dispose()
       p.socket.close()
       p.rendering.dispose()
+      p.files.clear()
       panes.delete(c.pane)
       return
     case 'draft':
@@ -476,25 +482,32 @@ async function handle(c: Cmd) {
       return p.socket.deliverNow()
     case 'image':
       return p.socket.pasteImage(new File([Buffer.from(c.data, 'base64')], 'clipboard', { type: c.mime }))
-    case 'files':
-      emit('files', { pane: c.pane, files: await p.socket.listFiles(AbortSignal.timeout(20000)) })
+    case 'files': {
+      const files = await p.socket.listFiles(AbortSignal.timeout(20000))
+      p.files.retain(files)
+      emit('files', { pane: c.pane, files })
       return
+    }
     case 'preview': {
       const file = parseSessionFile(c.file)
-      if (!previewImage(file)) throw new Error('Preview not supported.')
-      const blob = await p.socket.readFile(file, AbortSignal.timeout(120000))
-      if (panes.get(c.pane) === p)
-        emit('preview', {
-          pane: c.pane,
-          id: file.id,
-          mime: file.mediaType,
-          data: Buffer.from(await blob.arrayBuffer()).toString('base64'),
-        })
+      try {
+        if (!previewImage(file)) throw new Error('Preview not supported.')
+        const blob = await p.files.read(file)
+        if (panes.get(c.pane) === p)
+          emit('preview', {
+            pane: c.pane,
+            id: file.id,
+            mime: file.mediaType,
+            data: Buffer.from(await blob.arrayBuffer()).toString('base64'),
+          })
+      } catch (error) {
+        if (panes.get(c.pane) === p) emit('previewFailed', { pane: c.pane, id: file.id, message: message(error) })
+      }
       return
     }
     case 'saveFile': {
       const file = parseSessionFile(c.file)
-      const blob = await p.socket.readFile(file, AbortSignal.timeout(120000))
+      const blob = await p.files.read(file)
       await writeFile(c.path, Buffer.from(await blob.arrayBuffer()))
       emit('fileSaved', { pane: c.pane, path: c.path })
       return
@@ -502,6 +515,7 @@ async function handle(c: Cmd) {
     case 'deleteFile': {
       const file = parseSessionFile(c.file)
       await p.socket.removeFile(file.id, AbortSignal.timeout(120000))
+      p.files.remove(file.id)
       return handle({ ...c, op: 'files' })
     }
   }

@@ -1,4 +1,5 @@
 mod drag;
+pub(crate) mod files;
 use crate::{
     agent_mark::AgentMark,
     bridge::Bridge,
@@ -35,10 +36,9 @@ enum Page {
     Create,
     Find,
     Compose,
-    Files,
 }
 pub struct Workspace {
-    watches: HashMap<Id, ([Subscription; 3], SnapshotSource)>,
+    watches: HashMap<Id, ([Subscription; 4], SnapshotSource)>,
     drag: DragState,
     active_order: usize,
     handle: AnyWindowHandle,
@@ -70,7 +70,8 @@ pub struct Workspace {
     targets: Value,
     tools: Value,
     creating: bool,
-    preview_id: String,
+    files_menu: Option<Id>,
+    preview_id: Option<String>,
     preview: Option<Arc<Image>>,
 }
 type Transfer = (Tab, BTreeMap<Id, Entity<Pane>>, HashMap<u64, Id>);
@@ -294,7 +295,8 @@ impl Workspace {
             targets: Value::Null,
             tools: Value::Null,
             creating: false,
-            preview_id: String::new(),
+            files_menu: None,
+            preview_id: None,
             preview: None,
         }
     }
@@ -322,10 +324,9 @@ impl Workspace {
             page
         };
         self.message.clear();
-        if self.page != Page::Files {
-            self.preview = None;
-            self.preview_id.clear();
-        }
+        self.files_menu = None;
+        self.preview_id = None;
+        self.preview = None;
         match self.page {
             Page::Terminal => {
                 if let Some(p) = self.active() {
@@ -397,8 +398,14 @@ impl Workspace {
             s.message = e.0.clone();
             cx.notify();
         });
+        let ready = cx.subscribe(p, move |s, p, e: &files::PreviewReady, cx| {
+            if s.active().as_ref() == Some(&p) && s.preview_id.as_deref() == Some(&e.file) {
+                s.preview = Some(e.image.clone());
+                cx.notify();
+            }
+        });
         self.watches
-            .insert(id, ([sub, menu, paste_error], SnapshotSource::new()));
+            .insert(id, ([sub, menu, paste_error, ready], SnapshotSource::new()));
     }
     fn local(&mut self, profile: Option<String>, w: &mut Window, cx: &mut Context<Self>) {
         let profiles = items(&self.prefs["profiles"]);
@@ -816,24 +823,7 @@ impl Workspace {
                     }
                 }
             }
-            "preview"
-                if self.page == Page::Files
-                    && e["id"] == self.preview_id
-                    && self.remote.get(&n) == self.tabs.get(self.current).map(|t| &t.active) =>
-            {
-                let format = match e["mime"].as_str() {
-                    Some("image/png") => Some(ImageFormat::Png),
-                    Some("image/jpeg") => Some(ImageFormat::Jpeg),
-                    Some("image/gif") => Some(ImageFormat::Gif),
-                    Some("image/webp") => Some(ImageFormat::Webp),
-                    _ => None,
-                };
-                if let Some(format) = format
-                    && let Ok(bytes) = STANDARD.decode(strval(&e, "data"))
-                {
-                    self.preview = Some(Arc::new(Image::from_bytes(format, bytes)))
-                }
-            }
+            "preview" | "fileProgress" | "previewFailed" => self.file_event(n, e, cx),
             "filesChanged" => {
                 if let Some(pane) = self.remote.get(&n).and_then(|id| self.panes.get(id)) {
                     pane.read(cx).command("files", json!({}));
@@ -841,7 +831,19 @@ impl Workspace {
             }
             "files" => {
                 if let Some(pane) = self.remote.get(&n).and_then(|id| self.panes.get(id)) {
-                    pane.update(cx, |p, _| p.files = e["files"].clone());
+                    pane.update(cx, |p, _| {
+                        p.files = e["files"].clone();
+                        p.file_previews.retain(items(&p.files));
+                    });
+                    if self.active().as_ref() == Some(pane)
+                        && self
+                            .preview_id
+                            .as_ref()
+                            .is_some_and(|id| !items(&e["files"]).iter().any(|f| f["id"] == *id))
+                    {
+                        self.preview_id = None;
+                        self.preview = None;
+                    }
                 }
             }
             "barrier" => self.call(json!({"op":"ack","pane":n,"seq":e["seq"]})),
@@ -1015,6 +1017,9 @@ impl Workspace {
         self.show(Page::Choose, w, cx)
     }
     fn shortcuts(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
+        if self.file_key(e, w, cx) {
+            return;
+        }
         if e.keystroke.key == "escape" && self.drag.gesture.is_some() {
             self.cancel_drag(cx);
             w.prevent_default();
@@ -1358,24 +1363,18 @@ impl Workspace {
                         move |s, _, cx| s.panes[&id].read(cx).command("deliver", json!({})),
                     ))
                 }
-                let count = items(&pane.files).len();
+                let badge = (self.files_menu == Some(id) || !items(&pane.files).is_empty())
+                    .then(|| self.files_dropdown(id, pane, cx));
                 let surface = col()
                     .relative()
                     .p(px(5.))
                     .flex_1()
                     .overflow_hidden()
-                    .child(p);
-                let pane_body = body.child(surface.when(count > 0, |surface| {
-                    surface.child(div().absolute().top(px(6.)).right(px(8.)).child(control(
-                        format!("Files ({count})"),
-                        false,
-                        cx,
-                        move |s, w, cx| {
-                            s.select(id, w, cx);
-                            s.show(Page::Files, w, cx);
-                        },
-                    )))
-                }));
+                    .child(p)
+                    .children(
+                        badge.map(|badge| div().absolute().top(px(6.)).right(px(8.)).child(badge)),
+                    );
+                let pane_body = body.child(surface);
                 snapshot_source(&self.watches[&id].1, pane_body).into_any_element()
             }
             Layout::Split {
@@ -1787,8 +1786,8 @@ impl Workspace {
                         false,
                         cx,
                         |s, w, cx| {
-                            s.active().unwrap().read(cx).command("files", json!({}));
-                            s.show(Page::Files, w, cx)
+                            let id = s.tabs[s.current].active;
+                            s.open_files(id, w, cx);
                         },
                     )))
                 }
@@ -1913,86 +1912,6 @@ impl Workspace {
                 }
             }
             Page::Find | Page::Compose => {}
-            Page::Files => {
-                content = content.child(title("TERMINAL", "Session files"));
-                let active = self.active();
-                let files = active
-                    .as_ref()
-                    .map(|p| &p.read(cx).files)
-                    .unwrap_or(&Value::Null);
-                for f in items(files) {
-                    let file = f.clone();
-                    let remove = file.clone();
-                    let preview = file.clone();
-                    content = content.child(
-                        row()
-                            .id(SharedString::from(strval(f, "id")))
-                            .child(text(strval(f, "name"), 14., TEXT).flex_1())
-                            .when(
-                                f["mediaType"]
-                                    .as_str()
-                                    .is_some_and(|s| s.starts_with("image/")),
-                                |r| {
-                                    r.child(control("Preview", false, cx, move |s, _, cx| {
-                                        s.preview_id = strval(&preview, "id");
-                                        s.preview = None;
-                                        s.message.clear();
-                                        if let Some(p) = s.active() {
-                                            p.read(cx).command("preview", json!({"file":preview}))
-                                        }
-                                        cx.notify()
-                                    }))
-                                },
-                            )
-                            .child(control("Save as…", false, cx, move |s, _, cx| {
-                                let pick =
-                                    cx.prompt_for_new_path(&home_dir(), file["name"].as_str());
-                                let file = file.clone();
-                                let p = s.active();
-                                cx.spawn(async move |_, cx| {
-                                    if let Ok(Ok(Some(path))) = pick.await
-                                        && let Some(p) = p
-                                    {
-                                        p.update(cx, |p, _| {
-                                            p.command("saveFile", json!({"file":file,"path":path}))
-                                        });
-                                    }
-                                })
-                                .detach()
-                            }))
-                            .child(control("Delete", false, cx, move |s, w, cx| {
-                                let p = s.active();
-                                let file = remove.clone();
-                                confirm(
-                                    "Delete session file?",
-                                    &strval(&file, "name"),
-                                    w,
-                                    cx,
-                                    move |_, _, cx| {
-                                        if let Some(p) = p {
-                                            p.read(cx).command("deleteFile", json!({"file":file}))
-                                        }
-                                    },
-                                )
-                            })),
-                    )
-                }
-                if let Some(image) = &self.preview {
-                    content = content.child(
-                        img(image.clone())
-                            .w_full()
-                            .h(px(320.))
-                            .object_fit(ObjectFit::Contain),
-                    );
-                } else if !self.preview_id.is_empty() && self.message.is_empty() {
-                    content = content.child(text("Loading preview…", 13., MUTED));
-                }
-                if files.is_null() {
-                    content = content.child(text("Loading files…", 13., MUTED))
-                } else if items(files).is_empty() {
-                    content = content.child(text("No session files.", 13., MUTED))
-                }
-            }
             Page::Terminal => {}
         }
         div()
@@ -2007,6 +1926,7 @@ impl Workspace {
 }
 impl Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.prefetch_thumbnail(cx);
         self.drag.rendered_tabs = self
             .strip_slots()
             .into_iter()
@@ -2053,6 +1973,7 @@ impl Render for Workspace {
             })
             .child(col().flex_1().overflow_hidden().child(body))
             .children(self.drag_overlay())
+            .children(self.file_viewer(cx))
             .when(self.page == Page::Compose, |e| {
                 e.child(
                     row()

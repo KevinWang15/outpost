@@ -31,7 +31,9 @@ export class TerminalSocket {
   private started = false
   private allowStart = true
   private ready = false
-  private nextFileChunk = Promise.resolve()
+  // The service permits four outstanding reads. Keep one slot free and share
+  // the remaining lanes across every reader on this attachment.
+  private fileReads = Array.from({ length: 3 }, () => Promise.resolve())
   private readyAt = 0
   private receivedAt = 0
   private online = typeof navigator === 'undefined' || navigator.onLine !== false
@@ -538,25 +540,18 @@ export class TerminalSocket {
     if (!result.ok) throw new Error(result.message || 'Could not remove the session file.')
   }
 
-  readonly readFile: TerminalFileReader = async (metadata, signal) => {
+  readonly readFile: TerminalFileReader = async (metadata, signal, progress) => {
     const file = parseSessionFile(metadata)
     if (!this.connected) throw new Error('Connect the terminal before downloading a file.')
     const attachment = this.socket
-    const parts: Uint8Array<ArrayBuffer>[] = []
-    let offset = 0
-    do {
+    const count = Math.max(1, Math.ceil(file.size / terminalFileChunk))
+    const parts = new Array<Uint8Array<ArrayBuffer>>(count)
+    let received = 0
+    const readChunk = async (index: number) => {
       signal.throwIfAborted()
       if (!attachment || this.socket !== attachment) throw new Error('The terminal connection changed.')
-      const read = this.nextFileChunk.then(() => {
-        signal.throwIfAborted()
-        if (this.socket !== attachment) throw new Error('The terminal connection changed.')
-        return this.request({ type: 'file-read', id: crypto.randomUUID(), file: file.id, offset })
-      })
-      this.nextFileChunk = read.then(
-        () => {},
-        () => {},
-      )
-      const result = await read
+      const offset = index * terminalFileChunk
+      const result = await this.request({ type: 'file-read', id: crypto.randomUUID(), file: file.id, offset })
       signal.throwIfAborted()
       if (!result.ok) throw new Error(result.message || 'Could not read the session file.')
       const expected = Math.min(terminalFileChunk, file.size - offset)
@@ -564,9 +559,18 @@ export class TerminalSocket {
         throw new Error('The session sent an incomplete file.')
       const bytes = Uint8Array.from(atob(result.chunk), c => c.charCodeAt(0))
       if (bytes.length !== expected) throw new Error('The session sent an incomplete file.')
-      parts.push(bytes)
-      offset += bytes.length
-    } while (offset < file.size)
+      parts[index] = bytes
+      received += bytes.length
+      progress?.(received)
+    }
+    for (let index = 0; index < count; index += this.fileReads.length) {
+      const batch = this.fileReads.slice(0, count - index).map((previous, lane) => {
+        const read = previous.then(() => readChunk(index + lane))
+        this.fileReads[lane] = read.catch(() => {})
+        return read
+      })
+      await Promise.all(batch)
+    }
     return new Blob(parts, { type: file.mediaType })
   }
 

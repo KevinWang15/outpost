@@ -29,7 +29,9 @@ export class SessionFileCache {
     entry.promise = this.queue
       .then(async () => {
         controller.signal.throwIfAborted()
-        const blob = await this.load(file, AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]))
+        // The transport times out each stalled request. A progressing multi-chunk
+        // download can legitimately take longer than a single request.
+        const blob = await this.load(file, controller.signal)
         controller.signal.throwIfAborted()
         entry.bytes = blob.size
         this.trim()

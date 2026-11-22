@@ -118,6 +118,16 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
       updatedAt: null,
     },
   })
+  const png = await readFile(new URL('../../public/outpost-256.png', import.meta.url))
+  const file = {
+    id: 'f'.repeat(32),
+    name: 'sample.png',
+    size: png.length,
+    source: 'published',
+    mediaType: 'image/png',
+    createdAt: new Date().toISOString(),
+  }
+  let reads = 0
   let connections = 0
   ws.on('connection', (socket, req) => {
     const url = new URL(req.url!, origin)
@@ -139,6 +149,17 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
         if (m.type === 'acknowledge') {
           seen.push(m.completionId)
           send({ type: 'result', ok: true, id: m.id })
+        }
+        if (m.type === 'file-read') {
+          reads++
+          if (reads === 1) send({ type: 'result', id: m.id, ok: false, message: 'Download interrupted' })
+          else
+            send({
+              type: 'result',
+              id: m.id,
+              ok: true,
+              chunk: png.subarray(m.offset, m.offset + 65536).toString('base64'),
+            })
         }
         if (m.type === 'resize') send({ type: 'geometry', cols: m.cols, rows: m.rows })
       }
@@ -222,6 +243,18 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   assert.equal(metadata.tool, session.tool)
   const connected = await wait(e => e.event === 'connection' && e.state.kind === 'connected')
   assert.equal(connected.state.routeLabel, 'Server-managed')
+  cmd({ op: 'preview', pane, file })
+  const failed = await wait(e => e.event === 'previewFailed')
+  assert.equal(failed.id, file.id)
+  cmd({ op: 'preview', pane, file })
+  const preview = await wait(e => e.event === 'preview')
+  assert.deepEqual(Buffer.from(preview.data, 'base64'), png)
+  const completedReads = reads
+  const path = join(dir, 'saved.png')
+  cmd({ op: 'saveFile', pane, file, path })
+  await wait(e => e.event === 'fileSaved')
+  assert.deepEqual(await readFile(path), png)
+  assert.equal(reads, completedReads, 'Save uses the bytes already fetched for preview')
   assert.match(restored, /restored history/)
   assert.match(restored, /wide 界/)
   assert.match(restored, /alt screen/)

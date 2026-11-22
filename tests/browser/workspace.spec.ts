@@ -43,7 +43,7 @@ test('direct-only setup offers terminal tools and restores Chat tools for server
   await back.click()
   await page.keyboard.press('ArrowRight')
   await expect(dialog.getByRole('tab', { name: 'Direct only' })).toBeFocused()
-  await expect(dialog.getByRole('tabpanel')).toContainText('Show offline enrollment')
+  await expect(dialog.getByRole('tabpanel')).toContainText('Get install command')
   await next.click()
   await expect(deepseek).toHaveCount(0)
   await dialog.getByRole('checkbox', { name: 'Codex' }).check()
@@ -53,6 +53,33 @@ test('direct-only setup offers terminal tools and restores Chat tools for server
   await expect(dialog.getByLabel('Host', { exact: true })).toHaveValue('build.example.test')
   await expect(deepseek).toBeChecked()
 })
+
+for (const method of ['Direct only', 'Relay enabled']) {
+  test(`${method} offers an install command for the new machine`, async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Add a machine' }).first().click()
+    const dialog = page.getByRole('dialog', { name: 'Add a machine' })
+    await dialog.getByRole('tab', { name: method }).click()
+    await dialog.getByRole('button', { name: 'Continue' }).click()
+    await dialog.getByLabel('Name', { exact: true }).fill(`Installer test · ${method}`)
+    if (method === 'Direct only') await dialog.getByLabel(/Machine HTTPS address/).fill('https://machine.example.test')
+    await dialog.getByRole('button', { name: 'Add machine' }).click()
+    const panel = page.getByRole('region', { name: 'Machine installation' })
+    await panel.getByRole('button', { name: 'Get install command' }).click()
+    const command = panel.getByLabel('Install command', { exact: true })
+    await expect(command).toContainText('/api/install/machine.sh')
+    if (method === 'Direct only') {
+      await expect(command).toContainText('sh -s -- direct')
+      await panel.getByText('Install without outbound access', { exact: true }).click()
+      await expect(panel.getByLabel('Offline install command')).toContainText('sh ./machine.sh direct')
+    } else {
+      await expect(command).toContainText('sh -s -- relay')
+      const first = await command.innerText()
+      await panel.getByRole('button', { name: 'Generate new command' }).click()
+      await expect(command).not.toHaveText(first)
+    }
+  })
+}
 
 test('add a machine, create a session, and work in the web terminal', async ({ page }) => {
   await addMachine(page, 'Browser box')

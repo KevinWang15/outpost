@@ -140,7 +140,7 @@ for (const directOnly of [false, true])
         const targetPath = '/targets/' + target.id
         let installJson = ''
         if (directOnly) {
-          installJson = JSON.stringify(await (await request(targetPath + '/direct-install')).json())
+          installJson = JSON.stringify((await (await request(targetPath + '/direct-install')).json()).config)
           const pair = run('pair', '--direct')
           pair.stdin.end(installJson + '\n')
           assert.equal((await once(pair, 'exit'))[0], 0)

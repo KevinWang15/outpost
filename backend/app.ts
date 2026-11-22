@@ -1,3 +1,4 @@
+import { machineInstaller } from './machineInstaller'
 import { directRoutes } from './directOnly'
 import Fastify, { LogController } from 'fastify'
 import { readFile } from 'node:fs/promises'
@@ -207,6 +208,12 @@ export async function createApp(options: AppOptions) {
   })
 
   app.get('/health', async () => ({ status: 'ok' }))
+  app.get('/api/install/machine.sh', async (_req, reply) =>
+    reply
+      .type('text/x-shellscript; charset=utf-8')
+      .header('Content-Disposition', 'attachment; filename="machine.sh"')
+      .send(machineInstaller()),
+  )
   directRoutes(app, services, desktop)
   deployment.register(app)
   desktopRoutes(app, services, desktop)

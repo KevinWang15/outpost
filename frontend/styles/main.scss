@@ -373,6 +373,40 @@ kbd {
     gap: 2px;
   }
 }
+.machine-install {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  min-width: 0;
+  h2 {
+    font-size: 16px;
+  }
+  p {
+    color: var(--text);
+    line-height: 1.5;
+    font-size: 13px;
+  }
+  > button {
+    justify-self: start;
+  }
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  details[open] > :not(summary) {
+    margin-top: 8px;
+  }
+  .machine-assets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  a {
+    color: var(--link);
+    text-decoration: underline;
+  }
+}
 .machine-wizard .dialog-header {
   h2 {
     font-size: 20px;

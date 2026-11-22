@@ -198,7 +198,7 @@ export default function TargetDialog({
                 placeholder="https://terminal.corp.example"
               />
               <small>
-                Enter the HTTPS endpoint of the Outpost machine service. After adding it, follow the offline enrollment
+                Enter the HTTPS endpoint of the Outpost machine service. After adding it, follow the installation
                 instructions on its machine page.
               </small>
             </label>
@@ -253,7 +253,9 @@ export default function TargetDialog({
             </>
           )}
           {!target && kind === 'paired' && (
-            <p className="hint">After adding the machine, use the pairing code on its machine page to enroll it.</p>
+            <p className="hint">
+              After adding the machine, copy the install command from its machine page and run it on the machine.
+            </p>
           )}
           <ToolChoice
             direct={kind === 'direct'}

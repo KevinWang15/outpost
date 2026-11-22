@@ -1,3 +1,4 @@
+import { machineReleaseBase } from './machineInstaller'
 import { supportsTerminal } from '../shared/harnesses'
 import { createHmac } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
@@ -29,7 +30,10 @@ export function directRoutes(app: FastifyInstance, s: Services, desktop: Desktop
     const { target, owner } = await s.context(req, req.params.targetId)
     if (target.kind !== 'direct') throw new AppError('Choose a direct-only machine.', 400)
     const { publicKey } = directAuthority(s.deployment.secret, owner.userId, target.id)
-    return { origin: s.deployment.origin(req), targetId: target.id, endpoint: target.endpoint, publicKey }
+    return {
+      config: { origin: s.deployment.origin(req), targetId: target.id, endpoint: target.endpoint, publicKey },
+      releaseBase: machineReleaseBase(),
+    }
   })
   app.addHook('preHandler', async (req, reply) => {
     const route = req.routeOptions.url ?? ''

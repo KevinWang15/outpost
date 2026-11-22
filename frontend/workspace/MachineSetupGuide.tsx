@@ -75,9 +75,8 @@ export default function MachineSetupGuide({
         'An HTTPS address reachable from your device. It must forward WebSocket connections to the Outpost machine service.',
       next: (
         <>
-          Choose <strong>Show offline enrollment</strong>. On the machine, run{' '}
-          <code>outpost-terminal pair --direct</code>, paste the settings, then run{' '}
-          <code>outpost-terminal connect</code>.
+          Choose <strong>Get install command</strong> on the machine page. Paste the command on the machine, or use the
+          offline installer if it cannot download files. Point the HTTPS endpoint at the connector.
         </>
       ),
     },
@@ -91,8 +90,8 @@ export default function MachineSetupGuide({
         'The machine must be able to make an outbound connection to your Outpost server. No inbound port is needed for the relay.',
       next: (
         <>
-          Choose <strong>Generate pairing code</strong>. Run the pairing command shown on the machine page, enter the
-          code on the machine, then run <code>outpost-terminal connect</code>.
+          Choose <strong>Get install command</strong> on the machine page. Paste it into a Linux terminal within five
+          minutes to install, pair and start the connector.
         </>
       ),
     },

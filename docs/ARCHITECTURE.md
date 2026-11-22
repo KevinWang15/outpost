@@ -460,7 +460,7 @@ the host for a new installation also requires action on the host.
 
 The server-managed **Required software** installer creates the host directory on
 first installation. For a manually installed relay-enabled or direct-only machine, run
-the following once as the intended execution user on a fresh Linux installation:
+the following once as the intended execution user on a fresh Linux installation if bypassing the machine page’s installer:
 
 ```sh
 sudo mkdir -m 700 /var/lib/outpost-machine && sudo chown "$(id -u)" /var/lib/outpost-machine
@@ -496,11 +496,8 @@ files are retained.
 #### Direct-only machines
 
 In **Add a machine**, select **Direct only**, enter the HTTPS origin reachable by the
-client, and open **Show offline enrollment**. On the machine run
-`~/.outpost/bin/outpost-terminal pair --direct` and paste the JSON at the
-prompt. It contains the server origin, machine ID, endpoint and a machine-specific
-Ed25519 public verification key. Deliver it through a trusted administrative
-channel. Run `~/.outpost/bin/outpost-terminal connect` as that account.
+client, and choose **Get install command** on the machine page. Run the command as the Linux execution account. It downloads the installer and matching binary, verifies the checksum and version, enrolls with the machine-specific public verification key, then starts the listener in the foreground.
+For machines with restricted outbound access, open **Install without outbound access**. Transfer the linked installer, checksum manifest and matching Linux binary through a trusted channel, then run the provided offline command in their directory. Enrollment and operation require no machine-to-server connection. The printed connector command can be run under a service manager.
 In this mode it listens on `127.0.0.1:8844` (overridable with
 `OUTPOST_DIRECT_PORT`). Route **POST/OPTIONS /api/direct/request** and the
 **WebSocket /api/direct/terminal** from the machine's HTTPS endpoint to that
@@ -518,13 +515,9 @@ require a server-connected machine. Coding tools have their own network behavior
 
 #### Connecting a relay-enabled machine
 
-1. In **Add a machine**, select **Relay enabled**. Save the machine and choose **Generate pairing code**.
-2. On the Linux machine, use a V3 `outpost-terminal` build containing the connector.
-   Run `~/.outpost/bin/outpost-terminal pair https://YOUR-OUTPOST-SERVER` and
-   enter the single-use code within five minutes.
-3. Run `~/.outpost/bin/outpost-terminal connect` as the account that owns the sessions.
-   Keep it running with your service manager. It reconnects after network loss.
-   Outbound HTTPS from the client and machine to the deployment is sufficient for relay.
+1. Select **Relay enabled** in **Add a machine**, save it, then choose **Get install command**.
+2. Paste the command into a Linux terminal as the execution account within five minutes. It downloads and verifies the machine service, redeems the single-use code and starts the connector. Generating a replacement invalidates the previous code.
+3. Keep the connector running in that terminal or run `~/.outpost/bin/outpost-terminal connect` under your service manager. It reconnects after network loss. Outbound HTTPS from both sides to Outpost suffices for relay.
 4. To enable direct connections, set `OUTPOST_DIRECT_ORIGIN` to the machine's
    client-reachable HTTPS origin in the connector's environment. Configure that
    host's TLS reverse proxy to forward WebSocket upgrades for `/api/terminal/direct`

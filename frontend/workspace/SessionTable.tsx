@@ -99,7 +99,7 @@ export default function SessionTable({
           <div className="table-row table-head" role="row">
             <span role="columnheader">Session</span>
             <span role="columnheader">Activity</span>
-            <span role="columnheader">Runs in</span>
+            <span role="columnheader">Agent interface</span>
             <span role="columnheader">Last connected</span>
             <span role="columnheader" />
           </div>

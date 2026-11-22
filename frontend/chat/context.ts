@@ -12,7 +12,7 @@ export type ChatDialog =
   | { kind: 'session'; targetId?: string; conversation?: ConversationMatch }
   | { kind: 'channel'; channelId: string | null; membersOnly?: boolean }
   | { kind: 'schedule'; scheduleId: string | null; session: SessionRef | null }
-  | ({ kind: 'settings' | 'conversations' | 'fork' | 'stop' | 'delete' | 'chat' | 'terminal' } & SessionRef)
+  | ({ kind: 'settings' | 'conversations' | 'fork' | 'stop' | 'delete' } & SessionRef)
   | { kind: 'find'; query: string }
 
 interface ChatShell {

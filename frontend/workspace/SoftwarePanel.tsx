@@ -79,7 +79,7 @@ export default function SoftwarePanel({
                   {item.status === 'installed' ? <Check size={15} /> : <TriangleAlert size={15} />}
                   <strong>
                     {softwareLabel(item.id)}
-                    {item.id === 'claude-agent-acp' && ' (Chat only)'}
+                    {item.id === 'claude-agent-acp' && ' (for sessions started in Chat)'}
                   </strong>
                   <span>
                     {item.status === 'missing'

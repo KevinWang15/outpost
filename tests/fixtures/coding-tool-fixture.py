@@ -171,6 +171,18 @@ def hook(event):
 def answer(prompt):
     # Like Claude Code: hooks around the turn, and the reply in its transcript.
     hook('UserPromptSubmit')
+    with open(history, 'a') as stream:
+        stream.write(
+            json.dumps(
+                {
+                    'type': 'user',
+                    'uuid': str(uuid.uuid4()),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'message': {'role': 'user', 'content': [{'type': 'text', 'text': prompt}]},
+                }
+            )
+            + '\n'
+        )
     time.sleep(0.3)
     body = [line for line in prompt.splitlines() if line.strip() and not line.startswith('[Outpost:')]
     reply = 'Fixture reply to: ' + (body[0] if body else prompt.strip())

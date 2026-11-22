@@ -12,11 +12,7 @@ and keeps its conversation when you switch interfaces.
    [Agent Client Protocol](https://agentclientprotocol.com) (ACP v1), the
    standard editors such as Zed and JetBrains use. Outpost does not parse
    terminal output, patch the tool, or reimplement its agent.
-2. **One driver per conversation.** A session runs either its terminal service
-   or its chat host, never both: two processes writing one transcript would fork
-   it. Viewing a session starts nothing. **Continue in chat** or **Continue in a
-   terminal** ends the running driver and continues the conversation in the
-   other; Connect, Start in chat and sending a message start a stopped one.
+2. **One agent can serve both views.** The first explicit start chooses the native CLI or its ACP agent. Opening another view attaches to that running process. When the CLI owns the session, Chat follows its native conversation records and sends prompts through the terminal delivery queue. When ACP owns it, Terminal renders the same journal as Chat and submits prompts and approvals to the same host. Keyboard drafts belong to each viewer. A pending approval can be answered once.
 3. **The machine owns the chat**, as it owns the terminal. A chat host on the
    machine keeps the agent, its prompt queue and its history while browsers,
    SSH and the Outpost server come and go.
@@ -47,7 +43,7 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 | Chat host | `machine/chat.ts` | The persistent ACP client of one session: starts the tool's ACP server, opens the native conversation and records a new one in the session, queues prompts, journals updates, answers permission requests from viewers |
 | Host contract | `shared/chatHost.ts` | Envelope messages, the journal both ends apply, bounds |
 | Transcript model | `shared/chatTranscript.ts` | Turns and items for display, live or replayed |
-| Node | `machine/node.ts`, `machine/launch.ts` | Starts the host, enforces one driver, connects chat streams to it |
+| Node | `machine/sessionView.ts`, `machine/launch.ts` | Opens both views of the running agent and serializes concurrent first starts |
 | Harness adapters | `chat`, `chatResumable`, `chatServers` in `machine/harnesses/` | How each tool serves ACP |
 | Server | `backend/chat/` | Links, hub (routing), store, socket, tokens |
 | Web app | `frontend/chat/` | The browser chat UI |

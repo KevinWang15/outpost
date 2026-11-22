@@ -6,14 +6,12 @@ import { harnessLabel } from '../../shared/harnesses'
 import { pagePaths } from '../../shared/pages'
 import { chatLimits, sessionKey, type ChannelMember, type ChannelView, type SessionRef } from '../../shared/chatApi'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
-import ConnectDialog from '../connect/ConnectDialog'
-import { useConnect } from '../connect/useConnect'
 import { Dialog } from '../ui/Dialog'
 import ConversationsDialog from '../workspace/ConversationsDialog'
 import FinderDialog from '../workspace/FinderDialog'
 import ForkDialog from '../workspace/ForkDialog'
 import SessionDialog from '../workspace/SessionDialog'
-import { ContinueInChat, DeleteConfirm, MoveToTerminal, StopConfirm } from '../workspace/SessionMenu'
+import { DeleteConfirm, StopConfirm } from '../workspace/SessionMenu'
 import SessionSettingsDialog from '../workspace/SessionSettingsDialog'
 import { plainRef } from './client'
 import { Avatar } from './Avatar'
@@ -593,52 +591,6 @@ export function ScheduleDialog({
         {error && <p className="error">{error}</p>}
       </form>
     </Dialog>
-  )
-}
-
-export function TerminalDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
-  const target = plainRef(selected)
-  const { client } = useChat()
-  const session = client.session(target)
-  const connector = useConnect({ id: target.targetId, name: session?.target ?? '' }, onClose)
-  if (!session) return null
-  if (connector.connection)
-    return (
-      <ConnectDialog
-        target={{ name: session.target }}
-        connection={connector.connection}
-        onChoose={connector.choose}
-        onBack={connector.back}
-        onClose={connector.close}
-      />
-    )
-  // Connect from the click itself, so a remembered web terminal opens its
-  // pop-up inside the user's gesture.
-  return (
-    <MoveToTerminal
-      session={session}
-      stop={() => client.call({ type: 'stop', ...target })}
-      onOpen={() => connector.connect(session)}
-      onClose={onClose}
-    />
-  )
-}
-
-/** Continue a session that runs in a terminal here in chat. */
-export function ContinueChatDialog({ target: selected, onClose }: { target: SessionRef; onClose: () => void }) {
-  const { client } = useChat()
-  const target = plainRef(selected)
-  const session = client.session(target)
-  if (!session) return null
-  return (
-    <ContinueInChat
-      session={session}
-      onClose={onClose}
-      onConfirm={async () => {
-        await client.call({ type: 'stop', ...target })
-        client.restart(target)
-      }}
-    />
   )
 }
 

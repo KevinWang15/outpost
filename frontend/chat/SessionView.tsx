@@ -1,3 +1,5 @@
+import { useConnect } from '../connect/useConnect'
+import ConnectDialog from '../connect/ConnectDialog'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type * as acp from '@agentclientprotocol/sdk'
 import {
@@ -7,7 +9,6 @@ import {
   Files,
   History,
   LoaderCircle,
-  MessagesSquare,
   NotebookPen,
   Play,
   Square,
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react'
 import { sessionKey, type ChatSession, type SessionRef } from '../../shared/chatApi'
 import { linkedFile, type ChatInfo } from '../../shared/chatHost'
-import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
+import { harnessLabel } from '../../shared/harnesses'
 import { FileViewer } from '../terminal/FileViewer'
 import { useSessionFiles } from '../terminal/useSessionFiles'
 import { SessionMenu } from '../workspace/SessionMenu'
@@ -109,12 +110,13 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const target = useMemo(() => ({ targetId, sessionId }), [targetId, sessionId])
   const key = sessionKey(target)
   const session = client.session(target)
+  const connector = useConnect({ id: targetId, name: session?.target ?? '' }, () => {})
   const conversation = client.conversations.get(key)
   const journal = conversation?.journal ?? null
   const info = conversation?.info ?? null
   // transcriptOf memoizes per journal version.
   const view = journal ? transcriptOf(journal) : null
-  const terminal = session?.driver === 'terminal'
+  const terminal = info ? !!info.nativeTerminal : session?.driver === 'terminal'
   const [limit, setLimit] = useState(page)
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
@@ -236,16 +238,18 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               session={session}
               label={`Actions for ${session.name}`}
               actions={{
-                terminal: () => open({ kind: 'terminal', ...target }),
-                newConversation: {
-                  disabled: link !== 'live' || running || info?.state !== 'ready',
-                  onSelect: () => {
-                    setActionError('')
-                    void client
-                      .call({ type: 'new-conversation', ...target })
-                      .catch(error => setActionError((error as Error).message))
-                  },
-                },
+                terminal: () => connector.connect(session),
+                newConversation: terminal
+                  ? undefined
+                  : {
+                      disabled: link !== 'live' || running || info?.state !== 'ready',
+                      onSelect: () => {
+                        setActionError('')
+                        void client
+                          .call({ type: 'new-conversation', ...target })
+                          .catch(error => setActionError((error as Error).message))
+                      },
+                    },
                 conversations: () => open({ kind: 'conversations', ...target }),
                 edit: () => open({ kind: 'settings', ...target }),
                 fork: () => open({ kind: 'fork', ...target }),
@@ -330,21 +334,15 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                     Choose a conversation
                   </button>
                 </div>
-              ) : terminal ? (
+              ) : terminal && info?.activity.state === 'waiting' ? (
                 <div className="status-card">
                   <SquareTerminal size={18} />
                   <div>
-                    <strong>{session.name} runs in a terminal.</strong>
-                    <p>Continuing here ends the terminal’s process; the conversation stays the same.</p>
+                    <strong>The coding tool needs your input in Terminal.</strong>
                   </div>
-                  <div className="status-actions">
-                    <button className="button small" onClick={() => open({ kind: 'terminal', ...target })}>
-                      Open terminal
-                    </button>
-                    <button className="button small primary" onClick={() => open({ kind: 'chat', ...target })}>
-                      <MessagesSquare size={14} /> Continue in chat
-                    </button>
-                  </div>
+                  <button className="button small" onClick={() => connector.connect(session)}>
+                    Open Terminal
+                  </button>
                 </div>
               ) : link === 'unavailable' ? (
                 <div className="status-card error">
@@ -365,11 +363,9 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                     <p>{info?.error ?? 'Start it here, or send a message to start it in chat.'}</p>
                   </div>
                   <div className="status-actions">
-                    {supportsTerminal(session.tool) && (
-                      <button className="button small" onClick={() => open({ kind: 'terminal', ...target })}>
-                        <SquareTerminal size={14} /> Open in a terminal
-                      </button>
-                    )}
+                    <button className="button small" onClick={() => connector.connect(session)}>
+                      <SquareTerminal size={14} /> Open in Terminal
+                    </button>
                     <button className="button small primary" onClick={() => client.restart(target)}>
                       <Play size={14} /> Start in chat
                     </button>
@@ -396,53 +392,69 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               <ArrowDown size={14} /> Latest
             </button>
           )}
-          {!terminal && (
-            <footer className="conversation-footer">
-              {view && view.queue.length > 0 && (
-                <ul className="queue" aria-label="Queued messages">
-                  {view.queue.map(turn => (
-                    <li key={turn.id}>
-                      <span>
-                        {turn.prompt
-                          .map(block => (block.type === 'text' ? block.text : '[image]'))
-                          .join(' ')
-                          .slice(0, 140)}
-                      </span>
-                      <button
-                        className="icon-button"
-                        aria-label="Remove queued message"
-                        onClick={() => void actions.unqueue(turn.id).catch(() => {})}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Composer
-                draftKey={`session:${key}`}
-                placeholder={`Message ${session.name}`}
-                onUpload={file => client.upload(target, file)}
-                commands={(info?.commands ?? []).map(command => ({ value: command.name, label: command.description }))}
-                running={running}
-                disabled={link === 'unavailable' ? 'This chat is unavailable.' : null}
-                onSend={async (text, files, key) => {
-                  pinned.current = true
-                  await client.prompt(target, text, files, key)
-                }}
-                onStop={() => void client.request({ type: 'cancel', ...target })}
-              />
-              {usage && usage.size > 0 && (
-                <p className="usage">
-                  {Math.round((usage.used / usage.size) * 100)}% of {Math.round(usage.size / 1000)}k context
-                  {usage.cost &&
-                    usage.cost.amount > 0 &&
-                    ` · ${usage.cost.currency === 'USD' ? '$' : ''}${usage.cost.amount.toFixed(2)}${usage.cost.currency === 'USD' ? '' : ` ${usage.cost.currency}`}`}
-                </p>
-              )}
-            </footer>
-          )}
+          <footer className="conversation-footer">
+            {view && view.queue.length > 0 && (
+              <ul className="queue" aria-label="Queued messages">
+                {info?.nativeTerminal && (
+                  <li className="hint">
+                    {info.nativeTerminal.delivery === 'manual'
+                      ? 'Messages are held. Choose Deliver now in Terminal to send the next one.'
+                      : 'Queued until the agent is idle and the terminal draft is clear.'}
+                  </li>
+                )}
+                {view.queue.map(turn => (
+                  <li key={turn.id}>
+                    <span>
+                      {turn.prompt
+                        .map(block => (block.type === 'text' ? block.text : '[image]'))
+                        .join(' ')
+                        .slice(0, 140)}
+                    </span>
+                    <button
+                      className="icon-button"
+                      aria-label="Remove queued message"
+                      onClick={() =>
+                        void actions.unqueue(turn.id).catch(error => setActionError((error as Error).message))
+                      }
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Composer
+              draftKey={`session:${key}`}
+              placeholder={`Message ${session.name}`}
+              onUpload={file => client.upload(target, file)}
+              commands={(info?.commands ?? []).map(command => ({ value: command.name, label: command.description }))}
+              running={running}
+              disabled={link === 'unavailable' ? 'This chat is unavailable.' : null}
+              onSend={async (text, files, key) => {
+                pinned.current = true
+                await client.prompt(target, text, files, key)
+              }}
+              onStop={terminal ? undefined : () => void client.request({ type: 'cancel', ...target })}
+            />
+            {usage && usage.size > 0 && (
+              <p className="usage">
+                {Math.round((usage.used / usage.size) * 100)}% of {Math.round(usage.size / 1000)}k context
+                {usage.cost &&
+                  usage.cost.amount > 0 &&
+                  ` · ${usage.cost.currency === 'USD' ? '$' : ''}${usage.cost.amount.toFixed(2)}${usage.cost.currency === 'USD' ? '' : ` ${usage.cost.currency}`}`}
+              </p>
+            )}
+          </footer>
         </section>
+        {connector.connection && (
+          <ConnectDialog
+            target={{ name: session.target }}
+            connection={connector.connection}
+            onChoose={connector.choose}
+            onBack={connector.back}
+            onClose={connector.close}
+          />
+        )}
         {panel && <FilesPanel access={access} state={files} onOpen={setViewing} onClose={() => setPanel(false)} />}
         {viewing && <FileViewer selected={viewing} access={access} state={files} close={() => setViewing(null)} />}
       </FilesContext.Provider>

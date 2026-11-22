@@ -64,6 +64,9 @@ app.addHook('preSerialization', async (request, reply, payload) => {
       const socket = managedSocket(deployment.secret, deployment.owner(), target.id)
       provisionMachine(fixture.home, socket)
       await cp(project, join(fixture.home, 'fork-project'), { recursive: true })
+      const shared = join(fixture.home, 'shared-terminal')
+      await mkdir(shared)
+      await Promise.all(['capture-input', 'answer-prompts'].map(file => writeFile(join(shared, file), '')))
       await symlink(fixture.home, join(nodes, socket.slice('run/'.length)))
     }
   }

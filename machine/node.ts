@@ -1,14 +1,15 @@
 // `outpost-terminal node --socket run/node-<key>.sock`: the machine end of the
 // one connection Outpost keeps to it. It runs for as long as that connection
 // (stdio) is open. Drivers it starts outlive it.
-import { prepareTerminal } from './terminalAttach'
+import { openSessionView } from './sessionView'
+import type { Duplex } from 'node:stream'
 import { authorizeNode, validNodeSocket, watchInstallation, nodeLock, installation } from './installation'
 import { inspectSoftware } from './software'
 import { requiredSoftware } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, mkdirSync, renameSync, rmSync, statSync, watch } from 'node:fs'
-import { connect, createServer, type Socket } from 'node:net'
+import { createServer, type Socket } from 'node:net'
 import {
   machineProtocol,
   nodeMagic,
@@ -22,13 +23,12 @@ import {
 } from '../shared/machine'
 import { BoundedWriter } from '../shared/node/boundedWriter'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
-import { chatHost } from '../shared/chatHost'
 import { terminalService } from '../shared/terminalService'
-import { driverStatus, request } from './drivers'
+import { request } from './drivers'
 import { eventsDirectory, readEvents } from './events'
 import { listFiles, readFile, removeFile, StoredFile } from './files'
 import { catalog, readBatch, readMessage } from './history'
-import { chatSocket, startChat, terminalSocket } from './launch'
+import { terminalSocket } from './launch'
 import { readRegistry, RegistryError, session as findSession } from './registry'
 import { directories, searchConversations } from './search'
 import {
@@ -40,7 +40,6 @@ import {
   listSessions,
   switchSession,
   terminateSession,
-  touchSession,
   updateSession,
 } from './sessions'
 import { socketAddress, statePath } from './state'
@@ -128,9 +127,8 @@ export async function serveNode(socketName: string) {
     }
 
     /** A driver's socket, carried as a stream: bytes both ways, paced by the window. */
-    const pipe = (stream: number, socketPath: string, hello: Buffer) => {
+    const pipe = (stream: number, socket: Duplex) => {
       const out = output(stream)
-      const socket = connect(socketAddress(socketPath))
       let ended = false
       const end = (error?: RemoteError) => {
         if (ended) return
@@ -139,9 +137,6 @@ export async function serveNode(socketName: string) {
         out.discard()
         closeStream(stream, error ? { error } : {})
       }
-      socket.on('connect', () => {
-        if (!ended) socket.write(hello)
-      })
       socket.on('data', (bytes: Buffer) => {
         if (ended || out.write(bytes)) return
         socket.pause()
@@ -174,23 +169,10 @@ export async function serveNode(socketName: string) {
 
     const openers = {
       async terminal(stream: number, args: TerminalStreamArgs) {
-        const { path, hello } = await prepareTerminal(args)
-        pipe(stream, path, hello)
+        pipe(stream, (await openSessionView('terminal', args)).stream)
       },
       async chat(stream: number, args: ChatStreamArgs) {
-        const record = findSession(readRegistry(), args.session)
-        const { terminal, chat } = await driverStatus(record.id)
-        if (terminal) throw new RegistryError('This session runs in a terminal. Choose Continue in chat to move it.')
-        if (chat && chat.protocol !== chatHost.protocol)
-          throw new RegistryError(
-            'This chat runs an older Outpost machine service. Stop the session, then open it again.',
-          )
-        if (!chat) {
-          if (!args.start) throw new RegistryError('This session is not running in chat.', 410)
-          await startChat(record)
-        }
-        await touchSession(record.id)
-        pipe(stream, chatSocket(record.id), Buffer.alloc(0))
+        pipe(stream, (await openSessionView('chat', args)).stream)
       },
       async 'file-read'(stream: number, args: FileReadArgs) {
         findSession(readRegistry(), args.session)

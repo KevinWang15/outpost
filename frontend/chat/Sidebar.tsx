@@ -28,7 +28,7 @@ function SessionRow({ session, active }: { session: ChatSession; active: boolean
   const detail =
     state === 'idle'
       ? session.rootDir.split('/').filter(Boolean).at(-1) || session.rootDir
-      : state === 'stopped' || state === 'terminal'
+      : state === 'stopped'
         ? placeLabel(session)
         : presenceLabel[state]
   return (
@@ -41,7 +41,7 @@ function SessionRow({ session, active }: { session: ChatSession; active: boolean
       <span className="chat-row-text">
         <strong>{session.name}</strong>
         <small className={state}>
-          {state === 'terminal' && <SquareTerminal size={11} />}
+          {session.driver === 'terminal' && <SquareTerminal size={11} />}
           {detail}
         </small>
       </span>

@@ -1,8 +1,9 @@
-# Outpost machine service 2.7.0
+# Outpost machine service 2.8.0
 
 Everything Outpost runs on a machine, as one executable. Terminal service
-protocol 6, chat host protocol 3, node protocol 4.
+protocol 6, chat host protocol 3, node protocol 5.
 
+- Chat and Terminal can share a running agent. A terminal-backed session queues Chat messages around keyboard input. An ACP-backed session offers a terminal transcript with prompts, approvals and session files. Simultaneous first connections start one agent.
 - File publication and removal notify each attached terminal once. Closing an attachment releases its machine stream.
 - Machine state locks are released automatically if the process exits.
 - History search uses `mixed` for combined keyword and semantic results. Message pages count Unicode code points. Existing V3 installations must rebuild the generated history index with the matching server.

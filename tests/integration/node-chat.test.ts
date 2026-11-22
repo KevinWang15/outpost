@@ -1,13 +1,14 @@
 // Chat through a machine's node: the chat host, its conversation in the session
 // timeline, files, Outpost tools and one driver at a time, on a local target.
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { readFile, writeFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { streamWindow, type AgentCall } from '../../shared/machine'
 import { chatHost, type ChatEntry, type ChatHostMessage, type ChatHostRequest } from '../../shared/chatHost'
 import { currentConversation, type SessionInput, type Target } from '../../shared/model'
-import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
+import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
 import type { Stream } from '../../backend/machines'
 import { SessionFileClient } from '../../backend/sessionFiles'
 import { SessionClient } from '../../backend/sessions'
@@ -89,6 +90,34 @@ class ChatClient {
   }
 }
 
+async function waitFor(check: () => boolean, message: string) {
+  const until = Date.now() + 15_000
+  while (!check()) {
+    if (Date.now() > until) throw Error(message)
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+}
+
+function terminalViewer(stream: Stream) {
+  const decoder = new FrameDecoder()
+  let output = ''
+  const events: { type: string; id?: string; files?: { name: string }[] }[] = []
+  stream.onData(bytes => {
+    for (const frame of decoder.feed(bytes)) {
+      if (frame.kind === 'O') output += frame.payload.toString()
+      else if (frame.kind === 'C') events.push(JSON.parse(frame.payload.toString()))
+    }
+  })
+  return {
+    events,
+    ready: () => waitFor(() => events.some(m => m.type === 'ready'), 'Terminal did not become ready'),
+    text: (value: string) => waitFor(() => output.includes(value), 'Missing terminal text: ' + value),
+    input: (data: string) => stream.write(terminalFrame('I', Buffer.from(data))),
+    send: (control: object) => stream.write(terminalControl(control)),
+    close: () => stream.end(),
+  }
+}
+
 async function machine(t: TestContext) {
   const { home, machines, context, streams } = await localMachine(t, 'outpost-node-chat-', settings)
   const calls: AgentCall[] = []
@@ -105,7 +134,7 @@ async function machine(t: TestContext) {
     streams.push(stream)
     return new ChatClient(stream)
   }
-  return { context, sessions, files: new SessionFileClient(), calls, project, create, open }
+  return { home, context, sessions, files: new SessionFileClient(), calls, project, create, open }
 }
 
 test(
@@ -138,8 +167,10 @@ test(
 
     const finished = (await sessions.get(context, session.id)).activity
     assert.equal(finished.state, 'finished')
-    // One driver at a time: the terminal refuses while the chat runs, and so does deletion.
-    await assert.rejects(sessions.attach(context, session.id, 80, 24, true), { statusCode: 409 })
+    const terminal = terminalViewer(await sessions.attach(context, session.id, 80, 24, false))
+    await terminal.ready()
+    await terminal.text('Permission granted.')
+    terminal.close()
     await assert.rejects(sessions.remove(context, session.id), { statusCode: 409 })
     const seen = await sessions.acknowledge(context, session.id, finished.completionId!)
     assert.equal(seen.activity.state, 'idle')
@@ -287,7 +318,7 @@ test('files sent to the agent are stored, and linked where its own tools read th
   assert.match(missing.message!, /no longer in this session/)
 })
 
-test('DeepSeek chats resume their exact conversation and have no terminal', { timeout: 120_000 }, async t => {
+test('DeepSeek resumes the same conversation from either view', { timeout: 120_000 }, async t => {
   const { context, sessions, create, open, project } = await machine(t)
   const session = await create({ name: 'DeepSeek named session', tool: 'deepseek' })
   const native = currentConversation(session)
@@ -301,7 +332,10 @@ test('DeepSeek chats resume their exact conversation and have no terminal', { ti
   const reopened = await open(session.id)
   assert.equal((await reopened.ready()).info.nativeId, native)
   await sessions.terminate(context, session.id)
-  await assert.rejects(sessions.attach(context, session.id, 80, 24, true), { statusCode: 409, message: /chat/i })
+  const terminal = terminalViewer(await sessions.attach(context, session.id, 80, 24, true))
+  await terminal.ready()
+  assert.equal((await sessions.get(context, session.id)).driver, 'chat')
+  terminal.close()
 })
 
 test('chat starts with the session model, mode and MCP servers', { timeout: 120_000 }, async t => {
@@ -405,5 +439,109 @@ test(
     await sessions.terminate(context, session.id)
     const reopened = await open(session.id)
     assert.equal((await reopened.ready()).info.nativeId, native)
+  },
+)
+
+test('simultaneous first connections start exactly one agent', { timeout: 90_000 }, async t => {
+  const { home, create, open, context, sessions } = await machine(t)
+  const session = await create()
+  const [chat, terminal] = await Promise.all([
+    open(session.id),
+    sessions.attach(context, session.id, 90, 30, true).then(terminalViewer),
+  ])
+  const [view] = await Promise.all([chat.ready(), terminal.ready()])
+  const sockets = await Promise.all(
+    ['terminals', 'chats'].map(
+      async dir =>
+        (await stat(join(home, '.outpost', dir, session.id + '.sock')).catch(() => null))?.isSocket() ?? false,
+    ),
+  )
+  assert.deepEqual(sockets, view.info.nativeTerminal ? [true, false] : [false, true])
+  terminal.close()
+})
+
+test(
+  'a terminal and a chat share the native agent, queue, attachments and conversation',
+  { timeout: 90_000 },
+  async t => {
+    const { context, sessions, create, open, project, files } = await machine(t)
+    const session = await create()
+    await writeFile(join(project, 'capture-input'), '')
+    await writeFile(join(project, 'answer-prompts'), '')
+    const terminal = terminalViewer(await sessions.attach(context, session.id, 90, 30, true))
+    await terminal.ready()
+    // Early fixture output can already be in the terminal checkpoint when this viewer attaches.
+    await waitFor(() => existsSync(join(project, 'sizes.log')), 'Native tool did not start')
+    const pids = await readFile(join(project, 'starts.log'), 'utf8')
+    const chat = await open(session.id, false)
+    await chat.ready()
+    terminal.send({ type: 'draft', active: true })
+    const file = await files.receive(
+      context,
+      session.id,
+      'shared.txt',
+      Buffer.from('shared'),
+      AbortSignal.timeout(10000),
+    )
+    chat.prompt('add', 'from the chat', [file.id], 'shared-test')
+    assert.equal((await chat.result('add')).ok, true)
+    await waitFor(() => JSON.stringify(chat.messages).includes('from the chat'), 'Chat did not show the queued message')
+    terminal.send({ type: 'draft', active: false })
+    await waitFor(
+      () => JSON.stringify(chat.messages).includes('Fixture reply to: from the chat'),
+      'Chat received no agent answer',
+    )
+    terminal.input('from the keyboard\r')
+    await waitFor(
+      () => JSON.stringify(chat.messages).includes('Fixture reply to: from the keyboard'),
+      'Keyboard turn was missing from Chat',
+    )
+    const another = await open(session.id, false)
+    const history = await another.ready()
+    assert.match(JSON.stringify(history), /Fixture reply to: from the keyboard/)
+    assert.match(JSON.stringify(history), /shared.txt/)
+    assert.equal(await readFile(join(project, 'starts.log'), 'utf8'), pids)
+    terminal.close()
+  },
+)
+
+test(
+  'an ACP session can be prompted and approved from a terminal while Chat stays open',
+  { timeout: 90_000 },
+  async t => {
+    const { context, sessions, create, open } = await machine(t)
+    const session = await create()
+    const chat = await open(session.id)
+    const original = await chat.ready()
+    const terminal = terminalViewer(await sessions.attach(context, session.id, 90, 30, false))
+    await terminal.ready()
+    terminal.input('\x1b[20')
+    terminal.input('0~first line\r\nsecond line\x1b[20')
+    terminal.input('1~')
+    terminal.send({ type: 'ping', id: 'pasted' })
+    await waitFor(() => terminal.events.some(m => m.id === 'pasted'), 'Paste was not processed')
+    assert.ok(!chat.messages.some(m => m.type === 'entry' && m.entry.kind === 'queued'))
+    terminal.input('\r')
+    const pasted = await chat.entry('queued')
+    assert.deepEqual(pasted.entry.prompt, [{ type: 'text', text: 'first line\nsecond line' }])
+    await chat.entry('ended')
+    terminal.input('Check with permission\r')
+    const ask = await chat.entry('permission')
+    const command =
+      '/answer ' + ask.entry.id.slice(0, 8) + ' ' + (ask.entry.options.findIndex(o => o.optionId === 'allow') + 1)
+    await terminal.text(command)
+    terminal.input(command + '\r')
+    const done = await chat.entry('ended')
+    assert.equal(done.entry.stopReason, 'end_turn')
+    await terminal.text('Permission granted.')
+    chat.send({ type: 'permission', id: 'late', request: ask.entry.id, optionId: 'allow' })
+    assert.equal((await chat.result('late')).ok, false)
+    terminal.close()
+    const reconnect = await open(session.id, false)
+    const same = await reconnect.ready()
+    assert.equal(same.info.nativeId, original.info.nativeId)
+    const instance = (viewer: ChatClient) => viewer.messages.find(m => m.type === 'welcome')?.instance
+    assert.ok(instance(chat))
+    assert.equal(instance(reconnect), instance(chat))
   },
 )

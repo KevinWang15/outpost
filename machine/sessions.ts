@@ -18,6 +18,7 @@ import {
   RegistryError,
   session as findSession,
   switchConversation,
+  withSessionLock,
   type Registry,
 } from './registry'
 import { locked, now, statePath } from './state'
@@ -285,44 +286,49 @@ function pick<T extends object, K extends keyof T>(value: T, keys: readonly K[])
 
 /** Make an earlier conversation current; it is resumed at the next start. */
 export async function switchSession(id: unknown, conversation: unknown) {
-  const { terminal, chat } = await driverStatus(String(id))
-  if (terminal || chat) throw new RegistryError('Stop the session before switching its conversation.')
-  const record = await changeRegistry(registry => {
-    const record = findSession(registry, id)
-    const entry = record.conversations.find(item => item.id === conversation)
-    if (!entry) throw new RegistryError('This conversation is not in the session.', 404)
-    if (entry.movedTo) throw new RegistryError('This conversation moved to another session.')
-    switchConversation(registry, record.id, entry.id)
-    return record
+  return withSessionLock(id, async () => {
+    const { terminal, chat } = await driverStatus(String(id))
+    if (terminal || chat) throw new RegistryError('Stop the session before switching its conversation.')
+    const record = await changeRegistry(registry => {
+      const record = findSession(registry, id)
+      const entry = record.conversations.find(item => item.id === conversation)
+      if (!entry) throw new RegistryError('This conversation is not in the session.', 404)
+      if (entry.movedTo) throw new RegistryError('This conversation moved to another session.')
+      switchConversation(registry, record.id, entry.id)
+      return record
+    })
+    return describe(record, readRegistry())
   })
-  return describe(record, readRegistry())
 }
 
 export async function deleteSession(id: unknown) {
-  const { terminal, chat } = await driverStatus(String(id))
-  if (terminal || chat) throw new RegistryError('Stop the session or exit the coding tool before deleting it.')
-  const record = await changeRegistry(registry => {
-    const record = findSession(registry, id)
-    registry.sessions = registry.sessions.filter(item => item !== record)
-    return record
+  return withSessionLock(id, async () => {
+    const { terminal, chat } = await driverStatus(String(id))
+    if (terminal || chat) throw new RegistryError('Stop the session or exit the coding tool before deleting it.')
+    const record = await changeRegistry(registry => {
+      const record = findSession(registry, id)
+      registry.sessions = registry.sessions.filter(item => item !== record)
+      return record
+    })
+    for (const path of [
+      terminalSocket(record.id),
+      chatSocket(record.id),
+      `logs/${record.id}.log`,
+      `logs/${record.id}.chat.log`,
+      `activity/${record.id}.json`,
+      `deliveries/${record.id}.json`,
+      `clipboard/${record.id}`,
+    ])
+      rmSync(statePath(path), { recursive: true, force: true })
+    await removeSessionFiles(record.id)
   })
-  for (const path of [
-    terminalSocket(record.id),
-    chatSocket(record.id),
-    `logs/${record.id}.log`,
-    `logs/${record.id}.chat.log`,
-    `activity/${record.id}.json`,
-    `deliveries/${record.id}.json`,
-    `clipboard/${record.id}`,
-  ])
-    rmSync(statePath(path), { recursive: true, force: true })
-  await removeSessionFiles(record.id)
 }
 
 export async function terminateSession(id: unknown) {
-  const record = findSession(readRegistry(), id)
-  await stopDriver(record.id)
-  return getSession(record.id)
+  return withSessionLock(id, async record => {
+    await stopDriver(record.id)
+    return getSession(record.id)
+  })
 }
 
 export async function acknowledgeSession(id: unknown, completionId: unknown) {

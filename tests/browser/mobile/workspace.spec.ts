@@ -179,7 +179,7 @@ test('Home Screen mode connects in its own window and closing returns to the wor
   await expect(page).toHaveURL(url => url.origin === 'http://127.0.0.1:4178' && url.pathname === '/')
   await expect(page.getByRole('navigation', { name: 'Machines' })).toBeVisible()
   await page.getByRole('button', { name: new RegExp(`Standalone ${info.project.name}`) }).tap()
-  await expect(page.getByRole('row').filter({ hasText: name })).toContainText('In a terminal')
+  await expect(page.getByRole('row').filter({ hasText: name })).toContainText('Native CLI')
   const manifest = await page.request.get('/outpost.webmanifest')
   expect(manifest.ok()).toBe(true)
   const data = await manifest.json()

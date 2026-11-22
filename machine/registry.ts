@@ -86,6 +86,11 @@ export function session(registry: Registry, id: unknown) {
   return found
 }
 
+export function withSessionLock<T>(id: unknown, action: (record: SessionRecord) => T | Promise<T>) {
+  const record = session(readRegistry(), id)
+  return locked('session-' + record.id, () => action(session(readRegistry(), record.id)), 60_000)
+}
+
 export const current = (session: SessionRecord) => session.conversations.at(-1)!
 
 /** The tool made `conversation` current in this session (new, clear, resume).

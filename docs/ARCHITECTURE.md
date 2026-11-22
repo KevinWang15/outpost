@@ -756,7 +756,7 @@ owns its native configuration:
   preserving user entries and `inherits`. Its camelCase hooks map root-conversation
   starts, invocations, tools, cancellations and errors, ignoring subagent hooks
   that carry no direct user input.
-- DeepSeek Harness runs only in chat.
+- DeepSeek Harness provides an ACP agent. Outpost renders its journal in either Chat or Terminal.
 
 A failed hook setup is shown on the session and does not prevent the terminal
 starting. Hooks use no model calls, additional context, prompts or MCP tools.
@@ -1059,11 +1059,7 @@ the executable, session helper, Node runtime and third-party notices.
 
 ## Outpost Chat
 
-Chat drives the same managed sessions through each tool's Agent Client Protocol
-server instead of a PTY. A persistent `outpost-terminal chat-serve` process per
-session is the ACP client on the machine; one session has one driver at a time
-(terminal service or chat host). The server keeps one link per chat host and
-routes channels, session messages and schedules. See [CHAT.md](CHAT.md).
+A managed session has one running coding agent. The machine serializes the first start and routes each subsequent attachment to that agent. A native CLI accepts ordinary terminal viewers. Chat subscribes to its committed conversation records and delivers prompts through its durable terminal queue. An ACP agent receives both views through its chat host. Terminal renders its journal as an interactive transcript and submits responses to the host’s pending approvals. The server routes channels, session messages and schedules. Direct-only machines keep their terminal-only network policy. See [Outpost Chat](CHAT.md).
 
 ## Cross-machine history
 
@@ -1240,10 +1236,9 @@ connects to the address it checked.
 interfaces; shared machine code must not branch on harness names.
 
 The DeepSeek adapter uses `command: dsh` independently of its `deepseek` harness
-ID, with `DSH_HOME` pinned per session. Its official package exposes ACP rather
-than a bundled terminal UI, so registry capability metadata routes connections
-to Chat and excludes it from the desktop terminal creator. The node also
-refuses a terminal driver before launching a process. `outpost-terminal agent
+ID, with `DSH_HOME` pinned per session. Its official package exposes ACP. Outpost starts the ACP host for either view
+and serves its interactive transcript to web and desktop terminals. DeepSeek is
+available on server-connected machines. `outpost-terminal agent
 deepseek` (`machine/agents/deepseek.ts`) maps the chat host's `session/load` to
 the advertised `session/resume`, forwarding all other requests, permissions,
 updates and invocation-scoped MCP descriptors. It does not add replay or

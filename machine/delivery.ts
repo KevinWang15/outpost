@@ -5,7 +5,7 @@
 import type { SessionActivity } from '../shared/activity'
 import { readJson, statePath, writeJson } from './state'
 
-interface Delivery {
+export interface Delivery {
   /** The server's key for it; adding the same key again changes nothing. */
   key: string
   text: string
@@ -88,6 +88,14 @@ export class Deliveries {
     }
     this.tick()
     return item
+  }
+
+  remove(key: unknown) {
+    const index = this.items.findIndex(item => item.key === key && item.state === 'waiting')
+    if (index < 0) return false
+    this.items.splice(index, 1)
+    this.save()
+    return true
   }
 
   status(keys: string[]) {

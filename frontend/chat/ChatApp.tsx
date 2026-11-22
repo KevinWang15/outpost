@@ -6,7 +6,6 @@ import { ChatClient } from './client'
 import { ChatClientContext, ShellContext, useChat, type ChatDialog, type Selection } from './context'
 import {
   ChannelDialog,
-  ContinueChatDialog,
   ConversationsChatDialog,
   DeleteChatDialog,
   FindChatDialog,
@@ -16,7 +15,6 @@ import {
   ScheduleDialog,
   SessionSettingsChatDialog,
   StopChatDialog,
-  TerminalDialog,
 } from './Dialogs'
 import { needsYou } from './format'
 import SessionView from './SessionView'
@@ -148,7 +146,6 @@ function Shell() {
         {dialog?.kind === 'fork' && <ForkChatDialog target={dialog} onClose={close} />}
         {dialog?.kind === 'stop' && <StopChatDialog target={dialog} onClose={close} />}
         {dialog?.kind === 'delete' && <DeleteChatDialog target={dialog} onClose={close} />}
-        {dialog?.kind === 'chat' && <ContinueChatDialog target={dialog} onClose={close} />}
         {dialog?.kind === 'channel' && (
           <ChannelDialog membersOnly={dialog.membersOnly} channelId={dialog.channelId} onClose={close} />
         )}
@@ -157,7 +154,6 @@ function Shell() {
         )}
         {dialog?.kind === 'settings' && <SessionSettingsChatDialog target={dialog} onClose={close} />}
         {dialog?.kind === 'conversations' && <ConversationsChatDialog target={dialog} onClose={close} />}
-        {dialog?.kind === 'terminal' && <TerminalDialog target={dialog} onClose={close} />}
       </div>
     </ShellContext.Provider>
   )

@@ -12,8 +12,12 @@ export interface FileRead {
   offset: number
 }
 
-export function validFileRead(request: FileRead) {
+export function validFileRead(value: unknown): value is FileRead {
+  if (!value || typeof value !== 'object') return false
+  const request = value as FileRead
   return (
+    request.type === 'file-read' &&
+    typeof request.id === 'string' &&
     sessionFileId(request.file) &&
     Number.isSafeInteger(request.offset) &&
     request.offset >= 0 &&
@@ -38,9 +42,13 @@ export interface ImageWrite {
   chunk: string
 }
 
-export function validImageWrite(request: ImageWrite) {
+export function validImageWrite(value: unknown): value is ImageWrite {
+  if (!value || typeof value !== 'object') return false
+  const request = value as ImageWrite
   const bytes = Math.min(terminalFileChunk, request.size - request.offset)
   return (
+    request.type === 'image-write' &&
+    typeof request.id === 'string' &&
     typeof request.transfer === 'string' &&
     /^[a-zA-Z0-9_-]{1,80}$/.test(request.transfer) &&
     !imageProblem({ type: request.mime, size: request.size }) &&

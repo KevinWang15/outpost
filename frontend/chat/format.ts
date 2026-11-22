@@ -26,11 +26,10 @@ export function elapsed(from: string | null, to: string | null = null) {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
 }
 
-type Presence = ActivityState | 'stopped' | 'terminal'
+type Presence = ActivityState | 'stopped'
 
 /** One status for dots and labels: what the session is doing, or where it runs. */
 export function presence(session: ChatSession): Presence {
-  if (session.driver === 'terminal') return 'terminal'
   if (session.driver === null) return session.activity.state === 'error' ? 'error' : 'stopped'
   return session.activity.state
 }
@@ -43,7 +42,6 @@ export const presenceLabel: Record<Presence, string> = {
   error: 'Error',
   unknown: 'Unknown',
   stopped: 'Not running',
-  terminal: 'In a terminal',
 }
 
 export const needsYou = (session: ChatSession) => ['waiting', 'finished', 'error'].includes(presence(session))

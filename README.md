@@ -512,14 +512,9 @@ slash commands.
   A session can also start with a model, an agent mode for Chat and MCP servers of its
   own, next to Outpost's.
 
-A session runs in a terminal or in chat, never both, and each view shows which
-(**Runs in** in Machines). Opening a session that is not running starts nothing;
-**Connect** starts it in a terminal, and **Start in chat** or sending it a message
-starts it in chat. **Continue in chat** or **Continue in a terminal**, in the
-session's **…** menu in either view, ends the coding tool where it runs and
-continues the same conversation in the other. Chat uses each tool's [Agent Client Protocol](https://agentclientprotocol.com)
-server. Install the Claude Code chat adapter from **Required software** to use Claude in Chat. Its terminal works without the adapter. See
-[docs/CHAT.md](docs/CHAT.md) for how it works.
+On a server-connected machine, **Open in Chat** and **Open in Terminal** join the same running agent. When the native CLI owns the session, Chat shows its recorded user messages and replies. Messages from Chat wait for an idle prompt and an empty terminal draft. Approvals offered by the CLI are answered in Terminal.
+
+When Chat starts the agent using the [Agent Client Protocol](https://agentclientprotocol.com), opening a terminal shows a text conversation. Press Enter to send a prompt. For an approval, enter the displayed answer command or use the buttons in Chat. Both views see the outcome. Closing a view leaves the agent running. Claude Code needs its chat adapter to start through ACP. See [Outpost Chat](docs/CHAT.md).
 
 ### DeepSeek Harness
 
@@ -531,8 +526,7 @@ and npm on that machine. Configure its normal DeepSeek credentials, or provide
 Its Outpost MCP has the same tools as every session's, from file publishing to
 history search and messaging other sessions. User profile and home configuration remain intact.
 
-The official package has no bundled terminal interface, so Outpost opens these
-sessions in Chat. The terminal picker excludes them. DeepSeek's ACP interface
+DeepSeek uses its ACP agent in both views. Outpost supplies the interactive terminal transcript. DeepSeek's ACP interface
 does not apply custom session instructions or replay imported native messages;
 Outpost retains messages from its own Chat journal, and earlier native messages
 remain accessible through history MCP. See the [official ACP contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md).

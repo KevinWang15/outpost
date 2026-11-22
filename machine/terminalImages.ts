@@ -1,5 +1,5 @@
 import { imageExtensions, maxImageBytes, type ImageMediaType } from '../shared/images'
-import { terminalFileChunk, validImageWrite, type ImageWrite } from '../shared/terminalFiles'
+import { terminalFileChunk, validImageWrite } from '../shared/terminalFiles'
 import { saveImage } from './files'
 
 /** One upload per viewer. The persistent terminal process shares a memory
@@ -17,7 +17,7 @@ export class TerminalImages {
     this.upload = undefined
   }
 
-  write(request: ImageWrite): string | undefined {
+  write(request: unknown): string | undefined {
     if (!validImageWrite(request)) throw new Error('Invalid image chunk.')
     if (request.offset === 0) {
       this.close()

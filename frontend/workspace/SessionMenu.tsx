@@ -9,10 +9,9 @@ import {
   SquareTerminal,
   Trash2,
 } from 'lucide-react'
-import { useState } from 'react'
 import type { Session } from '../../shared/model'
-import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
-import { Confirm, Dialog } from '../ui/Dialog'
+import { harnessLabel } from '../../shared/harnesses'
+import { Confirm } from '../ui/Dialog'
 import { Menu, type MenuItem } from '../ui/Menu'
 
 /** Machines and Chat share the session menu. Each page supplies the actions available there. */
@@ -33,14 +32,13 @@ export function SessionMenu({ session, label, actions }: { session: Session; lab
   const items: (MenuItem | 'separator')[] = []
   if (actions.terminal)
     items.push({
-      label: session.driver === 'chat' ? 'Continue in a terminal' : 'Open in a terminal',
+      label: 'Open in Terminal',
       icon: <SquareTerminal size={14} />,
-      disabled: !supportsTerminal(session.tool),
       onSelect: actions.terminal,
     })
   if (actions.chat)
     items.push({
-      label: session.driver === 'terminal' ? 'Continue in chat' : 'Open in chat',
+      label: 'Open in Chat',
       icon: <MessagesSquare size={14} />,
       onSelect: actions.chat,
     })
@@ -76,7 +74,7 @@ export function StopConfirm({
     <Confirm
       title={`Stop ${session.name}?`}
       action="Stop coding tool"
-      description={`This ends ${harnessLabel(session.tool)} and its processes${session.driver === 'terminal' ? ' and disconnects open terminals' : ''}.${working(session) ? ' It is working now; stopping interrupts the current turn.' : ''} The conversation is kept, and the session resumes it when it starts again.`}
+      description={`This ends ${harnessLabel(session.tool)} and its processes and disconnects any open terminals.${working(session) ? ' It is working now; stopping interrupts the current turn.' : ''} The conversation is kept, and the session resumes it when it starts again.`}
       onConfirm={onConfirm}
       onClose={onClose}
     />
@@ -100,122 +98,5 @@ export function DeleteConfirm({
       onConfirm={onConfirm}
       onClose={onClose}
     />
-  )
-}
-
-/** Continue a session that runs in a terminal in chat: the terminal's process ends
- * so chat can continue the same conversation. */
-export function ContinueInChat({
-  session,
-  onConfirm,
-  onClose,
-}: {
-  session: Session
-  onConfirm: () => Promise<void>
-  onClose: () => void
-}) {
-  return (
-    <Confirm
-      title={`Continue ${session.name} in chat?`}
-      action="Continue in chat"
-      description={`This ends the terminal’s ${harnessLabel(session.tool)} process and disconnects open terminals.${working(session) ? ' It is working now; this interrupts the current turn.' : ''} The conversation stays and continues in chat.`}
-      onConfirm={onConfirm}
-      onClose={onClose}
-    />
-  )
-}
-
-/** Open a session in a terminal. One that runs in chat stops there first; the
- * terminal then opens from a second click, so a remembered web terminal can open
- * its pop-up within that click. */
-export function MoveToTerminal({
-  session,
-  stop,
-  onOpen,
-  onClose,
-}: {
-  session: Session
-  stop: () => Promise<void>
-  onOpen: () => void | Promise<void>
-  onClose: () => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [ready, setReady] = useState(session.driver !== 'chat')
-  if (!supportsTerminal(session.tool))
-    return (
-      <Dialog
-        title={harnessLabel(session.tool)}
-        description={`${harnessLabel(session.tool)} runs in Outpost Chat and has no terminal interface.`}
-        size="small"
-        onClose={onClose}
-        footer={
-          <button className="button" onClick={onClose}>
-            Close
-          </button>
-        }
-      >
-        {null}
-      </Dialog>
-    )
-  return (
-    <Dialog
-      title={ready ? `Open ${session.name} in a terminal` : `Continue ${session.name} in a terminal?`}
-      description={
-        ready
-          ? 'The same conversation continues in the coding tool’s own terminal interface.'
-          : `This ends the chat’s ${harnessLabel(session.tool)} process. The conversation stays and continues in the terminal.`
-      }
-      size="small"
-      busy={busy}
-      onClose={onClose}
-      footer={
-        <>
-          <button className="button" disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
-          {ready ? (
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() => {
-                const opening = onOpen()
-                if (!opening) return
-                setBusy(true)
-                opening.catch(problem => {
-                  setError((problem as Error).message)
-                  setBusy(false)
-                })
-              }}
-            >
-              Open terminal
-            </button>
-          ) : (
-            <button
-              className={`button ${working(session) ? 'danger' : 'primary'}`}
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true)
-                setError('')
-                try {
-                  await stop()
-                  setReady(true)
-                } catch (problem) {
-                  setError((problem as Error).message)
-                }
-                setBusy(false)
-              }}
-            >
-              {working(session) ? 'Stop the current work and continue' : 'Continue in a terminal'}
-            </button>
-          )}
-        </>
-      }
-    >
-      {working(session) && !ready && (
-        <p className="warning">{session.name} is working now. Stopping it interrupts the current turn.</p>
-      )}
-      {error && <p className="error">{error}</p>}
-    </Dialog>
   )
 }

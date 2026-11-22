@@ -12,7 +12,7 @@ import { useToast } from '../ui/toast-context'
 import ConversationsDialog from './ConversationsDialog'
 import ForkDialog from './ForkDialog'
 import SessionDialog from './SessionDialog'
-import { ContinueInChat, DeleteConfirm, MoveToTerminal, StopConfirm } from './SessionMenu'
+import { DeleteConfirm, StopConfirm } from './SessionMenu'
 import SessionSettingsDialog from './SessionSettingsDialog'
 import SessionTable from './SessionTable'
 import SoftwarePanel from './SoftwarePanel'
@@ -26,7 +26,7 @@ import type { DirectorySuggestions } from '../../shared/model'
 
 type Panel =
   | { kind: 'session'; conversation: ConversationMatch | null }
-  | { kind: 'fork' | 'settings' | 'conversations' | 'stop' | 'delete' | 'chat' | 'terminal'; session: Session }
+  | { kind: 'fork' | 'settings' | 'conversations' | 'stop' | 'delete'; session: Session }
   | { kind: 'edit' }
   | { kind: 'remove' }
 
@@ -199,16 +199,11 @@ export default function TargetView({
               : { kind: 'unavailable' }
         }
         actionsFor={session => ({
-          ...(target.kind === 'direct' || !supportsTerminal(session.tool)
+          ...(target.kind === 'direct'
             ? {}
             : opensInChat(session)
-              ? {
-                  terminal: () =>
-                    session.driver === 'chat' ? setPanel({ kind: 'terminal', session }) : connect(session),
-                }
-              : {
-                  chat: () => (session.driver === 'terminal' ? setPanel({ kind: 'chat', session }) : inChat(session)),
-                }),
+              ? { terminal: () => connect(session) }
+              : { chat: () => inChat(session) }),
           conversations: () => setPanel({ kind: 'conversations', session }),
           edit: () => setPanel({ kind: 'settings', session }),
           fork: () => setPanel({ kind: 'fork', session }),
@@ -326,27 +321,6 @@ export default function TargetView({
             await api(sessionPath(panel.session), 'DELETE')
             await refresh()
           }}
-        />
-      )}
-      {panel?.kind === 'chat' && (
-        <ContinueInChat
-          session={panel.session}
-          onClose={close}
-          onConfirm={async () => {
-            await api(`${sessionPath(panel.session)}/terminate`, 'POST')
-            inChat(panel.session, { start: true })
-          }}
-        />
-      )}
-      {panel?.kind === 'terminal' && (
-        <MoveToTerminal
-          session={panel.session}
-          onClose={close}
-          stop={async () => {
-            await api(`${sessionPath(panel.session)}/terminate`, 'POST')
-            await refresh()
-          }}
-          onOpen={() => connect(panel.session)}
         />
       )}
     </div>

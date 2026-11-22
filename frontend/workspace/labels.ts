@@ -25,9 +25,9 @@ export const address = (target: Target) =>
 
 /** Where a session runs now, as shown in Machines and Chat. */
 export function placeLabel(session: Pick<Session, 'driver' | 'status'>) {
-  if (session.driver === 'chat') return 'In chat'
+  if (session.driver === 'chat') return 'Chat agent'
   if (session.driver === 'terminal')
-    return session.status === 'attached' ? 'In a terminal · connected' : 'In a terminal'
+    return session.status === 'attached' ? 'Native CLI · terminal attached' : 'Native CLI'
   return session.status === 'ready' ? 'Not started' : 'Not running'
 }
 

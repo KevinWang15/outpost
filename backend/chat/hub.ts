@@ -311,10 +311,16 @@ export class ChatHub {
     const named = handles(items.map(item => ({ ...item, sessionId: item.session.id, name: item.session.name })))
     account.view = items.map(({ targetId, target, session }) => {
       const link = this.links.get(this.linkKey(account.userId, { targetId, sessionId: session.id }))
-      const live = link?.state === 'live' && link.info
+      const live = link?.state === 'live' ? link.info : null
       return {
         ...session,
-        ...(live ? { activity: link.info!.activity, driver: 'chat' as const, status: 'attached' as const } : {}),
+        ...(live
+          ? {
+              activity: live.activity,
+              driver: live.nativeTerminal ? ('terminal' as const) : ('chat' as const),
+              status: live.nativeTerminal ? session.status : ('attached' as const),
+            }
+          : {}),
         targetId,
         target,
         handle: named.get(`${targetId}/${session.id}`)!,

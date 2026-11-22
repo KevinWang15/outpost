@@ -6,7 +6,7 @@ import {
   type DesktopAccount,
 } from '../../shared/desktopAuth'
 import type { SessionInput } from '../../shared/model'
-import { harnessIds, supportsTerminal } from '../../shared/harnesses'
+import { harnessIds } from '../../shared/harnesses'
 import { softwareIds } from '../../shared/schemas'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
 import { parseServerTargets } from './server-targets'
@@ -38,7 +38,7 @@ export function sessionCreationServer(summary: { origin: string; account: Deskto
         !result.missing.every(id => softwareIds.includes(id))
       )
         throw new Error('Invalid session creation options.')
-      return { tools: result.tools.filter(supportsTerminal), missing: result.missing }
+      return { tools: result.tools, missing: result.missing }
     },
     async create(targetId: string, input: SessionInput, requestId: string): Promise<DesktopSessionChoice> {
       try {

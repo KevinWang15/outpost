@@ -67,6 +67,8 @@ export type ChatEntryInput = DistributiveOmit<ChatEntry, 'seq' | 'at'>
 
 /** Latest-value session state. It is replaced, not journaled. */
 export interface ChatInfo {
+  /** Native CLI prompts share the terminal delivery queue. Its TUI owns approvals and settings. */
+  nativeTerminal?: { delivery: 'auto' | 'manual' }
   state: 'starting' | 'ready' | 'failed' | 'exited'
   error: string | null
   agent: { name: string; title: string | null; version: string | null } | null

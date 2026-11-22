@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { WebSocketServer, type RawData } from 'ws'
-import { connect } from 'node:net'
+import type { Duplex } from 'node:stream'
 import type { Stream } from '../backend/machines'
 import { directApiPath, directTerminalPath } from '../shared/direct'
 import { DirectTickets, endpointProof } from '../shared/node/directTickets'
@@ -15,11 +15,10 @@ import { softwareReport } from '../shared/node/softwareInspection'
 import { desktopSession } from '../shared/desktopSession'
 import { inspectSoftware } from './software'
 import { launchSize } from '../backend/sessions'
-import { prepareTerminal } from './terminalAttach'
+import { openSessionView } from './sessionView'
 import * as sessions from './sessions'
 import { directories, searchConversations } from './search'
 import { readRegistry, RegistryError } from './registry'
-import { socketAddress } from './state'
 import type { DirectEnrollment } from '../shared/direct'
 
 type Call = {
@@ -193,15 +192,18 @@ export async function serveDirect(config: DirectEnrollment, signal: AbortSignal)
       })
       try {
         if (signal.aborted) return ws.terminate()
-        const { record, path, hello } = await track(prepareTerminal(a))
-        if (viewer.abort.signal.aborted) return
+        const { record, stream } = await track(openSessionView('terminal', a))
+        if (viewer.abort.signal.aborted) {
+          stream.destroy()
+          return
+        }
         viewer.send({
           type: 'hello',
           resume: '',
           target: { id: config.targetId, name: a.name },
           session: { id: record.id, name: record.name, tool: record.tool },
         })
-        viewer.start(terminalStream(socketAddress(path), hello))
+        viewer.start(terminalStream(stream))
       } catch (e) {
         viewer.close(
           e instanceof RegistryError && [404, 410].includes(e.status) ? 'ended' : 'unavailable',
@@ -223,8 +225,7 @@ export async function serveDirect(config: DirectEnrollment, signal: AbortSignal)
   }
 }
 
-function terminalStream(path: string, hello: Buffer): Stream {
-  const pty = connect(path)
+function terminalStream(pty: Duplex): Stream {
   const stream: Stream = {
     opened: null,
     onData: fn => {
@@ -246,6 +247,5 @@ function terminalStream(path: string, hello: Buffer): Stream {
     end: () => pty.destroy(),
   }
   pty.on('error', () => pty.destroy())
-  pty.once('connect', () => pty.write(hello))
   return stream
 }

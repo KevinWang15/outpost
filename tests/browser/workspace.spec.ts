@@ -119,7 +119,7 @@ test('add a machine, create a session, and work in the web terminal', async ({ p
   const closed = popup.waitForEvent('close')
   await terminal.getByRole('button', { name: 'Close terminal' }).click()
   await closed
-  await expect(row).toContainText('In a terminal')
+  await expect(row).toContainText('Native CLI')
 
   await row.getByRole('button', { name: `More actions for Browser session` }).click()
   await page.getByRole('menuitem', { name: 'Stop coding tool' }).click()
@@ -128,6 +128,28 @@ test('add a machine, create a session, and work in the web terminal', async ({ p
     .getByRole('button', { name: 'Stop coding tool' })
     .click()
   await expect(row).toContainText('Not running')
+})
+
+test('Chat joins a running CLI and displays both terminal and Chat turns', async ({ page, context }) => {
+  await addMachine(page, 'Shared machine')
+  await createSession(page, 'Shared agent', '~/shared-terminal')
+  await page.evaluate(() => localStorage.setItem('outpost.connection.terminal', 'web'))
+  const row = page.getByRole('row').filter({ hasText: 'Shared agent' })
+  const opened = context.waitForEvent('page')
+  await row.getByRole('button', { name: 'Connect' }).click()
+  const terminal = await opened
+  await expect(terminal.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
+  const input = terminal.getByRole('textbox', { name: 'Terminal input' })
+  await input.pressSequentially('From the keyboard')
+  await input.press('Enter')
+  await row.getByRole('button', { name: 'More actions for Shared agent' }).click()
+  await page.getByRole('menuitem', { name: 'Open in Chat' }).click()
+  await expect(page.locator('.reply .markdown').last()).toContainText('Fixture reply to: From the keyboard')
+  const composer = page.getByRole('textbox', { name: 'Message' })
+  await composer.fill('From Chat')
+  await composer.press('Enter')
+  await expect(page.locator('.reply .markdown').last()).toContainText('Fixture reply to: From Chat')
+  await expect(terminal.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()
 })
 
 test('Outpost Desktop hands off a session reference and uses app-owned access', async ({ page }) => {

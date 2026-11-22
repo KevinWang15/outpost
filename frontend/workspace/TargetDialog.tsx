@@ -1,4 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
+import MachineSetupGuide from './MachineSetupGuide'
 import {
   machineSetupLabels,
   type Environment,
@@ -11,21 +13,6 @@ import { api } from '../api'
 import { useAuth } from '../auth/useAuth'
 import { Dialog } from '../ui/Dialog'
 import AccountKey from '../auth/AccountKey'
-
-const connectionSetups = [
-  { kind: 'ssh', detail: 'Use when your Outpost server can SSH into the machine. You connect through the server.' },
-  {
-    kind: 'direct',
-    detail:
-      'Your browser or desktop app connects to the machine over HTTPS, for example on a company VPN. The machine stays disconnected from the Outpost server.',
-  },
-  {
-    kind: 'paired',
-    detail:
-      'Use when the machine can connect out to your Outpost server. Clients can connect directly or use the server as a relay.',
-  },
-  { kind: 'local', detail: 'Run sessions on the same Linux machine as the Outpost server.' },
-] as const
 
 function ToolChoice({
   value,
@@ -74,6 +61,25 @@ export default function TargetDialog({
   const [environment, setEnvironment] = useState<Environment | null>(null)
   const [kind, setKind] = useState<Target['kind']>(target?.kind ?? 'ssh')
   const [chosenTools, setTools] = useState<HarnessId[]>(target?.tools ?? ['claude'])
+  const [choosing, setChoosing] = useState(!target)
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const form = useRef<HTMLFormElement>(null)
+  const guide = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (choosing) guide.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
+    else form.current?.querySelector<HTMLInputElement>('input[name="name"]')?.focus()
+  }, [choosing])
+
+  function back() {
+    if (form.current) {
+      const fields = Object.fromEntries(new FormData(form.current)) as Record<string, string>
+      setDraft(previous => ({ ...previous, ...fields }))
+    }
+    setError('')
+    setChoosing(true)
+  }
+
   const tools = kind === 'direct' ? chosenTools.filter(supportsTerminal) : chosenTools
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('')
@@ -86,6 +92,7 @@ export default function TargetDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (busy) return
     const data = new FormData(event.currentTarget)
     const text = (name: string) => String(data.get(name) ?? '').trim()
     setBusy(true)
@@ -115,108 +122,155 @@ export default function TargetDialog({
       title={target ? `Edit ${target.name}` : 'Add a machine'}
       busy={busy}
       onClose={onClose}
-      description={target ? undefined : 'A Linux machine where your coding sessions run.'}
+      size={choosing ? 'large' : 'medium'}
+      className={target ? '' : 'machine-wizard'}
+      description={
+        target
+          ? undefined
+          : choosing
+            ? 'Step 1 of 2 · Choose a connection method'
+            : `Step 2 of 2 · ${machineSetupLabels[kind]} details`
+      }
       footer={
         <>
-          <button className="button" type="button" disabled={busy} onClick={onClose}>
-            Cancel
+          <button
+            className={target || choosing ? 'button' : 'button push-left'}
+            type="button"
+            disabled={busy}
+            onClick={target || choosing ? onClose : back}
+          >
+            {target || choosing ? (
+              'Cancel'
+            ) : (
+              <>
+                <ArrowLeft size={15} />
+                Back
+              </>
+            )}
           </button>
-          <button className="button primary" form="target-form" disabled={busy || !tools.length}>
-            {busy ? 'Saving…' : target ? 'Save' : 'Add machine'}
-          </button>
+          {choosing ? (
+            <button key="continue" className="button primary" type="button" onClick={() => setChoosing(false)}>
+              Continue <ArrowRight size={15} />
+            </button>
+          ) : (
+            <button
+              key="save"
+              className="button primary"
+              type="submit"
+              form="target-form"
+              disabled={busy || !tools.length}
+            >
+              {busy ? 'Saving…' : target ? 'Save' : 'Add machine'}
+            </button>
+          )}
         </>
       }
     >
-      <form id="target-form" className="form" onSubmit={submit}>
-        {!target && (
-          <fieldset className="field">
-            <legend className="label">How will you reach this machine?</legend>
-            {connectionSetups
-              .filter(setup => setup.kind !== 'local' || environment?.localTargets)
-              .map(setup => (
-                <label className="connection-setup" key={setup.kind}>
-                  <input
-                    type="radio"
-                    name="connection-setup"
-                    checked={kind === setup.kind}
-                    onChange={() => setKind(setup.kind)}
-                    aria-labelledby={`setup-label-${setup.kind}`}
-                    aria-describedby={`setup-detail-${setup.kind}`}
-                  />
-                  <span>
-                    <strong id={`setup-label-${setup.kind}`}>{machineSetupLabels[setup.kind]}</strong>
-                    <small id={`setup-detail-${setup.kind}`}>{setup.detail}</small>
-                  </span>
-                </label>
-              ))}
-          </fieldset>
-        )}
-        <label className="field">
-          <span className="label">Name</span>
-          <input
-            name="name"
-            required
-            maxLength={80}
-            autoFocus={Boolean(target)}
-            defaultValue={target?.name}
-            placeholder={kind === 'local' ? machineSetupLabels.local : 'dev-box'}
+      {choosing ? (
+        <div ref={guide}>
+          <MachineSetupGuide
+            kind={kind}
+            localAvailable={Boolean(environment?.localTargets)}
+            hosted={hosted}
+            onSelect={setKind}
           />
-        </label>
-        {!target && kind === 'direct' && (
+        </div>
+      ) : (
+        <form ref={form} id="target-form" className="form" onSubmit={submit}>
           <label className="field">
-            <span className="label">Machine HTTPS address</span>
-            <input required name="endpoint" type="url" placeholder="https://terminal.corp.example" />
-            <small>
-              Enter the HTTPS endpoint of the Outpost machine service. After adding it, follow the offline enrollment
-              instructions on its machine page.
-            </small>
+            <span className="label">Name</span>
+            <input
+              name="name"
+              required
+              maxLength={80}
+              defaultValue={draft.name ?? target?.name}
+              placeholder={kind === 'local' ? machineSetupLabels.local : 'dev-box'}
+            />
           </label>
-        )}
-        {!target && kind === 'ssh' && (
-          <>
-            <div className="form-row">
-              <label className="field grow">
-                <span className="label">Host</span>
+          {!target && kind === 'direct' && (
+            <label className="field">
+              <span className="label">Machine HTTPS address</span>
+              <input
+                required
+                name="endpoint"
+                defaultValue={draft.endpoint}
+                type="url"
+                placeholder="https://terminal.corp.example"
+              />
+              <small>
+                Enter the HTTPS endpoint of the Outpost machine service. After adding it, follow the offline enrollment
+                instructions on its machine page.
+              </small>
+            </label>
+          )}
+          {!target && kind === 'ssh' && (
+            <>
+              <div className="form-row">
+                <label className="field grow">
+                  <span className="label">Host</span>
+                  <input
+                    name="host"
+                    defaultValue={draft.host}
+                    required
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    placeholder={hosted ? 'dev.example.com' : 'dev.example.com or an SSH alias'}
+                  />
+                </label>
+                <label className="field port">
+                  <span className="label">Port</span>
+                  <input name="port" defaultValue={draft.port} type="number" min={1} max={65535} placeholder="22" />
+                </label>
+              </div>
+              <label className="field">
+                <span className="label">User</span>
                 <input
-                  name="host"
+                  name="user"
+                  defaultValue={draft.user}
                   required
                   spellCheck={false}
                   autoCapitalize="off"
-                  placeholder={hosted ? 'dev.example.com' : 'dev.example.com or an SSH alias'}
+                  maxLength={32}
+                  placeholder="ubuntu"
                 />
+                <small>Sessions run as this Linux user. It needs no root access.</small>
               </label>
-              <label className="field port">
-                <span className="label">Port</span>
-                <input name="port" type="number" min={1} max={65535} placeholder="22" />
-              </label>
-            </div>
-            <label className="field">
-              <span className="label">User</span>
-              <input name="user" required spellCheck={false} autoCapitalize="off" maxLength={32} placeholder="ubuntu" />
-              <small>Sessions run as this Linux user. It needs no root access.</small>
-            </label>
-            {!hosted && (
-              <label className="field">
-                <span className="label">
-                  Identity file <em>optional</em>
-                </span>
-                <input name="identityFile" spellCheck={false} placeholder="~/.ssh/id_ed25519" />
-                <small>Otherwise Outpost uses your SSH config and agent.</small>
-              </label>
-            )}
-            {hosted && <AccountKey />}
-          </>
-        )}
-        {!target && kind === 'paired' && (
-          <p className="hint">After adding the machine, use the pairing code on its machine page to enroll it.</p>
-        )}
-        <ToolChoice direct={kind === 'direct'} value={tools} onChange={setTools} />
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-      </form>
+              {!hosted && (
+                <label className="field">
+                  <span className="label">
+                    Identity file <em>optional</em>
+                  </span>
+                  <input
+                    name="identityFile"
+                    defaultValue={draft.identityFile}
+                    spellCheck={false}
+                    placeholder="~/.ssh/id_ed25519"
+                  />
+                  <small>Otherwise Outpost uses your SSH config and agent.</small>
+                </label>
+              )}
+              {hosted && <AccountKey />}
+            </>
+          )}
+          {!target && kind === 'paired' && (
+            <p className="hint">After adding the machine, use the pairing code on its machine page to enroll it.</p>
+          )}
+          <ToolChoice
+            direct={kind === 'direct'}
+            value={tools}
+            onChange={updated =>
+              setTools(
+                kind === 'direct' ? [...chosenTools.filter(tool => !supportsTerminal(tool)), ...updated] : updated,
+              )
+            }
+          />
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+        </form>
+      )}
     </Dialog>
   )
 }

@@ -23,8 +23,7 @@ export default function AccountKey() {
         Authorize your Outpost key
       </h3>
       <p>
-        Add this public key to <code>~/.ssh/authorized_keys</code> of the user sessions run as on each server. Outpost
-        uses it for sessions and terminals.
+        On the machine, add this key to <code>~/.ssh/authorized_keys</code> for the Linux user Outpost will log in as.
       </p>
       {key ? (
         <>
@@ -35,6 +34,7 @@ export default function AccountKey() {
         <p className="error" role="alert">
           {error}{' '}
           <button
+            type="button"
             className="link"
             onClick={() => {
               setError('')

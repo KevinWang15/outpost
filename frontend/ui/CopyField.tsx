@@ -16,7 +16,7 @@ export function CopyField({ value, label }: { value: string; label: string }) {
   return (
     <div className="copy-field">
       <code aria-label={label}>{value}</code>
-      <button className="button small" onClick={() => void copy()}>
+      <button type="button" className="button small" onClick={() => void copy()}>
         {state === 'copied' ? <Check size={14} /> : <Copy size={14} />}
         {state === 'copied' ? 'Copied' : 'Copy'}
       </button>

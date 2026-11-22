@@ -56,7 +56,7 @@ http://127.0.0.1:3000.
 
 ## Start a session on a machine
 
-1. Open **Machines** at the server’s home address and choose **Add a machine**.
+1. Open **Machines** at the server’s home address and choose **Add a machine**. Pick a connection method to see who connects to whom and what you need. Choose **Continue**, fill in the machine details, and choose **Add machine**. For **Direct only** or **Relay enabled**, follow the enrollment instructions on the machine page.
 2. Select the machine and check **Required software**. Choose **New session**, then select a coding tool and its project directory.
 3. Choose **Connect** to open the session in the web terminal or Outpost Desktop. Return to the same machine to reconnect. For a tool that runs in Chat, the session action is **Open in chat**.
 

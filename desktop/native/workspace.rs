@@ -1226,7 +1226,9 @@ impl Workspace {
                     .size(ComponentSize::Sm)
                     .w(px(30.))
                     .h(px(30.))
-                    .tooltip_text("Open a terminal or session")
+                    .when(!open, |button| {
+                        button.tooltip_text("Open a terminal or session")
+                    })
                     .on_click(cx.listener(move |s, e: &ClickEvent, _, cx| {
                         if !matches!(e, ClickEvent::Mouse(_)) {
                             s.set_new_tab_menu(!open, cx);

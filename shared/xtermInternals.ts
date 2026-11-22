@@ -1,4 +1,4 @@
-import type { BufferState, CheckpointState } from './terminalState'
+import type { BufferState, CheckpointLink, CheckpointState } from './terminalState'
 
 /** The exact private surface used by terminalCheckpoint.ts, pinned to xterm 6.0.
  * These are adapter types, not an alternative terminal API. Runtime shape checks
@@ -50,7 +50,7 @@ export interface XtermBuffer extends Omit<BufferState, 'savedAttributes'> {
 export interface XtermLink {
   id: number
   key?: string
-  data: CheckpointState['links'][number][1]
+  data: CheckpointLink[1]
   lines: Marker[]
 }
 type ColorRequest =

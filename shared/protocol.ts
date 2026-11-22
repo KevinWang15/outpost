@@ -1,6 +1,7 @@
 // Terminal protocol between clients (web terminal and desktop app) and the
 // broker. Binary WebSocket frames carry raw terminal bytes; text frames carry
 // these JSON messages. See docs/ARCHITECTURE.md → "Terminal protocol".
+import type { Scrollback } from './terminalService'
 import type { FileRead, ImageWrite } from './terminalFiles'
 import type { SessionActivity } from './activity'
 import type { HarnessId } from './harnesses'
@@ -9,7 +10,7 @@ import type { Checkpoint } from './terminalState'
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 18
+export const protocolVersion = 19
 export const maxInputMessage = 64 * 1024
 // Interactive input queue. Files use bounded transfer requests on the attachment.
 export const maxInputQueue = 2 * 1024 * 1024
@@ -33,6 +34,7 @@ export type ClientMessage =
   | { type: 'activate'; id: string; token: string }
   | { type: 'acknowledge'; id: string; completionId: string }
   | { type: 'resize'; cols: number; rows: number }
+  | { type: 'scrollback'; lines: Scrollback }
   | { type: 'focus'; active: boolean }
   | { type: 'ack'; bytes: number }
   | { type: 'send'; id: string; data: string }

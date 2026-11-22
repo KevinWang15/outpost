@@ -57,7 +57,7 @@ test('channels keep offline members and remove deleted sessions once across chan
   const client = {
     owner,
     send(event: ChatServerMessage) {
-      events.push(event)
+      events.push(structuredClone(event))
     },
   }
   await hub.attach(client)
@@ -120,7 +120,14 @@ test('channels keep offline members and remove deleted sessions once across chan
   )
   await sessions.remove(context, two.id)
   await hub.sessionDeleted(owner, ref(two.id))
-  await t.waitFor(() => assert.equal(schedule.lastRun?.ok, false))
+  // The schedule broadcast follows its durable write. The in-memory object changes earlier.
+  await t.waitFor(() =>
+    assert.ok(
+      events.some(
+        event => event.type === 'schedule' && event.schedule.id === schedule.id && event.schedule.lastRun?.ok === false,
+      ),
+    ),
+  )
   assert.match(schedule.lastRun?.message ?? '', /session not found/i)
   assert.deepEqual(
     (await hub.attach(client)).hello.channels.map(channel => channel.members),

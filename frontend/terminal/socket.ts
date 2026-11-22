@@ -1,3 +1,4 @@
+import type { Scrollback } from '../../shared/terminalService'
 import { terminalFileChunk, type TerminalFileReader } from '../../shared/terminalFiles'
 import { maxSessionFiles, parseSessionFile } from '../../shared/sessionFiles'
 import type { ClientMessage, ServerMessage } from '../../shared/protocol'
@@ -19,6 +20,13 @@ interface Handlers {
 /** The web client of the terminal protocol (shared/protocol.ts). Reconnects
  * with the resume token after drops; an ended session requires explicit reconnect. */
 export class TerminalSocket {
+  private scrollback?: Scrollback
+  setScrollback(lines: Scrollback) {
+    if (lines === this.scrollback) return
+    this.scrollback = lines
+    if (this.connected) this.send({ type: 'scrollback', lines })
+  }
+
   private socket: WebSocket | null = null
   private token: string
   private attempts = 0
@@ -71,6 +79,7 @@ export class TerminalSocket {
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     url.search = new URLSearchParams({
       token: this.token,
+      ...(this.scrollback !== undefined && { scrollback: String(this.scrollback) }),
       cols: String(cols),
       rows: String(rows),
       protocol: String(protocolVersion),
@@ -86,15 +95,18 @@ export class TerminalSocket {
     this.receivedAt = Date.now()
     this.ready = false
     this.requestedSize = null
-    this.rendering.begin()
+    const requestedScrollback = this.scrollback
+    this.rendering.begin(requestedScrollback)
     let acknowledged = 0
     let lastAck = 0
     let ackTimer: ReturnType<typeof setTimeout> | undefined
-    const attachTimer = setTimeout(
-      () =>
-        this.lost(socket, { type: 'closed', reason: 'error', message: 'The terminal did not become ready in time.' }),
-      terminalConnectionPolicy.clientAttachMs,
-    )
+    let lastRestoreAt = Date.now()
+    const checkAttach = () => {
+      const remaining = lastRestoreAt + terminalConnectionPolicy.clientAttachMs - Date.now()
+      if (remaining > 0) attachTimer = setTimeout(checkAttach, remaining)
+      else this.lost(socket, { type: 'closed', reason: 'error', message: 'The terminal did not become ready in time.' })
+    }
+    let attachTimer = setTimeout(checkAttach, terminalConnectionPolicy.clientAttachMs)
     this.cleanup = () => {
       clearTimeout(ackTimer)
       clearTimeout(attachTimer)
@@ -136,12 +148,15 @@ export class TerminalSocket {
         this.handlers.hello(message)
       } else if (message.type === 'restore' || message.type === 'geometry' || message.type === 'clear') {
         const length = new TextEncoder().encode(event.data).length
+        if (message.type === 'restore') lastRestoreAt = this.receivedAt
         this.rendering.restore(message, () => rendered(length))
       } else if (message.type === 'ready') {
         this.rendering.flush(() => {
           if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
           if (this.ready) return this.fail('Outpost sent duplicate terminal readiness.')
           this.ready = true
+          if (this.scrollback !== requestedScrollback && this.scrollback !== undefined)
+            this.send({ type: 'scrollback', lines: this.scrollback })
           this.readyAt = Date.now()
           clearTimeout(attachTimer)
           this.scheduleProbe()

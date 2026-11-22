@@ -7,7 +7,13 @@ import { randomUUID } from 'node:crypto'
 import headless from '@xterm/headless'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { checkpoint, clearTerminal, headlessColors, writeHeadless } from '../shared/terminalCheckpoint'
-import { terminalService, terminalSize } from '../shared/terminalService'
+import {
+  terminalService,
+  terminalSize,
+  scrollbackLines,
+  validScrollback,
+  type Scrollback,
+} from '../shared/terminalService'
 import { chatHost } from '../shared/chatHost'
 import { parseSessionFile, sessionFileId } from '../shared/sessionFiles'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
@@ -23,6 +29,7 @@ import { Sequences } from './sequences'
 import { socketAddress, statePath } from './state'
 
 interface Launch {
+  scrollback?: Scrollback
   socket: string
   session: string
   revision: number
@@ -36,6 +43,7 @@ interface Launch {
   rows: number
 }
 interface Viewer {
+  scrollback?: Scrollback
   attachment: TerminalAttachment
   cols: number
   rows: number
@@ -62,7 +70,7 @@ export async function serveTerminal() {
   const term = new headless.Terminal({
     cols: launch.cols,
     rows: launch.rows,
-    scrollback: terminalService.scrollback,
+    scrollback: Math.max(terminalService.scrollback, scrollbackLines(launch.scrollback)),
     allowProposedApi: true,
     logLevel: 'off',
     cursorBlink: true,
@@ -71,6 +79,13 @@ export async function serveTerminal() {
   term.unicode.activeVersion = '11'
   const sequences = new Sequences()
   const clients = new Map<Socket, Viewer>()
+  // Attaching a smaller viewer or losing a connection must never discard another
+  // viewer's retained rows. Only an explicit settings change can reduce retention.
+  function changeScrollback() {
+    let lines: number = terminalService.scrollback
+    for (const viewer of clients.values()) lines = Math.max(lines, scrollbackLines(viewer.scrollback))
+    term.options.scrollback = lines
+  }
   const sockets = new Set<Socket>()
   /** Helpers waiting for a viewer to act on their signal. */
   const signals = new Map<string, { socket: Socket; timer: NodeJS.Timeout }>()
@@ -309,8 +324,7 @@ export async function serveTerminal() {
                 'Terminal service protocol mismatch; install the current Outpost machine service and restart this session',
               )
             if (!terminalSize(message.cols, message.rows)) throw new Error('Invalid terminal size')
-            // A raw full-width checkpoint can hold about 50 MiB of cells. Bound
-            // concurrent captures; clients retry without pausing the live PTY.
+            // Bound concurrent copies of a live grid while other viewers attach.
             if (restoring >= 2) {
               sendControl(socket, {
                 type: 'error',
@@ -323,10 +337,22 @@ export async function serveTerminal() {
             // A newly loading/hidden viewer must not resize an existing viewer.
             // It takes control only when the UI reports activation after ready.
             if (!controller) resize(message.cols, message.rows)
-            const parts = checkpoint(term)
-            restoring++
+            if (message.scrollback !== undefined && !validScrollback(message.scrollback))
+              throw new Error('Invalid scrollback limit')
             const attachment = new TerminalAttachment(socket)
-            clients.set(socket, { attachment, cols: message.cols, rows: message.rows, active: false })
+            clients.set(socket, {
+              attachment,
+              cols: message.cols,
+              rows: message.rows,
+              active: false,
+              scrollback: message.scrollback,
+            })
+            term.options.scrollback = Math.max(
+              term.options.scrollback ?? terminalService.scrollback,
+              scrollbackLines(message.scrollback),
+            )
+            const parts = checkpoint(term, scrollbackLines(message.scrollback))
+            restoring++
             attached = true
             controller ??= socket
             socket.setTimeout(0)
@@ -371,6 +397,10 @@ export async function serveTerminal() {
             clearTerminal(term)
             broadcast(terminalControl({ type: 'clear' }))
             sendControl(socket, { type: 'result', id: message.id, ok: true })
+          } else if (message.type === 'scrollback') {
+            if (!validScrollback(message.lines)) throw new Error('Invalid scrollback limit')
+            clients.get(socket)!.scrollback = message.lines
+            changeScrollback()
           } else if (message.type === 'resize') {
             if (!terminalSize(message.cols, message.rows)) throw new Error('Invalid terminal size')
             const client = clients.get(socket)!

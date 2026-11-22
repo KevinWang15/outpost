@@ -2,7 +2,7 @@ import { WebSocket } from 'ws'
 import { Connection, closedMessages } from './connection'
 import type { CloseReason, ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
-import { terminalService } from '../../shared/terminalService'
+import { terminalService, validScrollback } from '../../shared/terminalService'
 import type { Owner } from '../deployment'
 import { terminalFailure } from './failures'
 import type { SessionService, TargetContext } from '../sessions'
@@ -15,6 +15,7 @@ export interface TerminalQuery {
   rows?: string
   protocol?: string
   start?: string
+  scrollback?: string
 }
 
 interface Dependencies {
@@ -76,6 +77,14 @@ export class TerminalBroker {
     if (query.protocol !== String(protocolVersion)) {
       return reject('outdated', 'Outpost was updated. Reload this terminal to reconnect.')
     }
+    const scrollback =
+      query.scrollback === undefined || query.scrollback === 'unlimited'
+        ? query.scrollback
+        : /^(0|[1-9][0-9]*)$/.test(query.scrollback)
+          ? Number(query.scrollback)
+          : NaN
+    if (scrollback !== undefined && !validScrollback(scrollback))
+      return reject('unavailable', 'Invalid scrollback limit.')
     const redeemed = this.stopped ? null : this.dependencies.tokens.redeem(query.token ?? '')
     if (!redeemed || !this.dependencies.active(redeemed.grant.owner)) return reject('expired', closedMessages.expired)
     const { grant } = redeemed
@@ -119,6 +128,7 @@ export class TerminalBroker {
         rows,
         start,
         connection.abort.signal,
+        scrollback,
       )
       connection.start(stream)
     } catch (error) {

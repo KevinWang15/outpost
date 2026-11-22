@@ -17,6 +17,10 @@ use gpui::{prelude::*, *};
 use serde_json::json;
 use std::{cell::RefCell, ops::Range, path::Path, rc::Rc};
 
+pub(super) const DEFAULT_HISTORY: usize = 10_000;
+// Alacritty indexes lines with i32 and adds the viewport height when reflowing.
+pub(super) const MAX_HISTORY: usize = i32::MAX as usize - 200;
+
 pub const FAMILY: &str = if cfg!(target_os = "macos") {
     "Menlo"
 } else if cfg!(windows) {
@@ -73,6 +77,7 @@ pub struct Pane {
     pub mark: Option<&'static crate::agent_mark::AgentMark>,
     pub status: String,
     pub font_size: f32,
+    scrollback: usize,
     pub bell: bool,
     pub activity: String,
     pub waiting: u64,
@@ -157,6 +162,7 @@ impl Pane {
             next.image_syntax = self.image_syntax.clone();
             next.wsl = self.wsl;
             next.sound = self.sound;
+            next.set_scrollback(self.scrollback);
         });
         Ok(pane)
     }
@@ -184,7 +190,7 @@ impl Pane {
     ) -> Self {
         let events = Events::default();
         let config = Config {
-            scrolling_history: 10000,
+            scrolling_history: DEFAULT_HISTORY,
             ..Default::default()
         };
         let focus = cx.focus_handle();
@@ -203,6 +209,7 @@ impl Pane {
             mark: None,
             status: String::new(),
             font_size,
+            scrollback: DEFAULT_HISTORY,
             bell: false,
             activity: String::new(),
             waiting: 0,
@@ -296,10 +303,23 @@ impl Pane {
             rows: rows.clamp(2, 200),
         })
     }
+    pub fn set_scrollback(&mut self, lines: usize) {
+        if self.scrollback == lines {
+            return;
+        }
+        if lines < self.term.history_size() {
+            self.term.selection = None;
+        }
+        self.scrollback = lines;
+        self.term.set_options(Config {
+            scrolling_history: lines,
+            ..Config::default()
+        });
+    }
     pub fn reset(&mut self, cols: u16, rows: u16) {
         self.term = Term::new(
             Config {
-                scrolling_history: 10000,
+                scrolling_history: self.scrollback,
                 ..Default::default()
             },
             &SizeHint { cols, rows },
@@ -398,6 +418,10 @@ impl Pane {
         if let Some(text) = self.term.selection_to_string() {
             cx.write_to_clipboard(ClipboardItem::new_string(text))
         }
+    }
+    #[cfg(feature = "ui-tests")]
+    pub fn selected_text(&self) -> Option<String> {
+        self.term.selection_to_string()
     }
     #[cfg(feature = "ui-tests")]
     pub fn screen_text(&self) -> String {

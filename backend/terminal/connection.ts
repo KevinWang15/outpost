@@ -9,7 +9,7 @@ import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/
 import { signalValidators } from '../../shared/signals'
 import { sessionFileId, maxSessionFiles } from '../../shared/sessionFiles'
 import { terminalFileChunk, validImageWrite, validFileRead } from '../../shared/terminalFiles'
-import { terminalSize } from '../../shared/terminalService'
+import { terminalSize, validScrollback } from '../../shared/terminalService'
 import { terminalFailure } from './failures'
 import type { Stream } from '../machines'
 
@@ -142,6 +142,7 @@ export class Connection {
 
   private control(message: { type?: string; [key: string]: unknown }) {
     if (message.type === 'restore' || message.type === 'geometry' || message.type === 'clear') {
+      if (!this.started && message.type === 'restore') this.attachTimer.refresh()
       const data = JSON.stringify(message)
       this.unacked += Buffer.byteLength(data)
       if (this.socket.readyState === WebSocket.OPEN) this.socket.send(data)
@@ -322,6 +323,9 @@ export class Connection {
           ...(!ok && { message: 'Could not accept this launch ticket. Use Connect in Outpost again.' }),
         })
       }
+      case 'scrollback':
+        if (validScrollback(message.lines)) this.toService({ type: 'scrollback', lines: message.lines })
+        return
       case 'resize':
         if (terminalSize(message.cols, message.rows)) {
           this.toService({ type: 'resize', cols: message.cols, rows: message.rows })

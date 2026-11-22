@@ -20,7 +20,7 @@ For the two enrollment methods and their acceptance criteria, see the [v3 connec
 ## Principles
 
 1. **The machine owns the session.** For a native CLI, the terminal service owns the PTY,
-   screen and 10,000-line in-memory scrollback. For an ACP agent, the chat host owns the
+   screen and in-memory scrollback requested by its viewers. For an ACP agent, the chat host owns the
    process and journal. Closing or losing a viewer leaves the agent running.
 2. **One machine connection carries work in both directions.** Terminal attachments, Chat,
    file transfers and agent tool calls share that connection. Published files remain on
@@ -203,7 +203,15 @@ through the same clipboard path as the context menu. It never enters a remote
 mode or sends a selection gesture. Application OSC 52 copies still work.
 
 The service and renderer use xterm's normal and alternate buffers. The normal
-buffer retains 10,000 scrollback rows; the alternate buffer has no scrollback.
+buffer retains 10,000 scrollback rows by default. Desktop can request a numeric
+line limit or unlimited in-memory history on attachment and change it on a live
+connection. A larger request increases worker retention. Opening a smaller viewer or
+disconnecting leaves the retained history intact. An explicit settings change can
+reduce retention to the largest attached request, with a 10,000-row floor for
+browser viewers. Each viewer restores only its own window of
+history. The alternate screen has no scrollback. Stopping the worker releases
+its history. A Terminal view of an ACP agent reconstructs its transcript from
+the chat host's bounded journal.
 Screen erase and scrollback erase remain separate operations. Reconnecting
 restores both buffers, including normal-buffer history behind an active
 alternate screen. The renderer's actual xterm scrollbar browses those rows,
@@ -364,6 +372,7 @@ JSON control messages. The following messages apply to a broker attachment. The 
 | Broker | `ack {bytes}` | Output rendered; flow control |
 | Broker | `ping {id}` | Probe the remote terminal service without sending terminal input |
 | Broker | `send {id, data}` | Input that must be confirmed (composer drafts) |
+| Broker | `scrollback {lines}` | Update this Desktop viewer’s retention request for a running machine terminal |
 | Broker | `clear {id}` | Clear the shared screen and scrollback, keeping the current cursor line |
 | Broker | `paste {id, data}` | Paste text using the running application’s bracketed-paste mode |
 | Broker | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without opening another stream |
@@ -371,7 +380,7 @@ JSON control messages. The following messages apply to a broker attachment. The 
 | Broker | `draft {active}` | The message box has text; messages from other sessions wait until it is sent or cleared |
 | Broker | `deliver-now` | Type the next waiting message in once the agent is idle |
 | Client | `hello {resume, session, target}` | Connection accepted |
-| Client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
+| Client | `restore {checkpoint}` | Ordered checkpoint header, hyperlinks, buffer lines and end |
 | Client | `geometry {cols, rows}` | Shared terminal dimensions, applied before subsequent output |
 | Client | `clear` | Clear the screen at this point in the ordered output stream |
 | Client | `ready` | Checkpoint restored; attached to the persistent PTY |
@@ -556,7 +565,7 @@ directory): the machine's user account is the trust boundary. Besides viewers,
 it answers one-shot requests on the same socket: `status`, `stop`,
 `acknowledge`, hook events, `files` hints and signals.
 
-The normal buffer retains 10,000 rows in memory. There is no raw output journal,
+The normal buffer retains the session’s negotiated scrollback in memory. There is no raw output journal,
 copy mode, prefix key, status bar or keyboard negotiation shim. The service
 interprets terminal state and delivers live output to attached renderers. Complete
 UTF-8 and VT sequences are framed before entering xterm so checkpoints never
@@ -580,9 +589,9 @@ callbacks using native typed-array copies. Row compression is deferred until
 streaming, so the atomic phase does not scan every cell in JavaScript. Captured
 rows are released as each part is encoded, and abandoned generators release their
 remaining rows. At most two viewers per service may be restoring simultaneously;
-additional viewers receive a transient error and retry. A maximum-size snapshot
-holds about 50 MiB of raw cells plus metadata before streaming releases them.
-Checkpoint schema 2 encodes each row's repeated final cell once,
+additional viewers receive a transient error and retry. A 10,000-row snapshot at 400 columns
+holds about 50 MiB of raw cells plus metadata. Larger Desktop histories grow with the number of retained rows.
+Checkpoint schema 3 sends referenced hyperlinks in chunks and encodes each row's repeated final cell once,
 preserving its character and style as well as combined characters and links.
 `machine/attachment.ts` encodes and streams this immutable snapshot in
 4 ms slices, honoring socket backpressure. The live PTY keeps running; each

@@ -1,6 +1,6 @@
 import { terminalService, terminalSize } from './terminalService'
 import { terminalTheme } from './terminalTheme'
-import type { Attributes, BufferState, CellLine, Checkpoint, CheckpointState } from './terminalState'
+import type { Attributes, BufferState, CellLine, Checkpoint, CheckpointLink, CheckpointState } from './terminalState'
 import type { TerminalLike, XtermAttributes, XtermBuffer, XtermCore, XtermLink } from './xtermInternals'
 
 /** The only xterm-internal adapter in Outpost. Pinned to the 6.0 buffer layout
@@ -73,19 +73,26 @@ const bufferState = (buffer: XtermBuffer): BufferState => ({
 
 /** Capture owned cells and metadata atomically. Encoding and transport can then
  * yield between parts while the live PTY continues changing its own buffers. */
-export function checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
+export function checkpoint(
+  terminal: TerminalLike,
+  history: number = terminalService.scrollback,
+): Generator<Checkpoint> {
   const c = core(terminal),
     buffers = c._bufferService.buffers,
     input = c._inputHandler
   if (input._parser.currentState !== 0) throw new Error('Checkpoint requires a complete terminal sequence')
+  const omitted = Math.max(0, buffers.normal.ybase - history)
+  const normal = bufferState(buffers.normal)
+  normal.ybase -= omitted
+  normal.savedY = Math.max(0, normal.savedY - omitted)
   const begin: Extract<Checkpoint, { part: 'begin' }> = {
     part: 'begin',
-    version: 2,
+    version: 3,
     cols: terminal.cols,
     rows: terminal.rows,
     state: structuredClone({
       active: buffers.active === buffers.alt ? 'alt' : 'normal',
-      normal: bufferState(buffers.normal),
+      normal,
       alt: bufferState(buffers.alt),
       modes: c.coreService.modes,
       dec: c.coreService.decPrivateModes,
@@ -102,36 +109,49 @@ export function checkpoint(terminal: TerminalLike): Generator<Checkpoint> {
       titleStack: input._windowTitleStack,
       iconStack: input._iconNameStack,
       join: input._parser.precedingJoinState,
-      links: [...c._oscLinkService._dataByLinkId].map(([id, entry]) => [id, entry.data]),
+
       nextLink: c._oscLinkService._nextId,
       colors: c.outpostColors ?? {},
     }),
   }
+  const linkIds = new Set([begin.state.attributes.url, normal.savedAttributes.url, begin.state.alt.savedAttributes.url])
   const captured: { name: 'normal' | 'alt'; lines: (CapturedLine | undefined)[] }[] = []
   for (const name of ['normal', 'alt'] as const) {
     const buffer = buffers[name]
     const lines: CapturedLine[] = []
-    for (let index = 0; index < buffer.lines.length; index++) {
+    for (let index = name === 'normal' ? omitted : 0; index < buffer.lines.length; index++) {
       const line = buffer.lines.get(index)
       // Only native typed-array copies belong in the atomic phase. Run-length
       // scanning/encoding happens in the yielded parts below, not on the PTY's
       // critical path. Raw cell storage is bounded by the terminal dimensions.
+      const extended: CellLine['extended'] = []
+      for (const [col, attr] of Object.entries(line._extendedAttrs)) {
+        if (!attr || Number(col) >= terminal.cols) continue
+        extended.push([Number(col), attr._ext, attr.urlId])
+        if (attr.urlId) linkIds.add(attr.urlId)
+      }
       lines.push({
         cells: line._data.slice(0, terminal.cols * 3),
         wrapped: line.isWrapped,
         combined: { ...line._combined },
-        extended: Object.entries(line._extendedAttrs)
-          .filter(([col, attr]) => attr && Number(col) < terminal.cols)
-          .map(([col, attr]) => [Number(col), attr._ext, attr.urlId]),
+        extended,
       })
     }
     captured.push({ name, lines })
+  }
+  // Capture only links referenced by this viewer's window. Keep metadata frames bounded
+  // even when a long-running shell has printed thousands of distinct hyperlinks.
+  const links: CheckpointLink[] = []
+  for (const id of linkIds) {
+    const entry = c._oscLinkService._dataByLinkId.get(id)
+    if (entry) links.push([id, { ...entry.data }])
   }
   return parts()
 
   function* parts(): Generator<Checkpoint> {
     try {
       yield begin
+      for (let i = 0; i < links.length; i += 8) yield { part: 'links', links: links.slice(i, i + 8) }
       for (const { name, lines } of captured) {
         for (let first = 0; first < lines.length; first += 8) {
           const encoded: CellLine[] = []
@@ -201,17 +221,30 @@ export function clearTerminal(terminal: TerminalLike) {
 
 export class CheckpointReader {
   private state: CheckpointState | null = null
-  constructor(private terminal: TerminalLike) {}
+  constructor(
+    private terminal: TerminalLike,
+    private history: number = terminalService.scrollback,
+  ) {}
 
   accept(part: Checkpoint) {
     const terminal = this.terminal
     if (part.part === 'begin') {
-      if (part.version !== 2 || !terminalSize(part.cols, part.rows)) throw new Error('Unsupported terminal checkpoint')
+      if (
+        part.version !== 3 ||
+        !terminalSize(part.cols, part.rows) ||
+        !Number.isSafeInteger(part.state.normal.ybase) ||
+        part.state.normal.ybase < 0 ||
+        part.state.normal.ybase > this.history ||
+        part.state.alt.ybase !== 0
+      )
+        throw new Error('Unsupported terminal checkpoint')
       terminal.reset()
       terminal.resize(part.cols, part.rows)
       const c = core(terminal)
       c._bufferService.buffers.normal.lines.length = 0
       c._bufferService.buffers.alt.lines.length = 0
+      c._oscLinkService._dataByLinkId.clear()
+      c._oscLinkService._entriesWithId.clear()
       this.state = part.state
       return
     }
@@ -219,10 +252,27 @@ export class CheckpointReader {
     const c = core(terminal),
       buffers = c._bufferService.buffers,
       input = c._inputHandler
+    if (part.part === 'links') {
+      if (part.links.length > 8) throw new Error('Invalid checkpoint links')
+      const links = c._oscLinkService
+      for (const [id, data] of part.links) {
+        if (!Number.isSafeInteger(id) || id <= 0 || links._dataByLinkId.has(id) || typeof data.uri !== 'string')
+          throw new Error('Invalid checkpoint link')
+        const entry: XtermLink = {
+          id,
+          data,
+          lines: [],
+          ...(data.id !== undefined ? { key: `${data.id};;${data.uri}` } : {}),
+        }
+        links._dataByLinkId.set(id, entry)
+        if (entry.key) links._entriesWithId.set(entry.key, entry)
+      }
+      return
+    }
     if (part.part === 'lines') {
       if (!['normal', 'alt'].includes(part.buffer) || part.lines.length > 8) throw new Error('Invalid checkpoint lines')
       const buffer = buffers[part.buffer]
-      const limit = terminal.rows + (part.buffer === 'normal' ? terminalService.scrollback : 0)
+      const limit = terminal.rows + (part.buffer === 'normal' ? this.state.normal.ybase : 0)
       if (part.first !== buffer.lines.length || part.first + part.lines.length > limit)
         throw new Error('Invalid checkpoint length')
       for (const data of part.lines) {
@@ -294,19 +344,7 @@ export class CheckpointReader {
     }
     // Preserve OSC 8 IDs and attach their lifetime to the restored buffer lines.
     const links = c._oscLinkService
-    links._dataByLinkId.clear()
-    links._entriesWithId.clear()
     links._nextId = state.nextLink
-    for (const [id, data] of state.links) {
-      const entry: XtermLink = {
-        id,
-        data,
-        lines: [],
-        ...(data.id !== undefined ? { key: `${data.id};;${data.uri}` } : {}),
-      }
-      links._dataByLinkId.set(id, entry)
-      if (entry.key) links._entriesWithId.set(entry.key, entry)
-    }
     for (const name of ['normal', 'alt'] as const) {
       const buffer = buffers[name]
       for (let row = 0; row < buffer.lines.length; row++) {

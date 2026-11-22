@@ -1,7 +1,7 @@
 import type { Terminal } from '@xterm/xterm'
 import type { ServerMessage } from '../../shared/protocol'
 import { CheckpointReader, clearTerminal, remoteTerminalReplies } from '../../shared/terminalCheckpoint'
-import { terminalSize } from '../../shared/terminalService'
+import { terminalSize, type Scrollback } from '../../shared/terminalService'
 
 type ScreenUpdate = Extract<ServerMessage, { type: 'restore' | 'geometry' | 'clear' }>
 const maxWriteBatch = 128 * 1024
@@ -14,7 +14,7 @@ interface WriteBatch {
 /** Connections order output and geometry, then acknowledge completed rendering.
  * Remote attachments additionally restore a checkpoint before live output. */
 export interface TerminalRendering {
-  begin(): void
+  begin(scrollback?: Scrollback): void
   output(bytes: Uint8Array, rendered: () => void): void
   restore(message: ScreenUpdate, rendered: () => void): void
   flush(rendered: () => void): void

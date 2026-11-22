@@ -1,3 +1,4 @@
+import type { Scrollback } from '../shared/terminalService'
 import type {
   ConversationResults,
   ConversationSearch,
@@ -91,8 +92,9 @@ export class SessionClient {
     rows: number,
     start: boolean,
     signal?: AbortSignal,
+    scrollback?: Scrollback,
   ): Promise<Stream> {
-    return machine.open('terminal', { session: id, cols, rows, start }, signal)
+    return machine.open('terminal', { session: id, cols, rows, start, scrollback }, signal)
   }
   /** The server's link to a session's chat host, carried as a stream. */
   chatAttach({ machine }: TargetContext, id: string, start: boolean): Promise<Stream> {

@@ -38,7 +38,7 @@ export function bufferControls(state: CheckpointState, buf: BufferState, cols: n
       controls += cursor(column, 0) + '\x1bH'
   }
   controls += '\x1b[' + coord(buf.scrollTop, rows) + ';' + coord(buf.scrollBottom, rows) + 'r'
-  controls += cursor(buf.savedX, buf.savedY) + rendition(buf.savedAttributes) + '\x1b7'
+  controls += cursor(buf.savedX, buf.savedY - buf.ybase) + rendition(buf.savedAttributes) + '\x1b7'
   controls += cursor(buf.x, buf.y) + rendition(state.attributes)
   return controls
 }

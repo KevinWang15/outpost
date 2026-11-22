@@ -18,7 +18,7 @@ import { TerminalActivity } from '../../frontend/terminal/activity'
 import { TerminalSocket } from '../../frontend/terminal/socket'
 import type { TerminalRendering } from '../../frontend/terminal/rendering'
 import { CheckpointReader } from '../../shared/terminalCheckpoint'
-import { terminalService, terminalSize } from '../../shared/terminalService'
+import { terminalService, terminalSize, scrollbackLines, type Scrollback } from '../../shared/terminalService'
 import {
   desktopSessionId,
   parseDesktopEntry,
@@ -101,14 +101,17 @@ class NativeRendering implements TerminalRendering {
   private serializer?: SerializeAddon
   private state?: CheckpointState
   private links: Record<'normal' | 'alt', number[][]> = { normal: [], alt: [] }
+  private history: number = terminalService.scrollback
+  private linkUris = new Map<number, string>()
   private live = false
   private callbacks = new Map<number, () => void>()
   constructor(
     readonly pane: number,
     private failed: (reason: string) => void,
   ) {}
-  begin() {
+  begin(scrollback?: Scrollback) {
     this.dispose()
+    this.history = scrollbackLines(scrollback)
     this.live = false
   }
   dispose() {
@@ -117,6 +120,7 @@ class NativeRendering implements TerminalRendering {
     this.reader = undefined
     this.serializer = undefined
     this.callbacks.clear()
+    this.linkUris.clear()
     this.state = undefined
     this.links = { normal: [], alt: [] }
   }
@@ -157,15 +161,16 @@ class NativeRendering implements TerminalRendering {
             allowProposedApi: true,
             cols: part.cols,
             rows: part.rows,
-            scrollback: terminalService.scrollback,
+            scrollback: this.history,
           })
           this.state = part.state
-          this.reader = new CheckpointReader(this.scratch)
+          this.reader = new CheckpointReader(this.scratch, this.history)
           this.serializer = new SerializeAddon()
           this.scratch.loadAddon(this.serializer)
         }
         if (!this.reader || !this.scratch || !this.serializer) throw new Error('Missing checkpoint header')
         this.reader.accept(part)
+        if (part.part === 'links') for (const [id, link] of part.links) this.linkUris.set(id, link.uri)
         if (part.part === 'lines')
           part.lines.forEach((line, index) => {
             for (const [col, , link] of line.extended)
@@ -174,7 +179,7 @@ class NativeRendering implements TerminalRendering {
         // The V3 server owns the canonical xterm cell snapshot. Decode it once
         // with the shared validator, then dispose of the temporary conversion grid.
         if (part.part === 'end') {
-          const restored = this.serializer.serialize({ scrollback: terminalService.scrollback })
+          const restored = this.serializer.serialize()
           emit('reset', { pane: this.pane, cols: this.scratch.cols, rows: this.scratch.rows })
           const state = this.state!,
             cols = this.scratch.cols,
@@ -183,16 +188,13 @@ class NativeRendering implements TerminalRendering {
             const buf = state[buffer]
             this.bytes(Buffer.from(bufferControls(state, buf, cols, rows)))
             // Link URIs are metadata, never executable terminal escapes.
-            const links = new Map(state.links)
             const list = this.links[buffer]
             for (let i = 0; i < list.length; i += 256) {
               emit('links', {
                 pane: this.pane,
                 cells: list.slice(i, i + 256).flatMap(([line, col, id]) => {
-                  const link = links.get(id)
-                  return link && typeof link.uri === 'string' && link.uri.length <= 8192
-                    ? [[line - buf.ybase, col, String(id), link.uri]]
-                    : []
+                  const uri = this.linkUris.get(id)
+                  return uri && uri.length <= 8192 ? [[line - buf.ybase, col, String(id), uri]] : []
                 }),
               })
             }
@@ -210,6 +212,7 @@ class NativeRendering implements TerminalRendering {
             this.bytes(Buffer.from('\x1b[?6h'))
             emit('cursor', { pane: this.pane, x: state[state.active].x, y: state[state.active].y })
           }
+          this.linkUris.clear()
           this.state = undefined
           this.links = { normal: [], alt: [] }
           this.scratch.dispose()
@@ -351,6 +354,7 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
   panes.set(pane, state)
   const known = catalogue.find(session => session.id === key) ?? recent.get(key)
   emit('opened', { pane, window, title: launch.title, server: launch.server, tool: known?.tool })
+  state.socket.setScrollback(prefs.scrollback)
   state.socket.open()
 }
 type Cmd = {
@@ -368,6 +372,8 @@ type Cmd = {
   cols: number
   rows: number
   answer: boolean
+  scrollbackLines: number
+  unlimitedScrollback: boolean
   fontSize: number
   sound: boolean
   localShell: string | null
@@ -412,7 +418,16 @@ async function handle(c: Cmd) {
       return attach(await accounts.launch(ref), c.window)
     }
     case 'prefs':
-      await prefs.set({ fontSize: c.fontSize, sound: c.sound }, c.localShell)
+      await prefs.set(
+        {
+          fontSize: c.fontSize,
+          sound: c.sound,
+          scrollbackLines: c.scrollbackLines,
+          unlimitedScrollback: c.unlimitedScrollback,
+        },
+        c.localShell,
+      )
+      for (const pane of panes.values()) pane.socket.setScrollback(prefs.scrollback)
       emit('prefs', { ...prefs.value, localShell: prefs.localShell, profiles })
       return
     case 'targets':

@@ -3,7 +3,7 @@ import type { Duplex } from 'node:stream'
 import { chatHost } from '../shared/chatHost'
 import { supportsTerminal } from '../shared/harnesses'
 import type { ChatStreamArgs, TerminalStreamArgs } from '../shared/machine'
-import { terminalService, terminalSize } from '../shared/terminalService'
+import { terminalService, terminalSize, validScrollback } from '../shared/terminalService'
 import { terminalControl } from '../shared/node/terminalFrames'
 import { ChatTerminal } from './chatTerminal'
 import { TerminalChat } from './terminalChat'
@@ -16,7 +16,13 @@ import { socketAddress } from './state'
 /** The first explicit start chooses the agent interface. Every subsequent view joins the same process. */
 export async function openSessionView(view: 'terminal' | 'chat', args: TerminalStreamArgs | ChatStreamArgs) {
   const size = 'cols' in args ? args : null
-  if (typeof args.start !== 'boolean' || (view === 'terminal' && (!size || !terminalSize(size.cols, size.rows))))
+  if (
+    typeof args.start !== 'boolean' ||
+    (view === 'terminal' &&
+      (!size ||
+        !terminalSize(size.cols, size.rows) ||
+        (size.scrollback !== undefined && !validScrollback(size.scrollback))))
+  )
     throw new RegistryError('Invalid session attachment.', 400)
   return withSessionLock(args.session, async record => {
     const running = await driverStatus(record.id)
@@ -25,7 +31,7 @@ export async function openSessionView(view: 'terminal' | 'chat', args: TerminalS
       if (!args.start)
         throw new RegistryError('The coding tool is stopped. Start it to continue the conversation.', 410)
       driver = view === 'terminal' && supportsTerminal(record.tool) ? 'terminal' : 'chat'
-      if (driver === 'terminal' && size) await startTerminal(record, size.cols, size.rows)
+      if (driver === 'terminal' && size) await startTerminal(record, size.cols, size.rows, size.scrollback)
       else await startChat(record)
     }
     if (
@@ -42,7 +48,13 @@ export async function openSessionView(view: 'terminal' | 'chat', args: TerminalS
       const socket = connect(socketAddress(driver === 'chat' ? chatSocket(record.id) : terminalSocket(record.id)))
       if (view === 'terminal' && size)
         socket.write(
-          terminalControl({ type: 'attach', protocol: terminalService.protocol, cols: size.cols, rows: size.rows }),
+          terminalControl({
+            type: 'attach',
+            protocol: terminalService.protocol,
+            cols: size.cols,
+            rows: size.rows,
+            scrollback: size.scrollback,
+          }),
         )
       stream = socket
     }

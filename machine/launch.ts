@@ -1,6 +1,7 @@
 // Starting a session's driver: the terminal service (the tool's own terminal
 // interface in a PTY) or the chat host (its ACP server). Both get the same
 // binding, Outpost's MCP server and the session's own.
+import type { Scrollback } from '../shared/terminalService'
 import { spawn, spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
@@ -171,7 +172,7 @@ async function daemon(
   )
 }
 
-export async function startTerminal(session: SessionRecord, cols: number, rows: number) {
+export async function startTerminal(session: SessionRecord, cols: number, rows: number, scrollback?: Scrollback) {
   const { adapter, launch } = prepare(session, 'terminal')
   if (!adapter.terminal)
     throw new RegistryError('This coding tool has no terminal interface. Open this session in Outpost Chat.')
@@ -206,6 +207,7 @@ export async function startTerminal(session: SessionRecord, cols: number, rows: 
       env: environment,
       cols,
       rows,
+      scrollback,
     },
     statePath('logs', `${session.id}.log`),
     async () => (await driverStatus(session.id)).terminal !== null,

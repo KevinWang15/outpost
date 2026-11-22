@@ -4,10 +4,11 @@
 //   C  control message (JSON)
 //   D  stream data: a 4-byte stream number, then bytes
 
+import type { Scrollback } from './terminalService'
 import type { ActivityState } from './activity'
 import type { SessionFile } from './sessionFiles'
 
-export const machineProtocol = 7
+export const machineProtocol = 8
 export interface OutboundEnrollmentReply {
   targetId: string
   socket: string
@@ -76,6 +77,8 @@ export interface AgentCall {
 }
 
 export interface TerminalStreamArgs {
+  /** Desktop can request retention. Other viewers restore the default window. */
+  scrollback?: Scrollback
   session: string
   cols: number
   rows: number

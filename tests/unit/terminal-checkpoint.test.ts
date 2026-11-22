@@ -10,6 +10,7 @@ import {
   writeHeadless,
 } from '../../shared/terminalCheckpoint'
 import { Sequences } from '../../machine/sequences'
+import { scrollbackLines } from '../../shared/terminalService'
 
 function terminal(cols = 20, rows = 5) {
   const term = new headless.Terminal({ cols, rows, scrollback: 10_000, allowProposedApi: true, logLevel: 'off' })
@@ -153,5 +154,44 @@ test('headless answers queries offline; renderer replies are suppressed without 
   } finally {
     source.dispose()
     destination.dispose()
+  }
+})
+
+test('unlimited and bounded viewers restore their own rows, cursor and hyperlinks', () => {
+  const source = terminal()
+  const history = scrollbackLines('unlimited')
+  source.options.scrollback = history
+  try {
+    writeHeadless(source, '\x1b]8;;https://example.com/first\x1b\\FIRST\x1b]8;;\x1b\\\r\n')
+    writeHeadless(source, 'middle\r\n'.repeat(24_000))
+    writeHeadless(source, '\x1b]8;;https://example.com/last\x1b\\LAST\x1b]8;;\x1b\\\r\n\x1b7\x1b[?1049hALT')
+    for (const limit of [0, 20, 10_000, history]) {
+      const copy = terminal()
+      try {
+        copy.options.scrollback = limit
+        const reader = new CheckpointReader(copy, limit)
+        const links: string[] = []
+        for (const part of checkpoint(source, limit)) {
+          if (part.part === 'links') links.push(...part.links.map(([, data]) => data.uri))
+          reader.accept(part)
+        }
+        assert.deepEqual(
+          links.sort(),
+          limit === history ? ['https://example.com/first', 'https://example.com/last'] : ['https://example.com/last'],
+        )
+        assert.equal(copy.buffer.normal.baseY, Math.min(limit, source.buffer.normal.baseY))
+        assert.equal(copy.buffer.active.type, 'alternate')
+        assert.equal(copy.buffer.normal.getLine(0)!.translateToString(true).includes('FIRST'), limit === history)
+        writeHeadless(copy, '\x1b[?1049l\x1b8OK')
+        assert.equal(
+          copy.buffer.active.getLine(copy.buffer.active.baseY + copy.buffer.active.cursorY)!.translateToString(true),
+          'OK',
+        )
+      } finally {
+        copy.dispose()
+      }
+    }
+  } finally {
+    source.dispose()
   }
 })

@@ -324,9 +324,12 @@ request mouse events receive them normally; to select text locally in such an
 application, hold **Shift** while dragging on Windows/Linux or **Option** on
 macOS. You can also use **Copy** from the context menu or your usual copy shortcut.
 
-The terminal retains up to **10,000 lines of scrollback in memory**, including
-output produced while you are disconnected. Reconnecting restores that history,
-the screen and terminal modes. The existing scrollbar browses actual local
+The browser terminal keeps **10,000 rows of scrollback**. In Outpost Desktop,
+open **Terminal Settings → Scrollback** to enter a line count or choose **Unlimited**.
+The default is 10,000. Changes apply to open panes and new panes. Unlimited keeps
+normal-screen output in memory as it arrives, so memory use grows with the session.
+A running machine terminal also retains output while Desktop is disconnected.
+Reconnecting restores the requested history, the screen and terminal modes. The existing scrollbar browses actual local
 terminal history; selecting text does not freeze the process. Screen clearing,
 explicit scrollback clearing, and alternate-screen applications follow normal
 terminal semantics. Full-screen applications can still provide their own
@@ -498,7 +501,7 @@ context menu also moves a tab or pane into its own window. Moving a pane keeps
 its output, shell or managed connection, and message draft.
 
 Right-click a tab or the terminal to open terminal actions. You can search
-scrollback, compose a multiline message, clear the screen, copy a selection or
+scrollback, change its limit in **Terminal Settings**, compose a multiline message, clear the screen, copy a selection or
 paste text and images. Managed panes also list session files, preview raster
 images and save files through a native file dialog. Closing a local terminal
 ends its shell. A managed session continues running on its machine.

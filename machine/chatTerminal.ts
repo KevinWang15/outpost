@@ -297,6 +297,7 @@ export class ChatTerminal extends ViewStream {
         this.editorOutput.columns = m.cols
         this.control({ type: 'geometry', cols: m.cols, rows: m.rows })
         return
+      case 'scrollback': // This view replays the ACP journal into the viewer's own grid.
       case 'focus':
       case 'draft':
       case 'deliver-now':

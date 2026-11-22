@@ -58,6 +58,7 @@ pub struct Workspace {
     prefs: Value,
     address: Entity<InputState>,
     query: Entity<InputState>,
+    history_input: Entity<InputState>,
     directory: Entity<InputState>,
     name: Entity<InputState>,
     compose: Entity<TextBoxState>,
@@ -225,6 +226,13 @@ impl Workspace {
         let query = entry("Find a session or server…", cx);
         cx.subscribe(&query, |_, _, _: &InputEvent, cx| cx.notify())
             .detach();
+        let history_input = entry("Lines", cx);
+        cx.subscribe(&history_input, |s: &mut Self, _, event: &InputEvent, cx| {
+            if let InputEvent::Submit(_) = event {
+                s.save_history_limit(cx);
+            }
+        })
+        .detach();
         let compose = cx.new(|cx| TextBoxState::new(cx).placeholder("Write a message…"));
         cx.subscribe(&compose, |s: &mut Self, _, e: &TextBoxEvent, cx| {
             if let TextBoxEvent::Change(value) = e
@@ -284,6 +292,7 @@ impl Workspace {
             },
             address: entry("https://outpost.example.com", cx),
             query,
+            history_input,
             directory: entry("Absolute working directory", cx),
             name: entry("Session name", cx),
             compose,
@@ -314,6 +323,39 @@ impl Workspace {
     fn fontsize(&self) -> f32 {
         self.prefs["fontSize"].as_f64().unwrap_or(13.5) as f32
     }
+    fn bounded_history(&self) -> usize {
+        self.prefs["scrollbackLines"]
+            .as_u64()
+            .map_or(crate::terminal::DEFAULT_HISTORY, |n| n as usize)
+    }
+    fn history(&self) -> usize {
+        if self.prefs["unlimitedScrollback"] == true {
+            crate::terminal::MAX_HISTORY
+        } else {
+            self.bounded_history()
+        }
+    }
+    fn sync_history_input(&mut self, cx: &mut Context<Self>) {
+        let lines = self.bounded_history().to_string();
+        self.history_input
+            .update(cx, |input, cx| input.set_value_silent(lines, cx));
+    }
+    fn save_history_limit(&mut self, cx: &mut Context<Self>) {
+        let value = self.history_input.read(cx).value().trim().parse::<usize>();
+        if let Ok(lines) = value
+            && lines <= crate::terminal::MAX_HISTORY
+        {
+            self.message.clear();
+            self.prefs["scrollbackLines"] = json!(lines);
+            self.settings(cx);
+        } else {
+            self.message = format!(
+                "Enter a whole number from 0 to {}.",
+                crate::terminal::MAX_HISTORY
+            );
+            cx.notify();
+        }
+    }
     fn active(&self) -> Option<Entity<Pane>> {
         self.panes
             .get(&self.tabs.get(self.current)?.active)
@@ -334,6 +376,10 @@ impl Workspace {
                 if let Some(p) = self.active() {
                     p.update(cx, |p, cx| p.focus_terminal(w, cx))
                 }
+            }
+            Page::Settings => {
+                self.sync_history_input(cx);
+                self.focus.focus(w, cx);
             }
             Page::Find | Page::Choose | Page::Switch => {
                 self.query.update(cx, |s, cx| s.set_value_silent("", cx));
@@ -370,7 +416,10 @@ impl Workspace {
             self.tabs.push(Tab::single(id))
         }
         let sound = self.prefs["sound"].as_bool().unwrap_or(true);
-        p.update(cx, |p, _| p.sound = sound);
+        p.update(cx, |p, _| {
+            p.sound = sound;
+            p.set_scrollback(self.history());
+        });
         self.watch(id, &p, w, cx);
         self.panes.insert(id, p);
         self.select(id, w, cx);
@@ -707,14 +756,12 @@ impl Workspace {
         let rows = e["rows"].as_u64().unwrap_or(24).clamp(2, 200) as u16;
         match kind {
             "prefs" => {
+                let previous_lines = self.bounded_history();
                 self.prefs = e;
-                for p in self.panes.values() {
-                    p.update(cx, |p, cx| {
-                        p.font_size = self.fontsize();
-                        p.sound = self.prefs["sound"].as_bool().unwrap_or(true);
-                        cx.notify()
-                    })
+                if self.bounded_history() != previous_lines {
+                    self.sync_history_input(cx);
                 }
+                self.apply_preferences(cx);
                 if self.startup_local && self.panes.is_empty() {
                     self.startup_local = false;
                     self.local(None, w, cx)
@@ -1028,15 +1075,19 @@ impl Workspace {
         }
     }
     fn settings(&mut self, cx: &mut Context<Self>) {
-        self.call(json!({"op":"prefs","fontSize":self.fontsize(),"sound":self.prefs["sound"],"localShell":self.prefs["localShell"]}));
+        self.call(json!({"op":"prefs","fontSize":self.fontsize(),"sound":self.prefs["sound"],"localShell":self.prefs["localShell"], "scrollbackLines":self.bounded_history(), "unlimitedScrollback": self.prefs["unlimitedScrollback"] == true}));
+        self.apply_preferences(cx);
+        cx.notify()
+    }
+    fn apply_preferences(&self, cx: &mut Context<Self>) {
         for p in self.panes.values() {
             p.update(cx, |p, cx| {
+                p.set_scrollback(self.history());
                 p.font_size = self.fontsize();
                 p.sound = self.prefs["sound"].as_bool().unwrap_or(true);
                 cx.notify()
             })
         }
-        cx.notify()
     }
     pub(super) fn manage(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         if let Some(t) = self.tabs.get(self.current) {
@@ -1631,6 +1682,24 @@ impl Workspace {
                         },
                     )))
                 }
+                let unlimited = self.prefs["unlimitedScrollback"] == true;
+                content = content.child(section("Scrollback"))
+                    .child(row()
+                        .child(control("Limit lines", !unlimited, cx, |s, _, cx| {
+                            s.prefs["unlimitedScrollback"] = json!(false);
+                            s.message.clear();
+                            s.settings(cx)
+                        }))
+                        .child(control("Unlimited", unlimited, cx, |s, _, cx| {
+                            s.prefs["unlimitedScrollback"] = json!(true);
+                            s.message.clear();
+                            s.settings(cx)
+                        })))
+                    .when(!unlimited, |content| content.child(row()
+                        .child(div().w(px(120.)).child(field(&self.history_input)))
+                        .child(text("lines", 13., MUTED))
+                        .child(control("Apply", false, cx, |s, _, cx| s.save_history_limit(cx)))))
+                    .when(unlimited, |content| content.child(text("History grows in memory. A remote terminal also keeps output while you’re disconnected.", 13., MUTED)));
                 content=content.child(section("Text size")).child(row().child(control("−",false,cx,|s,_,cx|{s.prefs["fontSize"]=json!((s.fontsize()-0.5).max(10.));s.settings(cx)})).child(text(format!("{} px",self.fontsize()),14.,TEXT)).child(control("+",false,cx,|s,_,cx|{s.prefs["fontSize"]=json!((s.fontsize()+0.5).min(28.));s.settings(cx)})))
                 .child(section("Bell sound")).child(row().child(control(if self.prefs["sound"]==true{"On"}else{"Off"},false,cx,|s,_,cx|{s.prefs["sound"]=json!(s.prefs["sound"]!=true);s.settings(cx)})))
                 .child(section("Keyboard shortcuts")).child(text(if cfg!(target_os="macos"){"⌘T   New terminal     ·     ⌘D   Split     ·     ⌘⇧D   Split vertically     ·     Ctrl+Tab   Next tab"}else{"Ctrl+Shift+T   New terminal     ·     Ctrl+Shift+D   Split     ·     Ctrl+Tab   Next tab"},13.,MUTED))
@@ -2159,6 +2228,19 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     if let Some(dir) = std::env::var_os("OUTPOST_TEST_SCREENSHOTS") {
         test.capture_screenshot(window.into())?
             .save(PathBuf::from(&dir).join("home.png"))?;
+        test.update_window(window.into(), |root, w, cx| {
+            root.downcast::<Workspace>()
+                .unwrap()
+                .update(cx, |s, cx| s.show(Page::Settings, w, cx));
+        })?;
+        draw(&mut test);
+        test.capture_screenshot(window.into())?
+            .save(PathBuf::from(&dir).join("scrollback-settings.png"))?;
+        test.update_window(window.into(), |root, w, cx| {
+            root.downcast::<Workspace>()
+                .unwrap()
+                .update(cx, |s, cx| s.show(Page::Home, w, cx));
+        })?;
         // Only the agent changes. Identical frames would mean the marks failed to paint.
         let mut frames = Vec::new();
         for tool in ["claude", "codex", "kimi", "deepseek", "antigravity"] {
@@ -2233,6 +2315,36 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     let mut switched = focused();
     switched.sort_unstable();
     assert_eq!(switched, vec![(1, false), (2, true)]);
+    test.update_window(remote_window.into(), |root, w, cx| {
+        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+            s.show(Page::Settings, w, cx);
+            s.prefs["unlimitedScrollback"] = json!(true);
+            s.settings(cx);
+            let pane = s.active().unwrap();
+            pane.update(cx, |p, cx| {
+                p.reset(40, 8);
+                p.feed(b"FIRST-RETAINED-ROW\r\n", cx);
+                p.feed(&b"row\r\n".repeat(25_000), cx);
+                p.geometry(25, 6);
+                p.find("FIRST-RETAINED-ROW", true, cx);
+                assert_eq!(p.selected_text().as_deref(), Some("FIRST-RETAINED-ROW"));
+                p.feed(b"\x1b[?1049hALT", cx);
+            });
+            s.prefs["unlimitedScrollback"] = json!(false);
+            s.history_input
+                .update(cx, |i, cx| i.set_value_silent("42", cx));
+            s.save_history_limit(cx);
+            assert_eq!(s.history(), 42);
+            pane.update(cx, |p, cx| {
+                p.feed(b"\x1b[?1049l", cx);
+                p.find("FIRST-RETAINED-ROW", true, cx);
+                assert!(p.selected_text().is_none());
+                p.find("row", false, cx);
+                assert_eq!(p.selected_text().as_deref(), Some("row"));
+            });
+            s.show(Page::Terminal, w, cx);
+        })
+    })?;
     // A publication on a background tab must refresh that pane while Files is closed.
     test.update_window(remote_window.into(), |root, w, cx| {
         root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {

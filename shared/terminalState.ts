@@ -1,8 +1,11 @@
 /** Current cell-checkpoint wire schema, independent of the xterm implementation. */
 export type Checkpoint =
-  | { part: 'begin'; version: 2; cols: number; rows: number; state: CheckpointState }
+  | { part: 'begin'; version: 3; cols: number; rows: number; state: CheckpointState }
+  | { part: 'links'; links: CheckpointLink[] }
   | { part: 'lines'; buffer: 'normal' | 'alt'; first: number; lines: CellLine[] }
   | { part: 'end' }
+
+export type CheckpointLink = [number, { id?: string; uri: string }]
 
 export interface CellLine {
   /** Packed cell triples, with the last cell repeated `repeat` more times. */
@@ -51,7 +54,6 @@ export interface CheckpointState {
   titleStack: string[]
   iconStack: string[]
   join: number
-  links: [number, { id?: string; uri: string }][]
   nextLink: number
   colors: Record<number, [number, number, number]>
 }

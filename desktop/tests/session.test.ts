@@ -13,6 +13,7 @@ import { createRequire } from 'node:module'
 import { WebSocketServer } from 'ws'
 import { checkpoint, writeHeadless } from '../../shared/terminalCheckpoint'
 import { desktopEntryUrl, type DesktopLaunch } from '../../shared/desktopAuth'
+import { scrollbackLines } from '../../shared/terminalService'
 import { protocolVersion, type ServerMessage } from '../../shared/protocol'
 import { ServerAccounts } from '../src/server-accounts'
 import { ServerTrust } from '../src/server-trust'
@@ -26,10 +27,10 @@ test('quitting during credential persistence drains login and queued preference 
 )
 async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   const { Terminal } = createRequire(import.meta.url)('@xterm/headless') as typeof import('@xterm/headless')
-  const terminal = new Terminal({ allowProposedApi: true, cols: 40, rows: 8 })
+  const terminal = new Terminal({ allowProposedApi: true, cols: 40, rows: 8, scrollback: scrollbackLines('unlimited') })
+  writeHeadless(terminal, 'FIRST-RETAINED-ROW\r\n' + 'history row\r\n'.repeat(12000))
   writeHeadless(terminal, 'restored history\r\n\x1b[32mwide 界\x1b[0m')
   writeHeadless(terminal, '\x1b[?1049h\x1b[?1006h\x1b]8;;https://example.com/test\x1b\\alt screen\x1b]8;;\x1b\\')
-  const parts = [...checkpoint(terminal)]
   const dir = await mkdtemp(join(tmpdir(), 'outpost-native-test-'))
   const login = { account: { id: 'account', name: 'Test', email: null }, expiresAt: Date.now() + 600000 }
   const session = {
@@ -139,6 +140,9 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
     const url = new URL(req.url!, origin)
     assert.equal(req.headers.origin, origin)
     assert.equal(url.searchParams.get('protocol'), String(protocolVersion))
+    const history = url.searchParams.get('scrollback')
+    assert.equal(history, connections === 0 ? '10000' : 'unlimited')
+    const parts = checkpoint(terminal, scrollbackLines(history === 'unlimited' ? history : Number(history)))
     const socketLogin = loginId
     const recovering = connections === 1
     assert.equal(url.searchParams.get('token'), recovering ? 'fixture.resume' : grant)
@@ -248,13 +252,16 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   if (quitDuringSave) {
     await wait(e => e.event === 'credentialWriteStarted')
     const exited = once(child, 'exit')
-    for (const fontSize of [12, 14, 16, 18]) cmd({ op: 'prefs', fontSize, sound: false, localShell: null })
+    for (const fontSize of [12, 14, 16, 18])
+      cmd({ op: 'prefs', fontSize, sound: false, localShell: null, scrollbackLines: 25000, unlimitedScrollback: true })
     child.stdin.end()
     assert.deepEqual(await exited, [0, null])
     assert.equal(JSON.parse(await readFile(join(dir, 'server-logins.json'), 'utf8'))[0].token, credential)
     assert.deepEqual(JSON.parse(await readFile(join(dir, 'preferences.json'), 'utf8')), {
       fontSize: 18,
       sound: false,
+      scrollbackLines: 25000,
+      unlimitedScrollback: true,
       localShell: null,
     })
     return
@@ -287,6 +294,11 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   await wait(e => e.event === 'output' && restored.includes('live input'))
   cmd({ op: 'resize', pane, cols: 50, rows: 12 })
   await wait(e => e.event === 'geometry' && e.cols === 50 && e.rows === 12)
+  assert.ok(!restored.includes('FIRST-RETAINED-ROW'))
+  const changed = once([...ws.clients][0]!, 'message')
+  cmd({ op: 'prefs', fontSize: 13.5, sound: true, scrollbackLines: 10000, unlimitedScrollback: true, localShell: null })
+  await wait(e => e.event === 'prefs')
+  await changed
   const sync = async (marker: string) => {
     cmd({ op: 'input', pane, data: Buffer.from(marker).toString('base64') })
     await wait(e => e.event === 'output' && restored.includes(marker))
@@ -320,6 +332,7 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   await wait(e => e.event === 'connection' && e.state.kind === 'connected')
   await sync('viewed-reconnect')
   assert.deepEqual(seen, [first, second, 'c'.repeat(64)])
+  assert.ok(restored.includes('FIRST-RETAINED-ROW'))
   assert.equal(connections, 2)
   const link = desktopEntryUrl({
     server: origin,

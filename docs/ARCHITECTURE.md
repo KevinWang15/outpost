@@ -1,59 +1,44 @@
 # Outpost architecture
 
-A machine owns its coding sessions. The web home (`/`) lists machines and the sessions
-on the selected machine. Terminal clients attach to those sessions. On server-connected
-machines, Chat (`/chat`) can drive a session through the coding tool’s agent protocol.
+A machine owns its coding sessions. The web home (`/`) lists machines and their sessions.
+Terminal and Chat (`/chat`) attach to the coding agent on the selected machine.
 
-This reference describes the current implementation. The agreed connection methods, enrollment flows and acceptance criteria for remote machines are in the [v3 connectivity design](V3.md).
+Remote machine connections and enrollment follow the accepted v3 design, pending
+implementation. The protocol sections describe the existing session machinery that both
+methods will use. See the [connectivity design and acceptance criteria](V3.md) and the
+[setup instructions for the current build](../README.md#current-build-setup).
 
 ## V3 terminology
 
 | Term | Meaning |
 | --- | --- |
-| Terminal client | Outpost Desktop or the web terminal. The client initiates an **attachment** to a session. |
-| Outpost server | The deployment that owns the workspace, authorizes clients and can relay an attachment. |
+| Terminal client | Outpost Desktop or the web terminal. The client asks its Outpost instance to attach to a session. |
+| Outpost server | The local or hosted instance that owns the workspace, authorizes attachments and communicates with enrolled machines. |
 | Machine | The Linux system that runs coding agents. A **target** (`Target`, `/api/targets`) is its workspace record. |
-| Outpost machine service | The `outpost-terminal` executable installed on a machine. Its **node** process (`outpost-terminal node`) handles the server’s management connection on server-managed and relay-enabled machines. |
-| Session | The machine-owned workspace for one coding agent. Its terminal process can keep running after a client detaches. |
-| Enrollment | Binding a machine to one Outpost server and execution account. A pairing code enrolls a relay-enabled machine. Direct-only enrollment imports the verification and endpoint identity keys on the machine. |
-| Connection route | The path carrying an active terminal attachment. **Direct** connects client to machine. **Relay** uses the machine’s outbound connection to the server. **Server-managed** uses SSH or runs on the Outpost server itself. |
+| Outpost machine service | The `outpost-terminal` executable installed on the machine. Its **node** handles machine protocol requests and opens streams to the session’s terminal service or chat host. |
+| Session | The machine-owned workspace for one coding agent. Its process can keep running after a viewer detaches. |
+| Enrollment | The binding between a remote machine, one Outpost server and workspace owner, and one Linux execution account. It records one connection method. |
+| Connection method | **Connect over SSH** lets the Outpost instance open SSH to the machine. **Run setup on the machine** explicitly enables a persistent outbound connection from the machine to that instance. |
 
 ## Principles
 
-1. **The machine owns the terminal.** A dedicated `outpost-terminal` process
-   owns each coding session's PTY, screen and 10,000-line in-memory scrollback.
-   Clients and connections are disposable. Reconnect restores a checkpoint and then
-   follows live output; disconnect never terminates the session.
-2. **The client opens each attachment.** For a relay-enabled machine, both client and machine
-   connect out to the same deployment. The server authorizes the requested session.
-   A reachable endpoint saved in the workspace carries terminal data directly. Otherwise the
-   server relays it through the machine's existing outbound connection.
-
-   ```text
-   Direct data     client → machine → session PTY
-   Relayed data    client → public Outpost server ← relay-enabled machine → session PTY
-   ```
-
-   Arrows show who opens the connection. Data flows both ways on each link.
-   For server-managed machines, the server starts the node over SSH or on its own Linux system.
-
-   Hosted and local server installations run the same code. Desktop local shells
-   use a native PTY on the user's computer; they have no broker, authentication,
-   remote service or persistence daemon. For a managed session the selected
-   attachment carries file lists, published bytes, removals and image uploads.
-   Each upload or download request can carry at most 64 KiB of file content each. The client waits for the machine
-   to confirm a complete image before pasting its path.
-
-3. **Outpost authorizes each attachment.** On the direct route, the client
-   holds a server control socket for revocation and reconnect grants. Terminal
-   input, output, image paste and file operations use the client-to-machine socket.
-4. **Deployment and connection policy are independent.** Local Outpost trusts loopback callers and uses the server user's SSH credentials. A hosted deployment authenticates each account and gives it its own workspace and SSH key. Both support SSH and the connector. Only a local Linux deployment can add the server itself, once. A machine can reach the local relay only through the server's loopback address, including a trusted same-port tunnel. A hosted relay uses its public HTTPS origin.
-5. **One installed machine dependency.** Required software installs the Outpost
-   machine service, a versioned, self-contained Linux executable in `~/.outpost/bin`.
-   It is everything Outpost runs on a machine: the node, terminal services, chat
-   hosts, the MCP server and hooks. Its processes run as the machine's user and
-   use private Unix sockets for local communication. A relay-enabled machine optionally
-   exposes a direct terminal endpoint through its HTTPS reverse proxy.
+1. **The machine owns the session.** For a native CLI, the terminal service owns the PTY,
+   screen and 10,000-line in-memory scrollback. For an ACP agent, the chat host owns the
+   process and journal. Closing or losing a viewer leaves the agent running.
+2. **One machine connection carries work in both directions.** Terminal attachments, Chat,
+   file transfers and agent tool calls share that connection. Published files remain on
+   the machine for returning viewers. An image paste waits for the machine to confirm the
+   upload before sending its path to the agent.
+3. **Outpost authorizes each attachment.** A client opens its session through Outpost.
+   Access is scoped to the workspace owner, machine and session. A coding agent’s Outpost
+   tools act as that session.
+4. **Enrollment fixes the connection method.** Local and hosted instances both default to
+   SSH. Only explicit outbound enrollment allows the machine to initiate an Outpost
+   connection. After a disconnect, Outpost uses the enrolled method again. Changing it
+   requires re-enrollment.
+5. **One executable serves both methods.** The versioned Linux executable in
+   `~/.outpost/bin` provides the node, terminal services, chat hosts, MCP server and
+   hooks. They run as the machine’s execution account and use private Unix sockets.
 6. **The client shims the platform.** Making a remote session feel native
    (paste an image with the usual shortcut, Shift+Enter for a newline, copying
    to your clipboard, opening links on your computer) is the client's job.
@@ -68,24 +53,12 @@ This reference describes the current implementation. The agreed connection metho
 ## Components
 
 ```text
-                 ┌──────────── your computer ────────────┐
-  Browser UI ────┤ Browser (xterm.js) / Desktop (Alacritty)│
-                 │ GPUI: OS links, clipboard, bells      │
-                 └───────────────┬───────────────────────┘
-                                 │ HTTPS + WebSocket (terminal protocol)
-                 ┌───────────────┴───────────────────────┐
-                 │ Outpost server (Node, Fastify)        │
-                 │  deployment · workspace · sessions    │
-                 │  software · terminal broker           │
-                 └───────────────┬───────────────────────┘
-                                 │ OpenSSH or local bash (node protocol)
-                 ┌───────────────┴───────────────────────┐
-                 │ Linux machine                         │
-                 │  node: one per account's connection   │
-                 │  terminal service or chat host per    │
-                 │  session · the coding tool            │
-                 └───────────────────────────────────────┘
+Connect over SSH           client ──→ Outpost instance ──SSH──→ Linux machine
+Run setup on the machine   client ──→ Outpost instance ←─────── Linux machine
 ```
+
+Arrows show who opens each connection. Data flows both ways on each link. On the machine,
+the node connects to the terminal service or chat host for the requested session.
 
 | Directory | Runs on | Role |
 | --- | --- | --- |
@@ -108,7 +81,7 @@ browser page must be registered there so development and production agree.
 
 | Role | Supported |
 | --- | --- |
-| Machines (where sessions run) | Linux with Bash, `setsid` (util-linux) and Outpost machine service; Git for forks. Choose Relay enabled, Direct only, SSH or On the Outpost server (Linux, including WSL). |
+| Machines (where sessions run) | Linux (including WSL) with Bash, `setsid` (util-linux) and the Outpost machine service. Forks also require Git. |
 | Outpost server | Node.js 24+ with OpenSSH, on Linux (including WSL) or macOS. Hosted deployments run on Linux. |
 | Web terminal | Any current browser, including phones. |
 | Outpost Desktop | GPUI desktop for macOS arm64/x64 and Windows x64. |
@@ -128,9 +101,11 @@ except that hosted adds account routes.
 | --- | --- | --- |
 | Owner | The single local user | A verified account and login session |
 | Workspace | `DATA/workspace.json` | `DATA/users/<id>/workspace.json` |
-| SSH identity | Your OpenSSH config, agent and keys | A per-account Ed25519 key and known-hosts file |
-| Local machines | Yes, when the server runs on Linux | No |
-| Network | Loopback only | Behind an HTTPS reverse proxy |
+| SSH origin and identity | The computer running Outpost, using your OpenSSH config, agent, keys and configured jump hosts | The hosted server, using the workspace owner’s Ed25519 key and known-hosts file. Any bastion must be reachable and usable from that server. |
+| Where an outbound enrollment connects | The local instance needs an address reachable from the machine. Its default loopback address is local to the workstation. | The hosted instance’s public HTTPS origin, reachable from both client and machine |
+| Sessions on the Outpost server itself | Available on a local Linux server | Unavailable |
+
+Running a session on the local Linux server executes the service on that computer. A Desktop local shell uses a native PTY on the user's computer and ends when its pane closes. Neither involves a remote machine enrollment.
 
 `backend/deployment.ts` defines the interface; `backend/hosted/` implements the
 account side. Routes receive an owner and a resolved machine context; they never
@@ -275,7 +250,7 @@ the application requested that mode. Image bytes never enter this FIFO.
 Drafts are confirmed only after the terminal service accepts their bytes into its PTY write queue; no queued
 input is replayed across reconnects.
 The browser and broker each cap queued transport input at 2 MiB. The machine
-connection's `BoundedWriter` stops writing when the SSH pipe applies
+connection's `BoundedWriter` stops writing when the underlying stream applies
 backpressure, resumes on drain, and drops the connection after 30 seconds
 without drain.
 Overflow closes the attachment with an explicit error and discards queued input.
@@ -384,35 +359,31 @@ behavior.
 ### Terminal protocol (client ⇄ broker, WebSocket)
 
 Binary frames carry raw terminal bytes in both directions. Text frames carry
-JSON control messages (`shared/protocol.ts`):
+JSON control messages. The following messages apply to a broker attachment. The current wire definitions live in `shared/protocol.ts`.
 
-| Direction | Message | Meaning |
+| Destination | Message | Meaning |
 | --- | --- | --- |
-| → server | `resize {cols, rows}` | Client geometry |
-| → server | `focus {active}` | Whether this viewer is active; the latest active viewer controls PTY dimensions |
-| → server | `ack {bytes}` | Output rendered; flow control |
-| → server | `ping {id}` | Probe the remote terminal service without sending terminal input |
-| → server | `send {id, data}` | Input that must be confirmed (composer drafts) |
-| → server | `clear {id}` | Clear the shared screen and scrollback, keeping the current cursor line |
-| → server | `paste {id, data}` | Paste text using the running application’s bracketed-paste mode |
-| → server | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without opening another stream |
-| → server | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
-| → server | `draft {active}` | The message box has text; messages from other sessions wait until it is sent or cleared |
-| → server | `deliver-now` | Type the next waiting message in once the agent is idle |
-| ← client | `hello {resume, session, target}` | Connection accepted |
-| ← client | `route-offer` | Saved endpoint, challenge, expected proof, resume token and whether a relay is connected |
-| → server | `route-choice` | Confirms whether the endpoint proved its identity for this challenge |
-| ← client | `direct-attach` / `direct-lease` | Machine-scoped attachment grant and subsequent lease renewals, carried by the client |
-| ← client | `route-selected {route}` | The broker is carrying the attachment over Relay or Server-managed |
-| ← client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
-| ← client | `geometry {cols, rows}` | Shared terminal dimensions, applied before subsequent output |
-| ← client | `clear` | Clear the screen at this point in the ordered output stream |
-| ← client | `ready` | Checkpoint restored; attached to the persistent PTY |
-| ← client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
-| ← client | `deliveries {waiting}` | Messages from other sessions, channels or schedules waiting to be typed in |
-| ← client | `result {id, ok, message?}` | Outcome of `ping` / `send` / `clear` / `paste` / `activate` / `acknowledge` |
-| ← client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
-| ← client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `unavailable`, `error` |
+| Broker | `resize {cols, rows}` | Client geometry |
+| Broker | `focus {active}` | Whether this viewer is active; the latest active viewer controls PTY dimensions |
+| Broker | `ack {bytes}` | Output rendered; flow control |
+| Broker | `ping {id}` | Probe the remote terminal service without sending terminal input |
+| Broker | `send {id, data}` | Input that must be confirmed (composer drafts) |
+| Broker | `clear {id}` | Clear the shared screen and scrollback, keeping the current cursor line |
+| Broker | `paste {id, data}` | Paste text using the running application’s bracketed-paste mode |
+| Broker | `activate {id, token}` | Acknowledge a fresh launch ticket for this already attached session without opening another stream |
+| Broker | `acknowledge {id, completionId}` | Mark the displayed native completion as seen; never acknowledge a newer completion |
+| Broker | `draft {active}` | The message box has text; messages from other sessions wait until it is sent or cleared |
+| Broker | `deliver-now` | Type the next waiting message in once the agent is idle |
+| Client | `hello {resume, session, target}` | Connection accepted |
+| Client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
+| Client | `geometry {cols, rows}` | Shared terminal dimensions, applied before subsequent output |
+| Client | `clear` | Clear the screen at this point in the ordered output stream |
+| Client | `ready` | Checkpoint restored; attached to the persistent PTY |
+| Client | `activity {activity}` | Native turn state using the same `SessionActivity` as the session list; invalid metadata becomes Unknown |
+| Client | `deliveries {waiting}` | Messages from other sessions, channels or schedules waiting to be typed in |
+| Client | `result {id, ok, message?}` | Outcome of `ping` / `send` / `clear` / `paste` / `activate` / `acknowledge` |
+| Client | `signal {type, payload}` | A remote request, e.g. `browser.open` |
+| Client | `closed {reason, message}` | `ended`, `expired`, `outdated`, `unavailable`, `error` |
 
 The server pauses the transport when more than 256 KiB is unacknowledged and
 resumes below 128 KiB. Acknowledgements mean xterm has parsed the bytes; painting
@@ -446,74 +417,48 @@ machine and session independently of the selected UI.
 
 ### Machine connection (server ⇄ node)
 
-`backend/machines.ts` keeps one node link per account and machine. For SSH and
-local machines the server starts the node on first use. A relay-enabled machine starts
-its own node and registers an authenticated WebSocket at `/api/paired/node`.
-The link carries session management, chat, relay attachments and agent calls.
+The Outpost server and the node share one bidirectional link per workspace owner and machine.
+The terminal client asks the server for a session attachment. The server can also open a
+stream on behalf of a channel, schedule or another session while the terminal client is closed.
 
 #### Installing and removing a machine
 
-Each Linux machine enrolls with one Outpost server under one execution account. The ordinary executable still lives in
-`~/.outpost/bin/outpost-terminal`. A private installation record in
-`/var/lib/outpost-machine/machine.json` binds the account’s session directory to
-its owner and transport. Server-managed nodes and relay-enabled connectors check the same
-record. Removing an entry in the server UI revokes server access. Releasing
-the host for a new installation also requires action on the host.
+Choose the connection method in **Machines → Add a machine**. Both methods install the same
+executable for one Linux execution account. A private record in
+`/var/lib/outpost-machine/machine.json` binds the machine to its Outpost server and workspace
+owner. Session data belongs to the execution account under `~/.outpost`.
 
-The server-managed **Required software** installer creates the host directory on
-first installation. For a manually installed relay-enabled or direct-only machine, run
-the following once as the intended execution user on a fresh Linux installation if bypassing the machine page’s installer:
+- **Connect over SSH** is the default. On first connection Outpost checks the platform and
+  installed versions, transfers the matching service and release checksum over SSH, and
+  verifies the service before atomic installation. It provisions any missing selected tools
+  and required ACP adapters. A restricted machine can receive approved artifacts over this
+  SSH connection. Interrupted setup can be run again. Subsequent connections run
+  `outpost-terminal node` for the enrolled socket with `ssh -T` and exchange protocol bytes
+  on stdin and stdout. A bastion can carry this connection. The node needs no SSH PTY,
+  application port forward or machine-side HTTPS endpoint. The machine initiates no
+  connections to Outpost.
+- **Run setup on the machine** covers a machine Outpost cannot SSH to. An operator runs the
+  wizard’s one-time command in a shell on the machine. It retrieves the installer from the
+  chosen Outpost instance, verifies and installs the service, and exchanges a short-lived,
+  single-use enrollment code for a machine-scoped credential. A service manager keeps the
+  service running after logout and starts it at boot. It reconnects to the enrolled
+  instance after link loss.
 
-```sh
-sudo mkdir -m 700 /var/lib/outpost-machine && sudo chown "$(id -u)" /var/lib/outpost-machine
-```
+Switching methods or transferring a machine requires releasing its local enrollment and
+enrolling it again. Removing the machine from its old workspace revokes Outpost access
+there. For an outbound enrollment, revocation closes the active link and rejects
+reconnection. Remove the old Outpost key from the Linux account if the server should
+also lose SSH access.
 
-If the directory already exists, inspect the installation as its current owner
-with `outpost-terminal status`. The command above leaves existing ownership
-intact. Install the matching executable in `~/.outpost/bin`, owned by that user
-and executable only by them. A restricted machine can receive the executable
-and configuration through the company's normal offline software distribution.
+Releasing the enrollment or removing the executable preserves the account’s session
+data and published files. Stop coding tools before uninstalling the executable and
+disable the outbound service if installed. A new owner using the same Linux account can
+access its existing session data. Use a fresh account to keep owners’ data separate.
+The current build’s cleanup commands are in the [operator instructions](../README.md#current-build-setup).
 
-**Installation.** The reviewed SSH/local install script runs `pair --managed`
-with the node socket identity for this server, account and machine. Starting a node
-requires an installed identity that matches that socket.
+#### Shared machine protocol
 
-**Remove or transfer.** Stop and disable the connector in its service manager,
-then run `~/.outpost/bin/outpost-terminal unpair` under the execution account.
-This fences the old node/listener, clears enrollment credentials and releases its registered node socket. Relay installations also attempt to revoke their
-credential on the old server. Direct-only unpairing is entirely local. Remove
-the machine from its old workspace and, for SSH machines, remove that server's
-SSH key if its access should end. A new installation requires explicit enrollment.
-
-To switch servers or change the host’s network policy, unpair it locally, add the
-new machine in the workspace, then enroll it explicitly.
-Existing sessions and files in the same execution account become visible to its
-new owner. For a different data owner use a fresh Linux account and session
-directory. After unpairing, the administrator can archive the disconnected host
-reservation and provision a fresh directory for that account. To uninstall the managed executable, stop the coding tools and run
-`~/.outpost/bin/outpost-terminal uninstall`. It checks for running drivers,
-unpairs and removes the executable. The registry, coding-tool data and published
-files are retained.
-
-#### Direct-only machines
-
-Choose **Add a machine → Install the connector → Direct only** and enter the HTTPS origin your client can reach. On the machine page, choose **Get install command**. Hosted deployments offer an online installer and an offline kit. Local deployments present the offline kit first because the machine's loopback address points to itself. Transfer the installer, checksum manifest, matching Linux binary and private enrollment command through a trusted channel. Run the command as the Linux execution account. The offline installer verifies the local binary and starts the connector without contacting Outpost.
-
-The machine verifies signed grants locally. The Outpost server retains the signing key. The machine also holds a separate key to prove its identity to the client. Terminal sessions, image paste and published files use the direct connection. Chat, schedules, activity collection and cross-machine MCP operations require a server-connected machine. Coding tools have their own network requirements.
-
-#### Connecting a relay-enabled machine
-
-1. Choose **Add a machine → Install the connector → Relay enabled**. Optionally enter the machine HTTPS address now or in **Edit machine** later.
-2. Choose **Get install command** and run it as the Linux execution account within five minutes. It verifies the downloaded executable, redeems the single-use pairing code and starts the connector. Generating a new code replaces the previous unused code.
-3. Keep the connector running, or use `~/.outpost/bin/outpost-terminal connect` under a service manager. Behind NAT, both client and machine need only outbound access to the hosted Outpost server. For a local deployment, first forward the machine's loopback port to the same port on the trusted Outpost server and keep the tunnel open. Anyone with access to the forwarded port can use the local workspace.
-
-#### Direct endpoint for either connector policy
-
-The connector listens on `127.0.0.1:8844` (set `OUTPOST_DIRECT_PORT` to change the port). Forward **POST/OPTIONS /api/direct/request** and **WebSocket /api/direct/terminal** from the machine's HTTPS origin to this listener. Preserve the Origin header and use a certificate trusted by the client. Browsers may also require local-network permission. The server includes saved endpoints in the signed-in workspace's content security policy.
-
-For a direct attachment, the server supplies a random challenge and the expected machine proof. The client verifies the proof before it sends an attachment grant or any session input. The client carries fresh signed leases from the server every 15 seconds. Each lease expires after 45 seconds. Both policies use this protocol. Direct terminals and client-initiated session management work while the relay link is down, provided the client can still reach Outpost for authorization and the machine for data. A relay-enabled machine with an active relay can fall back when its direct endpoint is unreachable. Removing or replacing the enrollment ends the old authorization. The native pane menu shows which route the attachment uses.
-
-Login shells may print first; the node then prints the marker
+On SSH a login shell may print before the node starts. The node emits the marker
 `\0OUTPOST-NODE-1\0` and a `hello` with its version and protocol. A machine
 running an incompatible version is asked to update before any operation runs.
 The required machine service version is defined in `shared/terminalService.ts`.
@@ -527,7 +472,7 @@ the messages:
 | --- | --- | --- |
 | `hello {version, protocol, pid}` | node → server | Once, before anything else |
 | `call {id, op, args}` / `result {id, ok, data \| error}` | both | A request and its answer. The server calls session, file, directory, search and history operations; the node calls `agent` for an agent's Outpost tool call |
-| `open {stream, kind, args}` / `opened {stream, data}` | server → node / node → server | Open a `terminal`, `chat`, `file-read`, `file-receive` or `image` stream |
+| `open {stream, kind, args}` / `opened {stream, data}` | server → node / node → server | Open a `terminal`, `chat`, `file-read` or `file-receive` stream. A terminal image paste uses the terminal stream. |
 | `close {stream, error?, data?}` | both | End a stream; a receiving node's final answer travels with it |
 | `credit {stream, bytes}` | both | Grant the sender more of its 4 MiB stream window |
 | `events` | node → server | The machine's event log grew; the server reads it with the `events` call |
@@ -536,10 +481,10 @@ Errors keep their HTTP status, so a missing session is still a 404 through the
 connection. Calls have a deadline (30 seconds unless the operation sets one) and
 can be cancelled. A stream's sender may have 4 MiB unacknowledged; the receiver
 grants credit as it consumes, so a paused WebSocket stops its terminal stream
-without stalling others. When the connection ends, every pending call and stream
-fails at once with a retryable error and the next use reconnects. Terminal
-services and chat hosts run detached from the node, so they and their coding
-tools keep running; only their streams close.
+without stalling others. Losing the connection fails pending calls and streams.
+With SSH, Outpost can open a new connection. With outbound enrollment, the machine
+reconnects to Outpost. Terminal services and chat hosts run independently of the node,
+so their agents keep running when the streams close.
 
 Terminal and chat streams carry their driver's own protocol unchanged: the node
 connects the stream to `~/.outpost/terminals/<id>.sock` or
@@ -550,18 +495,17 @@ asks to. Closing a stream closes only that socket.
 Its name is an HMAC of the server secret, account and machine. The host's
 installation record pins that node identity. MCP clients read the installed
 socket for server-backed operations, and the node checks that the calling
-session exists in its registry. Direct-only machines expose local file
-publication to agents. Terminal clients and file viewers communicate directly
-with the machine’s listener.
+session exists in its registry. An agent can call `publish_file` locally even
+while disconnected. Success confirms the stored snapshot. The machine sends a
+best-effort notification to attached viewers. A viewer can fetch the bytes over
+the attachment or discover the file on the next listing after reconnecting.
 
-Software inspection and installation use the separate POSIX script transport,
-which runs before Outpost machine service is installed. Inspection loads the
-interactive login environment to discover the same tools as session launches.
-Installation loads login profiles noninteractively, then runs the submitted
-script with `sh -s`. Batch installers have no controlling terminal and must not
-initialize interactive shell job control. Their stdout and stderr are streamed
-unchanged; the Outpost machine service installer reports its download and verification
-stages explicitly.
+SSH setup can run shell commands before the machine service exists. Software
+inspection loads the execution account’s login environment to find the same
+tools as session launches. Installation runs noninteractively and reports
+progress and verification errors. Subsequent machine operations use the node
+protocol. On an outbound enrollment the operator supplies that first shell
+on the machine.
 
 SSH connection sharing is a backend transport policy. Linux and macOS backends
 use owner/identity-scoped control sockets with a 120-second idle lifetime.
@@ -592,7 +536,7 @@ accepting a payload; the connection owner interprets its controls.
 `outpost-terminal serve` receives launch configuration on stdin, starts a PTY
 with Bun's native terminal API, and runs a pinned `@xterm/headless` engine.
 The node starts it detached, in its own process group, with its log in
-`~/.outpost/logs/<id>.log` and no inherited SSH stdio, so it outlives the node
+`~/.outpost/logs/<id>.log` and no inherited connection stdio, so it outlives the node
 and its connection. Each session has its own process; a failure cannot take
 down every session. The service never needs Node or Bun installed separately on
 the machine. Its socket is owner-only (mode 0600, in the owner-only state
@@ -674,7 +618,7 @@ so the session's arguments keep their shell syntax. `setsid` does not remain as
 a supervisor; the service retains the PTY master and its independent lifetime.
 Ctrl+C and other application keys pass directly through the PTY.
 
-The terminal service persists across client, SSH and Outpost server restarts.
+The terminal service persists across client and Outpost server restarts and losses of the machine connection.
 Its in-memory state and running processes do not survive a machine reboot or
 service crash. Explicit **Stop coding tool** asks the driver to stop; if it does not
 answer, the node ends its process tree, children first, after checking that the
@@ -687,11 +631,12 @@ leaves already-running sessions alone.
 and terminal bounds; the node protocol has its own version in
 `shared/machine.ts`. The manual `.github/workflows/terminal.yml` builds baseline x86_64 and ARM64
 binaries for glibc and musl, plus SHA256SUMS. Publishing creates an immutable
-`terminal-v<version>` release. The Required software installer selects the
-architecture/libc, downloads that exact release, checks SHA-256 and `--version`,
-and renames the verified executable into `~/.outpost/bin/outpost-terminal`.
-It uses the existing editable installation plan, server-managed transport and log UI.
-Minimal musl machines also receive the `libstdc++` system package.
+`terminal-v<version>` release. Both v3 enrollment methods use these same assets.
+For SSH setup, the Outpost instance obtains the matching executable and checksum and
+transfers them to the machine. For outbound setup, the machine fetches its installer
+from Outpost. Setup checks SHA-256 and `--version` before renaming the verified
+executable into `~/.outpost/bin/outpost-terminal`. Minimal musl installations
+also require the system `libstdc++` package.
 
 **Creation and forking** share the `creation` lock, serializing
 allocations without blocking operations on existing sessions. Lock order is
@@ -1061,14 +1006,16 @@ the executable, session helper, Node runtime and third-party notices.
 
 ## Outpost Chat
 
-A managed session has one running coding agent. The machine serializes the first start and routes each subsequent attachment to that agent. A native CLI accepts ordinary terminal viewers. Chat subscribes to its committed conversation records and delivers prompts through its durable terminal queue. An ACP agent receives both views through its chat host. Terminal renders its journal as an interactive transcript and submits responses to the host’s pending approvals. The server routes channels, session messages and schedules. Direct-only machines keep their terminal-only network policy. See [Outpost Chat](CHAT.md).
+A managed session has one running coding agent. The machine serializes the first start and routes each subsequent attachment to that agent. A native CLI accepts ordinary terminal viewers. Chat subscribes to its committed conversation records and delivers prompts through its durable terminal queue. An ACP agent receives both views through its chat host. Terminal renders its journal as an interactive transcript and submits responses to the host’s pending approvals.
+
+In v3 the server delivers channel mentions, session messages and schedules over either enrolled connection. Delivery requires a running Outpost instance and a reachable recipient. A hosted server can open SSH for a scheduled prompt while the user's laptop is asleep. [Outpost Chat](CHAT.md)
 
 ## Cross-machine history
 
 The built-in Outpost MCP registers `search_history`, `read_context`,
 `read_message`, `get_session` and `refresh_index` alongside `publish_file`.
 `shared/historyTools.json` is the single tool/schema definition used by the
-server and the MCP server. Chat, history indexing and machine activity collection use only server-connected machines. Direct-only machines remain available in the terminal clients. Unmanaged CLI launches still expose no Outpost tools.
+server and the MCP server. In v3, history indexing and machine activity collection can use either connection method. Fresh reads need a reachable machine. Unmanaged CLI launches expose no Outpost tools.
 
 `backend/history/` owns an account-private SQLite index, local multilingual
 embeddings and background backfill. It reads each machine through its machine
@@ -1214,6 +1161,7 @@ connects to the address it checked.
   checked; tokens are HMAC-signed with the installation secret.
 - Hosted SSH uses only the account's key and known-hosts file (`-F none`, no
   agent). Connection multiplexing sockets are scoped per owner and identity.
+- In the v3 design, an SSH enrollment never initiates an Outpost connection from the machine. An outbound enrollment requires an operator to redeem a single-use code. Its machine credential authorizes Outpost operations for that enrollment. Revocation closes the connection and prevents reconnection. [Enrollment security](../SECURITY.md#remote-machine-enrollment-in-v3)
 - Desktop confirms unknown server origins before contacting them. Accepted trust
   persists independently of login and has no management UI; declining cancels
   only the current attempt. Only HTTPS and localhost HTTP qualify.
@@ -1224,9 +1172,8 @@ connects to the address it checked.
   another session or account.
 - Images are limited to 16 MB, signals to 32 KiB and 120 per minute per
   connection, clipboard text to 1 MiB.
-- The activity log is readable only by its account; webhooks are the only
-  outbound requests an account configures, and a hosted server sends them only
-  to public addresses (see Activity log).
+- Each account can read its own activity log and configure webhooks for event
+  delivery. A hosted server sends webhook events only to public addresses.
 
 ## Extending Outpost
 
@@ -1239,8 +1186,7 @@ interfaces; shared machine code must not branch on harness names.
 
 The DeepSeek adapter uses `command: dsh` independently of its `deepseek` harness
 ID, with `DSH_HOME` pinned per session. Its official package exposes ACP. Outpost starts the ACP host for either view
-and serves its interactive transcript to web and desktop terminals. DeepSeek is
-available on server-connected machines. `outpost-terminal agent
+and serves its interactive transcript to web and desktop terminals. `outpost-terminal agent
 deepseek` (`machine/agents/deepseek.ts`) maps the chat host's `session/load` to
 the advertised `session/resume`, forwarding all other requests, permissions,
 updates and invocation-scoped MCP descriptors. It does not add replay or
@@ -1262,6 +1208,8 @@ the session's bound node, never a path or identity in its arguments.
 the broker, and handle it in the shared client, delegating native actions through the bridge.
 
 ## Verification
+
+The table describes the existing test suites. The connectivity refactor also has [acceptance criteria for both enrollment methods](V3.md#acceptance-criteria).
 
 | Layer | Tests |
 | --- | --- |

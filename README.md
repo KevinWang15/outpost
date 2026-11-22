@@ -5,7 +5,8 @@
 Outpost runs coding agents on your Linux machines. Open **Machines** to choose
 a machine, start a session in a project directory, or reconnect to a running
 agent. Claude Code, Codex, Kimi Code and Antigravity CLI offer persistent
-terminals in the browser and Outpost Desktop. DeepSeek Harness uses Chat.
+terminals in the browser and Outpost Desktop. DeepSeek Harness opens the same
+conversation in Chat or either terminal.
 
 - **One Connect button.** Choose the web terminal or Outpost Desktop for macOS and Windows. Both attach to the same machine-owned session.
 - **Feels native.** Paste screenshots with your normal paste shortcut and the agent receives the image. Shift+Enter inserts a newline. Text the agent copies lands on your clipboard. Links it opens open in your browser.
@@ -15,7 +16,7 @@ terminals in the browser and Outpost Desktop. DeepSeek Harness uses Chat.
 - **Know what needs you.** Each session shows whether the agent is working, idle, or finished a turn you haven't seen.
 - **Find any conversation.** Search the coding tools' history on all your machines, including conversations started outside Outpost, and resume them as sessions.
 - **See what happened.** Logs records when agents start, work, finish or fail, every message passed between sessions, channels and schedules, and errors, and sends what you choose to your own webhooks.
-- **Recall work across machines.** The built-in Outpost MCP searches Claude Code, Codex, Kimi Code, DeepSeek Harness and Antigravity CLI histories across server-connected machines using keyword, semantic, or mixed search. Results identify the machine and tool; context and message tools page through the conversation.
+- **Recall work across machines.** The built-in Outpost MCP searches indexed Claude Code, Codex, Kimi Code, DeepSeek Harness and Antigravity CLI histories across your machines using keyword, semantic, or mixed search. Results identify the machine and tool, and you can read the surrounding conversation.
 
 ![Outpost's Machines view: a machine with three sessions and their activity](docs/images/workspace.png)
 
@@ -28,9 +29,8 @@ terminals in the browser and Outpost Desktop. DeepSeek Harness uses Chat.
 | Web terminal | Any current browser, including on phones. |
 | Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Native GPUI terminal with local shells and managed Outpost sessions. |
 
-The accepted design gives remote machines two enrollment methods, SSH and a machine-initiated outbound connection. See the [v3 connectivity design](docs/V3.md).
-
-The setup instructions below describe the current build. It also offers **Install the connector → Direct only** for a machine with a client-reachable HTTPS endpoint. See the [V3 glossary](docs/ARCHITECTURE.md#v3-terminology), [installation, ownership and cleanup](docs/ARCHITECTURE.md#installing-and-removing-a-machine) and [direct-only setup](docs/ARCHITECTURE.md#direct-only-machines).
+The remote setup below follows the accepted v3 design. Implementation is pending.
+If you are enrolling a machine today, use the [current-build instructions](#current-build-setup).
 
 ## Run the local tool
 
@@ -49,15 +49,42 @@ inside WSL and open http://localhost:3000 in your Windows browser: in WSL,
 Outpost listens on all interfaces so Windows' localhost forwarding reaches it,
 and still accepts only connections that arrive through localhost.
 
-To use Outpost running on another machine, forward its port to the **same**
-port locally (`ssh -L 3000:127.0.0.1:3000 that-machine`) and open
-http://127.0.0.1:3000.
+To open the web UI of a local Outpost instance running on another computer,
+forward its UI port to the **same** port on yours
+(`ssh -L 3000:127.0.0.1:3000 that-machine`) and open http://127.0.0.1:3000.
+That instance opens SSH connections to its enrolled machines from the computer where it runs.
 
 ## Start a session on a machine
 
-1. Open **Machines → Add a machine**. Choose **SSH** for a machine the server can log in to, or **Install the connector** to set its connection policy. **Direct only** is the default. Choose **Relay enabled** to allow the machine to keep an outbound link to Outpost. A local Linux deployment also offers **On the Outpost server** once per workspace. Save the machine. For a connector, choose **Get install command**. On a local deployment, Direct only offers an offline kit to transfer from this computer. Hosted deployments also offer a one-command download.
-2. Select the machine and check **Required software**. Choose **New session**, then select a coding tool and its project directory.
-3. Choose **Connect** to open the session in the web terminal or Outpost Desktop. Return to the same machine to reconnect. For a tool that runs in Chat, the session action is **Open in chat**.
+In the v3 design, open **Machines → Add a machine**. Choose the method based on whether the
+computer running Outpost can SSH to the Linux account that will run the coding agent.
+
+| Choose | When to use it | What happens |
+| --- | --- | --- |
+| **Connect over SSH** (default) | Outpost can log in to that account, directly or through an SSH bastion. | Outpost installs the machine service and provisions the selected coding tools over SSH. It uses SSH again when you start or reattach to a session. The machine service opens no connection back to Outpost. |
+| **Run setup on the machine** | Outpost cannot SSH to the machine, and the machine is allowed to connect out to Outpost. | Run the wizard’s one-time `curl` command in a shell on the machine. It installs the service and enables a persistent, authenticated outbound connection to that Outpost instance. |
+
+In local mode SSH starts on your computer, with your OpenSSH config, keys and jump hosts.
+In hosted mode SSH starts on the Outpost server, using your account’s key and a route
+available to that server. If only your laptop can reach a bastion, run the local tool there.
+
+For outbound setup, the machine must be able to reach the Outpost instance. A client and
+a machine behind separate NATs can both connect to the same public hosted instance.
+A local tool’s default loopback address is reachable only on the workstation itself.
+
+Once enrolled, select the machine, choose **New session**, and pick the coding tool and
+project directory. **Connect** opens the session in the web terminal or Outpost Desktop.
+**Open in chat** opens its conversation. Both methods support the same session features.
+Reconnecting uses the method you chose. [V3 connectivity design](docs/V3.md)
+
+### Current-build setup
+
+Today’s wizard offers **SSH** and **Install the connector**. The **Direct only** connector
+supports terminal sessions. For Chat and unattended delivery, use an SSH machine, a
+connected **Relay enabled** machine, or a session on the local Linux Outpost server.
+Use **Required software** to install missing dependencies. For exact steps, see the
+[current-build machine setup guide](https://github.com/KevinWang15/outpost/blob/a568e89800eb6b06f9b34a445db78dcecb8844ec/README.md#start-a-session-on-a-machine)
+and [installation and removal commands](https://github.com/KevinWang15/outpost/blob/a568e89800eb6b06f9b34a445db78dcecb8844ec/docs/ARCHITECTURE.md#installing-and-removing-a-machine).
 
 ## Edit a session and its conversations
 
@@ -355,8 +382,9 @@ In the browser, thumbnails, previews and downloads share a bounded session cache
 transfers while the file remains cached. Closing the file panel keeps the cache;
 closing the session clears it.
 
-Files are snapshots stored on the machine, survive client disconnects, and
-appear again after reconnection. The same list holds files you attach in chat.
+A successful `publish_file` confirms the machine stored a snapshot. The agent can publish
+while you are away. Opening or reconnecting the terminal loads the file list, and opening
+a file fetches its contents. The same list holds files you attach in chat.
 Removing a file leaves the original alone. Deleting the managed session also
 deletes its files. Limits
 are **32 MiB per file**, **100 files**, and **256 MiB total per session**.
@@ -380,7 +408,7 @@ the same **Outpost MCP** as `publish_file`, with no additional registration:
 
 | Tool | Purpose |
 | --- | --- |
-| `search_history` | Search the account’s server-connected machines, or filter by machine, coding tool, session, working directory, role and dates. |
+| `search_history` | Search indexed conversations from the account’s machines, or filter by machine, coding tool, session, working directory, role and dates. |
 | `read_context` | Read a chronological page around a match, then page before or after it. |
 | `read_message` | Retrieve further character pages of a long message. |
 | `get_session` | Inspect the source machine, native conversation and transcript files, its lineage and its Outpost session. |
@@ -488,7 +516,7 @@ Build and run the native app from a checkout with the commands in
 
 ## Chat with your sessions
 
-Open **Chat** from the Machines sidebar to message sessions on server-connected machines or bring them into a channel. Replies stream in, the steps the agent took fold into
+Open **Chat** from the Machines sidebar to message a session or bring it into a channel. Replies stream in, the steps the agent took fold into
 one line you can open (commands and their output, file edits as diffs), and
 permission requests appear as buttons. Choose the agent's mode and model in the
 header, attach files and images (paste, drop or the paperclip), and use its
@@ -497,7 +525,7 @@ slash commands.
 - **Files go both ways.** What you attach is stored in the session's files on
   its machine and handed to the agent, which reads it with its own tools.
   Files the agent shares (`publish_file`) appear in its reply and in **Files**.
-- **Channels** bring sessions from your server-connected machines together. A session
+- **Channels** bring sessions from your machines together. A session
   replies when you mention it (`@api`, or `@all`); a reply that mentions another
   member passes the conversation on. Files attached in a channel are copied to
   each member that receives them.
@@ -506,19 +534,19 @@ slash commands.
   copy each other's files; the answer comes back as a message. A session running
   in a terminal gets messages typed in when its agent is idle and you are not
   typing, or holds them until you choose **Deliver now** (**Edit session**).
-- **Schedules** send a session a message at set times, e.g. a weekday summary.
+- **Schedules** send a session a message at set times, such as a weekday summary. Outpost must be running and able to reach the recipient when delivery is due. With hosted Outpost, your laptop can be asleep.
 - **Instructions** give a session a role, added to the coding tool's own.
   A session can also start with a model, an agent mode for Chat and MCP servers of its
   own, next to Outpost's.
 
-On a server-connected machine, **Open in Chat** and **Open in Terminal** join the same running agent. When the native CLI owns the session, Chat shows its recorded user messages and replies. Messages from Chat wait for an idle prompt and an empty terminal draft. Approvals offered by the CLI are answered in Terminal.
+**Open in Chat** and **Open in Terminal** join the same running agent. When the native CLI owns the session, Chat shows its recorded user messages and replies. Messages from Chat wait for an idle prompt and an empty terminal draft. Approvals offered by the CLI are answered in Terminal.
 
 When Chat starts the agent using the [Agent Client Protocol](https://agentclientprotocol.com), opening a terminal shows a text conversation. Press Enter to send a prompt. For an approval, enter the displayed answer command or use the buttons in Chat. Both views see the outcome. Closing a view leaves the agent running. Claude Code needs its chat adapter to start through ACP. See [Outpost Chat](docs/CHAT.md).
 
 ### DeepSeek Harness
 
-Enable **DeepSeek Harness** on a server-connected machine and use **Required software** to install
-the official `dsh` CLI (`@deepseek-ai/dsh@0.2.2-rc.1`). It requires Node.js 24.9+
+Enable **DeepSeek Harness** on the machine that runs the session. It uses
+the official `dsh` CLI (`@deepseek-ai/dsh@0.2.2-rc.1`), which requires Node.js 24.9+
 and npm on that machine. Configure its normal DeepSeek credentials, or provide
 `DEEPSEEK_API_KEY` in the session environment, then choose **New session** on that machine. Open the session in Chat. Outpost uses `dsh --profile acp`, preserves its native session ID and
 `DSH_HOME` (default `~/.dsh`), and resumes the conversation after reconnecting.
@@ -535,8 +563,8 @@ remain accessible through history MCP. See the [official ACP contract](https://g
 Set `OUTPOST_MODE=hosted`. Each verified account gets its own workspace.
 For an SSH machine, add the account’s Ed25519 public key to
 `~/.ssh/authorized_keys` for the Linux user that runs the sessions.
-Relay-enabled machines redeem one-time pairing codes. Direct-only machines import their enrollment settings locally.
-Both terminal clients sign in through the hosted Outpost server.
+If the server cannot SSH to the machine, the v3 design offers outbound setup
+from a shell on the machine. Both terminal clients sign in through the hosted Outpost server.
 
 ```dotenv
 OUTPOST_MODE=hosted
@@ -552,7 +580,7 @@ OUTPOST_TRUST_PROXY=127.0.0.1,::1   # your reverse proxy
 Production requires HTTPS and email delivery. Without mail settings on
 loopback, development shows verification links in the UI. Put Outpost behind
 an HTTPS reverse proxy that preserves the `Host` header and forwards WebSocket
-upgrades for both `/api/terminal` and `/api/paired/node`.
+upgrades to the Outpost server for clients and outbound machine connections.
 
 ```nginx
 proxy_http_version 1.1;
@@ -569,22 +597,15 @@ instance per data directory.
 
 ## How it works
 
-The **terminal client** (Outpost Desktop or the web terminal) attaches to a **session** on a **machine**. The **Outpost machine service** (`outpost-terminal`) runs the coding agent there. The machine enrolls with one Outpost server. Terminal input, output, published files and image paste use the
-selected attachment.
+In the v3 design, a remote machine enrolls with one Outpost server under one Linux execution
+account. The browser and Outpost Desktop attach through that server. An SSH enrollment
+starts `outpost-terminal node` with `ssh -T`. An outbound enrollment carries the same protocol
+over the machine’s authenticated connection to Outpost. Requests and results flow both ways.
+Image paste, agent-published files and Chat all use this connection.
 
-| Machine configuration in the current build | How the session is reached |
-| --- | --- |
-| Direct only | The client obtains authorization from Outpost and connects to the machine’s HTTPS endpoint. The machine verifies the grant locally. |
-| Relay enabled | The machine maintains an outbound link to Outpost. The client tries the optional saved HTTPS endpoint first, even if the relay link is down. A registered relay handles fallback. |
-| SSH | The client uses the Server-managed route. The Outpost server reaches the machine over SSH. |
-| On the Outpost server | The client uses the Server-managed route. Sessions run on the Linux system running the Outpost server. |
+The machine service runs each coding agent independently of the connection. Closing a viewer leaves the agent running. Reopening the session reattaches to it. Desktop local shells run on your computer and close with their panes.
 
-**Required software → Outpost machine service → Install** downloads the matching Linux
-executable into `~/.outpost/bin`, verifies its SHA-256 checksum and installs it
-atomically. x86_64 and ARM64 machines with glibc or musl are supported. The runtime
-is bundled; machines need neither Node.js nor Bun. Minimal musl installations also
-receive the system `libstdc++` package. Running sessions keep their processes
-when the executable is replaced.
+The machine service ships as a self-contained Linux executable for x86_64 and ARM64 with glibc or musl. Setup verifies the release checksum before replacing the executable in `~/.outpost/bin`. Running sessions keep their processes across that replacement. The coding tools can have their own runtime requirements.
 
 The **Outpost machine service** GitHub Actions workflow is manual. Enable **Publish**
 to create the versioned release the installer downloads. See

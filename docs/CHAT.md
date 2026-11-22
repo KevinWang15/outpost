@@ -6,16 +6,20 @@ on a session to work with streamed replies, agent steps, and permission requests
 Chat also supports channels and schedules. Each session still runs on its machine
 and keeps its conversation when you switch interfaces.
 
+In the accepted v3 design, Chat, channels and schedules work over either machine connection.
+The Outpost instance can open SSH itself or use the persistent outbound connection established
+during enrollment. A channel mention or scheduled prompt can reach the agent with every viewer
+closed. [V3 connectivity design](V3.md#what-the-connection-carries)
+
 ## Principles
 
-1. **The coding tool's own protocol.** Chat drives the tool through the
-   [Agent Client Protocol](https://agentclientprotocol.com) (ACP v1), the
-   standard editors such as Zed and JetBrains use. Outpost does not parse
-   terminal output, patch the tool, or reimplement its agent.
+1. **The coding tool's own protocol.** When Chat starts an agent, the chat host speaks
+   the Agent Client Protocol (ACP v1) over local stdio to the tool or its adapter.
+   [Agent Client Protocol](https://agentclientprotocol.com)
 2. **One agent can serve both views.** The first explicit start chooses the native CLI or its ACP agent. Opening another view attaches to that running process. When the CLI owns the session, Chat follows its native conversation records and sends prompts through the terminal delivery queue. When ACP owns it, Terminal renders the same journal as Chat and submits prompts and approvals to the same host. Keyboard drafts belong to each viewer. A pending approval can be answered once.
 3. **The machine owns the chat**, as it owns the terminal. A chat host on the
    machine keeps the agent, its prompt queue and its history while browsers,
-   SSH and the Outpost server come and go.
+   machine connections and the Outpost server come and go.
 4. **ACP inside, Outpost envelope around it.** Payloads are ACP types. The
    envelope adds what one ACP client connection lacks: sequence numbers, many
    viewers, a prompt queue, and who a prompt came from.
@@ -26,6 +30,8 @@ and keeps its conversation when you switch interfaces.
    its MCP tools; their replies are their own turns.
 
 ## Components
+
+When the session is running through ACP, both the host and the coding tool run on the machine.
 
 ```text
 browser at /chat
@@ -53,14 +59,15 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 
 | Tool | ACP server | Installed by |
 | --- | --- | --- |
-| Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the machine's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Install the Chat adapter from Required software (`claude-agent-acp`, pinned in `shared/chatAgents.json`). Terminal sessions use Claude Code directly. |
+| Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the machine's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Installed separately on the machine at the version pinned in `shared/chatAgents.json`. The native CLI can start without the ACP adapter. |
 | Codex | Official [`codex-acp`](https://github.com/agentclientprotocol/codex-acp), run with the machine's own `codex` (`CODEX_PATH`) | Bundled in Outpost machine service (`outpost-terminal agent codex`), fetched with an integrity pin by `scripts/vendor-agents.mjs` |
 | Kimi Code | `kimi acp` | Kimi itself |
 | DeepSeek Harness | `dsh --profile acp`, through `outpost-terminal agent deepseek` | DeepSeek itself |
 | Antigravity CLI | `agy acp`, through `outpost-terminal agent antigravity` | Antigravity CLI itself |
 
-The Claude adapter is installed rather than bundled because it depends on
-Anthropic's proprietary Agent SDK; Outpost does not redistribute it. Its release
+The Claude adapter depends on Anthropic's proprietary Agent SDK. Outpost does not
+redistribute it. In the v3 design SSH setup can reuse an installed adapter or transfer
+an operator-approved copy of the official release to a restricted machine. The release
 archive's own `claude` is removed after installation. Codex's adapter and its
 dependencies are Apache-2.0/MIT/BSD JavaScript using only Node built-ins.
 
@@ -214,9 +221,11 @@ Pages read files over HTTP with their chat grant
   other machines can read them. Its prompt names each message's files and lists
   any that could not be copied.
 
-**Schedules.** Five-field cron in an IANA time zone (`shared/cron.ts`), fired at
-most once per matching minute while the server runs. A schedule's prompt runs in
-its session's own chat.
+**Schedules.** The Outpost instance evaluates five-field cron in an IANA time zone
+(`shared/cron.ts`) and fires at most once per matching minute. To deliver the prompt
+to the selected session, it must be running and able to reach that machine when delivery
+is due. A hosted instance can do this while the user's laptop sleeps. A local instance
+needs its computer awake. An unreachable machine produces a delivery failure.
 
 **Authorization.** Browser pages use their login cookie; the socket is subject
 to the same origin checks as every route.

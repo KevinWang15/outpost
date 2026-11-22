@@ -27,8 +27,8 @@ retain the license notices supplied with their distributions in `node_modules`.
   Codex itself is not bundled.
 - The Claude Code chat adapter, [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp)
   (Apache License 2.0), depends on Anthropic's Claude Agent SDK, which is
-  subject to Anthropic's terms. Outpost does not redistribute it: Required
-  software downloads the official release onto your machine.
+  subject to Anthropic's terms. Outpost does not redistribute the Claude adapter
+  or SDK. The adapter is installed separately on the machine from its official release.
 
 - Session avatars are drawn by [Boring Avatars](https://github.com/boringdesigners/boring-avatars)
   (`boring-avatars`, MIT License).

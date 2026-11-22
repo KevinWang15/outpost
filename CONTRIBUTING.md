@@ -1,8 +1,10 @@
 # Contributing to Outpost
 
-Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: it explains the
-principles every change should keep (one connection path, machine-owned persistent sessions,
-Outpost as the hub, local and hosted deployments that differ in identity, one installed machine executable).
+Each remote machine enrolls with one Outpost instance using **Connect over SSH** or
+**Run setup on the machine**. Keep session operations on the same bidirectional protocol
+for both methods. The machine owns the running agent, and the Outpost instance authorizes
+access. Connectivity changes follow the [accepted v3 design](docs/V3.md). Component
+boundaries and wire messages are documented in the [architecture reference](docs/ARCHITECTURE.md).
 
 Outpost is unreleased. Keep one current implementation and schema: remove
 obsolete paths when replacing a feature instead of adding migration readers,
@@ -65,6 +67,11 @@ SSH known hosts or provider credentials. Existing browser assertions inspect
 xterm DOM text, so Playwright disables WebGL to exercise the fallback renderer.
 Native GPU behavior and OS integration require checks on the supported systems.
 
+When implementing v3 connectivity, verify SSH setup and reattachment through a bastion
+with target egress blocked. Exercise outbound enrollment with inbound access blocked,
+including reconnect and credential revocation. Check file transfer, image paste, ACP
+approvals, channel delivery and schedules on both methods. [V3 acceptance criteria](docs/V3.md#acceptance-criteria)
+
 ## Desktop development and previews
 
 Use Node 24, a stable Rust toolchain and the native build tools for your platform.
@@ -92,7 +99,13 @@ publishing a new release.
 
 ## Outpost machine service
 
-For a self-hosted release, `OUTPOST_TERMINAL_RELEASE_BASE` can point to an HTTPS directory containing the four version-matched Linux executables and their `SHA256SUMS`. The installer checks the downloaded binary’s checksum and protocol version. For a bundled Apple silicon installer, set `VITE_OUTPOST_MAC_ARM64_INSTALLER` at web build time to its public download path.
+For a self-hosted release, `OUTPOST_TERMINAL_RELEASE_BASE` can point to an HTTPS
+directory containing the four version-matched Linux executables and their `SHA256SUMS`.
+In the v3 design the Outpost instance supplies the matching executable and checksum
+over SSH, or the operator’s outbound setup command fetches the installer from Outpost.
+Both methods must verify the checksum and service version before installation.
+For a bundled Apple silicon installer, set `VITE_OUTPOST_MAC_ARM64_INSTALLER` at web
+build time to its public download path.
 
 Build the machine binary with `npm run build:terminal`. Integration and browser tests use
 `npm run build:terminal -- --fixtures` so each simulated machine has its own installation directory. Use

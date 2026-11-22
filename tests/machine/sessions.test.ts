@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { currentConversation, type SessionInput } from '../../shared/model'
 import { driverStatus } from '../../machine/drivers'
-import { saveImage } from '../../machine/files'
+import { contentPath, saveImage, StoredFile } from '../../machine/files'
 import { changeRegistry, readRegistry, switchConversation } from '../../machine/registry'
 import {
   createSession,
@@ -334,6 +334,23 @@ test('an attached viewer reads bounded file ranges scoped to its own session', a
   assert.deepEqual(await readFileChunk(owner.id, file.id, 65536), bytes.subarray(65536))
   await assert.rejects(readFileChunk(other.id, file.id, 0), /not found/)
   await assert.rejects(readFileChunk(owner.id, file.id, bytes.length + 1), /offset/)
+})
+
+test('finishing one file transfer leaves a concurrent transfer writable', async t => {
+  const home = machine(t)
+  const session = record(home, 'codex', crypto.randomUUID())
+  await register(session)
+  const first = new StoredFile(session.id, 'first.txt', 'received')
+  first.write(Buffer.from('one'))
+  const committing = first.commit()
+  await Promise.resolve()
+  const second = new StoredFile(session.id, 'second.txt', 'received')
+  const saved = await committing
+  first.abort()
+  second.write(Buffer.from('two'))
+  const next = await second.commit()
+  assert.equal(readFileSync(contentPath(session.id, saved), 'utf8'), 'one')
+  assert.equal(readFileSync(contentPath(session.id, next), 'utf8'), 'two')
 })
 
 test('image chunks stay with their attachment and an interrupted upload cannot finish on a new one', async t => {

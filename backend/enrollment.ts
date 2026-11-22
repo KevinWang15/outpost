@@ -104,25 +104,33 @@ export function enrollmentRoutes(app: FastifyInstance, services: Services) {
       const key = digest(code),
         hash = digest(secret)
       const item = pending.get(key)
+      if (item?.targetId === targetId && item.expires > Date.now() && services.deployment.active(item.owner))
+        requireOutbound(await services.deployment.workspace(item.owner).get(targetId))
+
+      // Decide the claim after the last await. An overlapping redemption may
+      // have stored this credential, or a removal may have invalidated the code.
       const saved = enrollment(services.deployment, targetId)
-      // A machine that lost its receipt can prove its original claim after the code expires.
       if (saved && saved.hash === hash && services.deployment.account(saved.userId)) {
         if (item?.targetId === targetId && item.owner.userId === saved.userId) pending.delete(key)
         return receipt(saved)
       }
-      if (!item || item.targetId !== targetId || item.expires <= Date.now() || !services.deployment.active(item.owner))
+      if (
+        !item ||
+        item.targetId !== targetId ||
+        pending.get(key) !== item ||
+        item.expires <= Date.now() ||
+        !services.deployment.active(item.owner)
+      )
         throw new AppError('The enrollment code is invalid or expired.', 401)
-      requireOutbound(await services.deployment.workspace(item.owner).get(targetId))
-      // A new command or removal can invalidate this claim while the workspace is read.
-      if (pending.get(key) !== item || item.expires <= Date.now() || !services.deployment.active(item.owner))
-        throw new AppError('The enrollment code is invalid or expired.', 401)
-      pending.delete(key)
-      if (enrollment(services.deployment, targetId))
+      if (saved) {
+        pending.delete(key)
         throw new AppError('This machine already has an enrollment. Release it before enrolling another host.', 409)
+      }
       const record = { userId: item.owner.userId, targetId, hash }
       const path = keyPath(services.deployment, targetId)
       writeFileSync(path + '.new', JSON.stringify(record), { mode: 0o600, flush: true })
       renameSync(path + '.new', path)
+      pending.delete(key)
       return receipt(record)
     },
   )

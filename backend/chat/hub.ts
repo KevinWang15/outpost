@@ -25,10 +25,11 @@ import { handles, mentions } from '../../shared/chatMentions'
 import { cronMatches, parseCron, validTimeZone, zonedParts } from '../../shared/cron'
 import type { HarnessId } from '../../shared/harnesses'
 import type { Session } from '../../shared/model'
+import type { TerminalDelivery } from '../../shared/machine'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
 import type { SessionFileClient } from '../sessionFiles'
-import type { SessionClient, TargetContext, TerminalDelivery } from '../sessions'
+import type { SessionClient, TargetContext } from '../sessions'
 import type { LogInput } from '../logs/activity'
 import { ChannelFiles } from './files'
 import { ChatLink, type ChatConnector, type LinkEvent } from './links'
@@ -58,8 +59,6 @@ interface Account {
   refreshing: Promise<void> | null
   viewKey: string
   poller: NodeJS.Timeout | null
-  /** Posts being written, by key; stored posts carry their key. */
-  posts: Map<string, string>
 }
 
 interface Dependencies {
@@ -149,7 +148,6 @@ export class ChatHub {
           deletedDuringRefresh: new Set(),
           viewKey: '',
           poller: null,
-          posts: new Map(),
         }
       })()
       account.catch(() => this.accounts.delete(owner.userId))
@@ -535,6 +533,7 @@ export class ChatHub {
         delivery.sessionId,
         promptKey(delivery),
         prompt,
+        delivery.files,
       )
       if (delivery.via !== 'terminal') await this.update(account, delivery, { state: 'sent', via: 'terminal' })
       await this.progress(account, delivery, progress)
@@ -581,10 +580,9 @@ export class ChatHub {
               else await this.failDelivery(account, delivery, 'The session no longer has this message.')
             }
           } catch (error) {
-            // Unreachable for now: keep waiting. A session that left its terminal cannot answer.
-            if (error instanceof AppError && error.statusCode === 409)
-              for (const delivery of deliveries)
-                await this.failDelivery(account, delivery, 'The session stopped before replying.')
+            if (error instanceof AppError && [404, 409, 410].includes(error.statusCode)) {
+              for (const delivery of deliveries) await this.failDelivery(account, delivery, error.message)
+            }
           }
         }
       }
@@ -602,7 +600,13 @@ export class ChatHub {
     if (progress.state === 'typed' && delivery.state !== 'running')
       await this.update(account, delivery, { state: 'running' })
     else if (progress.state === 'done')
-      await this.complete(account, delivery, { stopReason: 'end_turn', error: null }, progress.reply ?? '', [])
+      await this.complete(
+        account,
+        delivery,
+        { stopReason: 'end_turn', error: null },
+        progress.reply ?? '',
+        progress.files,
+      )
     else if (progress.state === 'failed')
       await this.failDelivery(account, delivery, progress.error ?? 'The session did not reply.')
   }
@@ -957,8 +961,6 @@ export class ChatHub {
     if (!channel) throw new AppError('Channel not found.', 404)
     const body = text.trim()
     if (!body && !files.length) throw new AppError('Write a message first.', 400)
-    const writing = account.posts.get(key)
-    if (writing) return { messageId: writing, duplicate: true }
     const id = randomUUID()
     const known = channel.members.map(member => member.handle)
     const found = mentions(body, known)
@@ -975,15 +977,14 @@ export class ChatHub {
       key,
       files: [],
     }
-    account.posts.set(key, id)
-    try {
-      const stored = (await account.store.recent(channelId)).find(item => item.key === key)
-      if (stored) return { messageId: stored.id, duplicate: true }
+    const previous = await account.store.change([], async () => {
+      if (!account.store.channels.channels.includes(channel)) throw new AppError('Channel not found.', 404)
+      const stored = await account.store.postId(channelId, key)
+      if (stored) return stored
       message.files = await account.files.commit(channelId, files)
-      await account.store.append(message)
-    } finally {
-      account.posts.delete(key)
-    }
+      await account.store.appendInChange(message)
+    })
+    if (previous) return { messageId: previous, duplicate: true }
     this.broadcast(account, { type: 'message', message })
     this.log(account, {
       kind: 'message',

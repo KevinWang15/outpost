@@ -31,7 +31,7 @@ import { ChatServer } from './chat/socket'
 import { ChatTokens } from './chat/tokens'
 import { chatRoutes } from './routes/chat'
 import { HistoryHub, type HistoryOptions } from './history/hub'
-import { Machines } from './machines'
+import { MachineConnectionError, Machines } from './machines'
 import { ActivityLog, logViewerMount } from './logs/activity'
 import { MachineEventLog } from './logs/machines'
 import { loggedSessions } from './logs/sessions'
@@ -185,12 +185,13 @@ export async function createApp(options: AppOptions) {
     const problem = error as Error & { statusCode?: number }
     const status = problem.statusCode ?? 500
     if (status >= 500) app.log.error(problem)
-    reply.code(status).send({
-      message:
-        deployment.mode === 'hosted' && status >= 500
-          ? 'Something went wrong. Please try again later.'
-          : problem.message,
-    })
+    let message = problem.message
+    if (deployment.mode === 'hosted' && status >= 500)
+      message =
+        problem instanceof MachineConnectionError
+          ? problem.publicMessage
+          : 'Something went wrong. Please try again later.'
+    reply.code(status).send({ message })
   })
 
   app.get('/health', async () => ({ status: 'ok' }))

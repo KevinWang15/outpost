@@ -11,7 +11,7 @@ import { harness } from './harnesses'
 import { current, readRegistry, session as findSession } from './registry'
 import { readJson, statePath } from './state'
 import { lines, reverseRecords, Scan } from './stores'
-import { filesDirectory, listFiles, readFile } from './files'
+import { filesDirectory, listFiles } from './files'
 import type { SessionFile } from '../shared/sessionFiles'
 import type { Delivery } from './delivery'
 import { ViewStream } from './viewStream'
@@ -287,7 +287,11 @@ export class TerminalChat extends ViewStream {
         })
       add({ kind: 'ended', turn: d.key, stopReason: d.state === 'failed' ? 'error' : 'end_turn', error: d.error })
     }
-    for (const file of this.files) entries.push({ at: file.createdAt, event: { kind: 'file', file, turn: null } })
+    const fileTurns = new Map(
+      this.receipts.flatMap(receipt => (receipt.files ?? []).map(file => [file.id, receipt.key] as const)),
+    )
+    for (const file of this.files)
+      entries.push({ at: file.createdAt, event: { kind: 'file', file, turn: fileTurns.get(file.id) ?? null } })
     const extendsJournal =
       !first &&
       this.previous.length <= entries.length &&
@@ -342,16 +346,13 @@ export class TerminalChat extends ViewStream {
       const key = m.key === null ? randomUUID() : m.key
       if (typeof key !== 'string' || !keyPattern.test(key)) return result(false, 'Invalid message key.')
       const body = m.prompt.map((b: acp.TextContent) => b.text).join('\n')
-      const attachments = m.files.map((id: string) => readFile(this.record.id, id).path)
-      const text = [body, ...attachments].filter(Boolean).join('\n')
-      // The PTY accepts text from Chat, including line breaks. Reject terminal control sequences.
-      if (
-        !text.trim() ||
-        Buffer.byteLength(text) > 63 * 1024 ||
-        Array.from(text as string).some(c => (c < ' ' && c !== '\n' && c !== '\t') || (c >= '\x7f' && c <= '\x9f'))
-      )
-        return result(false, 'Enter a message of up to 63 KiB without terminal control characters.')
-      const reply = await request(this.socket, { type: 'deliver', key, text: '[Outpost: Chat ' + key + ']\n' + text })
+      if (!body.trim() && !m.files.length) return result(false, 'Write a message first.')
+      const reply = await request(this.socket, {
+        type: 'deliver',
+        key,
+        text: '[Outpost: Chat ' + key + ']\n' + body,
+        files: m.files,
+      })
       if (reply?.ok !== true) return result(false, 'The terminal stopped before accepting this message.')
       await this.refresh()
       result(true, undefined, { turn: key })

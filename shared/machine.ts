@@ -5,8 +5,9 @@
 //   D  stream data: a 4-byte stream number, then bytes
 
 import type { ActivityState } from './activity'
+import type { SessionFile } from './sessionFiles'
 
-export const machineProtocol = 6
+export const machineProtocol = 7
 export interface OutboundEnrollmentReply {
   targetId: string
   socket: string
@@ -17,6 +18,15 @@ export const nodeMagic = '\0OUTPOST-NODE-1\0'
 export const streamWindow = 4 * 1024 * 1024
 
 export type StreamKind = 'terminal' | 'chat' | 'file-read' | 'file-receive'
+
+/** Durable receipt for a prompt queued in a native terminal. */
+export interface TerminalDelivery {
+  key: string
+  state: 'waiting' | 'typed' | 'done' | 'failed'
+  reply: string | null
+  error: string | null
+  files: SessionFile[]
+}
 
 export interface RemoteError {
   message: string

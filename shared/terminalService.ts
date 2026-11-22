@@ -1,7 +1,7 @@
 /** Release and protocol contract shared by the server, renderer and target binary. */
 export const terminalService = {
-  version: '3.0.2',
-  protocol: 6,
+  version: '3.0.3',
+  protocol: 7,
   repository: 'KevinWang15/outpost',
   scrollback: 10_000,
   maxCols: 400,

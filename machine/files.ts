@@ -96,10 +96,16 @@ export class StoredFile {
     if (this.prefix.length < 16) this.prefix = Buffer.concat([this.prefix, data.subarray(0, 16)])
     writeSync(this.descriptor, data)
   }
+  private close() {
+    if (this.descriptor === -1) return
+    const descriptor = this.descriptor
+    this.descriptor = -1
+    closeSync(descriptor)
+  }
   async commit(): Promise<SessionFile> {
     try {
       fsyncSync(this.descriptor)
-      closeSync(this.descriptor)
+      this.close()
       const file: SessionFile = {
         id: randomUUID().replace(/-/g, ''),
         name: this.name,
@@ -131,11 +137,10 @@ export class StoredFile {
   }
   abort() {
     try {
-      closeSync(this.descriptor)
-    } catch {
-      /* Already closed. */
+      this.close()
+    } finally {
+      rmSync(this.temporary, { recursive: true, force: true })
     }
-    rmSync(this.temporary, { recursive: true, force: true })
   }
 }
 

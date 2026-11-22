@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,55 @@ import { createApp } from '../../backend/app'
 import { HostedDeployment } from '../../backend/hosted/deployment'
 import { TerminalClient } from '../integration/helpers'
 import { FakeSessions, fakeSoftware } from './fakes'
+
+test('hosted session requests explain machine connectivity failures and redact internal diagnostics', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-hosted-connectivity-'))
+  await writeFile(join(directory, 'ssh'), '#!/bin/sh\necho "private ssh diagnostic" >&2\nexit 255\n', { mode: 0o700 })
+  const deployment = await HostedDeployment.open({ directory, publicUrl: 'http://127.0.0.1:5173', mailer: null })
+  const app = await createApp({
+    deployment,
+    history: false,
+    multiplex: false,
+    env: { ...process.env, PATH: directory },
+  })
+  t.after(async () => {
+    await app.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const user = deployment.store.create('owner@example.com', 'Owner', 'fixture')
+  const verified = deployment.store.consumeToken(deployment.store.issueToken(user.id, 'verify', 60_000), 'verify')
+  const login = deployment.store.issueSession(verified)
+  const workspace = deployment.workspace({ userId: user.id, loginId: login.id })
+  const metadata = { name: 'Machine', tools: ['codex'] as ['codex'], createdAt: new Date().toISOString() }
+  const offline = await workspace.add({ ...metadata, kind: 'outbound', id: randomUUID() })
+  const ssh = await workspace.add({
+    ...metadata,
+    name: 'SSH fixture',
+    kind: 'ssh',
+    id: randomUUID(),
+    user: 'dev',
+    host: 'fixture.test',
+  })
+  const list = (id: string) =>
+    app.inject({
+      url: '/api/targets/' + id + '/sessions',
+      headers: { host: '127.0.0.1:5173' },
+      cookies: { outpost_session: login.token },
+    })
+  const disconnected = await list(offline.id)
+  assert.equal(disconnected.statusCode, 503)
+  assert.match(disconnected.json().message, /outbound machine is offline.*Outpost service/)
+  const unreachable = await list(ssh.id)
+  assert.equal(unreachable.statusCode, 502)
+  assert.match(unreachable.json().message, /over SSH.*jump host/)
+  assert.doesNotMatch(unreachable.body, /private ssh diagnostic/)
+  t.mock.method(workspace, 'get', async () => {
+    throw Error('private backend diagnostic')
+  })
+  const unexpected = await list(offline.id)
+  assert.equal(unexpected.statusCode, 500)
+  assert.equal(unexpected.json().message, 'Something went wrong. Please try again later.')
+})
 
 test('hosted workspaces apply the same deployment policy to persisted machines', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-hosted-storage-'))

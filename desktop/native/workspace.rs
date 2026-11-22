@@ -65,10 +65,11 @@ pub struct Workspace {
     bounds: HashMap<Id, Bounds<Pixels>>,
     resizing: Option<(Id, Axis)>,
     origin: String,
+    account_id: String,
     target: String,
     tool: String,
     targets: Value,
-    tools: Value,
+    options: Value,
     creating: bool,
     files_menu: Option<Id>,
     preview_id: Option<String>,
@@ -290,10 +291,11 @@ impl Workspace {
             bounds: Default::default(),
             resizing: None,
             origin: String::new(),
+            account_id: String::new(),
             target: String::new(),
             tool: String::new(),
             targets: Value::Null,
-            tools: Value::Null,
+            options: Value::Null,
             creating: false,
             files_menu: None,
             preview_id: None,
@@ -718,7 +720,20 @@ impl Workspace {
                     self.local(None, w, cx)
                 }
             }
-            "accounts" => self.accounts = e,
+            "accounts" => {
+                self.accounts = e;
+                if self.page == Page::Create
+                    && !items(&self.accounts["accounts"]).iter().any(|a| {
+                        a["origin"] == self.origin
+                            && a["account"]["id"] == self.account_id
+                            && a["canCreate"] == true
+                    })
+                {
+                    self.creating = false;
+                    self.show(Page::Home, w, cx);
+                    self.message = "Choose a signed-in account to create a session.".into();
+                }
+            }
             "paneRemoved" => {
                 if let Some(&id) = self.remote.get(&n) {
                     let selected = self.tabs.get(self.current).is_some_and(|t| t.active == id);
@@ -789,16 +804,20 @@ impl Workspace {
                 self.creating = false;
                 self.message = strval(&e, "message")
             }
-            "targets" if self.origin == strval(&e, "origin") => self.targets = e["targets"].clone(),
+            "targets" if self.origin == e["origin"] && self.account_id == e["accountId"] => {
+                self.targets = e["targets"].clone()
+            }
             "options"
-                if self.origin == strval(&e, "origin") && self.target == strval(&e, "target") =>
+                if self.origin == e["origin"]
+                    && self.account_id == e["accountId"]
+                    && self.target == e["target"] =>
             {
-                self.tools = e["tools"].clone();
-                self.tool = items(&self.tools)
+                self.tool = items(&e["tools"])
                     .first()
                     .and_then(Value::as_str)
                     .unwrap_or("")
-                    .into()
+                    .into();
+                self.options = e;
             }
             "submitted" => {
                 if let Some(id) = self.remote.get(&n)
@@ -909,14 +928,30 @@ impl Workspace {
     fn choose(&mut self, id: String) {
         self.call(json!({"op":"choose","value":id}))
     }
-    fn create_form(&mut self, origin: String, w: &mut Window, cx: &mut Context<Self>) {
+    fn create_form(
+        &mut self,
+        origin: String,
+        account_id: String,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.origin != origin || self.account_id != account_id {
+            self.name.update(cx, |s, cx| s.set_value_silent("", cx));
+            self.directory
+                .update(cx, |s, cx| s.set_value_silent("", cx));
+        }
         self.origin = origin;
+        self.account_id = account_id;
         self.target.clear();
         self.tool.clear();
         self.targets = Value::Null;
-        self.tools = Value::Null;
-        self.call(json!({"op":"targets","origin":self.origin}));
+        self.options = Value::Null;
+        self.creating = false;
+        self.call(json!({"op":"targets","origin":self.origin,"accountId":self.account_id}));
         self.show(Page::Create, w, cx)
+    }
+    fn creation_ready(&self) -> bool {
+        !self.creating && !self.tool.is_empty() && items(&self.options["missing"]).is_empty()
     }
     fn submit(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         match self.page {
@@ -947,18 +982,17 @@ impl Workspace {
                 }
             }
             Page::Create => {
-                if self.creating {
+                if !self.creation_ready() {
                     return;
                 }
                 let name = self.name.read(cx).value().trim();
                 let dir = self.directory.read(cx).value().trim();
-                if name.is_empty() || dir.is_empty() || self.tool.is_empty() {
-                    self.message =
-                        "Choose a machine and tool, then enter a name and working directory.".into()
+                if name.is_empty() || dir.is_empty() {
+                    self.message = "Enter a session name and working directory.".into()
                 } else {
                     self.creating = true;
                     self.message = "Creating session…".into();
-                    self.call(json!({"op":"create","origin":self.origin,"target":self.target,"input":{"name":name,"rootDir":dir,"tool":self.tool}}))
+                    self.call(json!({"op":"create","origin":self.origin,"accountId":self.account_id,"target":self.target,"input":{"name":name,"rootDir":dir,"tool":self.tool}}))
                 }
                 cx.notify()
             }
@@ -1519,6 +1553,7 @@ impl Workspace {
                 for acc in items(&self.accounts["accounts"]) {
                     let origin = strval(acc, "origin");
                     let new = origin.clone();
+                    let account = strval(&acc["account"], "id");
                     let machines = origin.clone();
                     content = content.child(
                         row()
@@ -1533,9 +1568,11 @@ impl Workspace {
                             .child(control("Machines ↗", false, cx, move |_, _, cx| {
                                 cx.open_url(&machines)
                             }))
-                            .child(control("New session", false, cx, move |s, w, cx| {
-                                s.create_form(new.clone(), w, cx)
-                            }))
+                            .when(acc["canCreate"] == true, |row| {
+                                row.child(control("New session", false, cx, move |s, w, cx| {
+                                    s.create_form(new.clone(), account.clone(), w, cx)
+                                }))
+                            })
                             .child(control("Sign out", false, cx, move |s, _, _| {
                                 s.call(json!({"op":"logout","origin":origin}))
                             })),
@@ -1648,13 +1685,17 @@ impl Workspace {
                         )
                     }
                 }
-                for a in items(&self.accounts["accounts"]) {
+                for a in items(&self.accounts["accounts"])
+                    .iter()
+                    .filter(|a| a["canCreate"] == true)
+                {
                     let origin = strval(a, "origin");
+                    let account = strval(&a["account"], "id");
                     content = content.child(control(
                         format!("New session on {origin}"),
                         false,
                         cx,
-                        move |s, w, cx| s.create_form(origin.clone(), w, cx),
+                        move |s, w, cx| s.create_form(origin.clone(), account.clone(), w, cx),
                     ))
                 }
                 content = content.child(row().child(control(
@@ -1677,15 +1718,54 @@ impl Workspace {
                         cx,
                         move |s, _, cx| {
                             s.target = id.clone();
-                            s.tools = Value::Null;
+                            s.options = Value::Null;
                             s.tool.clear();
-                            s.call(json!({"op":"options","origin":s.origin,"target":id}));
+                            s.message.clear();
+                            s.call(json!({"op":"options","origin":s.origin,"accountId":s.account_id,"target":id}));
                             cx.notify()
                         },
                     ))
                 }
-                content = content.child(section("Tool"));
-                for t in items(&self.tools) {
+                if self.targets.is_null() && self.message.is_empty() {
+                    content = content.child(text("Loading machines…", 13., MUTED));
+                } else if self.targets.is_array() && items(&self.targets).is_empty() {
+                    let url = format!("{}/?add=1", self.origin);
+                    content = content
+                        .child(text(
+                            "Add a machine to this account to create a session.",
+                            13.,
+                            MUTED,
+                        ))
+                        .child(control("Add a machine ↗", false, cx, move |_, _, cx| {
+                            cx.open_url(&url)
+                        }));
+                }
+                if !self.target.is_empty() {
+                    content = content.child(section("Tool"));
+                    if self.options.is_null() && self.message.is_empty() {
+                        content = content.child(text("Checking required software…", 13., MUTED));
+                    }
+                }
+                let missing = items(&self.options["missing"])
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>();
+                if !missing.is_empty() {
+                    let url = format!("{}/?target={}", self.origin, self.target);
+                    content = content
+                        .child(text(
+                            format!(
+                                "Install {} on this machine to create a session.",
+                                missing.join(", ")
+                            ),
+                            13.,
+                            TEXT,
+                        ))
+                        .child(control("Open machine ↗", false, cx, move |_, _, cx| {
+                            cx.open_url(&url)
+                        }));
+                }
+                for t in items(&self.options["tools"]) {
                     let t = t.as_str().unwrap_or("").to_owned();
                     let label = agent_label(AgentMark::get(Some(&t)), t.clone());
                     content = content.child(
@@ -1709,9 +1789,13 @@ impl Workspace {
                     .child(section("Working directory"))
                     .child(field(&self.directory))
                     .child(
-                        row().child(control("Create and open", true, cx, |s, w, cx| {
-                            s.submit(w, cx)
-                        })),
+                        row().child(
+                            Button::new("create-session")
+                                .label("Create and open")
+                                .primary()
+                                .disabled(!self.creation_ready())
+                                .on_click(cx.listener(|s, _, w, cx| s.submit(w, cx))),
+                        ),
                     );
             }
             Page::Manage => {
@@ -2101,6 +2185,30 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             s.bridge = Some(bridge);
             s
         })
+    })?;
+    test.update_window(remote_window.into(), |root, w, cx| {
+        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+            let origin = "https://example.com";
+            s.create_form(origin.into(), "first".into(), w, cx);
+            assert_eq!(commands.try_recv().unwrap()["accountId"], "first");
+            s.target = "machine".into();
+            s.name.update(cx, |name, cx| name.set_value_silent("Review", cx));
+            s.directory.update(cx, |dir, cx| dir.set_value_silent("/work", cx));
+            let mut options = json!({"event":"options","origin":origin,"accountId":"first","target":"machine","tools":["codex"],"missing":["bash"]});
+            s.event(options.clone(), w, cx);
+            s.submit(w, cx);
+            assert!(!s.creation_ready());
+            assert!(commands.try_recv().is_err());
+            options["missing"] = json!([]);
+            s.event(options, w, cx);
+            assert!(s.creation_ready());
+            s.submit(w, cx);
+            let created = commands.try_recv().unwrap();
+            assert_eq!(created["op"], "create");
+            assert_eq!(created["accountId"], "first");
+            s.event(json!({"event":"accounts","accounts":[{"origin":origin,"account":{"id":"second"},"canCreate":true}]}), w, cx);
+            assert!(s.page == Page::Home);
+        });
     })?;
     let focused = || {
         std::iter::from_fn(|| commands.try_recv().ok())

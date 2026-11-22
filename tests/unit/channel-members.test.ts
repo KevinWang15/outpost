@@ -38,6 +38,7 @@ test('channels keep offline members and remove deleted sessions once across chan
       resolve,
       files: new SessionFileClient(),
       terminals: sessions,
+      terminalPollMs: 20,
       connect() {
         throw new Error('Unexpected chat connection')
       },
@@ -103,8 +104,24 @@ test('channels keep offline members and remove deleted sessions once across chan
   assert.equal(edited?.name, 'renamed')
   assert.deepEqual(edited.members, [])
 
+  const schedule = await hub.saveSchedule(owner, {
+    ...ref(two.id),
+    name: 'Review',
+    prompt: 'Review the build',
+    cron: '0 9 * * *',
+    timeZone: 'UTC',
+    enabled: false,
+  })
+  await hub.runSchedule(owner, schedule.id)
+  await t.waitFor(() =>
+    assert.ok(
+      events.some(e => e.type === 'delivery' && e.delivery.source.kind === 'schedule' && e.delivery.state === 'sent'),
+    ),
+  )
   await sessions.remove(context, two.id)
   await hub.sessionDeleted(owner, ref(two.id))
+  await t.waitFor(() => assert.equal(schedule.lastRun?.ok, false))
+  assert.match(schedule.lastRun?.message ?? '', /session not found/i)
   assert.deepEqual(
     (await hub.attach(client)).hello.channels.map(channel => channel.members),
     [[], []],
@@ -114,4 +131,58 @@ test('channels keep offline members and remove deleted sessions once across chan
   assert.equal(messages.at(-1)?.text, '@two was removed from this channel because the session was deleted.')
   assert.ok(events.some(event => event.type === 'delivery' && event.delivery.state === 'failed'))
   assert.equal((await hub.history(owner, b.id, null)).messages.at(-1)?.text, '@two left the channel.')
+})
+
+test('concurrent and old channel drafts acknowledge only a saved post in the same channel', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-channel-drafts-'))
+  const deployment = await LocalDeployment.open(directory)
+  const owner = deployment.owner()
+  const machines = new Machines('channel-drafts')
+  const make = () =>
+    new ChatHub({
+      deployment,
+      resolve: targetResolver(deployment, machines, false),
+      terminals: new FakeSessions(),
+      files: new SessionFileClient(),
+      list: async () => [],
+      connect() {
+        throw new Error('No machines')
+      },
+    })
+  let hub = make()
+  t.after(async () => {
+    hub.close()
+    machines.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const first = await hub.saveChannel(owner, { name: 'first', topic: '', members: [] })
+  const second = await hub.saveChannel(owner, { name: 'second', topic: '', members: [] })
+  const expired = () => hub.post(owner, first.id, 'draft', 'draft with expired file', ['f'.repeat(32)])
+  await Promise.all([assert.rejects(expired(), /expired/), assert.rejects(expired(), /expired/)])
+  assert.deepEqual((await hub.history(owner, first.id, null)).messages, [])
+  const attached = await hub.stageFile(owner, first.id, 'notes.txt', Buffer.from('work'))
+  const send = () => hub.post(owner, first.id, 'draft', 'keep this', [attached.id])
+  const [one, two, other] = await Promise.all([
+    send(),
+    send(),
+    hub.post(owner, second.id, 'draft', 'different channel'),
+  ])
+  assert.equal(one.messageId, two.messageId)
+  assert.deepEqual([one.duplicate, two.duplicate].sort(), [false, true])
+  assert.notEqual(other.messageId, one.messageId)
+  assert.equal(other.duplicate, false)
+  const { account } = await hub.attach({ owner, send() {} })
+  const [original] = (await hub.history(owner, first.id, null)).messages
+  for (let index = 0; index < 500; index++) {
+    const id = crypto.randomUUID()
+    await account.store.append({ ...original, id, root: id, key: id, files: [] })
+  }
+  assert.deepEqual(await send(), { messageId: one.messageId, duplicate: true })
+  hub.close()
+  hub = make()
+  assert.deepEqual(await send(), { messageId: one.messageId, duplicate: true })
+  assert.deepEqual(
+    (await hub.channelFiles(owner, first.id)).map(file => file.id),
+    [attached.id],
+  )
 })

@@ -1,5 +1,6 @@
 import type { Target, Session } from '../../shared/model'
 import { desktopEntryUrl } from '../../shared/desktopAuth'
+import { unavailableActivity } from '../../shared/activity'
 import { expect, test, type Page } from './fixtures'
 import { appConnection } from './terminal-fixture'
 
@@ -58,6 +59,70 @@ test('remote setup offers SSH with a bastion or one outbound install command and
   const first = await command.innerText()
   await panel.getByRole('button', { name: 'Generate new command' }).click()
   await expect(command).not.toHaveText(first)
+})
+
+test('Machines offers a terminal for an ACP-only session and stops offering creation when its machine disconnects', async ({
+  page,
+  request,
+}) => {
+  const response = await request.post('/api/targets', {
+    headers: { 'x-outpost-request': '1' },
+    data: { kind: 'outbound', name: 'Build host', tools: ['deepseek'] },
+  })
+  expect(response.status()).toBe(201)
+  const target: Target = await response.json()
+  const api = '**/api/targets/' + target.id
+  let connected = true
+  await page.route(api + '/enrollment', route => route.fulfill({ json: { enrolled: true, connected } }))
+  await page.route(api + '/installations', route => route.fulfill({ json: { installation: null } }))
+  await page.route(api + '/software', route =>
+    route.fulfill({
+      json: {
+        software: ['bash', 'outpost-terminal', 'deepseek'].map(id => ({ id, status: 'installed', version: 'fixture' })),
+      },
+    }),
+  )
+  const now = new Date().toISOString()
+  const session: Session = {
+    id: crypto.randomUUID(),
+    name: 'DeepSeek review',
+    tool: 'deepseek',
+    rootDir: '/work',
+    createdAt: now,
+    lastConnectedAt: null,
+    storage: {},
+    delivery: 'auto',
+    config: { revision: 1, instructions: null, model: null, mode: null, mcpServers: {}, args: '', env: {} },
+    conversations: [{ id: crypto.randomUUID(), title: null, startedAt: now, movedTo: null }],
+    title: null,
+    status: 'ready',
+    driver: null,
+    runningRevision: null,
+    activity: unavailableActivity('Not started'),
+  }
+  await page.route(api + '/sessions', route => route.fulfill({ json: { sessions: [session] } }))
+  await page.clock.install()
+  await page.goto('/')
+  const row = page.getByRole('row').filter({ hasText: session.name })
+  await expect(row.getByRole('link', { name: 'Open in chat' })).toBeVisible()
+  await row.getByRole('button', { name: 'More actions for ' + session.name }).click()
+  await page.getByRole('menuitem', { name: 'Open in Terminal' }).click()
+  const connect = page.getByRole('dialog', { name: 'Connect to ' + session.name })
+  await expect(connect.getByRole('button', { name: /Outpost Desktop/ })).toContainText('tabs and split panes')
+  await page.keyboard.press('Escape')
+  const start = page.getByRole('button', { name: 'New session', exact: true }).first()
+  await start.click()
+  const creator = page.getByRole('dialog', { name: 'New session' })
+  await expect(creator.getByRole('button', { name: 'Create session' })).toBeEnabled()
+  connected = false
+  await page.clock.fastForward('00:16')
+  await expect(creator.getByRole('button', { name: 'Create session' })).toBeDisabled()
+  await creator.getByRole('button', { name: 'Cancel' }).click()
+  await expect(start).toBeDisabled()
+  await expect(start).toHaveAttribute('title', 'Connect the machine first')
+  await page.getByRole('button', { name: 'Actions for Build host' }).click()
+  await page.getByRole('menuitem', { name: 'Remove machine' }).click()
+  await expect(page.getByRole('dialog', { name: 'Remove Build host?' })).toContainText('outpost-terminal unenroll')
 })
 
 test('add a machine, create a session, and work in the web terminal', async ({ page }) => {

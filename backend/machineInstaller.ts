@@ -35,8 +35,7 @@ ${prepare}
 cat > "$work/machine"
 checksum=${quote(sha256)}
 ${verify}
-"$work/machine" enroll ssh ${quote(socket)}
-mv -f "$work/machine" "$HOME/.outpost/bin/outpost-terminal"`
+"$work/machine" enroll --install ssh ${quote(socket)}`
 }
 
 export function sshToolInstaller(sha256: string) {
@@ -63,7 +62,20 @@ origin=$1
 target=$2
 enrollment=\${OUTPOST_ENROLLMENT:?Missing enrollment code}
 unset OUTPOST_ENROLLMENT
-case "$origin" in https://*|http://127.0.0.1:*|http://localhost:*|http://\\[::1\\]:*) ;; *) echo 'Use the HTTPS address of your Outpost server.' >&2; exit 1 ;; esac
+invalid_origin() { echo 'Use an HTTPS server address, or HTTP on localhost, without a path or credentials.' >&2; exit 1; }
+host=\${origin#*://}
+case "$host" in ''|*/*|*@*|*'?'*|*'#'*|*'\\'*|*[[:space:]]*) invalid_origin ;; esac
+case "$host" in
+  *']') ;; # IPv6 literal without a port
+  *:*) port=\${host##*:}; host=\${host%:*}
+    case "$port" in ''|*[!0-9]*) invalid_origin ;; esac
+    [ -n "$host" ] && [ "$port" -le 65535 ] 2>/dev/null || invalid_origin ;;
+esac
+case "$origin" in
+  https://*) ;;
+  http://*) case "$host" in localhost|127.0.0.1|'[::1]') ;; *) invalid_origin ;; esac ;;
+  *) invalid_origin ;;
+esac
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null; then manager=systemd
 elif command -v rc-update >/dev/null && command -v supervise-daemon >/dev/null; then manager=openrc
 else echo 'Outbound setup requires systemd or OpenRC to start at boot. Connect over SSH on other machines.' >&2; exit 1; fi
@@ -75,53 +87,7 @@ base="$origin/api/install/$platform"
 curl -fsS --connect-timeout 15 --max-time 300 "$base/binary" -o "$work/machine"
 checksum=$(curl -fsS --connect-timeout 15 --max-time 60 "$base/sha256")
 ${verify}
-printf '%s\\n' "$enrollment" | "$work/machine" enroll outbound "$origin" "$target"
-unset enrollment
-mv -f "$work/machine" "$HOME/.outpost/bin/outpost-terminal"
-if [ "$manager" = systemd ]; then
-  {
-    cat <<'UNIT'
-[Unit]
-Description=Outpost enrolled machine connection
-After=network-online.target
-Wants=network-online.target
-[Service]
-UNIT
-    printf 'User=%s\\n' "$(id -u)"
-    cat <<'UNIT'
-ExecStart=/bin/sh -c 'exec "$$HOME/.outpost/bin/outpost-terminal" connect'
-Restart=on-failure
-RestartSec=5s
-KillMode=process
-[Install]
-WantedBy=multi-user.target
-UNIT
-  } > "$work/unit"
-  as_root install -m 644 "$work/unit" /etc/systemd/system/outpost-machine.service
-  as_root systemctl daemon-reload
-  as_root systemctl enable outpost-machine.service
-  as_root systemctl restart outpost-machine.service
-else
-  cat > "$work/service" <<'OPENRC'
-#!/sbin/openrc-run
-description="Outpost enrolled machine connection"
-uid=$(stat -c %u /var/lib/outpost-machine)
-command_user=$(stat -c %U /var/lib/outpost-machine)
-if command -v getent >/dev/null; then account=$(getent passwd "$command_user")
-else account=$(awk -F: -v uid="$uid" '$3 == uid {print; exit}' /etc/passwd); fi
-HOME=$(printf '%s' "$account" | cut -d: -f6)
-SHELL=$(printf '%s' "$account" | cut -d: -f7)
-export HOME SHELL
-command="$HOME/.outpost/bin/outpost-terminal"
-command_args="connect"
-supervisor="supervise-daemon"
-respawn_delay=5
-depend() { need net; }
-OPENRC
-  as_root install -m 755 "$work/service" /etc/init.d/outpost-machine
-  as_root rc-update add outpost-machine default
-  as_root rc-service outpost-machine restart
-fi
+printf '%s\\n' "$enrollment" | "$work/machine" enroll --install outbound "$origin" "$target" "$manager"
 echo 'Outpost machine enrolled. Follow software setup on the machine page.'
 `
 }

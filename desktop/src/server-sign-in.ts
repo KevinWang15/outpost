@@ -27,7 +27,7 @@ interface Attempt {
 interface Host {
   openBrowser(url: string): Promise<void>
   changed(): void
-  accepted(entry: SavedServerLogin): void
+  accepted(entry: SavedServerLogin, previous?: SavedServerLogin): Promise<void>
   failed(error: Error): void
 }
 
@@ -156,8 +156,8 @@ export class ServerSignIn {
       this.phase(attempt, 'saving')
       await this.store.put(credential)
       saved = true
-      this.host.accepted(credential)
       if (previous) revokeDesktopLogin(previous)
+      await this.host.accepted(credential, previous)
       return [...attempt.sessions.values()]
     } catch (error) {
       if (attempt.abort.signal.aborted) return

@@ -85,7 +85,7 @@ export default function ConnectDialog({
             {
               id: 'desktop',
               name: 'Outpost Desktop',
-              detail: 'Your own terminal window, app icon, and desktop notifications. For macOS and Windows.',
+              detail: 'Open the session alongside local shells in tabs and split panes. For macOS and Windows.',
               icon: <Monitor size={20} />,
             },
           ] as const

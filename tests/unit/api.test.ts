@@ -340,8 +340,24 @@ test('outbound enrollment binds one machine, recovers a lost reply and invalidat
   assert.equal((await call('POST', '/machine/enroll', { code: current })).status, 400)
   assert.equal((await call('POST', '/machine/enroll', { code: current, targetId, secret, extra: true })).status, 400)
 
-  const first = await redeem(current)
+  // Hold both requests at the workspace read so both present the unused code.
+  const workspace = deployment.workspace()
+  const get = workspace.get.bind(workspace)
+  let release!: () => void
+  const waiting = new Promise<void>(resolve => {
+    release = resolve
+  })
+  let readers = 0
+  const gate = t.mock.method(workspace, 'get', async (id: string) => {
+    if (++readers === 2) release()
+    await waiting
+    return get(id)
+  })
+  const [first, second] = await Promise.all([redeem(current), redeem(current)])
+  gate.mock.restore()
   assert.equal(first.status, 200)
+  assert.equal(second.status, 200)
+  assert.deepEqual(second.body, first.body)
   assert.deepEqual(Object.keys(first.body).sort(), ['socket', 'targetId'])
   assert.equal(first.body.targetId, targetId)
   assert.match(first.body.socket, /^run\/node-[a-f0-9]{32}\.sock$/)

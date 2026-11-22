@@ -1,7 +1,7 @@
 // Chat through a machine's node: the chat host, its conversation in the session
 // timeline, files, Outpost tools and one driver at a time, on a local target.
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { readFile, writeFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
@@ -288,6 +288,19 @@ test(
     assert.deepEqual(read.bytes, data)
   },
 )
+
+test('a lost machine connection removes a partially uploaded file', { timeout: 20_000 }, async t => {
+  const { home, context, create } = await machine(t)
+  const session = await create()
+  const upload = await context.machine.open('file-receive', { session: session.id, name: 'partial.bin', size: 100 })
+  const directory = join(home, '.outpost', 'files', session.id)
+  const [staging] = readdirSync(directory)
+  const partial = join(directory, staging, 'content', 'partial.bin')
+  upload.write(Buffer.from('first chunk'))
+  await waitFor(() => statSync(partial).size === 11, 'The machine did not receive the first chunk')
+  context.machine.restart()
+  await waitFor(() => readdirSync(directory).length === 0, 'The disconnected upload remained on disk')
+})
 
 test('files sent to the agent are stored, and linked where its own tools read them', { timeout: 120_000 }, async t => {
   const { context, create, open, files } = await machine(t)

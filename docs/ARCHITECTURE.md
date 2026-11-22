@@ -435,12 +435,12 @@ owner. Session data belongs to the execution account under `~/.outpost`.
   connections to Outpost.
 - **Run setup on the machine** covers a machine Outpost cannot SSH to. An operator runs the
   wizard’s one-time command in a shell on the machine. It retrieves the installer from the
-  chosen Outpost instance and verifies and installs the service. Before redeeming the
-  short-lived code, the service records its own random machine credential locally. The
-  server binds that credential to the owner and machine. If the response is lost, the
-  same installation can confirm its enrollment with the saved credential. A service
-  manager keeps it running after logout, starts it at boot and restores the outbound
-  connection after link loss.
+  chosen Outpost instance. The verified executable is installed before the first
+  redemption, so `status` and `unenroll` are available even if that request fails.
+  The service saves its random credential locally and the server binds it to the owner
+  and machine. Retries with that credential receive the same receipt. Enrollment and
+  boot-service activation share the local ownership lock with removal. A service
+  manager then starts the outbound connection at boot and restores it after link loss.
 
 Switching methods or transferring a machine requires releasing its local enrollment and
 enrolling it again. Removing the machine from its old workspace revokes Outpost access
@@ -454,6 +454,19 @@ Both `unenroll` and `uninstall` remove the outbound service when installed. A ne
 owner using the same Linux account can access its existing session data. Use a
 fresh account to keep owners’ data separate.
 The [operator instructions](../README.md#machine-setup-and-removal) cover setup, revocation and removal.
+
+#### Linux account handoff
+
+Release the enrollment as the original Linux user, remove the old workspace entry and
+revoke its dedicated SSH key. Finish any setup or removal commands before the handoff
+and keep the former account from starting another setup during it.
+
+As root, confirm that `/var/lib/outpost-machine/machine.json` is absent. Transfer
+ownership of `/var/lib/outpost-machine`, its `locks` directory and the existing
+`*.lock` files inside it to the new Linux user. Keep the directories at mode 0700
+and the lock files at 0600. Change ownership in place so the locks retain their
+inodes. The former account keeps its own `~/.outpost` session history and files.
+Add the machine from the new workspace and run setup as the new execution user.
 
 #### Shared machine protocol
 

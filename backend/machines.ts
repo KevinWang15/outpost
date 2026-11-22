@@ -25,6 +25,21 @@ const magic = Buffer.from(nodeMagic, 'latin1')
 export class MachineError extends AppError {}
 const remote = (error: RemoteError) => new MachineError(error.message, error.status)
 
+const sshUnavailable = 'Could not connect to the machine over SSH. Check the address, SSH key and any jump host.'
+const outboundOffline = 'The outbound machine is offline. Check its Outpost service.'
+const noResponse = 'The machine did not answer in time. Check that it is reachable.'
+
+/** Keep SSH diagnostics in server logs while giving the workspace owner a recovery action. */
+export class MachineConnectionError extends MachineError {
+  constructor(
+    readonly publicMessage: string,
+    status: number,
+    detail = publicMessage,
+  ) {
+    super(detail, status)
+  }
+}
+
 /** A byte stream to a machine: what callers of `open` use. */
 export interface Stream {
   /** The node's answer to the open. */
@@ -161,20 +176,16 @@ export class MachineConnection {
 
   /** Connect if needed; resolves once the node said hello. */
   private connect() {
-    if (this.closed) return Promise.reject(new MachineError('Outpost is restarting. Try again shortly.', 503))
+    if (this.closed) return Promise.reject(new MachineConnectionError('Outpost is restarting. Try again shortly.', 503))
     if (this.incoming && !this.started)
-      return Promise.reject(new MachineError('The outbound machine is connecting.', 503))
+      return Promise.reject(new MachineConnectionError('The outbound machine is connecting. Try again shortly.', 503))
     if ((this.child || this.incoming) && this.started) return Promise.resolve()
     const transport = this.transport
-    if (!transport)
-      return Promise.reject(new MachineError('The outbound machine is offline. Check its Outpost service.', 503))
+    if (!transport) return Promise.reject(new MachineConnectionError(outboundOffline, 503))
     if (this.starting) return this.starting
     const starting: Promise<void> = new Promise<void>((resolve, reject) => {
       const command = transport.login(`exec "$HOME/.outpost/bin/outpost-terminal" node --socket ${this.socket}`)
-      const timer = setTimeout(
-        () => this.lost('The machine did not answer in time. Check that it is reachable.'),
-        30_000,
-      )
+      const timer = setTimeout(() => this.lost(noResponse, 504, noResponse), 30_000)
       const fail = (error: Error) => {
         clearTimeout(timer)
         this.startFailed = null
@@ -212,12 +223,16 @@ export class MachineConnection {
             this.writer?.dispose()
             return launch(retry.args, undefined)
           }
-          const message = !this.started
-            ? code === 127 || code === 126 || /outpost-terminal: (not found|No such file)/.test(stderr)
-              ? 'Outpost machine service is missing on this machine. Open Required software to install it.'
-              : stderr.split('\n').at(-1) || 'Could not connect to the machine. Check access and Required software.'
-            : 'The connection to the machine was lost.'
-          this.lost(message)
+          if (
+            !this.started &&
+            (code === 127 || code === 126 || /outpost-terminal: (not found|No such file)/.test(stderr))
+          ) {
+            const missing = 'Outpost machine service is missing on this machine. Open Required software to install it.'
+            return this.lost(missing, 502, missing)
+          }
+          this.lost(
+            this.started ? 'The connection to the machine was lost.' : stderr.split('\n').at(-1) || sshUnavailable,
+          )
         })
       }
       launch(command.args, command.retry)
@@ -339,7 +354,7 @@ export class MachineConnection {
   }
 
   /** The connection ended: every caller learns now; the next use reconnects. */
-  private lost(message: string, status = 502) {
+  private lost(message: string, status = 502, publicMessage = this.transport ? sshUnavailable : outboundOffline) {
     const child = this.child
     const incoming = this.incoming
     if (!child && !incoming) return
@@ -348,7 +363,8 @@ export class MachineConnection {
     // The next call can start a handshake before the interrupted one settles.
     this.starting = null
     incoming?.destroy()
-    this.startFailed?.(new MachineError(message, status))
+    const error = new MachineConnectionError(publicMessage, status, message)
+    this.startFailed?.(error)
     this.started = false
     this.writer?.dispose()
     this.writer = null
@@ -357,7 +373,6 @@ export class MachineConnection {
       child.kill('SIGTERM')
       setTimeout(() => child.kill('SIGKILL'), 5000).unref()
     }
-    const error = new MachineError(message, status)
     for (const waiter of this.calls.values()) {
       clearTimeout(waiter.timer)
       waiter.reject(error)
@@ -377,7 +392,7 @@ export class MachineConnection {
       const id = randomUUID()
       const timer = setTimeout(() => {
         this.calls.delete(id)
-        reject(new MachineError('The machine did not answer in time. Check it and retry.', 504))
+        reject(new MachineConnectionError(noResponse, 504))
       }, options.timeoutMs ?? 30_000)
       this.calls.set(id, { resolve: resolve as (data: unknown) => void, reject, timer })
       options.signal?.addEventListener(
@@ -414,11 +429,13 @@ export class MachineConnection {
 
   close() {
     this.closed = true
-    this.lost('Outpost is restarting. Try again shortly.')
+    const restarting = 'Outpost is restarting. Try again shortly.'
+    this.lost(restarting, 503, restarting)
   }
   /** Drop the current connection; the next use starts a new node (after an update). */
   restart() {
-    this.lost('Outpost machine service was updated. Reconnecting…')
+    const updating = 'Outpost machine service was updated. Reconnecting…'
+    this.lost(updating, 503, updating)
   }
 }
 

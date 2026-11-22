@@ -8,6 +8,8 @@ import headless from '@xterm/headless'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { checkpoint, clearTerminal, headlessColors, writeHeadless } from '../shared/terminalCheckpoint'
 import { terminalService, terminalSize } from '../shared/terminalService'
+import { chatHost } from '../shared/chatHost'
+import { parseSessionFile, sessionFileId } from '../shared/sessionFiles'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { isUserInput, TerminalActivity } from './activity'
 import { TerminalFileRequests } from './terminalFileRequests'
@@ -212,11 +214,16 @@ export async function serveTerminal() {
           typeof message.key !== 'string' ||
           !/^[A-Za-z0-9_-]{1,80}$/.test(message.key) ||
           typeof message.text !== 'string' ||
-          !message.text.trim() ||
-          Buffer.byteLength(message.text) > 64 * 1024
+          !Array.isArray(message.files) ||
+          message.files.length > chatHost.maxFiles ||
+          !message.files.every(sessionFileId)
         )
           throw new Error('Invalid message for the session')
-        sendControl(socket, { type: 'result', ok: true, delivery: deliveries.add(message.key, message.text) })
+        sendControl(socket, {
+          type: 'result',
+          ok: true,
+          delivery: deliveries.add(message.key, message.text, message.files),
+        })
         return socket.end()
       }
       case 'undeliver':
@@ -226,8 +233,10 @@ export async function serveTerminal() {
         if (!Array.isArray(message.keys) || message.keys.length > 100) throw new Error('Invalid delivery query')
         sendControl(socket, { type: 'result', ok: true, deliveries: deliveries.status(message.keys.map(String)) })
         return socket.end()
-      case 'files':
-        // The agent stored a file; viewers refresh their list.
+      case 'file':
+        // Tools without lifecycle hooks report their current turn through the native transcript.
+        activity.refresh()
+        deliveries.published(parseSessionFile(message.file))
         broadcast(terminalControl({ type: 'files' }))
         sendControl(socket, { type: 'result', ok: true })
         return socket.end()

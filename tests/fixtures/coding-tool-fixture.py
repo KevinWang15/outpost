@@ -185,6 +185,14 @@ def answer(prompt):
         )
     time.sleep(0.3)
     body = [line for line in prompt.splitlines() if line.strip() and not line.startswith('[Outpost:')]
+    if body and body[0] == 'Publish the attached brief':
+        report = Path('review.txt')
+        report.write_bytes(b'Reviewed: ' + Path(body[-1]).read_bytes())
+        subprocess.run(
+            [str(Path.home() / '.outpost/bin/outpost-terminal'), 'publish', str(report.resolve())],
+            check=True,
+            timeout=10,
+        )
     reply = 'Fixture reply to: ' + (body[0] if body else prompt.strip())
     with open(history, 'a') as stream:
         stream.write(

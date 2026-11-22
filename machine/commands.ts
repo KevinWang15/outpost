@@ -55,13 +55,11 @@ async function signal(session: string, type: string, payload: unknown) {
   if (!result.ok) throw new Error(result.message ?? 'Outpost did not accept the signal.')
 }
 
-/** Tell the session's driver about a stored file, as a hint to refresh. */
+/** Let the running driver attach the published file to its turn and notify viewers. */
 export async function filesChanged(session: string, driver: SessionBinding['driver'], file: unknown) {
-  await request(
-    driver === 'chat' ? chatSocket(session) : terminalSocket(session),
-    driver === 'chat' ? { type: 'file', file } : { type: 'files' },
-    2000,
-  ).catch(() => {})
+  await request(driver === 'chat' ? chatSocket(session) : terminalSocket(session), { type: 'file', file }, 2000).catch(
+    () => {},
+  )
 }
 
 export async function command(name: 'open' | 'signal' | 'publish', args: string[], binding: SessionBinding) {

@@ -58,7 +58,7 @@ export default function TargetView({
   const options = sessionCreationOptions(target, software.report?.software ?? [])
   const tools = options.tools
   const missing = options.missing
-  const ready = missing.length === 0 && tools.length > 0
+  const ready = available && missing.length === 0 && tools.length > 0
   const directories = useCallback(
     (path: string, signal: AbortSignal) =>
       api<DirectorySuggestions>(
@@ -81,7 +81,7 @@ export default function TargetView({
   const inChat = (session: Session, extra?: { start?: boolean; schedule?: boolean }) =>
     window.location.assign(chatHref(target.id, session.id, extra))
 
-  /** The session's main action: chat when it runs there or has no terminal, else a terminal. */
+  /** Prefer Chat for ACP-driven sessions and tools without a native CLI. */
   const opensInChat = (session: Session) => session.driver === 'chat' || !supportsTerminal(session.tool)
   function open(session: Session) {
     if (opensInChat(session)) inChat(session)
@@ -153,7 +153,7 @@ export default function TargetView({
           <button
             className="button primary"
             disabled={!ready}
-            title={ready ? undefined : 'Install the required software first'}
+            title={!available ? 'Connect the machine first' : ready ? undefined : 'Install the required software first'}
             onClick={() => setPanel({ kind: 'session', conversation: null })}
           >
             <Plus size={15} />
@@ -192,11 +192,7 @@ export default function TargetView({
                 : { kind: 'terminal', connect: () => connect(session) }
             }
             actionsFor={session => ({
-              ...(opensInChat(session)
-                ? supportsTerminal(session.tool)
-                  ? { terminal: () => connect(session) }
-                  : {}
-                : { chat: () => inChat(session) }),
+              ...(opensInChat(session) ? { terminal: () => connect(session) } : { chat: () => inChat(session) }),
               conversations: () => setPanel({ kind: 'conversations', session }),
               edit: () => setPanel({ kind: 'settings', session }),
               fork: () => setPanel({ kind: 'fork', session }),
@@ -214,7 +210,8 @@ export default function TargetView({
       {panel?.kind === 'session' && (
         <SessionDialog
           target={target}
-          tools={tools}
+          tools={ready ? tools : []}
+          beforeFields={!available && <p className="warning">Reconnect this machine to create a session.</p>}
           conversation={panel.conversation}
           directories={directories}
           copyFrom={(sessions ?? []).map(session => ({
@@ -291,7 +288,7 @@ export default function TargetView({
           title={`Remove ${target.name}?`}
           action="Remove machine"
           onClose={close}
-          description="Outpost forgets this machine. Sessions and coding tools keep running on it, and adding it again shows them."
+          description="This removes the machine from your workspace. Its sessions and files stay on the machine. If it was enrolled, run ~/.outpost/bin/outpost-terminal unenroll as the original Linux user before adding it again."
           onConfirm={async () => {
             await api(`/targets/${target.id}`, 'DELETE')
             onRemoved(target)

@@ -17,6 +17,7 @@ import { sessionCreationServer } from './server-session-creation'
 interface Host {
   openBrowser(url: string): Promise<void>
   changed(): void
+  accountRemoved?(origin: string, accountId: string): Promise<void>
   failed(error: Error): void
 }
 type Connection = { entry: SavedServerLogin; status: ServerConnection; error: string | null }
@@ -38,7 +39,11 @@ export class ServerAccounts {
     this.store = new ServerLoginStore(path)
     this.signIn = new ServerSignIn(this.store, {
       ...host,
-      accepted: entry => this.connection(entry, 'connected'),
+      accepted: async (entry, previous) => {
+        if (previous && previous.account.id !== entry.account.id)
+          await host.accountRemoved?.(entry.origin, previous.account.id)
+        this.connection(entry, 'connected')
+      },
     })
   }
   load() {
@@ -58,6 +63,7 @@ export class ServerAccounts {
         return {
           origin: entry.origin,
           account: entry.account,
+          canCreate: this.valid(entry),
           expiresAt: entry.expiresAt,
           status,
           error:
@@ -187,6 +193,7 @@ export class ServerAccounts {
     if (entry) {
       await this.store.remove(entry)
       revokeDesktopLogin(entry)
+      await this.host.accountRemoved?.(origin, entry.account.id)
     }
     this.connections.delete(origin)
   }
@@ -219,15 +226,13 @@ export class ServerAccounts {
       previous,
     )
   }
-  creationServers() {
-    return this.store
-      .list()
-      .filter(entry => this.valid(entry))
-      .map(entry =>
-        sessionCreationServer({ origin: entry.origin, account: entry.account }, (path, options) =>
-          this.request(entry, path, options),
-        ),
-      )
+  creationServer(origin: string, accountId: string) {
+    const entry = this.store.get(origin)
+    if (!entry || entry.account.id !== accountId || !this.valid(entry))
+      throw new Error('Sign in to this server account again to create a session.')
+    return sessionCreationServer({ origin, account: entry.account }, (path, options) =>
+      this.request(entry, path, options),
+    )
   }
   async launch(session: DesktopSessionReference, signal?: AbortSignal) {
     const entry = this.store.get(session.server)

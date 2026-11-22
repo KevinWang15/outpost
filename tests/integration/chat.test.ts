@@ -236,6 +236,38 @@ test('files the user attaches reach the agent as links it can read, in its sessi
   }
 })
 
+test('channel files reach a native terminal and only that turn’s published files come back after reconnect', async () => {
+  const chat = await chatHarness(['Builder'], { terminal: ['Builder'] })
+  try {
+    const first = await chat.startHub()
+    const [builder] = chat.sessions
+    const channel = await first.saveChannel(chat.owner, { name: 'files', topic: '', members: [chat.ref(builder)] })
+    const brief = await first.stageFile(chat.owner, channel.id, 'brief.txt', Buffer.from('review this file'))
+    await first.post(chat.owner, channel.id, 'draft', '@builder review', [brief.id])
+    const request = await until(() => chat.terminal.typed[0], 'the terminal to accept the channel post')
+    assert.equal(request.files.length, 1)
+    assert.equal((await chat.files.read(null, builder.id, request.files[0])).bytes.toString(), 'review this file')
+    await until(
+      () => chat.deliveries().find(d => d.via === 'terminal' && d.state === 'sent'),
+      'the saved terminal receipt',
+    )
+    first.close()
+    const stored = await chat.files.receive(null, builder.id, 'report.txt', Buffer.from('review completed'))
+    const published = { ...stored, source: 'published' as const }
+    chat.terminal.answer(request.key, 'Reviewed', [published])
+    const second = await chat.startHub()
+    const reply = await until(() => chat.messages().find(m => m.author.kind === 'session'), 'the channel reply')
+    assert.deepEqual(reply.files, [published])
+    await second.post(chat.owner, channel.id, 'again', '@builder anything else?')
+    const next = await until(() => chat.terminal.typed[1], 'the next terminal delivery')
+    chat.terminal.answer(next.key, 'Done')
+    const last = await until(() => chat.messages().find(m => m.text === 'Done'), 'the next channel reply')
+    assert.deepEqual(last.files, [])
+  } finally {
+    await chat.close()
+  }
+})
+
 test('a chat agent messages a session running in a terminal, and its reply comes back', async () => {
   const chat = await chatHarness(['Coder', 'Builder'], { terminal: ['Builder'] })
   try {

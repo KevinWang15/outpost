@@ -8,19 +8,12 @@ import type {
   SessionUpdate,
   Target,
 } from '../shared/model'
+import type { TerminalDelivery } from '../shared/machine'
 import type { Owner } from './deployment'
 import { AppError } from './errors'
 import type { MachineConnection, Stream } from './machines'
 import type { Transport } from './transport'
 import type { Workspace } from './workspace'
-
-/** A message's progress in a terminal session (machine/delivery.ts). */
-export interface TerminalDelivery {
-  key: string
-  state: 'waiting' | 'typed' | 'done' | 'failed'
-  reply: string | null
-  error: string | null
-}
 
 /** A target resolved for one owner: its settings and its machine connection. */
 export interface TargetContext {
@@ -72,8 +65,8 @@ export class SessionClient {
     return machine.call<Session>('sessions.acknowledge', { id, completionId })
   }
   /** A message for a session running in a terminal; the key makes a resend harmless. */
-  deliver({ machine }: TargetContext, id: string, key: string, text: string) {
-    return machine.call<TerminalDelivery>('sessions.deliver', { id, key, text })
+  deliver({ machine }: TargetContext, id: string, key: string, text: string, files: string[] = []) {
+    return machine.call<TerminalDelivery>('sessions.deliver', { id, key, text, files })
   }
   deliveries({ machine }: TargetContext, id: string, keys: string[]) {
     return machine.call<TerminalDelivery[]>('sessions.deliveries', { id, keys })

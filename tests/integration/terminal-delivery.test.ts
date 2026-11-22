@@ -8,7 +8,9 @@ import test from 'node:test'
 import type { Target } from '../../shared/model'
 import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
 import type { Stream } from '../../backend/machines'
-import { SessionClient, type TerminalDelivery } from '../../backend/sessions'
+import { SessionClient } from '../../backend/sessions'
+import { SessionFileClient } from '../../backend/sessionFiles'
+import type { TerminalDelivery } from '../../shared/machine'
 import { localMachine } from './helpers'
 
 const settings: Target = {
@@ -115,4 +117,40 @@ test('a terminal session takes messages only when nothing is in the way, once ea
     terminal.send({ type: 'deliver-now' })
     assert.equal((await settled('four')).reply, 'Fixture reply to: Only when asked')
   })
+
+  await t.test(
+    'a native turn reads its attached file and returns its own publication after the node reconnects',
+    async () => {
+      const current = await sessions.get(context, session.id)
+      await sessions.update(context, session.id, { revision: current.config.revision, delivery: 'auto' })
+      const files = new SessionFileClient()
+      const brief = await files.receive(
+        context,
+        session.id,
+        'brief.txt',
+        Buffer.from('ship Friday'),
+        AbortSignal.timeout(10000),
+      )
+      const result = await sessions.deliver(
+        context,
+        session.id,
+        'files',
+        '[Outpost: #review]\nPublish the attached brief',
+        [brief.id],
+      )
+      assert.equal(result.state, 'typed')
+      context.machine.restart()
+      const done = await settled('files')
+      assert.equal(done.state, 'done', done.error ?? '')
+      assert.deepEqual(
+        done.files.map(f => f.name),
+        ['review.txt'],
+      )
+      assert.equal(
+        (await files.read(context, session.id, done.files[0].id, AbortSignal.timeout(10000))).bytes.toString(),
+        'Reviewed: ship Friday',
+      )
+      assert.deepEqual((await progress('one'))?.files, [])
+    },
+  )
 })

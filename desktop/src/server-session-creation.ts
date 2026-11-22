@@ -22,7 +22,6 @@ export function sessionCreationServer(summary: { origin: string; account: Deskto
     return `/targets/${encodeURIComponent(targetId)}`
   }
   return {
-    summary,
     async targets(signal: AbortSignal) {
       return parseServerTargets(await request('/targets', { signal }))
     },

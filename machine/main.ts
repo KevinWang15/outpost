@@ -44,10 +44,17 @@ const run = async () => {
         if (owner.mode !== 'ssh') throw Error('This machine uses outbound enrollment.')
       }
       return console.log(`outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`)
-    case 'enroll':
-      if (args.length === 2 && args[0] === 'ssh') return enrollSsh(args[1])
-      if (args.length === 3 && args[0] === 'outbound') return enrollOutbound(args[1], args[2])
+    case 'enroll': {
+      const install = args[0] === '--install'
+      if (install) args.shift()
+      if (args.length === 2 && args[0] === 'ssh') return enrollSsh(args[1], install)
+      if (args[0] === 'outbound' && args.length === (install ? 4 : 3)) {
+        const manager = install ? args[3] : undefined
+        if (manager === undefined || manager === 'systemd' || manager === 'openrc')
+          return enrollOutbound(args[1], args[2], manager)
+      }
       throw Error(usage)
+    }
     case 'uninstall':
     case 'unenroll':
       if (args.length) throw Error(usage)

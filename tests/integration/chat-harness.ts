@@ -24,7 +24,7 @@ import { listFiles, readFile as storedFile, StoredFile } from '../../machine/fil
 import { changeRegistry } from '../../machine/registry'
 import { listSessions } from '../../machine/sessions'
 import { state as machineState, statePath } from '../../machine/state'
-import type { TerminalDelivery } from '../../backend/sessions'
+import type { TerminalDelivery } from '../../shared/machine'
 import { terminalBinary } from './helpers'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -193,13 +193,13 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
   }
 
   /** Messages for terminal sessions: what was handed to each, and its progress, which a test sets. */
-  const typed: { session: string; key: string; text: string }[] = []
+  const typed: { session: string; key: string; text: string; files: string[] }[] = []
   const progress = new Map<string, TerminalDelivery>()
   const terminals = {
-    async deliver(_context: unknown, session: string, key: string, text: string) {
+    async deliver(_context: unknown, session: string, key: string, text: string, files: string[] = []) {
       if (!progress.has(key)) {
-        typed.push({ session, key, text })
-        progress.set(key, { key, state: 'waiting', reply: null, error: null })
+        typed.push({ session, key, text, files })
+        progress.set(key, { key, state: 'waiting', reply: null, error: null, files: [] })
       }
       return progress.get(key)!
     },
@@ -272,7 +272,8 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
     terminal: {
       typed,
       /** The terminal session's agent answered message `key`. */
-      answer: (key: string, reply: string) => progress.set(key, { key, state: 'done', reply, error: null }),
+      answer: (key: string, reply: string, files: TerminalDelivery['files'] = []) =>
+        progress.set(key, { key, state: 'done', reply, error: null, files }),
     },
     ref: (session: { id: string }) => ({ targetId: target.id, sessionId: session.id }),
     /** Break every connection to a session's chat host; the host keeps running. */

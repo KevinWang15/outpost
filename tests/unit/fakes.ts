@@ -143,11 +143,11 @@ export class FakeSessions implements SessionService {
   async deliver(context: TargetContext, id: string, key: string, text: string) {
     this.find(context, id)
     this.delivered.push({ id, key, text })
-    return { key, state: 'waiting' as const, reply: null, error: null }
+    return { key, state: 'waiting' as const, reply: null, error: null, files: [] }
   }
   async deliveries(context: TargetContext, id: string, keys: string[]) {
     this.find(context, id)
-    return keys.map(key => ({ key, state: 'waiting' as const, reply: null, error: null }))
+    return keys.map(key => ({ key, state: 'waiting' as const, reply: null, error: null, files: [] }))
   }
   async acknowledge(context: TargetContext, id: string) {
     return this.find(context, id)

@@ -3,16 +3,15 @@
 // is idle, nobody has a draft or an unfinished line, and nobody typed for a few seconds. Kept in
 // ~/.outpost/deliveries/<session>.json, so they outlive the node and a restart.
 import type { SessionActivity } from '../shared/activity'
+import type { TerminalDelivery } from '../shared/machine'
+import type { SessionFile } from '../shared/sessionFiles'
+import { readFile } from './files'
 import { readJson, statePath, writeJson } from './state'
 
-export interface Delivery {
-  /** The server's key for it; adding the same key again changes nothing. */
-  key: string
+export interface Delivery extends Omit<TerminalDelivery, 'files'> {
   text: string
-  state: 'waiting' | 'typed' | 'done' | 'failed'
-  /** The agent's last message when its turn for this one ended. */
-  reply: string | null
-  error: string | null
+  /** Written on publication, only for the active turn. */
+  files?: SessionFile[]
   /** You chose Deliver now: it goes in once the agent is idle, even in manual mode. */
   forced: boolean
   typedAt: number | null
@@ -38,6 +37,10 @@ export const typingPause = 3000
 const startLimit = 60_000
 const kept = 50
 
+function receipt({ key, state, reply, error, files = [] }: Delivery): TerminalDelivery {
+  return { key, state, reply, error, files }
+}
+
 export class Deliveries {
   private items: Delivery[]
   private lastInput = 0
@@ -53,7 +56,7 @@ export class Deliveries {
     private options: Options,
   ) {
     this.now = options.now ?? Date.now
-    this.items = readJson<{ items: Delivery[] } | null>(this.path, null)?.items ?? []
+    this.items = readJson<{ items: Delivery[] } | null>(this.path, null, 16 * 1024 * 1024)?.items ?? []
   }
 
   private get path() {
@@ -79,15 +82,31 @@ export class Deliveries {
   }
 
   /** Queue a message; a key seen before returns its current state. */
-  add(key: string, text: string) {
+  add(key: string, text: string, files: string[] = []) {
     let item = this.items.find(entry => entry.key === key)
     if (!item) {
-      item = { key, text, state: 'waiting', reply: null, error: null, forced: false, typedAt: null, started: false }
+      const prompt = [text, ...files.map(id => readFile(this.session, id).path)].filter(Boolean).join('\n')
+      if (
+        !prompt.trim() ||
+        Buffer.byteLength(prompt) > 64 * 1024 ||
+        Array.from(prompt).some(c => (c < ' ' && c !== '\n' && c !== '\t') || (c >= '\x7f' && c <= '\x9f'))
+      )
+        throw new Error('Enter a message of up to 64 KiB without terminal control characters.')
+      item = {
+        key,
+        text: prompt,
+        state: 'waiting',
+        reply: null,
+        error: null,
+        forced: false,
+        typedAt: null,
+        started: false,
+      }
       this.items.push(item)
       this.save()
     }
     this.tick()
-    return item
+    return receipt(item)
   }
 
   remove(key: unknown) {
@@ -99,7 +118,17 @@ export class Deliveries {
   }
 
   status(keys: string[]) {
-    return keys.flatMap(key => this.items.filter(item => item.key === key))
+    return keys.flatMap(key => this.items.filter(item => item.key === key)).map(receipt)
+  }
+
+  published(file: SessionFile) {
+    const turn = this.items.find(item => item.state === 'typed')
+    if (!turn?.typedAt || file.source !== 'published' || Date.parse(file.createdAt) < turn.typedAt) return
+    const { state } = this.options.activity()
+    if ((state !== 'working' && state !== 'waiting') || turn.files?.some(item => item.id === file.id)) return
+    turn.started = true
+    turn.files = [...(turn.files ?? []), file]
+    this.save()
   }
 
   /** You typed into the terminal. Text without Enter (or Ctrl+C, Ctrl+U) leaves a

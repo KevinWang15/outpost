@@ -57,6 +57,17 @@ const validMessage = validate(channelMessage)
 const recent = 500
 const keep = { deliveries: 300, threads: 500 }
 
+interface ChannelHistory {
+  messages: ChannelMessage[]
+  complete: boolean
+  /** A post keeps its draft key for the lifetime of its channel, including beyond the display cache. */
+  postIds: Map<string, string>
+}
+
+function indexPost(postIds: Map<string, string>, message: ChannelMessage) {
+  if (message.author.kind === 'user' && message.key && !postIds.has(message.key)) postIds.set(message.key, message.id)
+}
+
 /** One owner's chat state, in `<workspace>/chat`. Channel messages are
  * append-only JSONL; other files are replaced atomically. The Outpost server is
  * the only writer (one instance per data directory). */
@@ -67,8 +78,7 @@ export class ChatStore {
   deliveries!: Static<typeof deliveriesFile>
   schedules!: Static<typeof schedulesFile>
   threads!: Static<typeof threadsFile>
-  private messages = new Map<string, ChannelMessage[]>()
-  private complete = new Set<string>()
+  private histories = new Map<string, Promise<ChannelHistory>>()
 
   constructor(readonly directory: string) {}
 
@@ -171,22 +181,35 @@ export class ChatStore {
     return messages
   }
 
-  /** The newest messages, cached; the cache holds the latest `recent`. */
-  async recent(channelId: string): Promise<ChannelMessage[]> {
-    let cached = this.messages.get(channelId)
-    if (!cached) {
-      const all = await this.all(channelId)
-      cached = all.slice(-recent)
-      if (all.length <= recent) this.complete.add(channelId)
-      this.messages.set(channelId, cached)
+  private history(channelId: string) {
+    let history = this.histories.get(channelId)
+    if (!history) {
+      history = this.all(channelId).then(all => {
+        const postIds = new Map<string, string>()
+        for (const message of all) indexPost(postIds, message)
+        return { messages: all.slice(-recent), complete: all.length <= recent, postIds }
+      })
+      this.histories.set(channelId, history)
+      void history.catch(() => {
+        if (this.histories.get(channelId) === history) this.histories.delete(channelId)
+      })
     }
-    return cached
+    return history
+  }
+
+  async postId(channelId: string, key: string) {
+    return (await this.history(channelId)).postIds.get(key)
+  }
+
+  async recent(channelId: string): Promise<ChannelMessage[]> {
+    return (await this.history(channelId)).messages
   }
 
   async page(channelId: string, before: string | null, limit: number) {
-    let messages = await this.recent(channelId)
+    const history = await this.history(channelId)
+    let messages = history.messages
     let index = before ? messages.findIndex(message => message.id === before) : messages.length
-    if (index < 0 || (index < limit && !this.complete.has(channelId))) {
+    if (index < 0 || (index < limit && !history.complete)) {
       messages = await this.all(channelId)
       index = before ? messages.findIndex(message => message.id === before) : messages.length
       if (index < 0) index = messages.length
@@ -203,12 +226,13 @@ export class ChatStore {
     if (!validMessage(message)) throw new AppError('Invalid channel message.', 409)
     await this.prepare()
     await mkdir(join(this.directory, 'messages'), { recursive: true, mode: 0o700 })
-    const cached = await this.recent(message.channelId)
+    const history = await this.history(message.channelId)
     await appendFile(this.messagesPath(message.channelId), `${JSON.stringify(message)}\n`, { mode: 0o600 })
-    cached.push(message)
-    if (cached.length > recent) {
-      cached.splice(0, cached.length - recent)
-      this.complete.delete(message.channelId)
+    indexPost(history.postIds, message)
+    history.messages.push(message)
+    if (history.messages.length > recent) {
+      history.messages.splice(0, history.messages.length - recent)
+      history.complete = false
     }
     return message
   }
@@ -218,8 +242,7 @@ export class ChatStore {
   }
 
   async removeMessages(channelId: string) {
-    this.messages.delete(channelId)
-    this.complete.delete(channelId)
+    this.histories.delete(channelId)
     await rm(this.messagesPath(channelId), { force: true })
   }
 }

@@ -93,7 +93,7 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
           title: session.title,
           targetId: session.targetId,
           sessionId: session.sessionId,
-          accountId: 'account',
+          accountId: login.account.id,
           loginId,
           server: origin,
           token: grant,
@@ -201,12 +201,15 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   const cmd = (obj: object) => child.stdin.write(JSON.stringify(obj) + '\n')
   const received = lines[Symbol.asyncIterator]()
   let pane = 0
+  let firstPane = 0
+  const removedPanes: number[] = []
   async function wait(
     match: (e: {
       event: string
       activity?: { completionId: string }
       state: { kind: string }
       sessions: { id: string }[]
+      recent: { title: string }[]
       cols: number
       rows: number
     }) => boolean,
@@ -226,7 +229,15 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
         assert.equal(e.url, origin + '/desktop/authorize?request=' + requestId)
         cmd({ op: 'link', value: 'outpost://login/' + state + '/' + code })
       }
-      if (e.event === 'opened') pane = e.pane
+      if (e.event === 'opened') {
+        pane = e.pane
+        firstPane ||= pane
+      }
+      if (e.event === 'paneRemoved') removedPanes.push(e.pane)
+      if (e.event === 'accounts' && e.accounts[0]?.account.id === 'second') {
+        assert.ok(removedPanes.includes(firstPane), 'the previous pane must close before publishing the new account')
+        assert.ok([...e.recent, ...e.sessions].every(item => item.title !== 'Fixture'))
+      }
       if (e.event === 'output') restored += Buffer.from(e.data, 'base64').toString()
       if (e.event === 'barrier') cmd({ op: 'ack', pane: e.pane, seq: e.seq })
       if (match(e)) return e
@@ -329,6 +340,28 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   assert.equal(connections, 3, 'the renewed login opens a fresh attachment in the same pane')
   assert.deepEqual(expectedAccounts, [undefined, login.account.id])
   await sync('renewed-login')
+  assert.deepEqual(removedPanes, [], 'renewing the same account preserves its pane')
+  login.account.id = 'second'
+  session.title = 'Second workspace'
+  credential = 'op_app_' + 'd'.repeat(43)
+  loginId = 'desktop:' + randomUUID()
+  grant = 'second.grant'
+  cmd({
+    op: 'link',
+    value: desktopEntryUrl({
+      server: origin,
+      accountId: login.account.id,
+      session: { targetId: session.targetId, sessionId: session.sessionId },
+    }),
+  })
+  await wait(e => e.event === 'accounts' && e.recent.some(item => item.title === session.title))
+  assert.notEqual(pane, opened.pane)
+  assert.deepEqual(
+    JSON.parse(await readFile(join(dir, 'recent-sessions.json'), 'utf8')).map(
+      (item: { accountId: string }) => item.accountId,
+    ),
+    ['second'],
+  )
   cmd({ op: 'logout', origin })
   const removed = await wait(e => e.event === 'paneRemoved')
   assert.equal(removed.pane, pane)
@@ -371,7 +404,9 @@ test('repeated machine requests notify desktop windows only when the account sta
     if (failure) throw new Error(failure)
     return Response.json([])
   })
-  const list = () => accounts.creationServers()[0].targets(AbortSignal.timeout(1000))
+  const list = () => accounts.creationServer(origin, 'account').targets(AbortSignal.timeout(1000))
+  assert.equal(accounts.snapshot().accounts[0].canCreate, true)
+  assert.throws(() => accounts.creationServer(origin, 'previous'), /Sign in/)
   await list()
   await list()
   failure = 'Server unreachable'
@@ -387,6 +422,10 @@ test('repeated machine requests notify desktop windows only when the account sta
     ['offline', 'Connection reset'],
     ['connected', null],
   ])
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ error: 'Expired' }, { status: 401 }))
+  await assert.rejects(list)
+  assert.equal(accounts.snapshot().accounts[0].canCreate, false)
+  assert.throws(() => accounts.creationServer(origin, 'account'), /Sign in/)
 })
 
 test('sign-out clears only the selected server when revocation fails', async t => {

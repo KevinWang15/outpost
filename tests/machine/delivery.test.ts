@@ -2,15 +2,19 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import type { ActivityState } from '../../shared/activity'
+import type { SessionFile } from '../../shared/sessionFiles'
+import { readFileSync } from 'node:fs'
 import { activity } from '../../machine/activity'
 import { Deliveries, typingPause } from '../../machine/delivery'
-import { machine } from './fixtures'
+import { removeFile, StoredFile } from '../../machine/files'
+import { machine, record, register, uuid } from './fixtures'
 
 function setup(t: TestContext, mode: 'auto' | 'manual' = 'auto') {
-  machine(t)
+  const home = machine(t)
+  const id = '11111111-1111-4111-8111-111111111111'
   const world = { now: 100_000, state: 'idle' as ActivityState, mode, typed: [] as string[], counts: [] as number[] }
   const make = () =>
-    new Deliveries('11111111-1111-4111-8111-111111111111', {
+    new Deliveries(id, {
       mode: () => world.mode,
       activity: () => activity(world.state),
       type: text => world.typed.push(text),
@@ -18,8 +22,24 @@ function setup(t: TestContext, mode: 'auto' | 'manual' = 'auto') {
       changed: waiting => world.counts.push(waiting),
       now: () => world.now,
     })
-  return { world, make, deliveries: make() }
+  return { world, make, deliveries: make(), home, id }
 }
+
+test('the native prompt carries readable session-local paths, and a resend reuses the receipt', async t => {
+  const { home, id, deliveries, world } = setup(t)
+  await register(record(home, 'claude', uuid, { id }))
+  const upload = new StoredFile(id, 'incoming brief.txt', 'received')
+  upload.write(Buffer.from('Read this'))
+  const file = await upload.commit()
+  const queued = deliveries.add('review', 'Summarize', [file.id])
+  assert.equal(queued.state, 'typed')
+  const [prompt, path] = world.typed[0].split('\n')
+  assert.equal(prompt, 'Summarize')
+  assert.equal(readFileSync(path, 'utf8'), 'Read this')
+  await removeFile(id, file.id)
+  assert.equal(deliveries.add('review', 'Summarize', [file.id]).state, 'typed')
+  assert.equal(world.typed.length, 1)
+})
 
 test('an idle agent gets the message; its turn ending returns the reply', async t => {
   const { world, deliveries } = setup(t)
@@ -59,6 +79,53 @@ test('one message at a time; an interrupted or failed turn fails its message', a
   world.state = 'error'
   deliveries.tick()
   assert.equal(deliveries.status(['b'])[0].state, 'failed')
+})
+
+test('published files belong to their running turn and its durable receipt', t => {
+  const { world, deliveries, make } = setup(t, 'manual')
+  const file = (name: string): SessionFile => ({
+    id: crypto.randomUUID().replaceAll('-', ''),
+    name,
+    source: 'published',
+    size: 1,
+    createdAt: new Date(world.now).toISOString(),
+    mediaType: 'application/octet-stream',
+  })
+  const earlier = file('keyboard.txt')
+  deliveries.add('a', 'First')
+  deliveries.add('b', 'Second')
+  world.state = 'working'
+  deliveries.published(earlier)
+  assert.deepEqual(
+    deliveries.status(['a', 'b']).map(d => d.files),
+    [[], []],
+  )
+  world.now++
+  world.state = 'idle'
+  deliveries.deliverNow()
+  world.state = 'working'
+  const report = file('report.txt')
+  deliveries.published(earlier) // A delayed notification for an earlier turn.
+  deliveries.published(report)
+  deliveries.published(report)
+  world.state = 'finished'
+  deliveries.tick()
+  deliveries.published(file('after.txt'))
+  const reopened = make()
+  assert.deepEqual(
+    reopened.status(['a', 'b']).map(d => d.files),
+    [[report], []],
+  )
+  world.now++
+  reopened.deliverNow()
+  world.state = 'working'
+  reopened.published(report)
+  const next = file('next.txt')
+  reopened.published(next)
+  assert.deepEqual(
+    reopened.status(['a', 'b']).map(d => d.files),
+    [[report], [next]],
+  )
 })
 
 test('a message the agent never starts on gives up; an exit fails what is in progress', async t => {

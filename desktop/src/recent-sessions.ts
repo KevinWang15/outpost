@@ -57,8 +57,8 @@ export class RecentSessions {
   }
 
   /** The home view needs labels only; connection references stay in the main process. */
-  list(): RecentSessionSummary[] {
-    return this.entries.map(({ id, server, title, tool, lastConnectedAt }) => ({
+  list(allowed: (session: RecentSession) => boolean): RecentSessionSummary[] {
+    return this.entries.filter(allowed).map(({ id, server, title, tool, lastConnectedAt }) => ({
       id,
       server,
       title,

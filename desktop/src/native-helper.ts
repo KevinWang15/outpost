@@ -24,11 +24,12 @@ import {
   parseDesktopEntry,
   type DesktopLaunch,
   type DesktopSessionChoice,
+  type DesktopSessionReference,
 } from '../../shared/desktopAuth'
 import { browserUrl } from '../../shared/signals'
 import { SessionFileCache } from '../../shared/sessionFileCache'
 import { parseSessionFile, previewImage } from '../../shared/sessionFiles'
-import type { SessionInput } from '../../shared/model'
+import { softwareLabel, type SessionInput } from '../../shared/model'
 import type { ServerMessage } from '../../shared/protocol'
 
 const dir = process.argv[2]
@@ -63,6 +64,7 @@ const accounts = new ServerAccounts(join(dir, 'server-logins.json'), trust, {
     emit('browser', { url })
   },
   changed: () => snapshot(),
+  accountRemoved: removeAccount,
   failed: error => emit('error', { message: error.message }),
 })
 const recent = new RecentSessions(join(dir, 'recent-sessions.json'))
@@ -70,7 +72,13 @@ const prefs = new Preferences(join(dir, 'preferences.json'))
 const profiles = shellProfiles()
 let catalogue: DesktopSessionChoice[] = []
 let listing: AbortController | undefined
-const snapshot = () => emit('accounts', { ...accounts.snapshot(), recent: recent.list(), sessions: catalogue })
+const ownsSession = (ref: DesktopSessionReference) => accounts.hasAccount(ref.server, ref.accountId)
+const snapshot = () =>
+  emit('accounts', {
+    ...accounts.snapshot(),
+    recent: recent.list(ownsSession),
+    sessions: catalogue.filter(ownsSession),
+  })
 const refresh = async () => {
   if (closing) return
   listing?.abort()
@@ -237,8 +245,26 @@ interface Attachment {
 }
 const creations = new Map<number, { key: string; id: string }>()
 const panes = new Map<number, Attachment>()
+function closePane(id: number, pane: Attachment) {
+  panes.delete(id)
+  pane.activity.dispose()
+  pane.socket.close()
+  pane.rendering.dispose()
+  pane.files.clear()
+}
+async function removeAccount(origin: string, accountId: string) {
+  const keep = (ref: DesktopSessionReference) => ref.server !== origin || ref.accountId !== accountId
+  listing?.abort()
+  catalogue = catalogue.filter(keep)
+  for (const [id, pane] of panes) {
+    if (keep(pane.launch)) continue
+    closePane(id, pane)
+    emit('paneRemoved', { pane: id })
+  }
+  await recent.retain(keep)
+}
 const attach = async (launch: DesktopLaunch, window?: number) => {
-  if (closing) return
+  if (closing || !ownsSession(launch)) return
   const key = desktopSessionId(launch)
   for (const [pane, existing] of panes)
     if (existing.key === key) {
@@ -247,7 +273,7 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
         existing.launch = launch
         existing.socket.reconnect(launch.token)
       }
-      emit('select', { pane })
+      if (panes.get(pane) === existing) emit('select', { pane })
       return
     }
   const pane = ++serial
@@ -334,6 +360,7 @@ type Cmd = {
   id: number
   seq: number
   origin: string
+  accountId: string
   value: string
   text: string
   data: string
@@ -373,18 +400,6 @@ async function handle(c: Cmd) {
       return
     case 'logout':
       await accounts.logout(c.origin)
-      listing?.abort()
-      catalogue = catalogue.filter(ref => ref.server !== c.origin)
-      for (const [id, p] of panes)
-        if (p.launch.server === c.origin) {
-          p.activity.dispose()
-          p.socket.close()
-          p.rendering.dispose()
-          panes.delete(id)
-          emit('paneRemoved', { pane: id })
-        }
-      await recent.retain(ref => accounts.hasAccount(ref.server, ref.accountId))
-      snapshot()
       return refresh()
     case 'refresh':
       return refresh()
@@ -400,27 +415,21 @@ async function handle(c: Cmd) {
       await prefs.set({ fontSize: c.fontSize, sound: c.sound }, c.localShell)
       emit('prefs', { ...prefs.value, localShell: prefs.localShell, profiles })
       return
-    case 'targets': {
-      const s = accounts.creationServers().find(s => s.summary.origin === c.origin)
-      if (s)
-        emit('targets', { window: c.window, origin: c.origin, targets: await s.targets(new AbortController().signal) })
-      return
-    }
+    case 'targets':
     case 'options': {
-      const s = accounts.creationServers().find(s => s.summary.origin === c.origin)
-      if (s)
-        emit('options', {
-          window: c.window,
-          origin: c.origin,
-          target: c.target,
-          ...(await s.options(c.target, new AbortController().signal)),
-        })
+      const server = accounts.creationServer(c.origin, c.accountId)
+      const signal = new AbortController().signal
+      const context = { window: c.window, origin: c.origin, accountId: c.accountId }
+      if (c.op === 'targets') emit('targets', { ...context, targets: await server.targets(signal) })
+      else {
+        const { tools, missing } = await server.options(c.target, signal)
+        emit('options', { ...context, target: c.target, tools, missing: missing.map(softwareLabel) })
+      }
       return
     }
     case 'create': {
-      const s = accounts.creationServers().find(s => s.summary.origin === c.origin)
-      if (!s) throw new Error('Sign in first')
-      const key = JSON.stringify([c.origin, c.target, c.input])
+      const s = accounts.creationServer(c.origin, c.accountId)
+      const key = JSON.stringify([c.origin, c.accountId, c.target, c.input])
       let request = creations.get(c.window)
       if (request?.key !== key) {
         request = { key, id: randomUUID() }
@@ -458,11 +467,7 @@ async function handle(c: Cmd) {
     case 'reconnect':
       return p.socket.reconnect()
     case 'close':
-      p.activity.dispose()
-      p.socket.close()
-      p.rendering.dispose()
-      p.files.clear()
-      panes.delete(c.pane)
+      closePane(c.pane, p)
       return
     case 'draft':
       return p.socket.draft(c.active)
@@ -519,7 +524,7 @@ async function main() {
   await trust.load()
   await accounts.load()
   await recent.load()
-  await recent.retain(ref => accounts.hasAccount(ref.server, ref.accountId))
+  await recent.retain(ownsSession)
   await prefs.load()
   emit('prefs', { ...prefs.value, localShell: prefs.localShell, profiles })
   snapshot()
@@ -537,12 +542,7 @@ async function main() {
     for (const answer of prompts.values()) answer(false)
     prompts.clear()
     accounts.dispose()
-    for (const p of panes.values()) {
-      p.activity.dispose()
-      p.socket.close()
-      p.rendering.dispose()
-    }
-    panes.clear()
+    for (const [id, pane] of panes) closePane(id, pane)
     // Every command preceding EOF was dispatched. Wait for its local writes before
     // ending the helper, including a credential exchange already in its saving phase.
     await Promise.all(pending)

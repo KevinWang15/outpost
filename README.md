@@ -82,7 +82,12 @@ For a machine without internet access, set `OUTPOST_TERMINAL_ASSET_DIR` on the O
 
 For outbound access to a local instance, set `OUTPOST_MACHINE_ORIGIN` to a machine-reachable HTTPS origin. Configure a trusted reverse proxy on the workstation to preserve the public Host header and forward only `/api/machine/` and `/api/install/` to Outpost on loopback. Keep workspace and login routes on loopback. Use hosted Outpost if your workstation cannot provide a reachable address.
 
-Use `~/.outpost/bin/outpost-terminal status` to inspect enrollment. **Remove machine** in Outpost closes its connections and revokes its outbound credential. Run `~/.outpost/bin/outpost-terminal unenroll` as the execution user to release local ownership before changing servers or methods. To remove the binary as well, stop the machine’s sessions and run `~/.outpost/bin/outpost-terminal uninstall`. Session files stay in the execution account’s home. Remove the old hosted account’s authorized SSH key separately if you granted it exclusively for Outpost.
+Use `~/.outpost/bin/outpost-terminal status` to inspect an active or pending enrollment. Removing a machine or adding it again takes two steps.
+
+1. Run `~/.outpost/bin/outpost-terminal unenroll` as the original Linux execution user. This releases the machine, removes its outbound boot service and keeps coding sessions and files in that account. To remove the executable too, stop the sessions first and use `uninstall` in place of `unenroll`.
+2. Choose **Remove machine** in the old workspace. This closes its connections and revokes its outbound credential even when the machine is offline. Remove the old hosted account’s authorized SSH key if you granted it exclusively for Outpost.
+
+Each new workspace entry has its own machine identity, including when you add the same address again. When you change Linux execution users, an administrator must also hand the released ownership directory to the new account. [Linux account handoff](docs/ARCHITECTURE.md#linux-account-handoff)
 
 ## Edit a session and its conversations
 
@@ -614,7 +619,8 @@ protocol and ownership model.
 ## Development
 
 ```sh
-npm run build:terminal   # build Outpost machine service before machine, integration and browser tests
+npm run build:terminal   # build the production machine service on Linux
+npm run build:terminal -- --fixtures  # build the isolated machine service for integration and browser tests
 npm run check            # lint, typecheck, build, unit and machine tests
 npm run test:integration # persistent PTYs: this computer and SSH in Docker
 npx playwright install chromium webkit

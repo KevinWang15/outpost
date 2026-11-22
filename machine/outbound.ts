@@ -19,6 +19,8 @@ import {
   runtimeLock,
   type OutboundEnrollment,
 } from './installation'
+import { installSupervisor, type Supervisor } from './supervisor'
+
 async function readLine(prompt: string) {
   process.stderr.write(prompt)
   const input = createInterface({ input: process.stdin, terminal: false })
@@ -29,36 +31,40 @@ async function readLine(prompt: string) {
   }
   throw Error('Expected installation input.')
 }
-export async function enrollOutbound(address: string, targetId: string) {
+async function confirmEnrollment(origin: string, targetId: string, credential: string, code: string) {
+  const input: OutboundEnrollmentInput = { targetId, code, secret: credential.slice(targetId.length + 1) }
+  const res = await fetch(origin + '/api/machine/enroll', {
+    method: 'POST',
+    redirect: 'error',
+    headers: { 'content-type': 'application/json', 'x-outpost-request': '1' },
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(10000),
+  }).catch(cause => {
+    throw new Error('Could not confirm enrollment. Retry the same enrollment command.', { cause })
+  })
+  if (res.status === 401) throw new Error('Enrollment was not authorized. Request a new code for this machine.')
+  if (res.status === 409) throw new Error('This entry already has an enrollment. Release its owner before retrying.')
+  if (!res.ok) throw new Error(`Could not confirm enrollment (HTTP ${res.status}). Retry the enrollment command.`)
+  const result = (await res.json().catch(cause => {
+    throw new Error('Could not read the enrollment confirmation. Retry the same enrollment command.', { cause })
+  })) as OutboundEnrollmentReply | null
+  if (result?.targetId !== targetId || !validNodeSocket(result.socket)) throw new Error('Invalid enrollment reply.')
+  writeOwnership({
+    mode: 'outbound',
+    origin,
+    targetId,
+    credential,
+    socket: result.socket,
+  })
+}
+
+export async function enrollOutbound(address: string, targetId: string, manager?: Supervisor) {
   const origin = serverOrigin(address)
   const code = await readLine('Outpost enrollment code: ')
   await installationLock(async () => {
-    const reservation = await reserveOutbound(origin, targetId)
-    if (!reservation) return
-    const input: OutboundEnrollmentInput = { targetId, code, secret: reservation.credential.slice(targetId.length + 1) }
-    const res = await fetch(origin + '/api/machine/enroll', {
-      method: 'POST',
-      redirect: 'error',
-      headers: { 'content-type': 'application/json', 'x-outpost-request': '1' },
-      body: JSON.stringify(input),
-      signal: AbortSignal.timeout(10000),
-    }).catch(cause => {
-      throw new Error('Could not confirm enrollment. Retry the same enrollment command.', { cause })
-    })
-    if (res.status === 401) throw new Error('Enrollment was not authorized. Request a new code for this machine.')
-    if (res.status === 409) throw new Error('This entry already has an enrollment. Release its owner before retrying.')
-    if (!res.ok) throw new Error(`Could not confirm enrollment (HTTP ${res.status}). Retry the enrollment command.`)
-    const result = (await res.json().catch(cause => {
-      throw new Error('Could not read the enrollment confirmation. Retry the same enrollment command.', { cause })
-    })) as OutboundEnrollmentReply | null
-    if (result?.targetId !== targetId || !validNodeSocket(result.socket)) throw new Error('Invalid enrollment reply.')
-    writeOwnership({
-      mode: 'outbound',
-      origin,
-      targetId,
-      credential: reservation.credential,
-      socket: result.socket,
-    })
+    const reservation = await reserveOutbound(origin, targetId, manager !== undefined)
+    if (reservation) await confirmEnrollment(origin, targetId, reservation.credential, code)
+    if (manager) await installSupervisor(manager)
   })
   console.log('Outbound machine enrolled.')
 }

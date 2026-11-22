@@ -68,6 +68,11 @@ export async function serveNode(socketName: string) {
     const writer = new BoundedWriter(process.stdout, 256 * 1024 * 1024, 120_000, () => process.exit(1))
     const send = (message: MachineMessage) => writer.write(terminalControl(message))
     const streams = new Map<number, Stream>()
+    // A transport can disappear without sending a close for its individual uploads.
+    const uploads = new Set<StoredFile>()
+    process.once('exit', () => {
+      for (const upload of uploads) upload.abort()
+    })
     const calls = new Map<string, { resolve(data: unknown): void; reject(error: Error): void }>()
     process.stdout.write(nodeMagic)
     send({
@@ -199,6 +204,7 @@ export async function serveNode(socketName: string) {
       async 'file-receive'(stream: number, args: FileReceiveArgs) {
         if (!Number.isSafeInteger(args.size) || args.size < 0) throw new RegistryError('Invalid file size', 400)
         const stored = new StoredFile(args.session, args.name, 'received')
+        uploads.add(stored)
         let received = 0
         let failed: unknown = null
         streams.set(stream, {
@@ -213,20 +219,20 @@ export async function serveNode(socketName: string) {
             }
           },
           close(error) {
-            if (error) {
-              stored.abort()
-              return closeStream(stream, { error })
-            }
             streams.set(stream, { data() {}, close() {}, credit() {} })
             if (!failed && received !== args.size) failed = new RegistryError('Incomplete file upload', 400)
-            if (failed) {
+            if (error || failed) {
+              uploads.delete(stored)
               stored.abort()
-              return closeStream(stream, { error: remoteError(failed) })
+              return closeStream(stream, { error: error ?? remoteError(failed) })
             }
-            stored.commit().then(
-              file => closeStream(stream, { data: file }),
-              error => closeStream(stream, { error: remoteError(error) }),
-            )
+            stored
+              .commit()
+              .finally(() => uploads.delete(stored))
+              .then(
+                file => closeStream(stream, { data: file }),
+                error => closeStream(stream, { error: remoteError(error) }),
+              )
           },
           credit() {},
         })
@@ -238,6 +244,20 @@ export async function serveNode(socketName: string) {
 
     type Args = Record<string, unknown>
     const sessions = () => readRegistry().sessions
+    async function terminalRequest(id: unknown, message: object) {
+      const socket = terminalSocket(findSession(readRegistry(), id).id)
+      const stopped = 'The session is no longer running in a terminal.'
+      const running = await request<{ protocol: number }>(socket, { type: 'status' })
+      if (!running) throw new RegistryError(stopped, 409)
+      if (running.protocol !== terminalService.protocol)
+        throw new RegistryError(
+          'The running terminal uses an incompatible machine service. Stop it and start it again.',
+          409,
+        )
+      const answer = await request(socket, message)
+      if (!answer) throw new RegistryError(stopped, 409)
+      return answer
+    }
     const operations: Record<string, (args: Args) => unknown> = {
       'software.install': args => {
         const id = args.id
@@ -276,22 +296,19 @@ export async function serveNode(socketName: string) {
       'sessions.acknowledge': args => acknowledgeSession(args.id, args.completionId),
       // Messages for a session running in a terminal, typed in by its terminal service.
       'sessions.deliver': async args => {
-        const record = findSession(readRegistry(), args.id)
-        const reply = await request<{ delivery?: unknown }>(terminalSocket(record.id), {
+        const reply = await terminalRequest(args.id, {
           type: 'deliver',
           key: args.key,
           text: args.text,
+          files: args.files,
         })
-        if (!reply) throw new RegistryError('The session is no longer running in a terminal.', 409)
         return reply.delivery
       },
       'sessions.deliveries': async args => {
-        const record = findSession(readRegistry(), args.id)
-        const reply = await request<{ deliveries?: unknown }>(terminalSocket(record.id), {
+        const reply = await terminalRequest(args.id, {
           type: 'deliveries',
           keys: args.keys,
         })
-        if (!reply) throw new RegistryError('The session is no longer running in a terminal.', 409)
         return reply.deliveries
       },
       directories: args => directories(args.path),

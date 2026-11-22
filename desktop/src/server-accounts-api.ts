@@ -4,6 +4,7 @@ export type ServerConnection = 'checking' | 'connected' | 'offline' | 'expired' 
 /** Only saved logins appear in this list. No trust data or credentials cross IPC. */
 export interface ServerAccountSummary extends DesktopLogin {
   origin: string
+  canCreate: boolean
   status: ServerConnection
   error: string | null
 }

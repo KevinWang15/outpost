@@ -199,9 +199,10 @@ Pages read files over HTTP with their chat grant
 (`/api/chat/files/:target/:session`).
 
 - *From the agent.* It shares a file with Outpost's `publish_file` MCP tool (or
-  `outpost publish FILE`), as in terminal mode. Publishing also tells the
-  chat host, which records a `file` journal entry in the running turn. The turn
-  shows a card for it, and a channel reply carries the files its turn published.
+  `outpost publish FILE`). An ACP chat host records a `file` journal entry in the
+  running turn. A native terminal worker records the file in the active delivery
+  receipt. For either kind of agent, a channel reply carries the files published
+  during that reply. They remain available when the server reconnects.
 - *To the agent.* The composer uploads each attached file (any type) on send:
   `POST /api/chat/files/:target/:session?name=…` with the raw bytes, stored on
   the machine. The prompt carries the file IDs, at most 8. The chat host turns
@@ -218,8 +219,8 @@ Pages read files over HTTP with their chat grant
   with the channel on the server (`<workspace>/chat/files/<channel>/`); members'
   published files stay in their sessions. When a member is delivered messages
   that carry files, the hub copies them into the member's own session files
-  (newest first, at most 8) and the delivery's prompt links them, so members on
-  other machines can read them. Its prompt names each message's files and lists
+  (newest first, at most 8). The ACP agent receives resource links. A terminal
+  agent receives readable paths in its prompt. The prompt names each message's files and lists
   any that could not be copied.
 
 **Schedules.** The Outpost instance evaluates five-field cron in an IANA time zone

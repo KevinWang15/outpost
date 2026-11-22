@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LoaderCircle, Play, Trash2 } from 'lucide-react'
 import type { ConversationMatch, ConversationResults, DirectorySuggestions, SessionInput } from '../../shared/model'
+import { softwareLabel } from '../../shared/model'
 import { describeCron, nextRun, parseCron } from '../../shared/cron'
 import { harnessLabel } from '../../shared/harnesses'
 import { pagePaths } from '../../shared/pages'
@@ -82,7 +83,7 @@ export function NewSessionDialog({
   return (
     <SessionDialog
       target={options ? target : null}
-      tools={options?.tools ?? []}
+      tools={options && !options.missing.length ? options.tools : []}
       conversation={conversation}
       directories={directories}
       description={target ? `On ${target.name}. It starts in chat.` : undefined}
@@ -115,7 +116,7 @@ export function NewSessionDialog({
           {problem && <p className="error">{problem}</p>}
           {options && options.missing.length > 0 && (
             <p className="warning">
-              Install {options.missing.join(', ')} on {target?.name} first, from{' '}
+              Install {options.missing.map(softwareLabel).join(', ')} on {target?.name} first, from{' '}
               <MachineLink targetId={targetId}>its page in Machines</MachineLink>.
             </p>
           )}

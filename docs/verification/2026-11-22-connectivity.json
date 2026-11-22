@@ -1,0 +1,120 @@
+{
+  "source": "c91bee59dd1e1ca58783dc31584baae656de5c23",
+  "ociImage": "ghcr.io/kevinwang15/outpost@sha256:149ac95548c389c2aa6533bbc03f50ec47a8a09e2693c2d568ffb356a305c861",
+  "matrix": [
+    {
+      "mode": "local",
+      "route": "direct",
+      "transportPassed": true,
+      "replacementPassed": true,
+      "viewerRecoverySeconds": 56.456,
+      "viewerDroppedPackets": {
+        "OUTPUT": 11,
+        "INPUT": 10
+      },
+      "sameTerminalAndAcpProcesses": true,
+      "sourceChannelPosts": 1,
+      "deliveredChannelReplies": 1,
+      "providerExecutionsOfChannelPost": 1,
+      "realCodexSuccessfulUserTurns": 2,
+      "realCodexTitleRequests": 1
+    },
+    {
+      "mode": "local",
+      "route": "bastion",
+      "transportPassed": true,
+      "replacementPassed": true,
+      "viewerRecoverySeconds": 54.12,
+      "viewerDroppedPackets": {
+        "OUTPUT": 11,
+        "INPUT": 10
+      },
+      "sameTerminalAndAcpProcesses": true,
+      "sourceChannelPosts": 1,
+      "deliveredChannelReplies": 1,
+      "providerExecutionsOfChannelPost": 1,
+      "realCodexSuccessfulUserTurns": 2,
+      "realCodexTitleRequests": 1
+    },
+    {
+      "mode": "local",
+      "route": "outbound",
+      "transportPassed": true,
+      "replacementPassed": true,
+      "viewerRecoverySeconds": 53.022,
+      "viewerDroppedPackets": {
+        "OUTPUT": 11,
+        "INPUT": 10
+      },
+      "sameTerminalAndAcpProcesses": true,
+      "sourceChannelPosts": 1,
+      "deliveredChannelReplies": 1,
+      "providerExecutionsOfChannelPost": 1,
+      "realCodexSuccessfulUserTurns": 2,
+      "realCodexTitleRequests": 1
+    },
+    {
+      "mode": "hosted",
+      "route": "direct",
+      "transportPassed": true,
+      "replacementPassed": true,
+      "viewerRecoverySeconds": 52.49,
+      "viewerDroppedPackets": {
+        "OUTPUT": 11,
+        "INPUT": 10
+      },
+      "sameTerminalAndAcpProcesses": true,
+      "sourceChannelPosts": 1,
+      "deliveredChannelReplies": 1,
+      "providerExecutionsOfChannelPost": 1,
+      "realCodexSuccessfulUserTurns": 2,
+      "realCodexTitleRequests": 1
+    },
+    {
+      "mode": "hosted",
+      "route": "bastion",
+      "transportPassed": true,
+      "replacementPassed": true,
+      "viewerRecoverySeconds": 51.218,
+      "viewerDroppedPackets": {
+        "OUTPUT": 11,
+        "INPUT": 10
+      },
+      "sameTerminalAndAcpProcesses": true,
+      "sourceChannelPosts": 1,
+      "deliveredChannelReplies": 1,
+      "providerExecutionsOfChannelPost": 1,
+      "realCodexSuccessfulUserTurns": 2,
+      "realCodexTitleRequests": 1
+    },
+    {
+      "mode": "hosted",
+      "route": "outbound",
+      "transportPassed": true,
+      "replacementPassed": true,
+      "viewerRecoverySeconds": 51.224,
+      "viewerDroppedPackets": {
+        "OUTPUT": 11,
+        "INPUT": 10
+      },
+      "sameTerminalAndAcpProcesses": true,
+      "sourceChannelPosts": 1,
+      "deliveredChannelReplies": 1,
+      "providerExecutionsOfChannelPost": 1,
+      "realCodexSuccessfulUserTurns": 2,
+      "realCodexTitleRequests": 1
+    }
+  ],
+  "automaticViewerRecoverySeconds": {
+    "min": 51.218,
+    "median": 52.756,
+    "max": 56.456
+  },
+  "realCodexUserTurns": 12,
+  "ipv6Bastion": true,
+  "lossyWan": ["local/bastion", "hosted/outbound"],
+  "systemdPowerCycle": "Ubuntu 24.04.5 LTS",
+  "macDesktop": "1.3.1",
+  "integrationTests": 56,
+  "focusedUnitTests": 29
+}

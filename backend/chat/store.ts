@@ -176,17 +176,20 @@ export class ChatStore {
   }
 
   async append(message: ChannelMessage) {
-    await this.change([], async () => {
-      await this.prepare()
-      await mkdir(join(this.directory, 'messages'), { recursive: true, mode: 0o700 })
-      await appendFile(this.messagesPath(message.channelId), `${JSON.stringify(message)}\n`, { mode: 0o600 })
-      const cached = await this.recent(message.channelId)
-      cached.push(message)
-      if (cached.length > recent) {
-        cached.splice(0, cached.length - recent)
-        this.complete.delete(message.channelId)
-      }
-    })
+    return this.change([], () => this.appendInChange(message))
+  }
+
+  /** Append within an existing store change so a roster update and its notice stay ordered. */
+  async appendInChange(message: ChannelMessage) {
+    await this.prepare()
+    await mkdir(join(this.directory, 'messages'), { recursive: true, mode: 0o700 })
+    const cached = await this.recent(message.channelId)
+    await appendFile(this.messagesPath(message.channelId), `${JSON.stringify(message)}\n`, { mode: 0o600 })
+    cached.push(message)
+    if (cached.length > recent) {
+      cached.splice(0, cached.length - recent)
+      this.complete.delete(message.channelId)
+    }
     return message
   }
 

@@ -214,7 +214,7 @@ class Connection implements ChatClient {
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
         await this.server.services.sessions.remove(context, ref!.sessionId)
         this.server.services.broker.closeTarget(this.owner, context.target.id, ref!.sessionId)
-        await hub.refreshFor(this.owner)
+        await hub.sessionDeleted(this.owner, ref!)
         return { ok: true }
       }
       case 'new-conversation': {

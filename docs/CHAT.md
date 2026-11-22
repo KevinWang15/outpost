@@ -157,6 +157,12 @@ A reply that mentions another member passes the conversation on; chains stop
 after 6 hops or 12 deliveries per user message, with a notice. A member mentioned
 again while working gets the newer messages after its turn.
 
+Open the member count in the channel header to find, add, or remove sessions.
+Each edit applies just the selected additions and removals. Deleting a session
+removes it from every channel and leaves a notice with its handle. Earlier
+messages stay in the transcript. A successful machine inventory also cleans up
+sessions deleted outside the server. An unavailable machine keeps its members.
+
 **Session messages.** Outpost's MCP server (`machine/mcp.ts`) serves
 `list_sessions`, `message_session` and `post_to_channel` to every session, in
 chat or in a terminal (see "Outpost MCP" in ARCHITECTURE.md). The call travels

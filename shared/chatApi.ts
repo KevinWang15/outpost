@@ -8,7 +8,7 @@ import type { Session } from './model'
 import { conversationSearch, sessionForkInput, sessionInput, sessionUpdate } from './schemas'
 import type { SessionFile } from './sessionFiles'
 
-export const chatProtocol = 3
+export const chatProtocol = 4
 export const chatLimits = {
   text: 32 * 1024,
   members: 24,
@@ -62,7 +62,7 @@ export interface ChannelMessage {
   hop: number
   /** The member turn that produced this reply. */
   turn: (SessionRef & { turn: string }) | null
-  /** The page's key for a user post; a resent draft with it is the same post. */
+  /** Idempotency key for a user post or an automatic membership notice. */
   key: string | null
   /** A member reply: files its turn published, kept in that session's files.
    * A user post: files attached to it, kept with the channel on the server. */
@@ -131,15 +131,13 @@ const session = { targetId, sessionId: uuid }
 const strict = { additionalProperties: false } as const
 const text = (maxLength: number) => Type.String({ maxLength, pattern: '^[^\\u0000]*$' })
 const channelName = Type.String({ pattern: '^[a-z0-9][a-z0-9_-]{0,39}$' })
-const channelInput = Type.Object(
-  {
-    id: Type.Optional(uuid),
-    name: channelName,
-    topic: text(500),
-    members: Type.Array(Type.Object(session, strict), { maxItems: chatLimits.members }),
-  },
-  strict,
-)
+const memberRefs = Type.Array(Type.Object(session, strict), { maxItems: chatLimits.members })
+const channelDetails = { name: channelName, topic: text(500) }
+const channelInput = Type.Union([
+  Type.Object({ ...channelDetails, members: memberRefs }, strict),
+  Type.Object({ id: uuid, ...channelDetails }, strict),
+  Type.Object({ id: uuid, add: memberRefs, remove: memberRefs }, strict),
+])
 const scheduleInput = Type.Object(
   {
     id: Type.Optional(uuid),

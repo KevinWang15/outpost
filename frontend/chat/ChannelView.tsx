@@ -108,7 +108,7 @@ function Message({
       <div className="channel-body">
         {!grouped && (
           <div className="channel-author">
-            {author.kind === 'session' ? (
+            {author.kind === 'session' && session ? (
               <button
                 className="link"
                 onClick={() => select({ kind: 'session', targetId: author.targetId, sessionId: author.sessionId })}
@@ -135,13 +135,13 @@ function Message({
             ))}
           </div>
         )}
-        {message.turn && (
+        {message.turn && session && (
           <button className="steps-toggle" aria-expanded={steps} onClick={() => setSteps(!steps)}>
             <ChevronRight size={13} className="chevron" />
             Steps
           </button>
         )}
-        {steps && message.turn && <MemberSteps member={message.turn} turn={message.turn.turn} />}
+        {steps && session && message.turn && <MemberSteps member={message.turn} turn={message.turn.turn} />}
       </div>
     </div>
   )
@@ -192,6 +192,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
     )
   const messages = state?.messages ?? []
   const members = channel.members.map(member => ({ member, session: client.session(member) }))
+  const manageMembers = () => open({ kind: 'channel', channelId, membersOnly: true })
   return (
     <MentionHandlesContext.Provider value={handles}>
       <section className="conversation channel">
@@ -204,20 +205,23 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
           </span>
           <div className="conversation-title">
             <h1>{channel.name}</h1>
-            <p>{channel.topic || `${channel.members.length} ${channel.members.length === 1 ? 'member' : 'members'}`}</p>
+            {channel.topic && <p>{channel.topic}</p>}
           </div>
-          <div className="member-stack" aria-label="Members">
-            {members.slice(0, 6).map(({ member, session }) => (
-              <Avatar
-                key={sessionKey(member)}
-                id={member.sessionId}
-                name={member.name}
-                tool={session?.tool ?? null}
-                session={session}
-                size={26}
-              />
-            ))}
-          </div>
+          <button className="button small" onClick={manageMembers} aria-label={`Manage members (${members.length})`}>
+            <span className="member-stack">
+              {members.slice(0, 6).map(({ member, session }) => (
+                <Avatar
+                  key={sessionKey(member)}
+                  id={member.sessionId}
+                  name={member.name}
+                  tool={session?.tool ?? null}
+                  session={session}
+                  size={26}
+                />
+              ))}
+            </span>
+            {members.length ? `${members.length} ${members.length === 1 ? 'member' : 'members'}` : 'Add members'}
+          </button>
           <button
             className="icon-button"
             aria-label="Channel settings"
@@ -305,7 +309,11 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
         <footer className="conversation-footer">
           <Composer
             draftKey={`channel:${channelId}`}
-            placeholder={`Message #${channel.name} — mention @${handles[0] ?? 'a member'} to ask it`}
+            placeholder={
+              handles.length
+                ? `Message #${channel.name} — mention @${handles[0]} to ask it`
+                : `Message #${channel.name}`
+            }
             onUpload={file => client.upload({ channelId }, file)}
             mentions={[
               ...members.map(({ member, session }) => ({
@@ -315,7 +323,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
               })),
               { value: 'all', label: 'Everyone in this channel' },
             ]}
-            disabled={channel.members.length ? null : 'Add members in channel settings first.'}
+            disabled={channel.members.length ? null : 'Add a member to start the conversation.'}
             hint={text => {
               const found = mentions(text, handles)
               return found.everyone || found.handles.length

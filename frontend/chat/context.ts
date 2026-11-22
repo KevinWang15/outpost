@@ -10,7 +10,7 @@ export type Selection = ({ kind: 'session' } & SessionRef) | { kind: 'channel'; 
 export type ChatDialog =
   /** A new session; with a conversation found on `targetId`, a session that resumes it. */
   | { kind: 'session'; targetId?: string; conversation?: ConversationMatch }
-  | { kind: 'channel'; channelId: string | null }
+  | { kind: 'channel'; channelId: string | null; membersOnly?: boolean }
   | { kind: 'schedule'; scheduleId: string | null; session: SessionRef | null }
   | ({ kind: 'settings' | 'conversations' | 'fork' | 'stop' | 'delete' | 'chat' | 'terminal' } & SessionRef)
   | { kind: 'find'; query: string }

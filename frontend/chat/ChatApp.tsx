@@ -149,7 +149,9 @@ function Shell() {
         {dialog?.kind === 'stop' && <StopChatDialog target={dialog} onClose={close} />}
         {dialog?.kind === 'delete' && <DeleteChatDialog target={dialog} onClose={close} />}
         {dialog?.kind === 'chat' && <ContinueChatDialog target={dialog} onClose={close} />}
-        {dialog?.kind === 'channel' && <ChannelDialog channelId={dialog.channelId} onClose={close} />}
+        {dialog?.kind === 'channel' && (
+          <ChannelDialog membersOnly={dialog.membersOnly} channelId={dialog.channelId} onClose={close} />
+        )}
         {dialog?.kind === 'schedule' && (
           <ScheduleDialog scheduleId={dialog.scheduleId} session={dialog.session} onClose={close} />
         )}

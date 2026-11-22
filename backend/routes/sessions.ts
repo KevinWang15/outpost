@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { ConversationSearch, SessionForkInput, SessionInput, SessionUpdate } from '../../shared/model'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
+import type { ChatHub } from '../chat/hub'
 import type { Services } from '../services'
 import { createSession, forkSession } from '../session-actions'
 import {
@@ -15,7 +16,7 @@ import {
 import Type from 'typebox'
 
 type Params = { targetId: string; sessionId: string }
-export function sessionRoutes(app: FastifyInstance, services: Services) {
+export function sessionRoutes(app: FastifyInstance, services: Services, hub: ChatHub) {
   const { sessions, broker, tokens } = services
   const base = '/api/targets/:targetId/sessions'
   app.get<{ Params: Params }>(base, async (request, reply) =>
@@ -69,6 +70,7 @@ export function sessionRoutes(app: FastifyInstance, services: Services) {
     const context = await services.context(request, request.params.targetId)
     await sessions.remove(context, request.params.sessionId)
     broker.closeTarget(context.owner, context.target.id, request.params.sessionId)
+    await hub.sessionDeleted(context.owner, request.params)
     return reply.code(204).send()
   })
   app.post<{ Params: Params }>(`${base}/:sessionId/terminate`, async request => {

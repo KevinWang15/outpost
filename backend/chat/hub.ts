@@ -6,6 +6,7 @@ import {
   sessionKey,
   type Channel,
   type ChannelInput,
+  type ChannelMember,
   type ChannelMessage,
   type ChannelView,
   type ChatServerMessage,
@@ -54,6 +55,7 @@ interface Account {
   view: ChatSession[]
   targets: ChatTarget[]
   refreshedAt: number
+  deletedDuringRefresh: Set<string>
   refreshing: Promise<void> | null
   viewKey: string
   poller: NodeJS.Timeout | null
@@ -86,6 +88,27 @@ const notStopped = (delivery: Delivery) => delivery.state !== 'done' && delivery
 const now = () => new Date().toISOString()
 /** The key a delivery's prompt carries; the chat host dedupes by it. */
 const promptKey = (delivery: Delivery) => delivery.id.replace(/-/g, '')
+
+function noticeMessage(
+  channelId: string,
+  level: 'info' | 'warning' | 'error',
+  text: string,
+  root: string = randomUUID(),
+): ChannelMessage {
+  return {
+    id: randomUUID(),
+    channelId,
+    at: now(),
+    author: { kind: 'outpost', level },
+    text,
+    mentions: [],
+    root,
+    hop: 0,
+    turn: null,
+    key: null,
+    files: [],
+  }
+}
 
 /** Chat across all of an owner's targets: session lists, links to chat hosts,
  * channel routing, session-to-session messages and schedules. */
@@ -140,6 +163,7 @@ export class ChatHub {
           targets: [],
           refreshedAt: 0,
           refreshing: null,
+          deletedDuringRefresh: new Set(),
           viewKey: '',
           poller: null,
           posts: new Map(),
@@ -163,9 +187,10 @@ export class ChatHub {
       if (!this.dependencies.deployment.account(userId)) continue
       try {
         const account = await this.account({ userId, loginId: 'background' })
-        void this.recover(account)
-        // Agents that were working may call Outpost's tools; reconnect to answer them.
+        // Reconcile membership before resending any pending channel messages.
         void this.refresh(account)
+          .then(() => this.recover(account))
+          .catch(() => {})
       } catch {
         // A store with an invalid schema stays untouched; its owner sees the error.
       }
@@ -225,13 +250,22 @@ export class ChatHub {
   refresh(account: Account): Promise<void> {
     account.refreshing ??= (async () => {
       try {
-        const targets = await this.dependencies.deployment.workspace(account.owner).listForServer()
+        const machines = await this.dependencies.deployment.workspace(account.owner).list()
+        const enrolled = new Set(machines.map(machine => machine.id))
+        const targets = machines.filter(machine => machine.kind !== 'direct')
         account.machines = new Map(targets.map(target => [target.id, { name: target.name, tools: target.tools }]))
         await Promise.all(
           targets.map(async target => {
             try {
               const context = await this.dependencies.resolve(account.owner, target.id)
-              account.sessions.set(target.id, await this.dependencies.list(context, AbortSignal.timeout(45_000)))
+              const sessions = await this.dependencies.list(context, AbortSignal.timeout(45_000))
+              account.sessions.set(
+                target.id,
+                sessions.filter(
+                  session =>
+                    !account.deletedDuringRefresh.has(sessionKey({ targetId: target.id, sessionId: session.id })),
+                ),
+              )
               account.errors.delete(target.id)
             } catch (error) {
               account.errors.set(target.id, (error as Error).message)
@@ -241,6 +275,16 @@ export class ChatHub {
         for (const id of account.sessions.keys()) if (!account.machines.has(id)) account.sessions.delete(id)
         account.refreshedAt = Date.now()
         this.rebuild(account)
+        const listed = new Map(
+          [...account.sessions]
+            .filter(([id]) => !account.errors.has(id))
+            .map(([id, sessions]) => [id, new Set(sessions.map(session => session.id))]),
+        )
+        await this.pruneMembers(account, ref => {
+          if (!enrolled.has(ref.targetId)) return 'its machine was removed'
+          if (listed.get(ref.targetId)?.has(ref.sessionId) === false) return 'the session was deleted'
+          return null
+        })
         for (const [targetId, sessions] of account.sessions)
           for (const session of sessions)
             if (session.driver === 'chat' && ['working', 'waiting'].includes(session.activity.state))
@@ -249,6 +293,7 @@ export class ChatHub {
                 () => {},
               )
       } finally {
+        account.deletedDuringRefresh.clear()
         account.refreshing = null
       }
     })()
@@ -369,6 +414,7 @@ export class ChatHub {
 
   /** Changes apply at once, so journal events that follow see them; saving follows. */
   private async update(account: Account, delivery: Delivery, change: Partial<Delivery>) {
+    if (!notStopped(delivery)) return
     const previous = delivery.state
     Object.assign(delivery, change, { updatedAt: now() })
     if (delivery.state !== previous) this.logDelivery(account, delivery)
@@ -592,9 +638,18 @@ export class ChatHub {
     const member = this.find(account, delivery)
     const name = member ? `@${member.handle}` : 'The session'
     const { source } = delivery
-    if (source.kind === 'channel')
-      await this.notice(account, source.channelId, 'warning', `${name} could not reply: ${error}`, source.root)
-    else if (source.kind === 'session' && !source.reply) {
+    if (source.kind === 'channel') {
+      const channel = account.store.channels.channels.find(item => item.id === source.channelId)
+      const recipient = channel?.members.find(item => sessionKey(item) === sessionKey(delivery))
+      if (recipient)
+        await this.notice(
+          account,
+          source.channelId,
+          'warning',
+          `@${recipient.handle} could not reply: ${error}`,
+          source.root,
+        )
+    } else if (source.kind === 'session' && !source.reply) {
       const sender = await this.link(account.owner, source.from).catch(() => null)
       sender?.ensure(false)
       await sender?.request({
@@ -713,53 +768,139 @@ export class ChatHub {
     }
   }
 
+  async sessionDeleted(owner: Owner, ref: SessionRef) {
+    const account = await this.account(owner)
+    // An inventory request already in flight may have seen the session before deletion.
+    if (account.refreshing) account.deletedDuringRefresh.add(sessionKey(ref))
+    const sessions = account.sessions.get(ref.targetId)
+    if (sessions)
+      account.sessions.set(
+        ref.targetId,
+        sessions.filter(item => item.id !== ref.sessionId),
+      )
+    this.rebuild(account)
+    await this.pruneMembers(account, member =>
+      sessionKey(member) === sessionKey(ref) ? 'the session was deleted' : null,
+    )
+  }
+
+  private async pruneMembers(account: Account, reason: (ref: SessionRef) => string | null) {
+    if (!account.store.channels.channels.some(channel => channel.members.some(reason))) return
+    const changes = await account.store.change(['channels'], async () => {
+      const changes = []
+      for (const channel of account.store.channels.channels) {
+        const removed = channel.members.filter(member => reason(member))
+        if (!removed.length) continue
+        const notices: ChannelMessage[] = []
+        for (const member of removed) {
+          const message = noticeMessage(
+            channel.id,
+            'info',
+            `@${member.handle} was removed from this channel because ${reason(member)}.`,
+          )
+          // Journal first. If interrupted before the roster is persisted, reconciliation
+          // can replay this removal without losing or duplicating its notice.
+          message.key = `membership:${sessionKey(member)}`
+          if (!(await account.store.recent(channel.id)).some(item => item.key === message.key))
+            notices.push(await account.store.appendInChange(message))
+          delete account.store.channels.cursors[channel.id]?.[sessionKey(member)]
+        }
+        channel.members = channel.members.filter(member => !removed.includes(member))
+        changes.push({ channel, removed, notices })
+      }
+      return changes
+    })
+    for (const { channel, removed, notices } of changes) {
+      await this.retireDeliveries(account, channel, removed)
+      for (const message of notices) this.broadcast(account, { type: 'message', message })
+      this.broadcast(account, { type: 'channel', channel: await this.channelView(account, channel) })
+    }
+  }
+
+  private async retireDeliveries(account: Account, channel: Channel, removed: ChannelMember[]) {
+    const keys = new Set(removed.map(sessionKey))
+    for (const delivery of account.store.deliveries.deliveries) {
+      if (
+        delivery.source.kind === 'channel' &&
+        delivery.source.channelId === channel.id &&
+        notStopped(delivery) &&
+        keys.has(sessionKey(delivery))
+      ) {
+        this.links.get(this.linkKey(account.userId, delivery))?.release(delivery.id)
+        await this.update(account, delivery, {
+          state: 'failed',
+          error: 'The session left the channel.',
+          prompt: null,
+          rerun: null,
+        })
+      }
+    }
+  }
+
   async saveChannel(owner: Owner, input: ChannelInput) {
     const account = await this.account(owner)
     await this.fresh(account)
-    const existing = input.id ? account.store.channels.channels.find(channel => channel.id === input.id) : undefined
-    if (input.id && !existing) throw new AppError('Channel not found.', 404)
-    if (account.store.channels.channels.some(channel => channel.name === input.name && channel.id !== input.id))
-      throw new AppError(`#${input.name} already exists.`, 409)
-    if (!existing && account.store.channels.channels.length >= chatLimits.channels)
-      throw new AppError('Too many channels.', 409)
-    const seen = new Set<string>()
-    const members = input.members.flatMap(ref => {
-      const key = sessionKey(ref)
-      if (seen.has(key)) return []
-      seen.add(key)
-      const previous = existing?.members.find(member => sessionKey(member) === key)
-      if (previous) return [previous]
-      const session = this.find(account, ref)
-      if (!session) throw new AppError('A member session was not found. Refresh and try again.', 404)
-      return [{ ...ref, name: session.name, handle: session.handle }]
-    })
-    const used = new Set<string>()
-    for (const member of members) {
-      let handle = member.handle
-      for (let suffix = 2; used.has(handle); suffix++) handle = `${member.handle}-${suffix}`
-      member.handle = handle
-      used.add(handle)
-    }
-    const channel: Channel = {
-      id: existing?.id ?? randomUUID(),
-      name: input.name,
-      topic: input.topic.trim(),
-      members,
-      createdAt: existing?.createdAt ?? now(),
-    }
-    await account.store.change(['channels'], () => {
+    const { channel, edited, removed, added } = await account.store.change(['channels'], () => {
       const list = account.store.channels.channels
-      const index = list.findIndex(item => item.id === channel.id)
-      if (index >= 0) list[index] = channel
-      else list.push(channel)
+      const existing = 'id' in input ? list.find(channel => channel.id === input.id) : undefined
+      if ('id' in input && !existing) throw new AppError('Channel not found.', 404)
+      if ('name' in input && list.some(channel => channel.name === input.name && channel !== existing))
+        throw new AppError(`#${input.name} already exists.`, 409)
+      if (!existing && list.length >= chatLimits.channels) throw new AppError('Too many channels.', 409)
+      const removals = new Set('remove' in input ? input.remove.map(sessionKey) : [])
+      const previous = existing?.members ?? []
+      const removed = previous.filter(member => removals.has(sessionKey(member)))
+      const retained = previous.filter(member => !removals.has(sessionKey(member)))
+      const additions = 'add' in input ? input.add : 'members' in input ? input.members : []
+      const requested = new Map(additions.map(ref => [sessionKey(ref), ref]))
+      for (const member of retained) requested.delete(sessionKey(member))
+      if (retained.length + requested.size > chatLimits.members)
+        throw new AppError(`A channel can have up to ${chatLimits.members} members.`, 409)
+      const used = new Set(retained.map(member => member.handle))
+      const added = [...requested.values()].map(ref => {
+        const session = this.find(account, ref)
+        if (!session) throw new AppError('This session is no longer available to add.', 404)
+        let handle = session.handle
+        for (let suffix = 2; used.has(handle); suffix++) {
+          const ending = `-${suffix}`
+          handle = session.handle.slice(0, 48 - ending.length) + ending
+        }
+        used.add(handle)
+        return { ...ref, name: session.name, handle }
+      })
+      const channel: Channel = existing ?? { id: randomUUID(), createdAt: now(), name: '', topic: '', members: [] }
+      if ('name' in input) {
+        channel.name = input.name
+        channel.topic = input.topic.trim()
+      }
+      channel.members = [...retained, ...added]
+      for (const member of removed) delete account.store.channels.cursors[channel.id]?.[sessionKey(member)]
+      if (!existing) list.push(channel)
+      return { channel, edited: Boolean(existing), added, removed }
     })
+    if (edited) {
+      await this.retireDeliveries(account, channel, removed)
+      for (const [members, action] of [
+        [added, 'joined'],
+        [removed, 'left'],
+      ] as const) {
+        if (members.length)
+          await this.notice(
+            account,
+            channel.id,
+            'info',
+            `${members.map(member => '@' + member.handle).join(', ')} ${action} the channel.`,
+            randomUUID(),
+          )
+      }
+    }
     const view = await this.channelView(account, channel)
     this.broadcast(account, { type: 'channel', channel: view })
     this.log(account, {
       kind: 'channel',
-      type: existing ? 'edited' : 'created',
-      message: `#${channel.name} was ${existing ? 'edited' : 'created'} with ${members.map(member => `@${member.handle}`).join(', ') || 'no members'}`,
-      details: { channel: channel.name, members: members.map(member => member.handle).join(', ') },
+      type: edited ? 'edited' : 'created',
+      message: `#${channel.name} was ${edited ? 'edited' : 'created'} with ${channel.members.map(member => `@${member.handle}`).join(', ') || 'no members'}`,
+      details: { channel: channel.name, members: channel.members.map(member => member.handle).join(', ') },
     })
     return view
   }
@@ -816,19 +957,7 @@ export class ChatHub {
     text: string,
     root: string,
   ) {
-    const message: ChannelMessage = {
-      id: randomUUID(),
-      channelId,
-      at: now(),
-      author: { kind: 'outpost', level },
-      text,
-      mentions: [],
-      root,
-      hop: 0,
-      turn: null,
-      key: null,
-      files: [],
-    }
+    const message = noticeMessage(channelId, level, text, root)
     await account.store.append(message)
     this.broadcast(account, { type: 'message', message })
   }
@@ -837,6 +966,7 @@ export class ChatHub {
    * restart, returns the first post. */
   async post(owner: Owner, channelId: string, key: string, text: string, files: string[] = []) {
     const account = await this.account(owner)
+    await this.fresh(account)
     const channel = account.store.channels.channels.find(item => item.id === channelId)
     if (!channel) throw new AppError('Channel not found.', 404)
     const body = text.trim()

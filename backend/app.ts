@@ -211,7 +211,7 @@ export async function createApp(options: AppOptions) {
   deployment.register(app)
   desktopRoutes(app, services, desktop)
   workspaceRoutes(app, services, pairedRoutes(app, services))
-  sessionRoutes(app, services)
+  sessionRoutes(app, services, hub)
   const download = sessionFileDownloads(services)
   terminalRoutes(app, services)
   chatRoutes(app, services, chat, download)

@@ -2,7 +2,7 @@ import { pastedImage } from './terminal-fixture'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures'
 import type { Session, Target } from '../../shared/model'
 
 const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 32, 10])

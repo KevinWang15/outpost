@@ -46,7 +46,9 @@ test(
       provisionMachine(home, managedSocket('history', deployment.owner(), id))
       await deployment.workspace().add({
         id,
-        kind: 'local',
+        kind: 'ssh',
+        host: id + '.test',
+        user: 'fixture',
         name: id === 'alpha' ? 'Build machine' : 'Development laptop',
         tools: ['claude', 'codex', 'kimi', 'deepseek', 'antigravity'],
         createdAt: new Date().toISOString(),

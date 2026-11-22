@@ -29,7 +29,7 @@ terminals in the browser and Outpost Desktop. DeepSeek Harness uses Chat.
 | Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Native GPUI terminal with local shells and managed Outpost sessions. |
 
 For corporate machines that cannot open an outbound Outpost connection, choose
-**Direct only** when adding the machine. The client connects to its HTTPS
+**Install the connector → Direct only** when adding the machine. The client connects to its HTTPS
 endpoint. See the [V3 glossary](docs/ARCHITECTURE.md#v3-terminology), [installation, ownership and cleanup](docs/ARCHITECTURE.md#installing-and-removing-a-machine)
 and [direct-only setup](docs/ARCHITECTURE.md#direct-only-machines).
 
@@ -56,7 +56,7 @@ http://127.0.0.1:3000.
 
 ## Start a session on a machine
 
-1. Open **Machines** at the server’s home address and choose **Add a machine**. Pick a connection method to see who connects to whom and what you need. Choose **Continue**, fill in the machine details, and choose **Add machine**. For **Direct only** or **Relay enabled**, choose **Get install command** on the machine page and paste it into a terminal on the Linux machine. **Direct only** also offers an offline installer for restricted networks.
+1. Open **Machines → Add a machine**. Choose **SSH** for a machine the server can log in to, or **Install the connector** to set its connection policy. **Direct only** is the default. Choose **Relay enabled** to allow the machine to keep an outbound link to Outpost. A local Linux deployment also offers **On the Outpost server** once per workspace. Save the machine. For a connector, choose **Get install command**. On a local deployment, Direct only offers an offline kit to transfer from this computer. Hosted deployments also offer a one-command download.
 2. Select the machine and check **Required software**. Choose **New session**, then select a coding tool and its project directory.
 3. Choose **Connect** to open the session in the web terminal or Outpost Desktop. Return to the same machine to reconnect. For a tool that runs in Chat, the session action is **Open in chat**.
 
@@ -542,7 +542,7 @@ remain accessible through history MCP. See the [official ACP contract](https://g
 Set `OUTPOST_MODE=hosted`. Each verified account gets its own workspace.
 For an SSH machine, add the account’s Ed25519 public key to
 `~/.ssh/authorized_keys` for the Linux user that runs the sessions.
-Relay-enabled machines use pairing codes. Direct-only machines use offline enrollment.
+Relay-enabled machines redeem one-time pairing codes. Direct-only machines import their enrollment settings locally.
 Both terminal clients sign in through the hosted Outpost server.
 
 ```dotenv
@@ -559,7 +559,7 @@ OUTPOST_TRUST_PROXY=127.0.0.1,::1   # your reverse proxy
 Production requires HTTPS and email delivery. Without mail settings on
 loopback, development shows verification links in the UI. Put Outpost behind
 an HTTPS reverse proxy that preserves the `Host` header and forwards WebSocket
-upgrades for `/api/terminal`:
+upgrades for both `/api/terminal` and `/api/paired/node`.
 
 ```nginx
 proxy_http_version 1.1;
@@ -582,7 +582,7 @@ selected attachment.
 | Machine configuration | How the session is reached |
 | --- | --- |
 | Direct only | The client obtains authorization from Outpost and connects to the machine’s HTTPS endpoint. The machine verifies the grant locally. |
-| Relay enabled | The machine maintains an outbound link to Outpost. A reachable direct endpoint is preferred. Otherwise the server relays the attachment. |
+| Relay enabled | The machine maintains an outbound link to Outpost. The client tries the optional saved HTTPS endpoint first, even if the relay link is down. A registered relay handles fallback. |
 | SSH | The client uses the Server-managed route. The Outpost server reaches the machine over SSH. |
 | On the Outpost server | The client uses the Server-managed route. Sessions run on the Linux system running the Outpost server. |
 

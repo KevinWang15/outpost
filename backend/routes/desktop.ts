@@ -9,7 +9,7 @@ import type { Services } from '../services'
 import type { SessionCreationRequest } from '../../shared/model'
 import { desktopSessionCreationInput } from '../../shared/schemas'
 import { sessionCreationOptions } from '../../shared/sessionCreation'
-import { createSession, desktopSession, inspectTargetSoftware } from '../session-actions'
+import { createSession, desktopSession, inspectTargetSoftware, terminalLaunch } from '../session-actions'
 
 const proof = Type.String({ pattern: desktopProofPattern })
 const strict = { additionalProperties: false }
@@ -19,7 +19,7 @@ type SessionParams = TargetParams & { sessionId: string }
 /** App bearers can browse/create sessions and issue scoped terminal launches.
  * Browser credentials alone can approve access; app credentials cannot approve themselves. */
 export function desktopRoutes(app: FastifyInstance, services: Services, access: DesktopAccess) {
-  const { deployment, sessions, tokens } = services
+  const { deployment, sessions } = services
   const limits = new RateLimit()
   app.post<{ Body: { challenge: string; state: string; accountId?: string } }>(
     '/api/desktop/authorizations',
@@ -119,17 +119,16 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
       withRequestSignal(reply, async signal => {
         const owner = access.authorize(request)
         const context = await services.resolve(owner, request.params.targetId)
-        const session = await sessions.get(context, request.params.sessionId, signal)
-        if (!access.active(owner)) throw new AppError('App sign-in expired.', 401)
-        const grant = { owner, targetId: context.target.id, sessionId: session.id }
+        const { sessionId } = request.params
+        const { launch, title } = await terminalLaunch(services, context, sessionId, signal)
         return {
           server: desktopOrigin(deployment.origin(request)),
           accountId: owner.userId,
           targetId: context.target.id,
-          sessionId: session.id,
+          sessionId,
           loginId: owner.loginId,
-          token: tokens.issue(grant).token,
-          title: `${session.name} · ${context.target.name}`,
+          token: launch.token,
+          title,
         } satisfies DesktopLaunch
       }),
   )

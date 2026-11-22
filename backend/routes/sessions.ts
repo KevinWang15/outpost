@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import type { ConversationSearch, SessionForkInput, SessionInput, SessionUpdate } from '../../shared/model'
-import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { ChatHub } from '../chat/hub'
 import type { Services } from '../services'
-import { createSession, forkSession } from '../session-actions'
+import { createSession, forkSession, terminalLaunch } from '../session-actions'
 import {
   acknowledgeInput,
   conversationSearch,
@@ -17,7 +16,7 @@ import Type from 'typebox'
 
 type Params = { targetId: string; sessionId: string }
 export function sessionRoutes(app: FastifyInstance, services: Services, hub: ChatHub) {
-  const { sessions, broker, tokens } = services
+  const { sessions, broker } = services
   const base = '/api/targets/:targetId/sessions'
   app.get<{ Params: Params }>(base, async (request, reply) =>
     withRequestSignal(reply, async signal =>
@@ -99,9 +98,7 @@ export function sessionRoutes(app: FastifyInstance, services: Services, hub: Cha
     async (request, reply) =>
       withRequestSignal(reply, async signal => {
         const context = await services.context(request, request.params.targetId)
-        const session = await sessions.get(context, request.params.sessionId, signal)
-        if (!services.active(context.owner)) throw new AppError('Sign in again to connect.', 401)
-        return tokens.issue({ owner: context.owner, targetId: context.target.id, sessionId: session.id })
+        return (await terminalLaunch(services, context, request.params.sessionId, signal)).launch
       }),
   )
   app.post<{ Params: Params; Body: ConversationSearch }>(

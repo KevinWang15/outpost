@@ -15,10 +15,10 @@ import {
   writeInstallation,
   watchInstallation,
   runtimeLock,
-  validateDirect,
+  validateEnrollment,
   type RelayInstall,
 } from './installation'
-import { serveDirectOnly } from './directOnly'
+import { serveDirect } from './directServer'
 async function readLine(prompt: string) {
   process.stderr.write(prompt)
   const input = createInterface({ input: process.stdin, terminal: false })
@@ -30,10 +30,10 @@ async function readLine(prompt: string) {
   throw Error('Expected installation input.')
 }
 export async function installDirect() {
-  const config = validateDirect(JSON.parse(await readLine('Offline enrollment JSON: ')))
+  const config = validateEnrollment(JSON.parse(await readLine('Offline enrollment JSON: ')))
   await installationLock(async () => {
     await requireUnpaired()
-    writeInstallation(config)
+    writeInstallation({ ...config, mode: 'direct' })
   })
   console.log('Direct-only machine enrolled. Run outpost-terminal connect.')
 }
@@ -55,8 +55,7 @@ export async function pairTarget(address: string) {
     if (!validRelayIdentity(pair)) throw new Error('Invalid pairing reply.')
     writeInstallation({
       mode: 'relay',
-      origin,
-      targetId: pair.targetId,
+      ...validateEnrollment({ ...pair, origin }),
       credential: pair.credential,
       socket: pair.socket,
     })
@@ -135,6 +134,15 @@ function connectOnce(pair: RelayInstall, signal: AbortSignal): Promise<boolean> 
     })
   })
 }
+async function runRelay(pair: RelayInstall, signal: AbortSignal) {
+  let backoff = 500
+  while (!signal.aborted) {
+    const stable = await connectOnce(pair, signal)
+    if (stable) backoff = 500
+    if (!signal.aborted) await delay(backoff + (Math.random() * backoff) / 4, undefined, { signal }).catch(() => {})
+    backoff = Math.min(30000, backoff * 2)
+  }
+}
 export async function runConnector() {
   const initial = installation()
   if (!initial || (initial.mode !== 'relay' && initial.mode !== 'direct')) throw Error('Enroll this machine first.')
@@ -148,15 +156,13 @@ export async function runConnector() {
     process.once('SIGTERM', shutdown)
     process.once('SIGINT', shutdown)
     try {
-      if (pair.mode === 'direct') return await serveDirectOnly(pair, stop.signal)
-      let backoff = 500
-      while (!stop.signal.aborted) {
-        const stable = await connectOnce(pair, stop.signal)
-        if (stable) backoff = 500
-        if (!stop.signal.aborted)
-          await delay(backoff + (Math.random() * backoff) / 4, undefined, { signal: stop.signal }).catch(() => {})
-        backoff = Math.min(30000, backoff * 2)
-      }
+      if (pair.mode === 'direct') return await serveDirect(pair, stop.signal)
+      // The listener belongs to the installation. Each relay registration can
+      // come and go without taking direct clients or their sessions with it.
+      const listener = serveDirect(pair, stop.signal).catch(error => {
+        console.error('Direct listener unavailable:', (error as Error).message)
+      })
+      await Promise.all([listener, runRelay(pair, stop.signal)])
     } finally {
       unwatch()
       process.off('SIGTERM', shutdown)

@@ -1,5 +1,11 @@
 import { desktopOrigin } from './desktopAuth'
 
+export interface DirectEnrollment {
+  origin: string
+  targetId: string
+  publicKey: string
+  proofKey: string
+}
 export const directApiPath = '/api/direct/request'
 export const directTerminalPath = '/api/direct/terminal'
 

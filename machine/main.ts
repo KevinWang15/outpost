@@ -14,7 +14,7 @@ import { serveTerminal } from './terminal'
 const usage = `Usage: outpost-terminal COMMAND
   node --socket PATH   the machine end of Outpost's connection (Outpost runs it)
   serve | chat-serve   a session's terminal service or chat host (the node runs them)
-  pair SERVER          enroll using the code from Add machine → ${machineSetupLabels.paired}
+  pair SERVER          enroll with a single-use ${machineSetupLabels.paired} pairing code
   pair --managed PATH  bind a server-managed installation to its node socket
   pair --direct        enroll a direct-only machine with the server’s offline enrollment JSON
   connect              serve this installation using its configured network policy

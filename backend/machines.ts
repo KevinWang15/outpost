@@ -105,7 +105,9 @@ interface Options {
 
 export class MachineConnection {
   private child: ChildProcessWithoutNullStreams | null = null
-  directOrigin?: string
+  get relayConnected() {
+    return this.incoming !== null && this.started
+  }
   private incoming: Duplex | null = null
   private writer: BoundedWriter | null = null
   private starting: Promise<void> | null = null
@@ -256,7 +258,6 @@ export class MachineConnection {
           return
         }
         this.started = true
-        this.directOrigin = this.incoming && typeof message.directOrigin === 'string' ? message.directOrigin : undefined
         this.startFailed = null
         ready()
         this.options.events()
@@ -337,7 +338,6 @@ export class MachineConnection {
     const incoming = this.incoming
     if (!child && !incoming) return
     this.incoming = null
-    this.directOrigin = undefined
     this.child = null
     incoming?.destroy()
     this.startFailed?.(new MachineError(message, status))
@@ -449,22 +449,6 @@ export class Machines {
     return connection
   }
 
-  directOrigins(owner: Owner) {
-    const origins = new Set<string>()
-    for (const [key, machine] of this.connections) {
-      if (!key.startsWith(owner.userId + '\0') || !machine.directOrigin) continue
-      try {
-        const url = new URL(machine.directOrigin)
-        if (url.protocol === 'https:' && /^[a-z0-9.:[\]-]+$/i.test(url.host))
-          origins.add('wss://' + url.host + '/api/terminal/direct')
-      } catch {
-        /* Ignore malformed endpoint advertisements. */
-      }
-    }
-    return [...origins]
-  }
-
-  /** A target was removed or its software changed. */
   forget(owner: Owner, targetId: string) {
     const key = `${owner.userId}\0${targetId}`
     this.connections.get(key)?.close()

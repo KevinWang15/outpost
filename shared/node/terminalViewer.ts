@@ -26,7 +26,7 @@ interface ViewerHost<Identity> {
 /** One client socket attached to one terminal stream on the machine connection.
  * Closing either end ends both; the machine's terminal service keeps the session. */
 export class Connection<Identity> {
-  private routeChoice?: { slot: string; finish: (direct: boolean) => void }
+  private routeChoice?: { challenge: string; finish: (direct: boolean) => void }
   private controlOnly = false
   private stream: Stream | null = null
   private decoder = new FrameDecoder()
@@ -110,8 +110,8 @@ export class Connection<Identity> {
         this.routeChoice = undefined
         resolve(direct)
       }
-      const timer = setTimeout(() => finish(false), 2500).unref()
-      this.routeChoice = { slot: offer.slot, finish }
+      const timer = setTimeout(() => finish(false), offer.relay ? 3000 : 10000).unref()
+      this.routeChoice = { challenge: offer.challenge, finish }
       this.send(offer)
     })
   }
@@ -125,15 +125,6 @@ export class Connection<Identity> {
   start(stream: Stream) {
     if (this.finished) return stream.end()
     this.stream = stream
-    if ((stream.opened as { route?: string } | null)?.route === 'direct') {
-      this.controlOnly = true
-      this.started = true
-      clearTimeout(this.attachTimer)
-      this.send({ type: 'route-selected', route: 'direct' })
-      this.broker.logged(this, 'opened')
-      stream.onClose(error => this.close('error', error?.message ?? 'The direct attachment ended.'))
-      return
-    }
     stream.onData(chunk => this.output(chunk))
     stream.onClose(error => {
       if (this.finished) return
@@ -312,7 +303,7 @@ export class Connection<Identity> {
       return
     }
     if (message.type === 'route-choice') {
-      if (this.routeChoice?.slot === message.slot && typeof message.direct === 'boolean')
+      if (this.routeChoice?.challenge === message.challenge && typeof message.direct === 'boolean')
         this.routeChoice?.finish(message.direct)
       return
     }

@@ -1,14 +1,14 @@
-# Outpost machine service 2.6.2
+# Outpost machine service 2.7.0
 
 Everything Outpost runs on a machine, as one executable. Terminal service
-protocol 6, chat host protocol 3, node protocol 3.
+protocol 6, chat host protocol 3, node protocol 4.
 
 - File publication and removal notify each attached terminal once. Closing an attachment releases its machine stream.
 - Machine state locks are released automatically if the process exits.
 - History search uses `mixed` for combined keyword and semantic results. Message pages count Unicode code points. Existing V3 installations must rebuild the generated history index with the matching server.
 
 - The CLI reports enrollment as Relay enabled, Direct only or Server-managed.
-- Direct-only machines import a deployment verification key offline and accept
+- Both connector policies share a direct listener and authenticate it before the client sends the attachment grant. Direct-only machines import their enrollment keys offline and accept
   authenticated client requests on their HTTPS endpoint. They never establish
   an Outpost relay link. The native and browser terminals use the same policy.
 - Linux installations reserve one execution account and one server/machine
@@ -17,8 +17,7 @@ protocol 6, chat host protocol 3, node protocol 3.
   Upgrade the server and machine executable together.
 - Relay-enabled machines enroll with `outpost-terminal pair SERVER` and stay online
   with `outpost-terminal connect`. A client can reach a session through the
-  public server when both machines are behind NAT. An advertised HTTPS endpoint
-  enables direct connections. Terminal data, pasted images and published files
+  public server when both machines are behind NAT. An HTTPS endpoint saved in the workspace enables direct connections even while the relay link is down. Terminal data, pasted images and published files
   travel over the selected attachment.
 - `outpost-terminal node`: the machine end of the one connection Outpost keeps
   to each machine an account uses. It answers session, file, search and history

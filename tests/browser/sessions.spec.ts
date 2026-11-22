@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { addClaudeTarget, newSession } from './chat-fixture'
 
 test('a chat session follows its conversations, resumes an earlier one, and applies edits at the next start', async ({

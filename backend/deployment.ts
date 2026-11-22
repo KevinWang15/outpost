@@ -22,7 +22,7 @@ export interface AccountIdentity {
   revision: string
 }
 
-/** The only place where local and hosted installations differ ("Modes differ only in identity"). */
+/** Deployment-specific identity, workspace access and machine installation rules. */
 /** What a deployment reads from a request: a Fastify request has it, and a raw
  * WebSocket upgrade can provide it. */
 export interface Caller {

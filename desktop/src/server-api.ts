@@ -1,4 +1,4 @@
-import { directResponse } from '../../shared/directOnly'
+import { directResponse } from '../../shared/direct'
 /** Native HTTP requests never follow redirects or share browser cookies. */
 export class ServerApiError extends Error {
   constructor(

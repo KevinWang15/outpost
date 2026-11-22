@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight } from 'lucide-react'
 import MachineSetupGuide from './MachineSetupGuide'
 import {
   machineSetupLabels,
+  machineEndpoint,
   type Environment,
   type Target,
   type TargetInput,
@@ -98,8 +99,11 @@ export default function TargetDialog({
     setBusy(true)
     setError('')
     try {
-      if (target) await onSave({ name: text('name'), tools })
+      const connector = kind === 'direct' || kind === 'paired'
+      if (target) await onSave({ name: text('name'), tools, ...(connector && { endpoint: text('endpoint') || null }) })
       else if (kind === 'direct') await onSave({ kind, name: text('name'), tools, endpoint: text('endpoint') })
+      else if (kind === 'paired')
+        await onSave({ kind, name: text('name'), tools, ...(text('endpoint') && { endpoint: text('endpoint') }) })
       else if (kind !== 'ssh') await onSave({ kind, name: text('name'), tools })
       else
         await onSave({
@@ -187,19 +191,20 @@ export default function TargetDialog({
               placeholder={kind === 'local' ? machineSetupLabels.local : 'dev-box'}
             />
           </label>
-          {!target && kind === 'direct' && (
+          {(kind === 'direct' || kind === 'paired') && (
             <label className="field">
-              <span className="label">Machine HTTPS address</span>
+              <span className="label">Machine HTTPS address {kind === 'paired' && <em>optional</em>}</span>
               <input
-                required
+                required={kind === 'direct'}
                 name="endpoint"
-                defaultValue={draft.endpoint}
+                defaultValue={draft.endpoint ?? (target && machineEndpoint(target))}
                 type="url"
                 placeholder="https://terminal.corp.example"
               />
               <small>
-                Enter the HTTPS endpoint of the Outpost machine service. After adding it, follow the installation
-                instructions on its machine page.
+                {kind === 'paired'
+                  ? 'Set this to try direct connections first. Leave it empty to use the relay.'
+                  : 'Your device must be able to reach this address.'}
               </small>
             </label>
           )}

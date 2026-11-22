@@ -10,7 +10,11 @@ test('long target and session lists stay within the viewport and Connect remains
   for (let index = 0; index < 10; index++) {
     const response = await page.request.post('/api/targets', {
       headers,
-      data: { kind: 'local', name: `Layout ${info.project.name} target ${index}`, tools: ['claude'] },
+      data: {
+        kind: index === 9 ? 'local' : 'paired',
+        name: `Layout ${info.project.name} target ${index}`,
+        tools: ['claude'],
+      },
     })
     expect(response.status()).toBe(201)
     target = await response.json()

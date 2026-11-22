@@ -449,6 +449,9 @@ kbd {
     }
   }
 }
+.machine-policy {
+  margin-bottom: 16px;
+}
 .machine-guide-panel {
   min-width: 0;
   h3 {
@@ -539,19 +542,15 @@ kbd {
   }
   .machine-methods {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     gap: 3px;
     border: 0;
     border-radius: var(--radius);
     background: var(--surface-muted);
     padding: 3px;
-    &:not(:has(> :nth-child(4))) button {
-      flex-direction: column;
-    }
-    &:has(> :nth-child(4)) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
     button {
+      flex-direction: column;
       justify-content: center;
       text-align: center;
       padding: 4px;

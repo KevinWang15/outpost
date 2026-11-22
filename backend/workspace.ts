@@ -4,6 +4,8 @@ import { Ajv } from 'ajv'
 import type { ExecutionEnvironment, Target, TargetUpdate } from '../shared/model'
 import Type from 'typebox'
 import { targetRecord } from '../shared/schemas'
+import { desktopOrigin } from '../shared/desktopAuth'
+import { supportsTerminal } from '../shared/harnesses'
 import { AppError } from './errors'
 import { writeJsonFile } from '../shared/node/jsonFile'
 
@@ -16,6 +18,19 @@ const validTarget = ajv.compile<Target>(targetRecord)
 const validFile = ajv.compile<WorkspaceFile>(
   Type.Object({ version: Type.Literal(3), targets: Type.Array(targetRecord) }, { additionalProperties: false }),
 )
+
+function validateSettings(target: Target) {
+  if (!validTarget(target)) throw new AppError('Invalid machine settings.', 400)
+  if ('endpoint' in target && target.endpoint !== undefined) {
+    try {
+      target.endpoint = desktopOrigin(target.endpoint)
+    } catch {
+      throw new AppError('Enter the machine HTTPS origin, without a path.', 400)
+    }
+  }
+  if (target.kind === 'direct' && !target.tools.every(supportsTerminal))
+    throw new AppError('Direct-only machines support terminal coding tools only.', 400)
+}
 
 /** Target settings live with the server. Sessions are always read from their target. */
 export class Workspace {
@@ -60,12 +75,12 @@ export class Workspace {
     this.queue = work.catch(() => {})
     return work
   }
-  private update(id: string, change: (target: Target) => Target, message: string) {
+  private update(id: string, change: (target: Target) => Target) {
     return this.transaction(data => {
       const index = data.targets.findIndex(target => target.id === id)
       if (index < 0) throw new AppError('Machine not found', 404)
       const updated = change(data.targets[index])
-      if (!validTarget(updated)) throw new AppError(message, 400)
+      validateSettings(updated)
       if (data.targets.some(target => target.id !== id && target.name.toLowerCase() === updated.name.toLowerCase()))
         throw new AppError('A machine with this name already exists', 409)
       data.targets[index] = updated
@@ -87,7 +102,9 @@ export class Workspace {
   }
   add(target: Target) {
     return this.transaction(data => {
-      if (!validTarget(target)) throw new AppError('Invalid machine settings.', 400)
+      validateSettings(target)
+      if (target.kind === 'local' && data.targets.some(item => item.kind === 'local'))
+        throw new AppError('The Outpost server is already in this workspace.', 409)
       if (data.targets.some(item => item.id === target.id))
         throw new AppError('A machine with this ID already exists', 409)
       if (data.targets.some(item => item.name.toLowerCase() === target.name.toLowerCase()))
@@ -97,10 +114,21 @@ export class Workspace {
     })
   }
   edit(id: string, patch: TargetUpdate) {
-    return this.update(id, target => ({ ...target, ...patch }), 'Invalid machine settings.')
+    return this.update(id, target => {
+      const { endpoint, ...fields } = patch
+      const updated = { ...target, ...fields }
+      if (endpoint !== undefined) {
+        if (updated.kind !== 'direct' && updated.kind !== 'paired')
+          throw new AppError('Only connector machines use an HTTPS endpoint.', 400)
+        if (endpoint !== null) updated.endpoint = endpoint
+        else if (updated.kind === 'paired') delete updated.endpoint
+        else throw new AppError('Direct only requires a machine HTTPS address.', 400)
+      }
+      return updated
+    })
   }
   setEnvironment(id: string, environment: ExecutionEnvironment) {
-    return this.update(id, target => ({ ...target, environment }), 'Invalid execution environment.')
+    return this.update(id, target => ({ ...target, environment }))
   }
   remove(id: string) {
     return this.transaction(data => {

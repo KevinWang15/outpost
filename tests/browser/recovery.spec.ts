@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { terminalConnectionPolicy } from '../../shared/protocol'
 
 test(`Web terminal: a blackholed connection recovers the same process, offline output, size and draft`, async ({

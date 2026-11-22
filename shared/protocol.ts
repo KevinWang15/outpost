@@ -9,7 +9,7 @@ import type { Checkpoint } from './terminalState'
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 16
+export const protocolVersion = 17
 export const terminalRouteLabels = { direct: 'Direct', relay: 'Relay', 'server-managed': 'Server-managed' } as const
 export type TerminalRoute = keyof typeof terminalRouteLabels
 export const maxInputMessage = 64 * 1024
@@ -28,7 +28,7 @@ export const terminalConnectionPolicy = {
 
 export type ClientMessage =
   | { type: 'direct-lease'; ticket: string }
-  | { type: 'route-choice'; slot: string; direct: boolean }
+  | { type: 'route-choice'; challenge: string; direct: boolean }
   | FileRead
   | ImageWrite
   | { type: 'file-list'; id: string }
@@ -54,9 +54,9 @@ export interface SignalMessage {
   payload: unknown
 }
 export type ServerMessage =
-  | { type: 'direct-only'; origin: string; ticket: string; resume: string }
+  | { type: 'direct-attach'; ticket: string }
   | { type: 'direct-lease'; ticket: string }
-  | { type: 'route-offer'; origin: string; slot: string; proof: string }
+  | { type: 'route-offer'; origin: string; challenge: string; proof: string; resume: string; relay: boolean }
   | { type: 'route-selected'; route: TerminalRoute }
   | {
       type: 'hello'

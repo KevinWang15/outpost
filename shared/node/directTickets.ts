@@ -1,10 +1,13 @@
 import { createHmac, createPrivateKey, createPublicKey, randomUUID, sign, verify, type KeyObject } from 'node:crypto'
 
 export const leaseMs = 45_000
-export function directAuthority(secret: string, owner: string, target: string) {
+export const endpointProof = (key: string, challenge: string) =>
+  createHmac('sha256', Buffer.from(key, 'base64url')).update(challenge).digest('base64url')
+
+export function directAuthority(secret: string, owner: string, target: string, enrollment = '') {
   // RFC 8410 PKCS#8 Ed25519 seed. Each account/target gets a separate signing key.
   const seed = createHmac('sha256', secret)
-    .update(JSON.stringify(['outpost/direct/v1', owner, target]))
+    .update(JSON.stringify(['outpost/direct', owner, target, enrollment]))
     .digest()
   const key = createPrivateKey({
     key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]),
@@ -12,6 +15,7 @@ export function directAuthority(secret: string, owner: string, target: string) {
     type: 'pkcs8',
   })
   return {
+    proofKey: createHmac('sha256', seed).update('endpoint identity').digest('base64url'),
     publicKey: createPublicKey(key).export({ format: 'der', type: 'spki' }).toString('base64url'),
     issue(operation: string, data: object) {
       const payload = Buffer.from(

@@ -1,4 +1,4 @@
-import { directResponse } from '../shared/directOnly'
+import { directResponse } from '../shared/direct'
 import type { InstallationEvent } from '../shared/model'
 
 export class ApiError extends Error {

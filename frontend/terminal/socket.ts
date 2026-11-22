@@ -1,4 +1,4 @@
-import { directTerminalPath } from '../../shared/directOnly'
+import { directTerminalPath } from '../../shared/direct'
 import { desktopOrigin } from '../../shared/desktopAuth'
 import { terminalFileChunk, type TerminalFileReader } from '../../shared/terminalFiles'
 import { maxSessionFiles, parseSessionFile } from '../../shared/sessionFiles'
@@ -141,22 +141,21 @@ export class TerminalSocket {
       const choice = (direct: boolean) => {
         clearTimeout(probeTimer)
         if (this.socket === socket && socket.readyState === WebSocket.OPEN)
-          socket.send(JSON.stringify({ type: 'route-choice', slot: offer.slot, direct }))
+          socket.send(JSON.stringify({ type: 'route-choice', challenge: offer.challenge, direct }))
         if (!direct) releaseDirect()
       }
       if (selected || candidate) return
-      if (preferRelay) return choice(false)
+      this.token = offer.resume
+      if (preferRelay && offer.relay) return choice(false)
       try {
-        if (![offer.slot, offer.proof].every(value => typeof value === 'string' && /^[A-Za-z0-9_-]{32}$/.test(value)))
-          return choice(false)
-        const address = new URL('/api/terminal/direct', desktopOrigin(offer.origin))
+        const address = new URL(directTerminalPath, desktopOrigin(offer.origin))
         address.protocol = address.protocol === 'https:' ? 'wss:' : 'ws:'
         const peer = this.endpoint?.open(address) ?? new WebSocket(address)
         candidate = peer
         peer.onerror = () => {} // Failed probes fall back when onclose fires.
         peer.binaryType = 'arraybuffer'
-        probeTimer = setTimeout(() => choice(false), 1500)
-        peer.onopen = () => peer.send(offer.slot)
+        probeTimer = setTimeout(() => choice(false), offer.relay ? 2000 : 9000)
+        peer.onopen = () => peer.send(offer.challenge)
         peer.onmessage = event => {
           if (candidate !== peer) return
           try {
@@ -189,29 +188,18 @@ export class TerminalSocket {
         this.fail('Outpost sent an invalid terminal message. Reload this terminal before reconnecting.')
         return
       }
-      if (fromDirect && ['direct-only', 'direct-lease', 'route-offer', 'route-selected'].includes(message.type)) return
-      if (message.type === 'direct-only') {
-        if (selected || candidate) return
-        this.token = message.resume
-        selected = 'direct'
-        try {
-          const address = new URL(directTerminalPath, desktopOrigin(message.origin))
-          address.protocol = address.protocol === 'https:' ? 'wss:' : 'ws:'
-          const peer = this.endpoint?.open(address) ?? new WebSocket(address)
-          candidate = this.direct = peer
-          peer.binaryType = 'arraybuffer'
-          peer.onerror = () => {}
-          peer.onopen = () => peer.send(message.ticket)
-          peer.onmessage = event => receive(event, true)
-          peer.onclose = () =>
-            this.lost(socket, {
-              type: 'closed',
-              reason: 'error',
-              message: 'The direct-only machine is unreachable. Check its address and your network connection.',
-            })
-        } catch {
-          this.fail('Invalid direct-only machine address.')
+      if (fromDirect && ['direct-attach', 'direct-lease', 'route-offer', 'route-selected'].includes(message.type))
+        return
+      if (message.type === 'direct-attach') {
+        if (!verified || !candidate || candidate.readyState !== WebSocket.OPEN) {
+          this.preferRelayOnce = true
+          return this.unresponsive(socket)
         }
+        selected = 'direct'
+        this.direct = candidate
+        candidate.onmessage = event => receive(event, true)
+        candidate.onclose = () => this.unresponsive(socket)
+        candidate.send(message.ticket)
         return
       }
       if (message.type === 'direct-lease') {
@@ -227,15 +215,7 @@ export class TerminalSocket {
       } else if (message.type === 'route-selected') {
         if (selected) return
         selected = message.route
-        if (selected === 'relay' || selected === 'server-managed') return releaseDirect()
-        if (!verified || !candidate || candidate.readyState !== WebSocket.OPEN) {
-          this.preferRelayOnce = true
-          return this.unresponsive(socket)
-        }
-        this.direct = candidate
-        candidate.onmessage = event => receive(event, true)
-        candidate.onclose = () => this.unresponsive(socket)
-        candidate.send('attach')
+        releaseDirect()
       } else if (message.type === 'hello') {
         this.token = message.resume
         this.handlers.hello(message)

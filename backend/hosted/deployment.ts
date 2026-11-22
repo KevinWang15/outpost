@@ -160,7 +160,8 @@ export class HostedDeployment implements Deployment {
   }
   validateTarget(input: TargetInput) {
     if (input.kind === 'paired' || input.kind === 'direct') return
-    if (input.kind !== 'ssh') throw new AppError('Hosted Outpost connects to machines over SSH.', 400)
+    if (input.kind !== 'ssh')
+      throw new AppError('Hosted accounts cannot run sessions on the Outpost server itself.', 400)
     if (input.identityFile) throw new AppError('Hosted workspaces use your account SSH key.', 400)
   }
 

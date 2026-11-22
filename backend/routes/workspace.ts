@@ -1,4 +1,3 @@
-import { desktopOrigin } from '../../shared/desktopAuth'
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { Environment, SoftwareId, Target, TargetInput, TargetUpdate } from '../../shared/model'
@@ -15,19 +14,17 @@ type Params = { targetId: string }
 export function workspaceRoutes(app: FastifyInstance, services: Services, forgetPairing: (targetId: string) => void) {
   const { deployment, installations, log } = services
   app.get('/api/environment', async request => {
-    deployment.owner(request)
-    return { mode: deployment.mode, localTargets: deployment.localTargets } satisfies Environment
+    const owner = deployment.owner(request)
+    return {
+      mode: deployment.mode,
+      localTargets:
+        deployment.localTargets &&
+        !(await deployment.workspace(owner).list()).some(machine => machine.kind === 'local'),
+    } satisfies Environment
   })
   app.get('/api/targets', async request => deployment.workspace(deployment.owner(request)).list())
   app.post<{ Body: TargetInput }>('/api/targets', { schema: { body: targetInput } }, async (request, reply) => {
     const owner = deployment.owner(request)
-    if (request.body.kind === 'direct') {
-      try {
-        request.body.endpoint = desktopOrigin(request.body.endpoint)
-      } catch {
-        throw new AppError('Enter the machine HTTPS origin, without a path.', 400)
-      }
-    }
     deployment.validateTarget(request.body)
     const target: Target = {
       ...request.body,

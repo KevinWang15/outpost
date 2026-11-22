@@ -1,4 +1,5 @@
-import { expect, test as base, type Page, type WebSocketRoute } from '@playwright/test'
+import { expect, test as base, type Page } from '../fixtures'
+import type { WebSocketRoute } from '@playwright/test'
 import type { ClientMessage, ServerMessage } from '../../../shared/protocol'
 import { restoreEmptyTerminal } from '../terminal-fixture'
 

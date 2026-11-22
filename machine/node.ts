@@ -6,7 +6,6 @@ import { authorizeNode, validNodeSocket, watchInstallation, nodeLock, installati
 import { inspectSoftware } from './software'
 import { requiredSoftware } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
-import { directEndpoint } from './direct'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, mkdirSync, renameSync, rmSync, statSync, watch } from 'node:fs'
 import { connect, createServer, type Socket } from 'node:net'
@@ -71,21 +70,12 @@ export async function serveNode(socketName: string) {
     const send = (message: MachineMessage) => writer.write(terminalControl(message))
     const streams = new Map<number, Stream>()
     const calls = new Map<string, { resolve(data: unknown): void; reject(error: Error): void }>()
-    // A direct endpoint is optional: an unavailable listener still permits relay attachment.
-    const direct =
-      owner.mode === 'relay'
-        ? await directEndpoint(owner.origin).catch(error => {
-            console.error('Direct terminal endpoint unavailable:', (error as Error).message)
-            return undefined
-          })
-        : undefined
     process.stdout.write(nodeMagic)
     send({
       type: 'hello',
       version: terminalService.version,
       protocol: machineProtocol,
       pid: process.pid,
-      directOrigin: direct?.origin,
     })
 
     // Streams --------------------------------------------------------------------------
@@ -185,18 +175,7 @@ export async function serveNode(socketName: string) {
     const openers = {
       async terminal(stream: number, args: TerminalStreamArgs) {
         const { path, hello } = await prepareTerminal(args)
-        const release = direct?.claim(args, socketAddress(path), hello, () => closeStream(stream))
-        if (release) {
-          streams.set(stream, {
-            data: () => {},
-            credit: () => {},
-            close: () => {
-              release()
-              closeStream(stream)
-            },
-          })
-          send({ type: 'opened', stream, data: { route: 'direct' } })
-        } else pipe(stream, path, hello)
+        pipe(stream, path, hello)
       },
       async chat(stream: number, args: ChatStreamArgs) {
         const record = findSession(readRegistry(), args.session)
@@ -288,11 +267,6 @@ export async function serveNode(socketName: string) {
         )
           throw new RegistryError('Invalid software inspection request.', 400)
         return inspectSoftware(requiredSoftware({ tools: args.tools }), args.marker)
-      },
-      'viewer.offer': async args => {
-        if (typeof args.session !== 'string') throw new RegistryError('Invalid session', 400)
-        findSession(readRegistry(), args.session)
-        return direct?.offer(args.session) ?? null
       },
       'sessions.list': async () => ({ sessions: await listSessions() }),
       'sessions.get': args => getSession(args.id),

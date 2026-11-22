@@ -13,7 +13,7 @@ machines, Chat (`/chat`) can drive a session through the coding tool’s agent p
 | Machine | The Linux system that runs coding agents. A **target** (`Target`, `/api/targets`) is its workspace record. |
 | Outpost machine service | The `outpost-terminal` executable installed on a machine. Its **node** process (`outpost-terminal node`) handles the server’s management connection on server-managed and relay-enabled machines. |
 | Session | The machine-owned workspace for one coding agent. Its terminal process can keep running after a client detaches. |
-| Enrollment | Binding a machine to one Outpost server and execution account. A pairing code enrolls a relay-enabled machine. Offline enrollment uses a verification key for a direct-only machine. |
+| Enrollment | Binding a machine to one Outpost server and execution account. A pairing code enrolls a relay-enabled machine. Direct-only enrollment imports the verification and endpoint identity keys on the machine. |
 | Connection route | The path carrying an active terminal attachment. **Direct** connects client to machine. **Relay** uses the machine’s outbound connection to the server. **Server-managed** uses SSH or runs on the Outpost server itself. |
 
 ## Principles
@@ -24,7 +24,7 @@ machines, Chat (`/chat`) can drive a session through the coding tool’s agent p
    follows live output; disconnect never terminates the session.
 2. **The client opens each attachment.** For a relay-enabled machine, both client and machine
    connect out to the same deployment. The server authorizes the requested session.
-   A reachable advertised endpoint carries terminal data directly. Otherwise the
+   A reachable endpoint saved in the workspace carries terminal data directly. Otherwise the
    server relays it through the machine's existing outbound connection.
 
    ```text
@@ -45,10 +45,7 @@ machines, Chat (`/chat`) can drive a session through the coding tool’s agent p
 3. **Outpost authorizes each attachment.** On the direct route, the client
    holds a server control socket for revocation and reconnect grants. Terminal
    input, output, image paste and file operations use the client-to-machine socket.
-4. **Modes differ only in identity.** A *deployment* answers four questions:
-   who owns this request, where is their workspace stored, which SSH identity
-   do they use, and may sessions run on the Outpost server. Everything else —
-   sessions, software, terminals, the UI — is mode-agnostic.
+4. **Deployment and connection policy are independent.** Local Outpost trusts loopback callers and uses the server user's SSH credentials. A hosted deployment authenticates each account and gives it its own workspace and SSH key. Both support SSH and the connector. Only a local Linux deployment can add the server itself, once. A machine can reach the local relay only through the server's loopback address, including a trusted same-port tunnel. A hosted relay uses its public HTTPS origin.
 5. **One installed machine dependency.** Required software installs the Outpost
    machine service, a versioned, self-contained Linux executable in `~/.outpost/bin`.
    It is everything Outpost runs on a machine: the node, terminal services, chat
@@ -401,7 +398,10 @@ JSON control messages (`shared/protocol.ts`):
 | → server | `draft {active}` | The message box has text; messages from other sessions wait until it is sent or cleared |
 | → server | `deliver-now` | Type the next waiting message in once the agent is idle |
 | ← client | `hello {resume, session, target}` | Connection accepted |
-| ← client | `route-selected {route}` | Active path for a server-managed or relay-enabled machine. Direct-only enrollment fixes the route to Direct. |
+| ← client | `route-offer` | Saved endpoint, challenge, expected proof, resume token and whether a relay is connected |
+| → server | `route-choice` | Confirms whether the endpoint proved its identity for this challenge |
+| ← client | `direct-attach` / `direct-lease` | Machine-scoped attachment grant and subsequent lease renewals, carried by the client |
+| ← client | `route-selected {route}` | The broker is carrying the attachment over Relay or Server-managed |
 | ← client | `restore {checkpoint}` | Ordered checkpoint parts: begin, buffer lines, end |
 | ← client | `geometry {cols, rows}` | Shared terminal dimensions, applied before subsequent output |
 | ← client | `clear` | Clear the screen at this point in the ordered output stream |
@@ -495,45 +495,21 @@ files are retained.
 
 #### Direct-only machines
 
-In **Add a machine**, select **Direct only**, enter the HTTPS origin reachable by the
-client, and choose **Get install command** on the machine page. Run the command as the Linux execution account. It downloads the installer and matching binary, verifies the checksum and version, enrolls with the machine-specific public verification key, then starts the listener in the foreground.
-For machines with restricted outbound access, open **Install without outbound access**. Transfer the linked installer, checksum manifest and matching Linux binary through a trusted channel, then run the provided offline command in their directory. Enrollment and operation require no machine-to-server connection. The printed connector command can be run under a service manager.
-In this mode it listens on `127.0.0.1:8844` (overridable with
-`OUTPOST_DIRECT_PORT`). Route **POST/OPTIONS /api/direct/request** and the
-**WebSocket /api/direct/terminal** from the machine's HTTPS endpoint to that
-listener. Preserve the Origin header. The client must trust the TLS certificate.
+Choose **Add a machine → Install the connector → Direct only** and enter the HTTPS origin your client can reach. On the machine page, choose **Get install command**. Hosted deployments offer an online installer and an offline kit. Local deployments present the offline kit first because the machine's loopback address points to itself. Transfer the installer, checksum manifest, matching Linux binary and private enrollment command through a trusted channel. Run the command as the Linux execution account. The offline installer verifies the local binary and starts the connector without contacting Outpost.
 
-The client contacts its Outpost server for authentication and signed grants,
-then sends each grant directly to the machine. The machine verifies it locally.
-Terminal and file bytes stay between the client and machine. A live terminal
-requires a fresh server-signed lease carried by the client every 15 seconds.
-The machine closes it when its last lease expires (45 seconds). A client that
-loses direct connectivity cannot attach through the relay. Direct-only machines
-support managing terminal sessions, image paste, and publishing files. Server
-background features such as chat, schedules and cross-machine MCP operations
-require a server-connected machine. Coding tools have their own network behavior.
+The machine verifies signed grants locally. The Outpost server retains the signing key. The machine also holds a separate key to prove its identity to the client. Terminal sessions, image paste and published files use the direct connection. Chat, schedules, activity collection and cross-machine MCP operations require a server-connected machine. Coding tools have their own network requirements.
 
 #### Connecting a relay-enabled machine
 
-1. Select **Relay enabled** in **Add a machine**, save it, then choose **Get install command**.
-2. Paste the command into a Linux terminal as the execution account within five minutes. It downloads and verifies the machine service, redeems the single-use code and starts the connector. Generating a replacement invalidates the previous code.
-3. Keep the connector running in that terminal or run `~/.outpost/bin/outpost-terminal connect` under your service manager. It reconnects after network loss. Outbound HTTPS from both sides to Outpost suffices for relay.
-4. To enable direct connections, set `OUTPOST_DIRECT_ORIGIN` to the machine's
-   client-reachable HTTPS origin in the connector's environment. Configure that
-   host's TLS reverse proxy to forward WebSocket upgrades for `/api/terminal/direct`
-   to `127.0.0.1:8844` on the machine and preserve the client Origin header.
-   Set `OUTPOST_DIRECT_PORT` to change the loopback listener port. Restart the
-   connector after changing these settings. Loopback HTTP also works for local tests.
+1. Choose **Add a machine → Install the connector → Relay enabled**. Optionally enter the machine HTTPS address now or in **Edit machine** later.
+2. Choose **Get install command** and run it as the Linux execution account within five minutes. It verifies the downloaded executable, redeems the single-use pairing code and starts the connector. Generating a new code replaces the previous unused code.
+3. Keep the connector running, or use `~/.outpost/bin/outpost-terminal connect` under a service manager. Behind NAT, both client and machine need only outbound access to the hosted Outpost server. For a local deployment, first forward the machine's loopback port to the same port on the trusted Outpost server and keep the tunnel open. Anyone with access to the forwarded port can use the local workspace.
 
-The server sends a one-time slot and proof through the authenticated attachment.
-The client sends the slot to the advertised endpoint and checks the returned proof
-before confirming the route with the server. The node binds the slot to that specific
-session. A slow or failed probe falls back to relay before either route attaches to
-the PTY. The native client shows the active route in the pane management menu.
-Hosted browsers can use endpoints present in their signed-in account's content
-security policy when the page loaded. Browser network permissions also apply.
-Deleting a machine or enrolling a replacement invalidates its previous credential
-and closes attachments through the old link.
+#### Direct endpoint for either connector policy
+
+The connector listens on `127.0.0.1:8844` (set `OUTPOST_DIRECT_PORT` to change the port). Forward **POST/OPTIONS /api/direct/request** and **WebSocket /api/direct/terminal** from the machine's HTTPS origin to this listener. Preserve the Origin header and use a certificate trusted by the client. Browsers may also require local-network permission. The server includes saved endpoints in the signed-in workspace's content security policy.
+
+For a direct attachment, the server supplies a random challenge and the expected machine proof. The client verifies the proof before it sends an attachment grant or any session input. The client carries fresh signed leases from the server every 15 seconds. Each lease expires after 45 seconds. Both policies use this protocol. Direct terminals and client-initiated session management work while the relay link is down, provided the client can still reach Outpost for authorization and the machine for data. A relay-enabled machine with an active relay can fall back when its direct endpoint is unreachable. Removing or replacing the enrollment ends the old authorization. The native pane menu shows which route the attachment uses.
 
 Login shells may print first; the node then prints the marker
 `\0OUTPOST-NODE-1\0` and a `hello` with its version and protocol. A machine

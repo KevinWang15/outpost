@@ -5,24 +5,47 @@ import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { createWebSocketStream } from 'ws'
 import type { Services } from './services'
-import type { Owner } from './deployment'
 import { AppError } from './errors'
+import type { Deployment, Owner } from './deployment'
+import type { Target } from '../shared/model'
+import { directAuthority } from '../shared/node/directTickets'
 import { managedSocket } from './machines'
 
 const digest = (s: string) => createHash('sha256').update(s).digest('hex')
 const credential = () => randomBytes(32).toString('base64url')
 type Identity = { userId: string; targetId: string; hash: string }
+const keyPath = (deployment: Deployment, id: string) => join(deployment.directory, 'paired-machines', id + '.json')
+function pairing(deployment: Deployment, id: string): Identity | undefined {
+  try {
+    return JSON.parse(readFileSync(keyPath(deployment, id), 'utf8')) as Identity
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
+/** Replacement and revocation also invalidate the paired machine’s direct authority. */
+export function machineAuthority(deployment: Deployment, owner: Owner, target: Target) {
+  if (target.kind === 'direct') return directAuthority(deployment.secret, owner.userId, target.id)
+  if (target.kind !== 'paired') return
+  const identity = pairing(deployment, target.id)
+  if (identity?.userId === owner.userId && identity.targetId === target.id)
+    return directAuthority(deployment.secret, owner.userId, target.id, identity.hash)
+}
+
 export function pairedRoutes(app: FastifyInstance, services: Services) {
   const pending = new Map<string, { owner: Owner; targetId: string; expires: number }>()
   const directory = join(services.deployment.directory, 'paired-machines')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
-  const keyPath = (id: string) => join(directory, id + '.json')
   const identity = (bearer: string | undefined) => {
     const match = /^Bearer ([a-f0-9-]{36})\.([A-Za-z0-9_-]{43})$/.exec(bearer ?? '')
     if (match) {
       try {
-        const saved = JSON.parse(readFileSync(keyPath(match[1]), 'utf8')) as Identity
-        if (saved.targetId === match[1] && saved.hash === digest(match[2]) && services.deployment.account(saved.userId))
+        const saved = pairing(services.deployment, match[1])
+        if (
+          saved?.targetId === match[1] &&
+          saved.hash === digest(match[2]) &&
+          services.deployment.account(saved.userId)
+        )
           return saved
       } catch {
         /* Missing or removed pairing. */
@@ -65,17 +88,21 @@ export function pairedRoutes(app: FastifyInstance, services: Services) {
       pending.delete(key)
       if (!item || item.expires <= Date.now() || !services.deployment.active(item.owner))
         throw new AppError('The pairing code is invalid or expired.', 401)
-      await paired(item.owner, item.targetId)
+      const target = await paired(item.owner, item.targetId)
       const secret = credential(),
-        path = keyPath(item.targetId)
+        path = keyPath(services.deployment, item.targetId)
       writeFileSync(
         path + '.new',
         JSON.stringify({ userId: item.owner.userId, targetId: item.targetId, hash: digest(secret) }),
         { mode: 0o600 },
       )
       renameSync(path + '.new', path)
+      services.broker.closeTarget(item.owner, item.targetId)
       services.machines.forget(item.owner, item.targetId)
+      const authority = directAuthority(services.deployment.secret, item.owner.userId, target.id, digest(secret))
       return {
+        publicKey: authority.publicKey,
+        proofKey: authority.proofKey,
         targetId: item.targetId,
         socket: managedSocket(services.deployment.secret, item.owner, item.targetId),
         credential: item.targetId + '.' + secret,
@@ -84,7 +111,8 @@ export function pairedRoutes(app: FastifyInstance, services: Services) {
   )
   app.post('/api/paired/revoke', async (req, reply) => {
     const saved = identity(req.headers.authorization)
-    unlinkSync(keyPath(saved.targetId))
+    unlinkSync(keyPath(services.deployment, saved.targetId))
+    services.broker.closeTarget({ userId: saved.userId, loginId: 'background' }, saved.targetId)
     services.machines.forget({ userId: saved.userId, loginId: 'background' }, saved.targetId)
     return reply.code(204).send()
   })
@@ -126,7 +154,7 @@ export function pairedRoutes(app: FastifyInstance, services: Services) {
   return (targetId: string) => {
     if (!/^[a-f0-9-]{36}$/.test(targetId)) return
     try {
-      unlinkSync(keyPath(targetId))
+      unlinkSync(keyPath(services.deployment, targetId))
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
     }

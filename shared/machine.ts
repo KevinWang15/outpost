@@ -6,7 +6,7 @@
 
 import type { ActivityState } from './activity'
 
-export const machineProtocol = 3
+export const machineProtocol = 4
 /** Printed by the node before its first frame; login shells may print before it. */
 export const nodeMagic = '\0OUTPOST-NODE-1\0'
 /** Bytes a stream may send before the receiver grants more. */
@@ -21,7 +21,7 @@ export interface RemoteError {
 
 export type MachineMessage =
   /** node → server, once, before anything else. */
-  | { type: 'hello'; version: string; protocol: number; pid: number; directOrigin?: string }
+  | { type: 'hello'; version: string; protocol: number; pid: number }
   | { type: 'call'; id: string; op: string; args: unknown }
   | { type: 'result'; id: string; ok: true; data: unknown }
   | { type: 'result'; id: string; ok: false; error: RemoteError }
@@ -62,7 +62,6 @@ export interface AgentCall {
 }
 
 export interface TerminalStreamArgs {
-  direct?: string
   session: string
   cols: number
   rows: number

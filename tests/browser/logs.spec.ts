@@ -1,5 +1,5 @@
 import { createServer, type IncomingHttpHeaders } from 'node:http'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { addClaudeTarget, newSession } from './chat-fixture'
 
 test('logs show what sessions did, filter by kind, and webhooks deliver it', async ({ page }) => {

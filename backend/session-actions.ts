@@ -1,6 +1,8 @@
 import { createHmac } from 'node:crypto'
 import type { Services } from './services'
 import type { SessionForkInput, SessionInput } from '../shared/model'
+import { machineEndpoint } from '../shared/model'
+import { machineAuthority } from './paired'
 import { AppError } from './errors'
 import { launchSize, type TargetContext } from './sessions'
 
@@ -16,15 +18,38 @@ export async function createSession(
   if (!context.target.tools.includes(input.tool))
     throw new AppError('Add this coding tool to the machine before creating a session.', 400)
   launchSize(input)
-  // Bind the retry identity to the authenticated owner and target. The target
-  // commits this receipt atomically with the session, so SSH/HTTP response loss
-  // and server restarts cannot turn a retry into another creation.
-  const creationKey = requestId
+  return services.sessions.create(context, input, sessionCreationKey(services, owner.userId, target.id, requestId))
+}
+
+// The machine commits this identity with the session, across retries and routes.
+export function sessionCreationKey(services: Services, userId: string, targetId: string, requestId?: string) {
+  return requestId
     ? createHmac('sha256', services.deployment.secret)
-        .update(JSON.stringify([owner.userId, target.id, requestId]))
+        .update(JSON.stringify([userId, targetId, requestId]))
         .digest('hex')
     : undefined
-  return services.sessions.create(context, input, creationKey)
+}
+
+// The enrolled machine checks the session when a client attaches directly.
+// Server-managed launches can resolve its name through their existing connection.
+export async function terminalLaunch(
+  services: Services,
+  context: TargetContext,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  const { owner, target } = context
+  let title = target.name
+  if (machineEndpoint(target)) {
+    if (!/^[\w-]{1,128}$/.test(sessionId)) throw new AppError('Invalid session.', 400)
+    if (!machineAuthority(services.deployment, owner, target))
+      throw new AppError('Enroll this machine before connecting.', 409)
+  } else {
+    const session = await services.sessions.get(context, sessionId, signal)
+    title = `${session.name} · ${target.name}`
+  }
+  if (!services.active(owner)) throw new AppError('Sign in again to connect.', 401)
+  return { launch: services.tokens.issue({ owner, targetId: target.id, sessionId }), title }
 }
 
 /** A new session on a new Git branch and worktree, with the source's tool and launch settings. */

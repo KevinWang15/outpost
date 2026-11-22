@@ -1,10 +1,11 @@
 import { machineReleaseBase } from './machineInstaller'
 import { supportsTerminal } from '../shared/harnesses'
-import { createHmac } from 'node:crypto'
+import { sessionCreationKey } from './session-actions'
 import type { FastifyInstance } from 'fastify'
 import type { Services } from './services'
 import type { DesktopAccess } from './desktop-access'
-import { directAuthority } from '../shared/node/directTickets'
+import { machineAuthority } from './paired'
+import { machineEndpoint } from '../shared/model'
 import { AppError } from './errors'
 
 // Only schema-validated owner operations are delegated. Neither an account
@@ -23,15 +24,14 @@ const operations: Record<string, string> = {
   'GET /directories': 'directories',
   'GET /software': 'software',
   'GET /session-options': 'options',
-  'POST /sessions/:sessionId/connect': 'connect',
 }
 export function directRoutes(app: FastifyInstance, s: Services, desktop: DesktopAccess) {
   app.post<{ Params: { targetId: string } }>('/api/targets/:targetId/direct-install', async req => {
     const { target, owner } = await s.context(req, req.params.targetId)
     if (target.kind !== 'direct') throw new AppError('Choose a direct-only machine.', 400)
-    const { publicKey } = directAuthority(s.deployment.secret, owner.userId, target.id)
+    const { publicKey, proofKey } = machineAuthority(s.deployment, owner, target)!
     return {
-      config: { origin: s.deployment.origin(req), targetId: target.id, endpoint: target.endpoint, publicKey },
+      config: { origin: s.deployment.origin(req), targetId: target.id, publicKey, proofKey },
       releaseBase: machineReleaseBase(),
     }
   })
@@ -44,37 +44,18 @@ export function directRoutes(app: FastifyInstance, s: Services, desktop: Desktop
     const { targetId, sessionId } = req.params as { targetId: string; sessionId?: string }
     const owner = match[1] ? desktop.authorize(req) : s.deployment.owner(req)
     const target = await s.deployment.workspace(owner).get(targetId)
-    if (target.kind !== 'direct') return
+    const endpoint = machineEndpoint(target)
+    if (!endpoint) return
+    if (target.kind === 'paired' && (await s.resolve(owner, targetId)).machine.relayConnected) return
+    const authority = machineAuthority(s.deployment, owner, target)
+    if (!authority) throw new AppError('Enroll this machine before connecting.', 409)
     if (!s.active(owner)) throw new AppError('Sign in again.', 401)
-    if (op === 'connect') {
-      if (!sessionId || !/^[\w-]{1,128}$/.test(sessionId)) throw new AppError('Invalid session.', 400)
-      const launch = s.tokens.issue({ owner, targetId, sessionId })
-      return reply.send(
-        match[1]
-          ? {
-              server: s.deployment.origin(req),
-              accountId: owner.userId,
-              loginId: owner.loginId,
-              targetId,
-              sessionId,
-              title: target.name,
-              token: launch.token,
-            }
-          : launch,
-      )
-    }
     const desktopRequest = !!match[1]
     const body = req.body as { requestId?: string; input?: { tool: string }; tool?: string } | undefined
     const input = op === 'create' && desktopRequest ? body?.input : body
     if (op === 'create' && !target.tools.some(tool => tool === input?.tool && supportsTerminal(tool)))
       throw new AppError('Add this coding tool to the machine first.', 400)
-    const creationKey =
-      op === 'create' && desktopRequest
-        ? createHmac('sha256', s.deployment.secret)
-            .update(JSON.stringify([owner.userId, targetId, body?.requestId]))
-            .digest('hex')
-        : undefined
-    const ticket = directAuthority(s.deployment.secret, owner.userId, target.id).issue('request', {
+    const ticket = authority.issue('request', {
       op,
       sessionId,
       desktop: desktopRequest,
@@ -82,8 +63,9 @@ export function directRoutes(app: FastifyInstance, s: Services, desktop: Desktop
       name: target.name,
       input,
       query: req.query,
-      creationKey,
+      creationKey:
+        op === 'create' && desktopRequest ? sessionCreationKey(s, owner.userId, targetId, body?.requestId) : undefined,
     })
-    return reply.header('x-outpost-direct', '1').send({ endpoint: target.endpoint, ticket })
+    return reply.header('x-outpost-direct', '1').send({ endpoint, ticket })
   })
 }

@@ -2,7 +2,7 @@
 // the built target binary, or set TEST_BUN to a Bun executable for source mode.
 import { serverRequest } from '../../desktop/src/server-api'
 import { parseDesktopLoginCallback } from '../../shared/desktopAuth'
-import { directResponse } from '../../shared/directOnly'
+import { directResponse, directTerminalPath } from '../../shared/direct'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -11,6 +11,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer, type AddressInfo } from 'node:net'
 import { join, resolve } from 'node:path'
+import type { Duplex } from 'node:stream'
 import test from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { WebSocket as Peer, WebSocketServer } from 'ws'
@@ -62,10 +63,10 @@ for (const directOnly of [false, true])
         await once(portServer, 'listening')
         const port = (portServer.address() as AddressInfo).port
         await new Promise<void>(ok => portServer.close(() => ok()))
+        const endpoint = 'http://127.0.0.1:' + port
         const env = {
           ...process.env,
           HOME: home,
-          OUTPOST_DIRECT_ORIGIN: 'http://127.0.0.1:' + port,
           OUTPOST_DIRECT_PORT: String(port),
         }
         const run = (...args: string[]) => {
@@ -114,6 +115,11 @@ for (const directOnly of [false, true])
           history: false,
           multiplex: false,
         })
+        let blockRelay = false
+        let relayLink: Duplex | undefined
+        app.addHook('preValidation', async (req, reply) => {
+          if (blockRelay && req.routeOptions.url === '/api/paired/node') return reply.code(503).send()
+        })
         const origin = await app.listen({ host: '127.0.0.1', port: 0 })
         cleanup.push(() => app.close())
         const request = (path: string, body: object = {}, method = 'POST') =>
@@ -127,12 +133,16 @@ for (const directOnly of [false, true])
         app.server.on('request', req => {
           if (req.url === '/api/paired/enroll') enroll++
         })
-        app.server.on('upgrade', req => {
-          if (req.url === '/api/paired/node') registrations++
+        app.server.on('upgrade', (req, socket) => {
+          if (req.url === '/api/paired/node') {
+            registrations++
+            relayLink = socket
+          }
         })
         const target = await (
           await request('/targets', {
-            ...(directOnly ? { kind: 'direct', endpoint: env.OUTPOST_DIRECT_ORIGIN } : { kind: 'paired' }),
+            kind: directOnly ? 'direct' : 'paired',
+            endpoint,
             name: 'Test',
             tools: ['codex'],
           })
@@ -158,17 +168,20 @@ for (const directOnly of [false, true])
           assert.equal((await request('/paired/enroll', { code })).status, 401)
         }
         const connector = run('connect')
+        const listSessions = () => fetch(origin + '/api' + targetPath + '/sessions')
+        await waitFor(async () => {
+          try {
+            await fetch(endpoint)
+            if (directOnly) return true
+            const list = await listSessions()
+            return list.ok && !list.headers.has('x-outpost-direct')
+          } catch {
+            return false
+          }
+        })
         if (directOnly) {
-          const central = await fetch(origin + '/api' + targetPath + '/sessions')
+          const central = await listSessions()
           const copy = central.clone()
-          await waitFor(async () => {
-            try {
-              await fetch(env.OUTPOST_DIRECT_ORIGIN + '/health')
-              return true
-            } catch {
-              return false
-            }
-          })
           const res = await directResponse(central)
           assert.equal(res.status, 200)
           assert.equal((await res.json()).sessions[0].id, session.id)
@@ -245,7 +258,7 @@ for (const directOnly of [false, true])
           {
             origin,
             open: url => {
-              const direct = ['/api/terminal/direct', '/api/direct/terminal'].includes(url.pathname)
+              const direct = url.pathname === directTerminalPath
               if (direct) assert.equal(url.search, '')
               const ws = new Peer(direct && refuseDirect ? new URL(url.pathname, otherOrigin) : url, {
                 origin,
@@ -267,7 +280,7 @@ for (const directOnly of [false, true])
           connections.at(-1)?.kind === 'connected' && (connections.at(-1) as { route?: string }).route === name
         await waitFor(() => route('direct'))
         if (!directOnly) {
-          const foreign = new Peer(env.OUTPOST_DIRECT_ORIGIN.replace(/^http/, 'ws') + '/api/terminal/direct', {
+          const foreign = new Peer(endpoint.replace(/^http/, 'ws') + directTerminalPath, {
             origin: 'https://foreign.invalid',
           })
           const rejected = await new Promise<boolean>(resolve => {
@@ -292,29 +305,43 @@ for (const directOnly of [false, true])
         assert.equal(client.input('direct-route\n'), true)
         await waitFor(() => Buffer.concat(output).includes('direct-route'))
         await transfer()
+        async function attachFreshDirect() {
+          const next = await request(targetPath + '/sessions/' + session.id + '/connect')
+          assert.equal(next.status, 200)
+          const url = new URL(servers[0].url)
+          url.searchParams.set('token', (await next.json()).token)
+          const control = new TerminalClient(url.href)
+          const offer = await control.message('route-offer')
+          assert.equal(offer.relay, false)
+          const peer = new Peer(new URL(directTerminalPath, offer.origin.replace(/^http/, 'ws')), { origin })
+          cleanup.push(() => {
+            peer.terminate()
+            control.socket.terminate()
+          })
+          await once(peer, 'open')
+          const proof = once(peer, 'message')
+          peer.send(offer.challenge)
+          assert.equal(JSON.parse((await proof)[0].toString()).proof, offer.proof)
+          control.send({ type: 'route-choice', challenge: offer.challenge, direct: true })
+          const { ticket } = await control.message('direct-attach')
+          const hello = once(peer, 'message')
+          let ready = false
+          peer.on('message', (data, binary) => {
+            if (!binary && JSON.parse(data.toString()).type === 'ready') ready = true
+          })
+          peer.send(ticket)
+          assert.equal(JSON.parse((await hello)[0].toString()).type, 'hello')
+          await waitFor(() => ready)
+          return { control: control.socket, peer }
+        }
+        assert.ok(centralFrames.includes('direct-attach'))
+        assert.ok(centralFrames.every(kind => ['route-offer', 'direct-attach', 'direct-lease'].includes(kind)))
         if (directOnly) {
-          assert.ok(centralFrames.includes('direct-only'))
-          assert.ok(centralFrames.every(kind => kind === 'direct-only' || kind === 'direct-lease'))
           assert.equal(enroll, 0)
           assert.equal(registrations, 0)
           // Withhold renewals on a second attachment. The machine must expire it autonomously.
-          const next = await (await request(targetPath + '/sessions/' + session.id + '/connect')).json()
-          const leaseUrl = new URL(servers[0].url)
-          leaseUrl.searchParams.set('token', next.token)
-          const control = new Peer(leaseUrl, { origin })
-          const [offered] = await once(control, 'message')
-          const offer = JSON.parse(offered.toString())
-          assert.equal(offer.type, 'direct-only')
-          const idle = new Peer(new URL('/api/direct/terminal', offer.origin.replace('http:', 'ws:')), { origin })
-          cleanup.push(() => {
-            idle.terminate()
-            control.terminate()
-          })
-          await once(idle, 'open')
-          const expires = once(idle, 'close')
-          idle.send(offer.ticket)
-          const [hello] = await once(idle, 'message')
-          assert.equal(JSON.parse(hello.toString()).type, 'hello')
+          const { control, peer } = await attachFreshDirect()
+          const expires = once(peer, 'close')
           control.close()
           await expires
           assert.equal(servers.length, 1, 'regular client kept its lease')
@@ -339,7 +366,7 @@ for (const directOnly of [false, true])
         const relay = new TerminalClient(relayUrl.href)
         cleanup.push(() => relay.socket.terminate())
         const offer = await relay.message('route-offer')
-        relay.send({ type: 'route-choice', slot: offer.slot, direct: false })
+        relay.send({ type: 'route-choice', challenge: offer.challenge, direct: false })
         assert.equal((await relay.message('route-selected')).route, 'relay')
         await relay.message('ready')
         const sharedFile = await publish(session.id, image)
@@ -355,15 +382,13 @@ for (const directOnly of [false, true])
         assert.ok(!relay.messages.some(m => m.type === 'signal' && m.signal.type === 'files.changed'))
         relay.socket.close()
         await relay.closed
-        assert.deepEqual([...new Set(centralFrames)].sort(), ['hello', 'route-offer', 'route-selected'])
+        assert.ok(!centralFrames.includes('bytes'))
         refuseDirect = true
         peers[0].terminate()
         await waitFor(() => route('relay'))
         assert.equal(service.exitCode, null)
         assert.equal(servers.length, 2)
         await transfer()
-        await client.removeFile(file.id, AbortSignal.timeout(5000))
-        assert.deepEqual(await client.listFiles(AbortSignal.timeout(5000)), [])
         assert.ok(centralFrames.includes('result'))
         // A fresh attempt probes, rejects an endpoint with the wrong identity and still attaches.
         servers.at(-1)!.terminate()
@@ -373,9 +398,22 @@ for (const directOnly of [false, true])
         refuseDirect = false
         servers.at(-1)!.terminate()
         await waitFor(() => route('direct'))
-        const authenticatedPeer = peers.at(-1)!
+        // Disable only machine → server. Existing and fresh client → machine attachments still work.
+        blockRelay = true
+        assert.ok(relayLink)
+        relayLink.destroy()
+        await waitFor(async () => (await listSessions()).headers.has('x-outpost-direct'))
+        const offlineList = await directResponse(await listSessions())
+        assert.equal((await offlineList.json()).sessions[0].id, session.id)
+        assert.equal(client.input('relay-offline\n'), true)
+        await waitFor(() => Buffer.concat(output).includes('relay-offline'))
+        const fresh = await attachFreshDirect()
+        await transfer()
+        await client.removeFile(file.id, AbortSignal.timeout(5000))
+        assert.deepEqual(await client.listFiles(AbortSignal.timeout(5000)), [])
+        const attachment = peers.at(-1)!
         assert.equal((await request(targetPath, {}, 'DELETE')).status, 204)
-        await waitFor(() => authenticatedPeer.readyState === Peer.CLOSED)
+        await waitFor(() => attachment.readyState === Peer.CLOSED && fresh.control.readyState === Peer.CLOSED)
         await waitFor(() => !client.connected)
       } finally {
         for (const action of cleanup.reverse()) await action()

@@ -14,6 +14,9 @@ export const machineSetupLabels = {
   paired: 'Relay enabled',
   direct: 'Direct only',
 } as const satisfies Record<Target['kind'], string>
+/** The saved endpoint is usable before or without a relay registration. */
+export const machineEndpoint = (target: TargetInput) => ('endpoint' in target ? target.endpoint : undefined)
+
 export type SshTarget = Extract<Target, { kind: 'ssh' }>
 export type SessionCreationRequest = Static<typeof schemas.desktopSessionCreationInput>
 export type SessionInput = Static<typeof schemas.sessionInput>

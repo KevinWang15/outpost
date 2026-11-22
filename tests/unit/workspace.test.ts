@@ -37,3 +37,40 @@ test('workspace stores targets atomically with a strict schema', async t => {
   await writeFile(join(directory, 'workspace.json'), JSON.stringify({ ...saved, unknown: 1 }))
   await assert.rejects(workspace.list(), /no data was modified/)
 })
+
+test('machine setup enforces one server machine, connector endpoints and terminal tool eligibility on create and edit', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-setup-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const workspace = new Workspace(directory)
+  const base = { createdAt: new Date().toISOString(), tools: ['codex' as const] }
+  const local = await Promise.allSettled(
+    ['A', 'B'].map(name => workspace.add({ ...base, id: crypto.randomUUID(), kind: 'local', name })),
+  )
+  assert.equal(local.filter(item => item.status === 'fulfilled').length, 1)
+  const [saved] = await workspace.list()
+  await assert.rejects(workspace.edit(saved.id, { endpoint: 'https://example.test' }), /connector/)
+  await workspace.remove(saved.id)
+  await workspace.add({ ...base, id: crypto.randomUUID(), name: 'Replacement', kind: 'local' })
+  const direct = {
+    ...base,
+    id: crypto.randomUUID(),
+    kind: 'direct' as const,
+    name: 'VPN',
+    endpoint: 'https://machine.example.test',
+  }
+  await assert.rejects(workspace.add({ ...direct, tools: ['deepseek'] }), /terminal coding tools/)
+  await workspace.add(direct)
+  await assert.rejects(workspace.edit(direct.id, { tools: ['deepseek'] }), /terminal coding tools/)
+  await assert.rejects(workspace.edit(direct.id, { endpoint: null }), /HTTPS address/)
+  const relay = await workspace.add({
+    ...base,
+    id: crypto.randomUUID(),
+    name: 'Remote',
+    kind: 'paired',
+    tools: ['deepseek'],
+  })
+  await assert.rejects(workspace.edit(relay.id, { endpoint: 'https://example.test/path' }), /HTTPS origin/)
+  await workspace.edit(relay.id, { endpoint: 'https://machine.example.test/' })
+  assert.equal(((await workspace.get(relay.id)) as { endpoint: string }).endpoint, direct.endpoint)
+  assert.ok(!('endpoint' in (await workspace.edit(relay.id, { endpoint: null }))))
+})

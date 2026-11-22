@@ -6,11 +6,12 @@ import { driverStatus } from './drivers'
 import { readRegistry } from './registry'
 import { randomUUID } from 'node:crypto'
 import { desktopOrigin } from '../shared/desktopAuth'
+import type { DirectEnrollment } from '../shared/direct'
 import { DirectTickets } from '../shared/node/directTickets'
 import { locked, readJson, state, statePath, writeJson } from './state'
 
-export type RelayInstall = { mode: 'relay'; origin: string; targetId: string; credential: string; socket: string }
-export type DirectInstall = { mode: 'direct'; origin: string; targetId: string; publicKey: string; endpoint: string }
+export type RelayInstall = DirectEnrollment & { mode: 'relay'; credential: string; socket: string }
+export type DirectInstall = DirectEnrollment & { mode: 'direct' }
 type Configuration = RelayInstall | DirectInstall | { mode: 'ssh'; socket: string }
 export type Installation = Configuration & { home: string; generation: string }
 declare const OUTPOST_ISOLATED_TEST_HOST: boolean
@@ -55,15 +56,10 @@ function validConfiguration(config: Configuration) {
     case 'ssh':
       return validNodeSocket(config.socket)
     case 'relay':
-      return validRelayIdentity(config) && desktopOrigin(config.origin) === config.origin
+      if (!validRelayIdentity(config)) return false
+      return validEnrollment(config)
     case 'direct':
-      return (
-        uuid.test(config.targetId) &&
-        typeof config.publicKey === 'string' &&
-        config.publicKey.length > 0 &&
-        desktopOrigin(config.origin) === config.origin &&
-        desktopOrigin(config.endpoint) === config.endpoint
-      )
+      return validEnrollment(config)
     default:
       return false
   }
@@ -96,24 +92,23 @@ export async function requireUnpaired() {
   await runtimeLock(() => {})
   await nodeLock(() => {}, 300)
 }
-export function validateDirect(value: unknown): DirectInstall {
-  const c = value as DirectInstall
-  if (
-    !c ||
-    typeof c.targetId !== 'string' ||
-    !uuid.test(c.targetId) ||
-    typeof c.publicKey !== 'string' ||
-    c.publicKey.length > 128
+function validEnrollment(c: DirectEnrollment) {
+  return (
+    c &&
+    uuid.test(c.targetId) &&
+    typeof c.publicKey === 'string' &&
+    c.publicKey.length <= 128 &&
+    typeof c.proofKey === 'string' &&
+    /^[A-Za-z0-9_-]{43}$/.test(c.proofKey) &&
+    desktopOrigin(c.origin) === c.origin
   )
-    throw Error('Invalid offline enrollment configuration.')
-  new DirectTickets(c.publicKey, c.targetId)
-  return {
-    mode: 'direct',
-    origin: desktopOrigin(c.origin),
-    endpoint: desktopOrigin(c.endpoint),
-    targetId: c.targetId,
-    publicKey: c.publicKey,
-  }
+}
+
+export function validateEnrollment(value: DirectEnrollment): DirectEnrollment {
+  if (!validEnrollment(value)) throw Error('Invalid machine enrollment.')
+  new DirectTickets(value.publicKey, value.targetId)
+  const { origin, targetId, publicKey, proofKey } = value
+  return { origin, targetId, publicKey, proofKey }
 }
 export const nodeLock = <T>(action: () => Promise<T> | T, timeout = 5000) =>
   locked('node-runtime', action, timeout, directory())

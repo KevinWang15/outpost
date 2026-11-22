@@ -1,11 +1,12 @@
-// Direct-only installations have no network dialer. The client's requests carry
-// short-lived, single-use permissions from the installed server's signing key.
+// Both connector policies serve the same authenticated client endpoint.
 import { createServer, type IncomingMessage } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { WebSocketServer } from 'ws'
-import { directApiPath, directTerminalPath } from '../shared/directOnly'
-import { DirectTickets } from '../shared/node/directTickets'
+import { WebSocketServer, type RawData } from 'ws'
+import { connect } from 'node:net'
+import type { Stream } from '../backend/machines'
+import { directApiPath, directTerminalPath } from '../shared/direct'
+import { DirectTickets, endpointProof } from '../shared/node/directTickets'
 import { Connection } from '../shared/node/terminalViewer'
 import { requiredSoftware, type SessionInput, type SessionUpdate } from '../shared/model'
 import { type HarnessId } from '../shared/harnesses'
@@ -14,13 +15,12 @@ import { softwareReport } from '../shared/node/softwareInspection'
 import { desktopSession } from '../shared/desktopSession'
 import { inspectSoftware } from './software'
 import { launchSize } from '../backend/sessions'
-import { terminalStream } from './direct'
 import { prepareTerminal } from './terminalAttach'
 import * as sessions from './sessions'
 import { directories, searchConversations } from './search'
 import { readRegistry, RegistryError } from './registry'
 import { socketAddress } from './state'
-import type { DirectInstall } from './installation'
+import type { DirectEnrollment } from '../shared/direct'
 
 type Call = {
   op: string
@@ -98,7 +98,7 @@ async function readTicket(req: IncomingMessage) {
   return JSON.parse(Buffer.concat(parts).toString()).ticket
 }
 type Attach = { lease: string; session: string; name: string; cols: number; rows: number; start: boolean }
-export async function serveDirectOnly(config: DirectInstall, signal: AbortSignal) {
+export async function serveDirect(config: DirectEnrollment, signal: AbortSignal) {
   const tickets = new DirectTickets(config.publicKey, config.targetId)
   const port = Number(process.env.OUTPOST_DIRECT_PORT ?? 8844)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('Invalid OUTPOST_DIRECT_PORT.')
@@ -148,15 +148,22 @@ export async function serveDirectOnly(config: DirectInstall, signal: AbortSignal
   const peers = new WebSocketServer({
     server,
     path: directTerminalPath,
+    verifyClient: ({ origin }: { origin: string }) => origin === config.origin,
     perMessageDeflate: false,
     maxPayload: 512 * 1024,
   })
-  peers.on('connection', (ws, req) => {
+  peers.on('connection', ws => {
     ws.on('error', () => ws.terminate())
-    if (req.headers.origin !== config.origin || peers.clients.size > 64) return ws.close(1008, 'Connection rejected')
+    if (peers.clients.size > 64) return ws.close(1008, 'Connection rejected')
     let timeout = setTimeout(() => ws.terminate(), 5000)
     ws.once('close', () => clearTimeout(timeout))
-    ws.once('message', async (raw, binary) => {
+    ws.once('message', (raw, binary) => {
+      const challenge = raw.toString()
+      if (binary || !/^[A-Za-z0-9_-]{32}$/.test(challenge)) return ws.close(1008, 'Invalid endpoint challenge')
+      ws.once('message', attach)
+      ws.send(JSON.stringify({ proof: endpointProof(config.proofKey, challenge) }))
+    })
+    async function attach(raw: RawData, binary: boolean) {
       let claim
       try {
         if (binary) throw Error()
@@ -201,7 +208,7 @@ export async function serveDirectOnly(config: DirectInstall, signal: AbortSignal
           (e as Error).message,
         )
       }
-    })
+    }
   })
   try {
     server.listen(port, '127.0.0.1')
@@ -214,4 +221,31 @@ export async function serveDirectOnly(config: DirectInstall, signal: AbortSignal
     server.close()
     await Promise.allSettled(pending)
   }
+}
+
+function terminalStream(path: string, hello: Buffer): Stream {
+  const pty = connect(path)
+  const stream: Stream = {
+    opened: null,
+    onData: fn => {
+      pty.on('data', fn)
+    },
+    onClose: fn => {
+      pty.once('close', () => fn(null, null))
+    },
+    write: bytes => {
+      if (pty.writableLength > 2 * 1024 * 1024) pty.destroy()
+      else pty.write(bytes)
+    },
+    pause: () => {
+      pty.pause()
+    },
+    resume: () => {
+      pty.resume()
+    },
+    end: () => pty.destroy(),
+  }
+  pty.on('error', () => pty.destroy())
+  pty.once('connect', () => pty.write(hello))
+  return stream
 }

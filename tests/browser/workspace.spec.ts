@@ -1,5 +1,5 @@
 import type { Target, Session } from '../../shared/model'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures'
 import { appConnection } from './terminal-fixture'
 
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)])
@@ -42,7 +42,8 @@ test('direct-only setup offers terminal tools and restores Chat tools for server
   await deepseek.check()
   await back.click()
   await page.keyboard.press('ArrowRight')
-  await expect(dialog.getByRole('tab', { name: 'Direct only' })).toBeFocused()
+  await expect(dialog.getByRole('tab', { name: 'Install the connector' })).toBeFocused()
+  await expect(dialog.getByRole('radio', { name: 'Direct only' })).toBeChecked()
   await expect(dialog.getByRole('tabpanel')).toContainText('Get install command')
   await next.click()
   await expect(deepseek).toHaveCount(0)
@@ -59,7 +60,8 @@ for (const method of ['Direct only', 'Relay enabled']) {
     await page.goto('/')
     await page.getByRole('button', { name: 'Add a machine' }).first().click()
     const dialog = page.getByRole('dialog', { name: 'Add a machine' })
-    await dialog.getByRole('tab', { name: method }).click()
+    await dialog.getByRole('tab', { name: 'Install the connector' }).click()
+    await dialog.getByRole('radio', { name: method }).check()
     await dialog.getByRole('button', { name: 'Continue' }).click()
     await dialog.getByLabel('Name', { exact: true }).fill(`Installer test · ${method}`)
     if (method === 'Direct only') await dialog.getByLabel(/Machine HTTPS address/).fill('https://machine.example.test')
@@ -67,12 +69,12 @@ for (const method of ['Direct only', 'Relay enabled']) {
     const panel = page.getByRole('region', { name: 'Machine installation' })
     await panel.getByRole('button', { name: 'Get install command' }).click()
     const command = panel.getByLabel('Install command', { exact: true })
-    await expect(command).toContainText('/api/install/machine.sh')
     if (method === 'Direct only') {
-      await expect(command).toContainText('sh -s -- direct')
-      await panel.getByText('Install without outbound access', { exact: true }).click()
+      await expect(command).toHaveCount(0)
       await expect(panel.getByLabel('Offline install command')).toContainText('sh ./machine.sh direct')
     } else {
+      await expect(panel).toContainText('loopback')
+      await expect(command).toContainText('/api/install/machine.sh')
       await expect(command).toContainText('sh -s -- relay')
       const first = await command.innerText()
       await panel.getByRole('button', { name: 'Generate new command' }).click()

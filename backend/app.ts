@@ -1,5 +1,6 @@
 import { machineInstaller } from './machineInstaller'
-import { directRoutes } from './directOnly'
+import { directRoutes } from './direct'
+import { directApiPath, directTerminalPath } from '../shared/direct'
 import Fastify, { LogController } from 'fastify'
 import { readFile } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
@@ -19,7 +20,8 @@ import { ConnectTokens } from './terminal/tokens'
 import { sessionRoutes } from './routes/sessions'
 import { terminalRoutes } from './routes/terminal'
 import { sessionFileDownloads } from './routes/sessionFiles'
-import { pairedRoutes } from './paired'
+import { machineEndpoint } from '../shared/model'
+import { pairedRoutes, machineAuthority } from './paired'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
 import { DesktopAccess } from './desktop-access'
@@ -83,7 +85,7 @@ export async function createApp(options: AppOptions) {
   const active = (owner: Owner) => desktop.active(owner)
   const broker = new TerminalBroker({
     tokens,
-    directSecret: deployment.secret,
+    authority: (owner, target) => machineAuthority(deployment, owner, target),
     active,
     sessions,
     resolve,
@@ -174,16 +176,16 @@ export async function createApp(options: AppOptions) {
     reply.header('X-Frame-Options', 'DENY')
     if (deployment.mode === 'hosted') {
       const origin = deployment.origin(request)
-      let direct: string[] = []
+      const direct: string[] = []
       if ([pagePaths.terminal, pagePaths.workspace].some(path => path === request.url.split('?')[0])) {
         try {
           const owner = deployment.owner(request)
-          direct = machines.directOrigins(owner)
           for (const target of await deployment.workspace(owner).list()) {
-            if (target.kind !== 'direct') continue
-            const url = new URL(target.endpoint)
+            const endpoint = machineEndpoint(target)
+            if (!endpoint) continue
+            const url = new URL(endpoint)
             if (!/^[a-z0-9.:[\]-]+$/i.test(url.host)) continue
-            direct.push(url.origin + '/api/direct/request', url.origin.replace(/^http/, 'ws') + '/api/direct/terminal')
+            direct.push(url.origin + directApiPath, url.origin.replace(/^http/, 'ws') + directTerminalPath)
           }
         } catch {
           /* Signed-out pages use the public origin. */

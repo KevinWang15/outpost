@@ -98,9 +98,8 @@ export class SessionClient {
     rows: number,
     start: boolean,
     signal?: AbortSignal,
-    direct?: string,
   ): Promise<Stream> {
-    return machine.open('terminal', { session: id, cols, rows, start, ...(direct && { direct }) }, signal)
+    return machine.open('terminal', { session: id, cols, rows, start }, signal)
   }
   /** The server's link to a session's chat host, carried as a stream. */
   chatAttach({ machine }: TargetContext, id: string, start: boolean): Promise<Stream> {

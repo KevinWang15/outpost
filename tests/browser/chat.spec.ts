@@ -3,14 +3,15 @@ import { addClaudeTarget, newSession } from './chat-fixture'
 
 test('Machines remains the home page after visiting Chat', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('outpost:mode', 'chat'))
+  const addMachine = page.getByRole('button', { name: 'Add a machine', exact: true }).first()
   await page.goto('/')
-  await expect(page.getByRole('navigation', { name: 'Machines' })).toBeVisible()
+  await expect(addMachine).toBeVisible()
   await page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('link', { name: 'Chat' }).click()
   await expect(page).toHaveURL(/\/chat$/)
   await page.reload()
   await expect(page.getByRole('link', { name: 'Back to machines' })).toBeVisible()
   await page.locator('a.brand').click()
-  await expect(page.getByRole('navigation', { name: 'Machines' })).toBeVisible()
+  await expect(addMachine).toBeVisible()
 })
 
 test('Outpost Chat: talk to a session, approve a step, and work with sessions in a channel', async ({ page }) => {

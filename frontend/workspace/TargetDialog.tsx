@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Monitor, Server } from 'lucide-react'
 import {
   machineSetupLabels,
   type Environment,
@@ -12,6 +11,21 @@ import { api } from '../api'
 import { useAuth } from '../auth/useAuth'
 import { Dialog } from '../ui/Dialog'
 import AccountKey from '../auth/AccountKey'
+
+const connectionSetups = [
+  { kind: 'ssh', detail: 'Use when your Outpost server can SSH into the machine. You connect through the server.' },
+  {
+    kind: 'direct',
+    detail:
+      'Your browser or desktop app connects to the machine over HTTPS, for example on a company VPN. The machine stays disconnected from the Outpost server.',
+  },
+  {
+    kind: 'paired',
+    detail:
+      'Use when the machine can connect out to your Outpost server. Clients can connect directly or use the server as a relay.',
+  },
+  { kind: 'local', detail: 'Run sessions on the same Linux machine as the Outpost server.' },
+] as const
 
 function ToolChoice({
   value,
@@ -115,24 +129,27 @@ export default function TargetDialog({
     >
       <form id="target-form" className="form" onSubmit={submit}>
         {!target && (
-          <div className="segmented" role="radiogroup" aria-label="Machine connection setup">
-            <button type="button" role="radio" aria-checked={kind === 'ssh'} onClick={() => setKind('ssh')}>
-              <Server size={16} />
-              {machineSetupLabels.ssh}
-            </button>
-            <button type="button" role="radio" aria-checked={kind === 'paired'} onClick={() => setKind('paired')}>
-              {machineSetupLabels.paired}
-            </button>
-            <button type="button" role="radio" aria-checked={kind === 'direct'} onClick={() => setKind('direct')}>
-              {machineSetupLabels.direct}
-            </button>
-            {environment?.localTargets && (
-              <button type="button" role="radio" aria-checked={kind === 'local'} onClick={() => setKind('local')}>
-                <Monitor size={16} />
-                {machineSetupLabels.local}
-              </button>
-            )}
-          </div>
+          <fieldset className="field">
+            <legend className="label">How will you reach this machine?</legend>
+            {connectionSetups
+              .filter(setup => setup.kind !== 'local' || environment?.localTargets)
+              .map(setup => (
+                <label className="connection-setup" key={setup.kind}>
+                  <input
+                    type="radio"
+                    name="connection-setup"
+                    checked={kind === setup.kind}
+                    onChange={() => setKind(setup.kind)}
+                    aria-labelledby={`setup-label-${setup.kind}`}
+                    aria-describedby={`setup-detail-${setup.kind}`}
+                  />
+                  <span>
+                    <strong id={`setup-label-${setup.kind}`}>{machineSetupLabels[setup.kind]}</strong>
+                    <small id={`setup-detail-${setup.kind}`}>{setup.detail}</small>
+                  </span>
+                </label>
+              ))}
+          </fieldset>
         )}
         <label className="field">
           <span className="label">Name</span>
@@ -140,7 +157,7 @@ export default function TargetDialog({
             name="name"
             required
             maxLength={80}
-            autoFocus
+            autoFocus={Boolean(target)}
             defaultValue={target?.name}
             placeholder={kind === 'local' ? machineSetupLabels.local : 'dev-box'}
           />
@@ -149,7 +166,10 @@ export default function TargetDialog({
           <label className="field">
             <span className="label">Machine HTTPS address</span>
             <input required name="endpoint" type="url" placeholder="https://terminal.corp.example" />
-            <small>Clients must reach this address. The machine stays disconnected from the Outpost server.</small>
+            <small>
+              Enter the HTTPS endpoint of the Outpost machine service. After adding it, follow the offline enrollment
+              instructions on its machine page.
+            </small>
           </label>
         )}
         {!target && kind === 'ssh' && (
@@ -188,13 +208,7 @@ export default function TargetDialog({
           </>
         )}
         {!target && kind === 'paired' && (
-          <p className="hint">
-            Enroll with a pairing code. The machine opens an outbound connection to the Outpost server. To prefer a
-            direct connection, also configure the machine’s HTTPS endpoint.
-          </p>
-        )}
-        {!target && kind === 'local' && (
-          <p className="hint">Sessions run on the Linux machine running the Outpost server.</p>
+          <p className="hint">After adding the machine, use the pairing code on its machine page to enroll it.</p>
         )}
         <ToolChoice direct={kind === 'direct'} value={tools} onChange={setTools} />
         {error && (

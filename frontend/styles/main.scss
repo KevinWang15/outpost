@@ -373,29 +373,22 @@ kbd {
     gap: 2px;
   }
 }
-.segmented {
+.connection-setup {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 9px;
-  background: var(--hover);
-  button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    height: 34px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    font-weight: 500;
-    &[aria-checked='true'] {
-      background: var(--surface);
-      color: var(--ink);
-      box-shadow: var(--shadow);
-    }
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+  &:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  > span {
+    display: grid;
+    gap: 2px;
   }
 }
 .disclosure {

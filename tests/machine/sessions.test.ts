@@ -1,10 +1,12 @@
 // Sessions on a machine: creation, forks, edits and the registry, with fixture coding tools.
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { once } from 'node:events'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { currentConversation, type SessionInput } from '../../shared/model'
+import { driverStatus } from '../../machine/drivers'
 import { saveImage } from '../../machine/files'
 import { changeRegistry, readRegistry, switchConversation } from '../../machine/registry'
 import {
@@ -43,6 +45,27 @@ function setup(t: TestContext) {
   const registryBytes = () => readFileSync(statePath('registry.json'))
   return { home, bin, project, input, git, repository, registryBytes }
 }
+
+test('checking status when a driver exits with the probe still unread returns a stopped session', async t => {
+  machine(t)
+  mkdirSync(statePath('terminals'), { recursive: true })
+  const listener = spawn('python3', [
+    '-c',
+    `import socket, sys
+listener = socket.socket(socket.AF_UNIX)
+listener.bind(sys.argv[1])
+listener.listen(1)
+print('ready', flush=True)
+peer, _ = listener.accept()
+peer.recv(1, socket.MSG_PEEK)
+listener.close()
+peer.close()`,
+    statePath('terminals/closing.sock'),
+  ])
+  t.after(() => listener.kill())
+  await once(listener.stdout, 'data', { signal: AbortSignal.timeout(5000) })
+  assert.deepEqual(await driverStatus('closing'), { terminal: null, chat: null })
+})
 
 test('a creation receipt replays the session, refuses changed settings and never resurrects it', async t => {
   const { input } = setup(t)

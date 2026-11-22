@@ -59,10 +59,23 @@ export function request<T = Record<string, unknown>>(
   })
 }
 
+async function probeDriver(socket: string): Promise<DriverStatus | null> {
+  const status = () => request<DriverStatus>(socket, { type: 'status' })
+  try {
+    return await status()
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    // A driver can exit between accepting the probe and reading it. A fresh
+    // connection observes either the current driver or its closed socket.
+    if (code === 'ECONNRESET' || code === 'EPIPE') return status()
+    throw error
+  }
+}
+
 export async function driverStatus(session: string) {
   const [terminal, chat] = await Promise.all([
-    request<DriverStatus>(`terminals/${session}.sock`, { type: 'status' }),
-    request<DriverStatus>(`chats/${session}.sock`, { type: 'status' }),
+    probeDriver(`terminals/${session}.sock`),
+    probeDriver(`chats/${session}.sock`),
   ])
   return { terminal, chat }
 }
@@ -125,7 +138,7 @@ export async function stopDriver(session: string) {
   ] as const) {
     let status: DriverStatus | null
     try {
-      status = await request<DriverStatus>(socket, { type: 'status' })
+      status = await probeDriver(socket)
     } catch {
       status = null
     }
@@ -134,7 +147,7 @@ export async function stopDriver(session: string) {
       continue
     }
     const stopped = await request(socket, { type: 'stop' }, 10_000).catch(() => null)
-    if (!stopped || (await request(socket, { type: 'status' }).catch(() => null))) {
+    if (!stopped || (await probeDriver(socket).catch(() => null))) {
       let command: string[] = []
       try {
         command = readFileSync(`/proc/${status.pid}/cmdline`, 'utf8').split('\0')

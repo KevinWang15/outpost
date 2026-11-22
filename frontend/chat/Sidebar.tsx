@@ -198,7 +198,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
           ))}
           {client.sessionsLoaded && !client.targets.length && (
             <p className="hint-row muted">
-              Chat uses server-connected machines. <MachineLink>Add a machine</MachineLink>.
+              Chat runs on your enrolled machines. <MachineLink>Add a machine</MachineLink>.
             </p>
           )}
         </section>

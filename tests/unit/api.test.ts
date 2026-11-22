@@ -232,7 +232,6 @@ test('the broker identifies a server-managed SSH attachment and reports attach f
   t.after(() => client.socket.terminate())
   const hello = await client.message('hello')
   assert.equal(hello.session.name, 'Build')
-  assert.equal((await client.message('route-selected')).route, 'server-managed')
   await client.message('ready')
   await client.text('started 120x40')
   assert.deepEqual(sessions.attached.at(-1), { targetId: target.id, id: session.id, cols: 120, rows: 40 })
@@ -314,4 +313,53 @@ test('the production server serves the terminal page on direct navigation and re
       if (method === 'GET') assert.match(response.body, /<title>Outpost<\/title>/)
     }
   }
+})
+
+test('outbound codes expire, supersede prior codes and bind one machine until revoked', async t => {
+  const { call } = await setup(t)
+  const target = (await call('POST', '/targets', { kind: 'outbound', name: 'Enrolled machine', tools: ['codex'] })).body
+  const issue = async () => (await call('POST', '/targets/' + target.id + '/enrollment')).body.code
+  const redeem = (code: string) => call('POST', '/machine/enroll', { code })
+  const expired = await issue()
+  const clock = t.mock.method(Date, 'now', () => new Date().getTime() + 301_000)
+  assert.equal((await redeem(expired)).status, 401)
+  clock.mock.restore()
+  const old = await issue(),
+    current = await issue()
+  assert.equal((await redeem(old)).status, 401)
+  const credential = await redeem(current)
+  assert.equal(credential.status, 200)
+  assert.equal(credential.body.targetId, target.id)
+  assert.equal((await redeem(current)).status, 401)
+  assert.equal((await redeem(await issue())).status, 409)
+  assert.equal((await call('DELETE', '/targets/' + target.id)).status, 204)
+  assert.equal(
+    (await call('POST', '/machine/revoke', undefined, { authorization: 'Bearer ' + credential.body.credential }))
+      .status,
+    401,
+  )
+})
+
+test('a local machine ingress exposes only installer and authenticated machine routes', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-machine-ingress-'))
+  const deployment = await LocalDeployment.open(directory, 'https://machines.example.test')
+  const app = await createApp({ deployment, history: false, software: fakeSoftware })
+  t.after(async () => {
+    await app.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const headers = { host: 'machines.example.test', 'x-outpost-request': '1' }
+  for (const url of ['/', '/api/targets', '/api/auth/session', '/log-viewer', '/api/chat', '/api/install/../targets'])
+    assert.equal((await app.inject({ url, headers })).statusCode, 403, url)
+  assert.equal((await app.inject({ url: '/api/install/machine.sh', headers })).statusCode, 200)
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/machine/enroll', headers, payload: { code: 'unknown' } }))
+      .statusCode,
+    401,
+  )
+  assert.equal(
+    (await app.inject({ url: '/api/install/machine.sh', headers: { ...headers, origin: 'https://foreign.example' } }))
+      .statusCode,
+    403,
+  )
 })

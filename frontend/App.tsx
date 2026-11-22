@@ -1,6 +1,5 @@
 import { useEffect, useReducer, useState } from 'react'
 import { LoaderCircle, Monitor, Plus, Server } from 'lucide-react'
-import { machineEndpoint } from '../shared/model'
 import type { ConversationResults, ConversationSearch, Target, TargetInput } from '../shared/model'
 import { api } from './api'
 import { AppSidebar } from './ui/AppSidebar'
@@ -104,7 +103,7 @@ export default function App() {
         </div>
         <nav aria-label="Machines">
           {targets?.map(item => {
-            const Icon = item.kind === 'ssh' ? Server : Monitor
+            const Icon = item.kind === 'local' ? Monitor : Server
             return (
               <button
                 key={item.id}
@@ -140,10 +139,7 @@ export default function App() {
             target={target}
             request={request}
             onFind={() => setFinding(true)}
-            onUpdated={updated => {
-              if (machineEndpoint(updated) !== machineEndpoint(target)) window.location.reload()
-              else dispatch({ type: 'updated', target: updated })
-            }}
+            onUpdated={updated => dispatch({ type: 'updated', target: updated })}
             onRemoved={removed => dispatch({ type: 'removed', id: removed.id })}
           />
         ) : (
@@ -180,12 +176,6 @@ export default function App() {
           onClose={() => setAdding(false)}
           onSave={async input => {
             const target = await api<Target>('/targets', 'POST', input as TargetInput)
-            if (machineEndpoint(target)) {
-              const url = new URL(window.location.href)
-              url.searchParams.set('target', target.id)
-              window.location.assign(url.href)
-              return
-            }
             dispatch({ type: 'added', target })
             setAdding(false)
           }}

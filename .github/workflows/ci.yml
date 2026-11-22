@@ -39,7 +39,11 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run check
       - run: npm run build:terminal -- --fixtures
+      - run: npm run build:terminal -- x64-musl
+      - run: docker build -t outpost-openrc-test -f tests/fixtures/OpenRC.Dockerfile tests/fixtures
       - run: npm run test:integration
+        env:
+          OUTPOST_OPENRC_TEST_IMAGE: outpost-openrc-test
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
 

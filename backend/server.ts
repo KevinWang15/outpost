@@ -23,7 +23,7 @@ const deployment: Deployment =
         directory,
         publicUrl: process.env.PUBLIC_APP_URL ?? (built ? `http://127.0.0.1:${port}` : 'http://127.0.0.1:5173'),
       })
-    : await LocalDeployment.open(directory)
+    : await LocalDeployment.open(directory, process.env.OUTPOST_MACHINE_ORIGIN)
 const production = deployment instanceof HostedDeployment && deployment.production
 const app = await createApp({
   deployment,

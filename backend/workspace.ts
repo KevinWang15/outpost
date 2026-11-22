@@ -4,8 +4,6 @@ import { Ajv } from 'ajv'
 import type { ExecutionEnvironment, Target, TargetUpdate } from '../shared/model'
 import Type from 'typebox'
 import { targetRecord } from '../shared/schemas'
-import { desktopOrigin } from '../shared/desktopAuth'
-import { supportsTerminal } from '../shared/harnesses'
 import { AppError } from './errors'
 import { writeJsonFile } from '../shared/node/jsonFile'
 
@@ -21,15 +19,6 @@ const validFile = ajv.compile<WorkspaceFile>(
 
 function validateSettings(target: Target) {
   if (!validTarget(target)) throw new AppError('Invalid machine settings.', 400)
-  if ('endpoint' in target && target.endpoint !== undefined) {
-    try {
-      target.endpoint = desktopOrigin(target.endpoint)
-    } catch {
-      throw new AppError('Enter the machine HTTPS origin, without a path.', 400)
-    }
-  }
-  if (target.kind === 'direct' && !target.tools.every(supportsTerminal))
-    throw new AppError('Direct-only machines support terminal coding tools only.', 400)
 }
 
 /** Target settings live with the server. Sessions are always read from their target. */
@@ -91,10 +80,6 @@ export class Workspace {
     await this.queue
     return (await this.read()).targets
   }
-  /** Chat, history and activity collection need a server-to-machine connection. */
-  async listForServer() {
-    return (await this.list()).filter(target => target.kind !== 'direct')
-  }
   async get(id: string) {
     const target = (await this.list()).find(item => item.id === id)
     if (!target) throw new AppError('Machine not found', 404)
@@ -114,18 +99,7 @@ export class Workspace {
     })
   }
   edit(id: string, patch: TargetUpdate) {
-    return this.update(id, target => {
-      const { endpoint, ...fields } = patch
-      const updated = { ...target, ...fields }
-      if (endpoint !== undefined) {
-        if (updated.kind !== 'direct' && updated.kind !== 'paired')
-          throw new AppError('Only connector machines use an HTTPS endpoint.', 400)
-        if (endpoint !== null) updated.endpoint = endpoint
-        else if (updated.kind === 'paired') delete updated.endpoint
-        else throw new AppError('Direct only requires a machine HTTPS address.', 400)
-      }
-      return updated
-    })
+    return this.update(id, target => ({ ...target, ...patch }))
   }
   setEnvironment(id: string, environment: ExecutionEnvironment) {
     return this.update(id, target => ({ ...target, environment }))

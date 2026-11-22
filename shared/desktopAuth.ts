@@ -1,3 +1,4 @@
+import { serverOrigin } from './serverOrigin'
 import { isHarnessId, type HarnessId } from './harnesses'
 
 /** First-party native app login. Passwords and browser cookies never enter the app. */
@@ -96,14 +97,14 @@ export function parseDesktopLoginCallback(value: string) {
 /** Start the normal trust and browser approval flow when only the server is known. */
 export function desktopConnectUrl(origin: string) {
   const url = new URL('outpost://connect')
-  url.searchParams.set('origin', desktopOrigin(origin))
+  url.searchParams.set('origin', serverOrigin(origin))
   return url.href
 }
 export function parseDesktopConnectUrl(value: string) {
   const url = new URL(value)
   const origin = url.searchParams.get('origin')
   if (!origin || desktopConnectUrl(origin) !== value) throw new Error('Invalid Outpost connection link.')
-  return desktopOrigin(origin)
+  return serverOrigin(origin)
 }
 
 /** A website hands off an address and optional session, never a credential. */
@@ -116,7 +117,7 @@ export const validDesktopId = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value)
 export function desktopEntryUrl(entry: DesktopEntry): string {
   const url = new URL('outpost://server')
-  url.searchParams.set('origin', desktopOrigin(entry.server))
+  url.searchParams.set('origin', serverOrigin(entry.server))
   url.searchParams.set('account', entry.accountId)
   if (entry.session) {
     url.searchParams.set('target', entry.session.targetId)
@@ -148,7 +149,7 @@ export function parseDesktopEntry(value: string): DesktopEntry {
   )
     throw new Error('Invalid Outpost app link.')
   return {
-    server: desktopOrigin(query.get('origin') ?? ''),
+    server: serverOrigin(query.get('origin') ?? ''),
     accountId,
     ...(targetId && sessionId ? { session: { targetId, sessionId } } : {}),
   }
@@ -159,21 +160,4 @@ export interface DesktopLaunch extends DesktopSessionReference {
   loginId: string
   token: string
   title: string
-}
-
-/** Desktop privileges require HTTPS, except a server on this computer. */
-export function desktopOrigin(value: string): string {
-  if (value.length > 2048 || /[\s\\]/.test(value)) throw new Error('Enter an Outpost server URL.')
-  const url = new URL(value)
-  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
-  if (
-    (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) ||
-    url.username ||
-    url.password ||
-    url.pathname !== '/' ||
-    url.search ||
-    url.hash
-  )
-    throw new Error('Use an HTTPS server address, or HTTP on localhost, without a path or credentials.')
-  return url.origin
 }

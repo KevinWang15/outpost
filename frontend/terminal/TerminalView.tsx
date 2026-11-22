@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
-import { terminalRouteLabels, type CloseReason } from '../../shared/protocol'
+import { type CloseReason } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/images'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
@@ -211,12 +211,7 @@ export default function TerminalView({ token, title, onClose }: Props) {
             </span>
           )}
           <strong>{name}</strong>
-          <span
-            className={`terminal-state ${state.kind}`}
-            role="status"
-            aria-label={label}
-            title={state.kind === 'connected' ? 'Connection route: ' + terminalRouteLabels[state.route] : label}
-          >
+          <span className={`terminal-state ${state.kind}`} role="status" aria-label={label} title={label}>
             {state.kind === 'connecting' || state.kind === 'reconnecting' ? (
               <LoaderCircle className="spin" size={12} />
             ) : (

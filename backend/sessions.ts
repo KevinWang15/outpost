@@ -26,7 +26,7 @@ export interface TerminalDelivery {
 export interface TargetContext {
   owner: Owner
   target: Target
-  transport: Transport
+  transport: Transport | null
   machine: MachineConnection
   workspace: Workspace
 }

@@ -1,6 +1,6 @@
+import { createReadStream } from 'node:fs'
+import { MachineAssets } from './machineAssets'
 import { machineInstaller } from './machineInstaller'
-import { directRoutes } from './direct'
-import { directApiPath, directTerminalPath } from '../shared/direct'
 import Fastify, { LogController } from 'fastify'
 import { readFile } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
@@ -20,8 +20,7 @@ import { ConnectTokens } from './terminal/tokens'
 import { sessionRoutes } from './routes/sessions'
 import { terminalRoutes } from './routes/terminal'
 import { sessionFileDownloads } from './routes/sessionFiles'
-import { machineEndpoint } from '../shared/model'
-import { pairedRoutes, machineAuthority } from './paired'
+import { enrollmentRoutes } from './enrollment'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
 import { DesktopAccess } from './desktop-access'
@@ -71,7 +70,8 @@ export async function createApp(options: AppOptions) {
   const machines = new Machines(deployment.secret, options.env)
   const log = new ActivityLog(deployment, header => app.parseCookie(header))
   const sessions = loggedSessions(options.sessions ?? new SessionClient(), log)
-  const software = options.software ?? new SoftwareClient(options.env)
+  const assets = new MachineAssets(deployment.directory, options.env)
+  const software = options.software ?? new SoftwareClient(assets, options.env)
   const resolveTarget = targetResolver(deployment, machines, options.multiplex ?? true)
   const history =
     options.history === false ? null : new HistoryHub({ deployment, resolve: resolveTarget, ...options.history })
@@ -85,7 +85,6 @@ export async function createApp(options: AppOptions) {
   const active = (owner: Owner) => desktop.active(owner)
   const broker = new TerminalBroker({
     tokens,
-    authority: (owner, target) => machineAuthority(deployment, owner, target),
     active,
     sessions,
     resolve,
@@ -176,24 +175,9 @@ export async function createApp(options: AppOptions) {
     reply.header('X-Frame-Options', 'DENY')
     if (deployment.mode === 'hosted') {
       const origin = deployment.origin(request)
-      const direct: string[] = []
-      if ([pagePaths.terminal, pagePaths.workspace].some(path => path === request.url.split('?')[0])) {
-        try {
-          const owner = deployment.owner(request)
-          for (const target of await deployment.workspace(owner).list()) {
-            const endpoint = machineEndpoint(target)
-            if (!endpoint) continue
-            const url = new URL(endpoint)
-            if (!/^[a-z0-9.:[\]-]+$/i.test(url.host)) continue
-            direct.push(url.origin + directApiPath, url.origin.replace(/^http/, 'ws') + directTerminalPath)
-          }
-        } catch {
-          /* Signed-out pages use the public origin. */
-        }
-      }
       reply.header(
         'Content-Security-Policy',
-        `default-src 'self'; connect-src 'self' ${[origin.replace(/^http/, 'ws'), ...direct].join(' ')}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+        `default-src 'self'; connect-src 'self' ${origin.replace(/^http/, 'ws')}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
       )
     }
   })
@@ -216,10 +200,16 @@ export async function createApp(options: AppOptions) {
       .header('Content-Disposition', 'attachment; filename="machine.sh"')
       .send(machineInstaller()),
   )
-  directRoutes(app, services, desktop)
+  app.get<{ Params: { platform: string } }>('/api/install/:platform/binary', async (req, reply) => {
+    const asset = await assets.service(req.params.platform)
+    return reply.type('application/octet-stream').send(createReadStream(asset.path))
+  })
+  app.get<{ Params: { platform: string } }>('/api/install/:platform/sha256', async (req, reply) =>
+    reply.type('text/plain').send((await assets.service(req.params.platform)).sha256 + '\n'),
+  )
   deployment.register(app)
   desktopRoutes(app, services, desktop)
-  workspaceRoutes(app, services, pairedRoutes(app, services))
+  workspaceRoutes(app, services, enrollmentRoutes(app, services))
   sessionRoutes(app, services, hub)
   const download = sessionFileDownloads(services)
   terminalRoutes(app, services)

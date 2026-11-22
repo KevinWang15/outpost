@@ -45,7 +45,7 @@ export const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, 
 
 export async function chatHarness(names: string[], options: { idleMs?: number; terminal?: string[] } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'outpost-chat-hub-')))
-  execFileSync(terminalBinary, ['pair', '--managed', nodeSocket], { env: { ...process.env, HOME: directory } })
+  execFileSync(terminalBinary, ['enroll', 'ssh', nodeSocket], { env: { ...process.env, HOME: directory } })
   const state = join(directory, '.outpost')
   await mkdir(join(state, 'chats'), { recursive: true })
   const home = join(directory, 'claude')

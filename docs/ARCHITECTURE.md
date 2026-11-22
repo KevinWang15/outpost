@@ -3,10 +3,7 @@
 A machine owns its coding sessions. The web home (`/`) lists machines and their sessions.
 Terminal and Chat (`/chat`) attach to the coding agent on the selected machine.
 
-Remote machine connections and enrollment follow the accepted v3 design, pending
-implementation. The protocol sections describe the existing session machinery that both
-methods will use. See the [connectivity design and acceptance criteria](V3.md) and the
-[setup instructions for the current build](../README.md#current-build-setup).
+For the two enrollment methods and their acceptance criteria, see the [v3 connectivity design](V3.md). For installation and ownership changes, see [machine setup and removal](../README.md#machine-setup-and-removal).
 
 ## V3 terminology
 
@@ -454,7 +451,7 @@ Releasing the enrollment or removing the executable preserves the account’s se
 data and published files. Stop coding tools before uninstalling the executable and
 disable the outbound service if installed. A new owner using the same Linux account can
 access its existing session data. Use a fresh account to keep owners’ data separate.
-The current build’s cleanup commands are in the [operator instructions](../README.md#current-build-setup).
+The [operator instructions](../README.md#machine-setup-and-removal) cover setup, revocation and removal.
 
 #### Shared machine protocol
 
@@ -1161,7 +1158,7 @@ connects to the address it checked.
   checked; tokens are HMAC-signed with the installation secret.
 - Hosted SSH uses only the account's key and known-hosts file (`-F none`, no
   agent). Connection multiplexing sockets are scoped per owner and identity.
-- In the v3 design, an SSH enrollment never initiates an Outpost connection from the machine. An outbound enrollment requires an operator to redeem a single-use code. Its machine credential authorizes Outpost operations for that enrollment. Revocation closes the connection and prevents reconnection. [Enrollment security](../SECURITY.md#remote-machine-enrollment-in-v3)
+- An SSH enrollment never initiates an Outpost connection from the machine. An outbound enrollment requires an operator to redeem a single-use code. Its machine credential authorizes Outpost operations for that enrollment. Revocation closes the connection and prevents reconnection. [Enrollment security](../SECURITY.md#remote-machine-enrollment-in-v3)
 - Desktop confirms unknown server origins before contacting them. Accepted trust
   persists independently of login and has no management UI; declining cancels
   only the current attempt. Only HTTPS and localhost HTTP qualify.

@@ -4,7 +4,7 @@
 import { openSessionView } from './sessionView'
 import type { Duplex } from 'node:stream'
 import { authorizeNode, validNodeSocket, watchInstallation, nodeLock, installation } from './installation'
-import { inspectSoftware } from './software'
+import { inspectSoftware, installTool } from './software'
 import { requiredSoftware } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
 import { randomUUID } from 'node:crypto'
@@ -239,6 +239,12 @@ export async function serveNode(socketName: string) {
     type Args = Record<string, unknown>
     const sessions = () => readRegistry().sessions
     const operations: Record<string, (args: Args) => unknown> = {
+      'software.install': args => {
+        const id = args.id
+        if (id !== 'bash' && id !== 'claude-agent-acp' && !isHarnessId(id))
+          throw new RegistryError('Unknown software requirement.', 400)
+        return installTool(id)
+      },
       'software.inspect': args => {
         if (
           !Array.isArray(args.tools) ||

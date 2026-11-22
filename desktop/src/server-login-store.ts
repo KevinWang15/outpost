@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
-import { desktopOrigin, validDesktopCredential, type DesktopCredential } from '../../shared/desktopAuth'
+import { validDesktopCredential, type DesktopCredential } from '../../shared/desktopAuth'
+import { serverOrigin } from '../../shared/serverOrigin'
 import { writeJsonFile } from '../../shared/node/jsonFile'
 
 export interface SavedServerLogin extends DesktopCredential {
@@ -29,7 +30,7 @@ export class ServerLoginStore {
     for (const entry of raw) {
       if (!validDesktopCredential(entry) || !('origin' in entry) || typeof entry.origin !== 'string') continue
       try {
-        const origin = desktopOrigin(entry.origin)
+        const origin = serverOrigin(entry.origin)
         if (allowed(origin))
           this.records.set(origin, {
             origin,

@@ -139,7 +139,6 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
     const send = (v: unknown) => socket.send(JSON.stringify(v))
     send({ type: 'hello', resume: 'fixture.resume', session: { id: 'session', name: 'Fixture', tool: 'codex' } })
     for (const part of parts) send({ type: 'restore', checkpoint: part })
-    send({ type: 'route-selected', route: 'server-managed' })
     if (connections > 1) send(finished('c'.repeat(64)))
     send({ type: 'ready' })
     socket.on('message', (bytes, binary) => {
@@ -241,8 +240,7 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   assert.equal(opened.tool, catalogue.sessions[0].tool)
   const metadata = await wait(e => e.event === 'session')
   assert.equal(metadata.tool, session.tool)
-  const connected = await wait(e => e.event === 'connection' && e.state.kind === 'connected')
-  assert.equal(connected.state.routeLabel, 'Server-managed')
+  await wait(e => e.event === 'connection' && e.state.kind === 'connected')
   cmd({ op: 'preview', pane, file })
   const failed = await wait(e => e.event === 'previewFailed')
   assert.equal(failed.id, file.id)

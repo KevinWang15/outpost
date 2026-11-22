@@ -24,7 +24,7 @@ export const terminalBinary = fileURLToPath(
 )
 
 export function provisionMachine(home: string, socket: string) {
-  execFileSync(join(home, '.outpost/bin/outpost-terminal'), ['pair', '--managed', socket], {
+  execFileSync(join(home, '.outpost/bin/outpost-terminal'), ['enroll', 'ssh', socket], {
     env: { ...process.env, HOME: home },
   })
 }

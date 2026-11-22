@@ -31,7 +31,6 @@ class FakeSocket {
   }
   ready() {
     this.readyState = FakeSocket.OPEN
-    this.message({ type: 'route-selected', route: 'server-managed' })
     this.message({ type: 'ready' })
   }
   requests() {

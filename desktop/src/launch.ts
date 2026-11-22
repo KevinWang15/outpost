@@ -1,4 +1,5 @@
-import { validDesktopId, desktopOrigin, type DesktopLaunch } from '../../shared/desktopAuth'
+import { validDesktopId, type DesktopLaunch } from '../../shared/desktopAuth'
+import { serverOrigin } from '../../shared/serverOrigin'
 
 /** Validate server responses before giving a terminal its scoped credential. */
 export function parseDesktopLaunch(value: unknown): DesktopLaunch {
@@ -19,7 +20,7 @@ export function parseDesktopLaunch(value: unknown): DesktopLaunch {
       'Update Outpost Desktop and your Outpost server together, then use Connect → Outpost Desktop again.',
     )
   return {
-    server: desktopOrigin(data.server),
+    server: serverOrigin(data.server),
     loginId: data.loginId,
     accountId: data.accountId,
     targetId: data.targetId,

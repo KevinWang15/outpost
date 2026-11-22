@@ -13,15 +13,13 @@ export function relativeTime(value: string | null) {
 }
 
 export const address = (target: Target) =>
-  target.kind === 'direct'
-    ? machineSetupLabels.direct + ' · ' + target.endpoint
-    : target.kind === 'paired'
-      ? machineSetupLabels.paired
-      : target.kind === 'ssh'
-        ? `${target.user}@${target.host}${target.port ? `:${target.port}` : ''}`
-        : target.environment?.username
-          ? `${target.environment.username} on the Outpost server`
-          : machineSetupLabels.local
+  target.kind === 'outbound'
+    ? 'Outbound connection'
+    : target.kind === 'ssh'
+      ? `${target.user}@${target.host}${target.port ? `:${target.port}` : ''}`
+      : target.environment?.username
+        ? `${target.environment.username} on the Outpost server`
+        : machineSetupLabels.local
 
 /** Where a session runs now, as shown in Machines and Chat. */
 export function placeLabel(session: Pick<Session, 'driver' | 'status'>) {

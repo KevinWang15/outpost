@@ -29,9 +29,7 @@ export default function SessionTable({
   onRefresh: () => void
   onCreate: () => void
   /** The row's main action; the menu offers the other place. */
-  primary: (
-    session: Session,
-  ) => { kind: 'chat'; href: string } | { kind: 'terminal'; connect: () => void } | { kind: 'unavailable' }
+  primary: (session: Session) => { kind: 'chat'; href: string } | { kind: 'terminal'; connect: () => void }
   actionsFor: (session: Session) => SessionActions
   onRestart: (session: Session) => void
   onConversations: (session: Session) => void
@@ -151,9 +149,7 @@ export default function SessionTable({
                   {relativeTime(session.lastConnectedAt)}
                 </span>
                 <div className="row-actions" role="cell">
-                  {main.kind === 'unavailable' ? (
-                    <span className="muted">Requires server-connected Chat</span>
-                  ) : main.kind === 'chat' ? (
+                  {main.kind === 'chat' ? (
                     <a className="button small" href={main.href}>
                       <MessagesSquare size={14} />
                       Open in chat

@@ -105,9 +105,6 @@ interface Options {
 
 export class MachineConnection {
   private child: ChildProcessWithoutNullStreams | null = null
-  get relayConnected() {
-    return this.incoming !== null && this.started
-  }
   private incoming: Duplex | null = null
   private writer: BoundedWriter | null = null
   private starting: Promise<void> | null = null
@@ -125,12 +122,16 @@ export class MachineConnection {
 
   constructor(
     readonly socket: string,
-    private transport: Transport,
+    private transport: Transport | null,
     private options: Options,
   ) {}
 
-  /** The authenticated connector supplies the same framed node protocol as SSH. */
-  register(stream: Duplex) {
+  get connected() {
+    return this.started && !this.closed
+  }
+
+  /** Authenticate the outbound node handshake before starting work on its stream. */
+  register(stream: Duplex, ready: () => void) {
     this.restart()
     this.incoming = stream
     this.decoder = new FrameDecoder()
@@ -138,20 +139,20 @@ export class MachineConnection {
     this.sawMagic = false
     this.started = false
     const timer = setTimeout(() => {
-      if (this.incoming === stream) this.lost('The relay-enabled machine did not finish its handshake.')
+      if (this.incoming === stream) this.lost('The outbound machine did not finish its handshake.')
     }, 10_000).unref()
     this.writer = new BoundedWriter(stream, 64 * 1024 * 1024, 30_000, message => this.lost(message))
     stream.on('data', (bytes: Buffer) => {
       if (this.incoming !== stream) return
       try {
-        this.output(bytes, () => {}, timer)
+        this.output(bytes, ready, timer)
       } catch {
-        this.lost('The relay-enabled machine sent an invalid node message.')
+        this.lost('The outbound machine sent an invalid node message.')
       }
     })
     const ended = () => {
       clearTimeout(timer)
-      if (this.incoming === stream) this.lost('The relay-enabled machine disconnected.')
+      if (this.incoming === stream) this.lost('The outbound machine disconnected.')
     }
     stream.on('error', ended)
     stream.once('close', ended)
@@ -162,10 +163,13 @@ export class MachineConnection {
   private connect() {
     if (this.closed) return Promise.reject(new MachineError('Outpost is restarting. Try again shortly.', 503))
     if (this.incoming && !this.started)
-      return Promise.reject(new MachineError('The relay-enabled machine is connecting.', 503))
+      return Promise.reject(new MachineError('The outbound machine is connecting.', 503))
     if ((this.child || this.incoming) && this.started) return Promise.resolve()
+    const transport = this.transport
+    if (!transport)
+      return Promise.reject(new MachineError('The outbound machine is offline. Check its Outpost service.', 503))
     this.starting ??= new Promise<void>((resolve, reject) => {
-      const command = this.transport.login(`exec "$HOME/.outpost/bin/outpost-terminal" node --socket ${this.socket}`)
+      const command = transport.login(`exec "$HOME/.outpost/bin/outpost-terminal" node --socket ${this.socket}`)
       const timer = setTimeout(
         () => this.lost('The machine did not answer in time. Check that it is reachable.'),
         30_000,
@@ -433,7 +437,7 @@ export class Machines {
     private env?: NodeJS.ProcessEnv,
   ) {}
 
-  get(owner: Owner, targetId: string, transport: Transport) {
+  get(owner: Owner, targetId: string, transport: Transport | null) {
     const key = `${owner.userId}\0${targetId}`
     let connection = this.connections.get(key)
     if (!connection) {

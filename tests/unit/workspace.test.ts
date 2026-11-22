@@ -38,7 +38,7 @@ test('workspace stores targets atomically with a strict schema', async t => {
   await assert.rejects(workspace.list(), /no data was modified/)
 })
 
-test('machine setup enforces one server machine, connector endpoints and terminal tool eligibility on create and edit', async t => {
+test('one co-located machine per workspace and all coding tools on outbound machines', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-setup-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const workspace = new Workspace(directory)
@@ -48,29 +48,8 @@ test('machine setup enforces one server machine, connector endpoints and termina
   )
   assert.equal(local.filter(item => item.status === 'fulfilled').length, 1)
   const [saved] = await workspace.list()
-  await assert.rejects(workspace.edit(saved.id, { endpoint: 'https://example.test' }), /connector/)
   await workspace.remove(saved.id)
   await workspace.add({ ...base, id: crypto.randomUUID(), name: 'Replacement', kind: 'local' })
-  const direct = {
-    ...base,
-    id: crypto.randomUUID(),
-    kind: 'direct' as const,
-    name: 'VPN',
-    endpoint: 'https://machine.example.test',
-  }
-  await assert.rejects(workspace.add({ ...direct, tools: ['deepseek'] }), /terminal coding tools/)
-  await workspace.add(direct)
-  await assert.rejects(workspace.edit(direct.id, { tools: ['deepseek'] }), /terminal coding tools/)
-  await assert.rejects(workspace.edit(direct.id, { endpoint: null }), /HTTPS address/)
-  const relay = await workspace.add({
-    ...base,
-    id: crypto.randomUUID(),
-    name: 'Remote',
-    kind: 'paired',
-    tools: ['deepseek'],
-  })
-  await assert.rejects(workspace.edit(relay.id, { endpoint: 'https://example.test/path' }), /HTTPS origin/)
-  await workspace.edit(relay.id, { endpoint: 'https://machine.example.test/' })
-  assert.equal(((await workspace.get(relay.id)) as { endpoint: string }).endpoint, direct.endpoint)
-  assert.ok(!('endpoint' in (await workspace.edit(relay.id, { endpoint: null }))))
+  const remote = await workspace.add({ ...base, id: crypto.randomUUID(), name: 'Remote', kind: 'outbound' })
+  assert.deepEqual((await workspace.edit(remote.id, { tools: ['deepseek'] })).tools, ['deepseek'])
 })

@@ -1,8 +1,6 @@
-import { directTerminalPath } from '../../shared/direct'
-import { desktopOrigin } from '../../shared/desktopAuth'
 import { terminalFileChunk, type TerminalFileReader } from '../../shared/terminalFiles'
 import { maxSessionFiles, parseSessionFile } from '../../shared/sessionFiles'
-import type { ClientMessage, ServerMessage, TerminalRoute } from '../../shared/protocol'
+import type { ClientMessage, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, maxInputQueue, protocolVersion, terminalConnectionPolicy } from '../../shared/protocol'
 import { imageProblem } from '../../shared/images'
 import type { SessionActivity } from '../../shared/activity'
@@ -22,8 +20,6 @@ interface Handlers {
  * with the resume token after drops; an ended session requires explicit reconnect. */
 export class TerminalSocket {
   private socket: WebSocket | null = null
-  private direct: WebSocket | null = null
-  private preferRelayOnce = false
   private token: string
   private attempts = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -68,8 +64,6 @@ export class TerminalSocket {
     this.started = true
     clearTimeout(this.retryTimer)
     this.retryTimer = undefined
-    const preferRelay = this.preferRelayOnce
-    this.preferRelayOnce = false
     this.detach()
     this.handlers.activity(null)
     const { cols, rows } = this.size()
@@ -101,23 +95,7 @@ export class TerminalSocket {
         this.lost(socket, { type: 'closed', reason: 'error', message: 'The terminal did not become ready in time.' }),
       terminalConnectionPolicy.clientAttachMs,
     )
-    let candidate: WebSocket | null = null
-    let probeTimer: ReturnType<typeof setTimeout> | undefined
-    let verified = false
-    let selected: TerminalRoute | undefined
-    const releaseDirect = () => {
-      clearTimeout(probeTimer)
-      this.direct = null
-      const peer = candidate
-      verified = false
-      candidate = null
-      if (peer) {
-        peer.onopen = peer.onmessage = peer.onclose = null
-        peer.close()
-      }
-    }
     this.cleanup = () => {
-      releaseDirect()
       clearTimeout(ackTimer)
       clearTimeout(attachTimer)
     }
@@ -137,42 +115,7 @@ export class TerminalSocket {
       if (acknowledged >= 64 * 1024 && performance.now() - lastAck >= 10) acknowledge()
       else ackTimer ??= setTimeout(acknowledge, 20)
     }
-    const tryDirect = (offer: Extract<ServerMessage, { type: 'route-offer' }>) => {
-      const choice = (direct: boolean) => {
-        clearTimeout(probeTimer)
-        if (this.socket === socket && socket.readyState === WebSocket.OPEN)
-          socket.send(JSON.stringify({ type: 'route-choice', challenge: offer.challenge, direct }))
-        if (!direct) releaseDirect()
-      }
-      if (selected || candidate) return
-      this.token = offer.resume
-      if (preferRelay && offer.relay) return choice(false)
-      try {
-        const address = new URL(directTerminalPath, desktopOrigin(offer.origin))
-        address.protocol = address.protocol === 'https:' ? 'wss:' : 'ws:'
-        const peer = this.endpoint?.open(address) ?? new WebSocket(address)
-        candidate = peer
-        peer.onerror = () => {} // Failed probes fall back when onclose fires.
-        peer.binaryType = 'arraybuffer'
-        probeTimer = setTimeout(() => choice(false), offer.relay ? 2000 : 9000)
-        peer.onopen = () => peer.send(offer.challenge)
-        peer.onmessage = event => {
-          if (candidate !== peer) return
-          try {
-            if (typeof event.data !== 'string' || JSON.parse(event.data).proof !== offer.proof) return choice(false)
-            peer.onmessage = () => releaseDirect()
-            verified = true
-            choice(true)
-          } catch {
-            choice(false)
-          }
-        }
-        peer.onclose = () => choice(false)
-      } catch {
-        choice(false)
-      }
-    }
-    const receive = (event: MessageEvent, fromDirect: boolean) => {
+    socket.onmessage = event => {
       if (this.socket !== socket) return
       this.receivedAt = Date.now()
       if (event.data instanceof ArrayBuffer) {
@@ -188,43 +131,13 @@ export class TerminalSocket {
         this.fail('Outpost sent an invalid terminal message. Reload this terminal before reconnecting.')
         return
       }
-      if (fromDirect && ['direct-attach', 'direct-lease', 'route-offer', 'route-selected'].includes(message.type))
-        return
-      if (message.type === 'direct-attach') {
-        if (!verified || !candidate || candidate.readyState !== WebSocket.OPEN) {
-          this.preferRelayOnce = true
-          return this.unresponsive(socket)
-        }
-        selected = 'direct'
-        this.direct = candidate
-        candidate.onmessage = event => receive(event, true)
-        candidate.onclose = () => this.unresponsive(socket)
-        candidate.send(message.ticket)
-        return
-      }
-      if (message.type === 'direct-lease') {
-        if (this.direct?.readyState === WebSocket.OPEN) this.direct.send(JSON.stringify(message))
-        return
-      }
-      if (fromDirect && message.type === 'hello') {
-        this.handlers.hello({ ...message, resume: this.token })
-        return
-      }
-      if (message.type === 'route-offer') {
-        tryDirect(message)
-      } else if (message.type === 'route-selected') {
-        if (selected) return
-        selected = message.route
-        releaseDirect()
-      } else if (message.type === 'hello') {
+      if (message.type === 'hello') {
         this.token = message.resume
         this.handlers.hello(message)
       } else if (message.type === 'restore' || message.type === 'geometry' || message.type === 'clear') {
         const length = new TextEncoder().encode(event.data).length
         this.rendering.restore(message, () => rendered(length))
       } else if (message.type === 'ready') {
-        const route = selected
-        if (!route) return this.fail('The terminal became ready before a route was selected.')
         this.rendering.flush(() => {
           if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return
           if (this.ready) return this.fail('Outpost sent duplicate terminal readiness.')
@@ -232,7 +145,7 @@ export class TerminalSocket {
           this.readyAt = Date.now()
           clearTimeout(attachTimer)
           this.scheduleProbe()
-          this.handlers.state({ kind: 'connected', route })
+          this.handlers.state({ kind: 'connected' })
           const { cols, rows } = this.size()
           this.resize(cols, rows)
           this.send({ type: 'focus', active: this.active })
@@ -256,7 +169,6 @@ export class TerminalSocket {
       } else if (message.type === 'signal') this.handlers.signal(message)
       else if (message.type === 'closed') this.lost(socket, message)
     }
-    socket.onmessage = event => receive(event, false)
     socket.onclose = event =>
       this.lost(socket, {
         type: 'closed',
@@ -275,7 +187,6 @@ export class TerminalSocket {
    * Transient failures keep retrying; backoff, not a retry limit, bounds the load. */
   private lost(socket: WebSocket, message: Extract<ServerMessage, { type: 'closed' }>) {
     if (this.socket !== socket) return
-    if (this.direct && message.reason === 'error') this.preferRelayOnce = true
     this.detach()
     this.handlers.activity(null)
     this.failPending('The connection closed before Outpost confirmed it. Check the terminal before retrying.')
@@ -429,7 +340,7 @@ export class TerminalSocket {
 
   private send(message: ClientMessage) {
     const data = JSON.stringify(message)
-    const wire = (message.type === 'activate' ? null : this.direct) ?? this.socket
+    const wire = this.socket
     if (wire && this.canSend(new TextEncoder().encode(data).length, wire)) wire.send(data)
   }
 
@@ -449,7 +360,7 @@ export class TerminalSocket {
       this.fail('Terminal input is limited to 1 MiB at a time. Reconnect and paste smaller sections.')
       return false
     }
-    const wire = this.direct ?? this.socket
+    const wire = this.socket
     if (!wire || !this.canSend(bytes.length, wire)) return false
     for (let offset = 0; offset < bytes.length; offset += maxInputMessage)
       wire.send(bytes.subarray(offset, offset + maxInputMessage))

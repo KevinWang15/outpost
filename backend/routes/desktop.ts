@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import Type from 'typebox'
-import { desktopOrigin, desktopProofPattern, type DesktopLaunch, type DesktopTarget } from '../../shared/desktopAuth'
+import { desktopProofPattern, type DesktopLaunch, type DesktopTarget } from '../../shared/desktopAuth'
+import { serverOrigin } from '../../shared/serverOrigin'
 import { AppError } from '../errors'
 import type { DesktopAccess } from '../desktop-access'
 import { RateLimit } from '../rate-limit'
@@ -36,7 +37,7 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
       },
     },
     async request => {
-      desktopOrigin(deployment.origin(request))
+      serverOrigin(deployment.origin(request))
       limits.consume(`start:${request.ip}`, 30)
       return access.start(request.body.challenge, request.body.state, request.body.accountId)
     },
@@ -122,7 +123,7 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
         const { sessionId } = request.params
         const { launch, title } = await terminalLaunch(services, context, sessionId, signal)
         return {
-          server: desktopOrigin(deployment.origin(request)),
+          server: serverOrigin(deployment.origin(request)),
           accountId: owner.userId,
           targetId: context.target.id,
           sessionId,

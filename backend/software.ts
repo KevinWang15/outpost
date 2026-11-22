@@ -1,135 +1,102 @@
 import { randomUUID } from 'node:crypto'
-import type { InstallationPlan, SoftwareId, SoftwareReport } from '../shared/model'
-import { requiredSoftware } from '../shared/model'
-import { harnesses } from '../shared/harnesses'
-import { AppError } from './errors'
-import { runCommand } from './process'
+import { createReadStream } from 'node:fs'
+import { requiredSoftware, softwareLabel, type SoftwareReport } from '../shared/model'
 import { inspectionScript, softwareReport } from '../shared/node/softwareInspection'
-import type { CommandResult } from './process'
+import { toolInstaller } from '../shared/node/toolInstaller'
+import { AppError } from './errors'
+import { MachineAssets, platformName } from './machineAssets'
+import { detectPlatform, sshServiceInstaller, sshToolInstaller } from './machineInstaller'
+import { runCommand, type CommandResult } from './process'
 import type { TargetContext } from './sessions'
-import { machineInstaller, packages } from './machineInstaller'
-import chatAgents from '../shared/chatAgents.json' with { type: 'json' }
-
-/** Editable presets: shown to the user, and run only as submitted. */
-function installationScript(id: SoftwareId, socket: string): string {
-  if (id === 'outpost-terminal') return machineInstaller(socket)
-  if (id === 'claude-agent-acp')
-    return `#!/bin/sh
-set -eu
-# Install the official Claude Code ACP adapter ${chatAgents.claude.version} (${chatAgents.claude.license}) for Outpost Chat.
-# Outpost runs it with this machine's own claude, so its bundled copy is removed.
-${packages}
-command -v curl >/dev/null 2>&1 || install_packages curl ca-certificates
-command -v tar >/dev/null 2>&1 || install_packages tar
-[ "$(uname -s)" = Linux ] || { echo 'The adapter requires Linux.' >&2; exit 1; }
-case "$(uname -m)" in
-  x86_64) arch=x64 ;;
-  aarch64|arm64) arch=arm64 ;;
-  *) echo 'Supported Linux architectures: x86_64 and aarch64.' >&2; exit 1 ;;
-esac
-suffix=''
-if ldd --version 2>&1 | grep -qi musl; then
-  suffix=-musl
-  [ -e /usr/lib/libstdc++.so.6 ] || install_packages libstdc++ libgcc
-fi
-version='${chatAgents.claude.version}'
-asset="claude-agent-acp-linux-$arch$suffix.tar.gz"
-umask 077
-mkdir -p "$HOME/.outpost/bin" "$HOME/.outpost/agents"
-work=$(mktemp -d "$HOME/.outpost/agents/.install.XXXXXX")
-trap 'rm -rf "$work"' EXIT HUP INT TERM
-echo "Downloading the Claude Code ACP adapter $version ($arch$suffix, about 200 MB)..."
-curl --proto '=https' --tlsv1.2 -fSL --connect-timeout 15 --max-time 900 \
-  "https://github.com/${chatAgents.claude.repository}/releases/download/v$version/$asset" -o "$work/$asset"
-mkdir "$work/unpacked"
-tar -xzf "$work/$asset" -C "$work/unpacked"
-rm -f "$work/$asset" "$work/unpacked/claude"
-chmod 700 "$work/unpacked/claude-agent-acp"
-[ "$("$work/unpacked/claude-agent-acp" --version)" = "$version" ] || { echo 'Unexpected adapter version.' >&2; exit 1; }
-rm -rf "$HOME/.outpost/agents/claude-agent-acp-$version"
-mv "$work/unpacked" "$HOME/.outpost/agents/claude-agent-acp-$version"
-ln -sfn "../agents/claude-agent-acp-$version/claude-agent-acp" "$HOME/.outpost/bin/.claude-agent-acp.new"
-mv -f "$HOME/.outpost/bin/.claude-agent-acp.new" "$HOME/.outpost/bin/claude-agent-acp"
-echo "Claude Code ACP adapter $version installed."
-`
-  const harness = harnesses.find(harness => harness.id === id)
-  if (harness && 'npm' in harness.installer)
-    return `#!/bin/sh
-set -eu
-# Install the official DeepSeek Harness CLI as the execution user.
-command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Install Node.js 24.9 or newer and npm first.' >&2; exit 1; }
-node -e 'const [major,minor]=process.versions.node.split(".").map(Number);if(major<24||(major===24&&minor<9))process.exit(1)' || { echo 'Node.js 24.9 or newer is required.' >&2; exit 1; }
-npm install --global --prefix "$HOME/.local" '${harness.installer.npm}'
-echo '${harness.label} installed. Configure its DeepSeek credentials before opening a chat.'
-`
-  if (harness && 'url' in harness.installer)
-    return `#!/bin/sh
-set -eu
-# Install ${harness.label} using its official installer, as the execution user.
-${packages}
-command -v curl >/dev/null 2>&1 || install_packages curl ca-certificates
-${harness.installer.shell === 'bash' ? 'command -v bash >/dev/null 2>&1 || install_packages bash\n' : ''}work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT HUP INT TERM
-curl -fsSL --connect-timeout 15 --max-time 120 '${harness.installer.url}' -o "$work/install.sh"
-${harness.installer.shell} "$work/install.sh"
-echo '${harness.label} installer finished.'
-`
-  return `#!/bin/sh
-set -eu
-# Install ${id} using the target's package manager.
-${packages}
-install_packages ${id}
-echo '${id} installation finished.'
-`
-}
 
 export interface SoftwareService {
-  inspect(context: TargetContext, signal?: AbortSignal): Promise<Omit<SoftwareReport, 'installation'>>
-  install(
-    context: TargetContext,
-    script: string,
-    output: (text: string) => void,
-    signal: AbortSignal,
-  ): Promise<number | null>
+  inspect(context: TargetContext, signal?: AbortSignal): Promise<SoftwareReport>
+  setup(context: TargetContext, output: (text: string) => void, signal: AbortSignal): Promise<void>
 }
 
 export class SoftwareClient implements SoftwareService {
-  constructor(private env: NodeJS.ProcessEnv = process.env) {}
-  async inspect({ target, transport, machine }: TargetContext, signal?: AbortSignal) {
-    const marker = `OUTPOST_SOFTWARE_${randomUUID()}`
+  constructor(
+    private assets: MachineAssets,
+    private env: NodeJS.ProcessEnv = process.env,
+  ) {}
+
+  private async report({ target, transport, machine }: TargetContext, signal?: AbortSignal, bootstrap = false) {
+    const marker = 'OUTPOST_SOFTWARE_' + randomUUID()
     const ids = requiredSoftware(target)
     const result =
-      target.kind === 'paired'
-        ? await machine.call<CommandResult>(
-            'software.inspect',
-            { tools: target.tools, marker },
-            { signal, timeoutMs: 50000 },
-          )
-        : await runCommand(transport.management('interactive'), inspectionScript(ids, marker, machine.socket), {
+      bootstrap && transport
+        ? await runCommand(transport.management('interactive'), inspectionScript(ids, marker, machine.socket), {
             env: this.env,
             signal,
             timeoutMs: 45_000,
             readOnly: true,
           })
+        : await machine.call<CommandResult>(
+            'software.inspect',
+            { tools: target.tools, marker },
+            { signal, timeoutMs: 50_000 },
+          )
     try {
       return softwareReport(ids, marker, result)
     } catch (error) {
       throw new AppError((error as Error).message, 502)
     }
   }
-  async install({ transport }: TargetContext, script: string, onOutput: (text: string) => void, signal: AbortSignal) {
-    return (
-      await runCommand(transport.management('noninteractive'), script, {
+
+  inspect(context: TargetContext, signal?: AbortSignal) {
+    return this.report(context, signal)
+  }
+
+  async setup(context: TargetContext, output: (text: string) => void, signal: AbortSignal) {
+    const { machine, transport } = context
+    output('Checking the execution account and selected tools…\n')
+    const initial = await this.report(context, signal, true)
+    const missing = initial.software.filter(item => item.status !== 'installed')
+    const options = { env: this.env, signal, timeoutMs: 15 * 60_000, onOutput: output }
+    let platform = ''
+    if (transport && missing.length) {
+      const result = await runCommand(transport.shell(detectPlatform + '\nprintf "%s" "$platform"'), '', {
         env: this.env,
         signal,
-        onOutput,
-        timeoutMs: 15 * 60_000,
+        readOnly: true,
       })
-    ).code
+      if (result.code !== 0) throw new Error(result.stderr || 'Could not determine machine platform.')
+      platform = platformName(result.stdout.trim())
+    }
+    for (const { id } of missing) {
+      signal.throwIfAborted()
+      output('Installing ' + softwareLabel(id) + '…\n')
+      let result: CommandResult
+      if (id === 'outpost-terminal') {
+        if (!transport) throw new AppError('Run the machine setup command again to update the outbound service.', 409)
+        const asset = await this.assets.service(platform)
+        result = await runCommand(
+          transport.shell(sshServiceInstaller(machine.socket, asset.sha256)),
+          createReadStream(asset.path),
+          options,
+        )
+        if (result.code === 0) machine.restart()
+      } else if (transport) {
+        const asset = await this.assets.approvedTool(platform, id)
+        result = asset
+          ? await runCommand(transport.shell(sshToolInstaller(asset.sha256)), createReadStream(asset.path), options)
+          : await runCommand(transport.management('noninteractive'), toolInstaller(id), options)
+      } else {
+        result = await machine.call<CommandResult>(
+          'software.install',
+          { id },
+          { timeoutMs: options.timeoutMs + 5000, signal },
+        )
+        output(result.stdout + result.stderr)
+      }
+      if (result.code !== 0)
+        throw new Error('Installation failed for ' + softwareLabel(id) + '. Review the setup log and retry.')
+    }
+    const verified = await this.inspect(context, signal)
+    const remaining = verified.software.filter(item => item.status !== 'installed')
+    if (remaining.length)
+      throw new Error('Check the installation of ' + remaining.map(item => softwareLabel(item.id)).join(', ') + '.')
+    await context.workspace.setEnvironment(context.target.id, verified.environment)
+    output('The machine service and selected software are ready.\n')
   }
 }
-
-export const planInstallation = (id: SoftwareId, socket: string): InstallationPlan => ({
-  softwareId: id,
-  script: installationScript(id, socket),
-})

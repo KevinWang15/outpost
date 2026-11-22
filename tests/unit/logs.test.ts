@@ -78,11 +78,13 @@ test('changes are recorded in the account’s log, which only Outpost writes', a
     (await entries(view)).map(entry => [entry.lg, entry.msg]),
     [
       ['machine', 'dev was added'],
+      ['machine', 'Setting up dev'],
+      ['machine', 'dev is ready'],
       ['session', 'Build was created'],
       ['session', 'Build was edited: instructions'],
     ],
   )
-  const [, created] = await entries(view)
+  const created = (await entries(view)).find(item => item.msg === 'Build was created')!
   assert.equal(created.th, 'dev')
   assert.equal(created.fields.session, 'Build')
 
@@ -170,7 +172,7 @@ test('hosted accounts each read only their own log', async t => {
   assert.notEqual(aliceView.channel, bobView.channel)
   assert.deepEqual(
     (await entries(aliceView, alice)).map(entry => entry.msg),
-    ['alice-box was added'],
+    ['alice-box was added', 'Setting up alice-box', 'alice-box is ready'],
   )
   const sources = await call<{ sources: { id: string }[] }>('GET', '/log-viewer/api/logs', undefined, bob)
   assert.deepEqual(

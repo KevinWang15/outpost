@@ -27,6 +27,8 @@ export interface AccountIdentity {
  * WebSocket upgrade can provide it. */
 export interface Caller {
   ip: string
+  url?: string
+  method?: string
   headers: IncomingHttpHeaders
   cookies: Record<string, string | undefined>
 }
@@ -36,6 +38,7 @@ export interface Deployment {
   readonly directory: string
   readonly secret: string
   readonly localTargets: boolean
+  readonly machineOrigin?: string
   /** Returns a rejection message for requests outside this deployment's network policy. */
   admits(request: Caller): string | null
   owner(request: Caller): Owner
@@ -84,15 +87,31 @@ export class LocalDeployment implements Deployment {
   private constructor(
     readonly directory: string,
     readonly secret: string,
+    readonly machineOrigin?: string,
   ) {
     this.store = new Workspace(directory)
   }
-  static async open(directory: string) {
-    return new LocalDeployment(directory, await serverSecret(directory))
+  static async open(directory: string, machineOrigin?: string) {
+    if (machineOrigin) {
+      const address = new URL(machineOrigin)
+      if (address.protocol !== 'https:' || address.origin !== machineOrigin || loopbackHost(address.hostname))
+        throw new Error('OUTPOST_MACHINE_ORIGIN must be an HTTPS origin for a machine-only reverse proxy.')
+    }
+    return new LocalDeployment(directory, await serverSecret(directory), machineOrigin)
   }
   admits(request: Caller) {
     if (!isLoopbackAddress(request.ip))
       return 'Outpost only accepts connections from this computer. Use an SSH tunnel for remote access.'
+    if (this.machineOrigin && request.headers.host === new URL(this.machineOrigin).host && !request.headers.origin) {
+      const path = request.url ?? ''
+      const admissible =
+        request.method === 'GET'
+          ? /^\/api\/(?:machine\/connect|install\/(?:machine\.sh|(?:arm64|x64)-(?:musl|glibc)\/(?:binary|sha256)))$/.test(
+              path,
+            )
+          : request.method === 'POST' && /^\/api\/machine\/(?:enroll|revoke)$/.test(path)
+      if (admissible) return null
+    }
     if (!loopbackHost(hostname(request.headers.host))) return 'Use the configured Outpost address.'
     if (request.headers.origin) {
       let origin = ''

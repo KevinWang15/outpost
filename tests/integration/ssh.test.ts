@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { setTimeout as delay } from 'node:timers/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -11,6 +13,7 @@ import { createApp } from '../../backend/app'
 import { LocalDeployment, type Deployment } from '../../backend/deployment'
 import { HostedDeployment } from '../../backend/hosted/deployment'
 import { terminalService } from '../../shared/terminalService'
+import { exerciseMachineChat } from './machine-chat'
 import { fixtures, TerminalClient } from './helpers'
 
 const execute = promisify(execFile)
@@ -21,17 +24,9 @@ const docker = await execute('docker', ['info'], { timeout: 20_000 }).then(
 )
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(16, 3)])
 
-async function container(t: test.TestContext) {
-  await execute('docker', ['build', '-q', '-t', 'outpost-ssh-target', fixtures], { timeout: 600_000 })
-  const id = (await execute('docker', ['run', '-d', '--rm', '-p', '127.0.0.1::22', 'outpost-ssh-target'])).stdout.trim()
+async function container(t: test.TestContext, options: string[]) {
+  const id = (await execute('docker', ['run', '-d', '--rm', ...options, 'outpost-ssh-target'])).stdout.trim()
   t.after(() => execute('docker', ['rm', '-f', id]).catch(() => {}))
-  const binary = join(process.cwd(), 'machine/dist/outpost-terminal-linux-' + process.arch + '-glibc')
-  await execute('docker', ['cp', binary, `${id}:/home/dev/.outpost/bin/outpost-terminal`])
-  // Claude Code's ACP adapter for chat; the scripted ACP agent stands in for it.
-  await execute('docker', ['cp', acpFixture, `${id}:/home/dev/.outpost/bin/claude-agent-acp`])
-  await execute('docker', ['exec', id, 'chmod', '700', '/home/dev/.outpost/bin/claude-agent-acp'])
-  await execute('docker', ['exec', id, 'chown', '-R', 'dev:dev', '/home/dev/.outpost'])
-  const port = Number((await execute('docker', ['port', id, '22/tcp'])).stdout.trim().split(':').pop())
   const authorize = (key: string) =>
     new Promise<void>((resolve, reject) => {
       const child = spawn('docker', [
@@ -45,13 +40,12 @@ async function container(t: test.TestContext) {
       child.on('exit', code => (code === 0 ? resolve() : reject(new Error(`authorize failed: ${code}`))))
       child.stdin.end(`${key.trim()}\n`)
     })
-  return { id, port, authorize }
+  return { id, authorize }
 }
 
 /** Exercise one deployment end to end against the SSH container. */
 async function lifecycle(
   t: test.TestContext,
-  containerId: string,
   deployment: Deployment,
   env: NodeJS.ProcessEnv,
   target: Record<string, unknown>,
@@ -72,20 +66,28 @@ async function lifecycle(
     return (response.body ? JSON.parse(response.body) : undefined) as T
   }
   const added = await call<Target>('POST', '/targets', target)
-  const plan = await call<{ script: string }>('GET', `/targets/${added.id}/software/outpost-terminal/script`)
-  const socket = /pair --managed '(run\/node-[a-f0-9]{32}\.sock)'/.exec(plan.script)![1]
-  await execute('docker', [
-    'exec',
-    '-u',
-    'dev',
-    '-e',
-    'HOME=/home/dev',
-    containerId,
-    '/home/dev/.outpost/bin/outpost-terminal',
-    'pair',
-    '--managed',
-    socket,
-  ])
+  const start = Date.now()
+  while (true) {
+    const { installation } = await call<{ installation: { status: string; error: string | null } }>(
+      'GET',
+      `/targets/${added.id}/installations`,
+    )
+    if (installation.status === 'succeeded') break
+    if (installation.status === 'failed') {
+      const log = await app.inject({
+        url: `/api/targets/${added.id}/installations`,
+        headers: { host: `127.0.0.1:${port}`, ...headers },
+      })
+      const { installation: job } = JSON.parse(log.body)
+      const result = await app.inject({
+        url: `/api/targets/${added.id}/installations/${job.id}/events`,
+        headers: { host: `127.0.0.1:${port}`, ...headers },
+      })
+      assert.fail(job.error + '\n' + result.body)
+    }
+    assert.ok(Date.now() - start < 120000, 'Timed out waiting for SSH setup')
+    await delay(200)
+  }
   const report = await call<SoftwareReport>('GET', `/targets/${added.id}/software`)
   assert.deepEqual(
     report.software.filter(item => item.status !== 'installed'),
@@ -142,6 +144,12 @@ async function lifecycle(
   await again.closed
   assert.equal((await call<Session>('POST', `/targets/${added.id}/sessions/${session.id}/terminate`)).status, 'stopped')
   await call('DELETE', `/targets/${added.id}/sessions/${session.id}`)
+  const agent = await call<Session>('POST', `/targets/${added.id}/sessions`, {
+    name: 'ACP',
+    rootDir: '~/work',
+    tool: 'claude',
+  })
+  await exerciseMachineChat(`http://127.0.0.1:${port}`, { targetId: added.id, sessionId: agent.id }, headers)
 }
 
 test(
@@ -151,54 +159,94 @@ test(
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'ops-')))
     t.after(() => rm(directory, { recursive: true, force: true }))
 
-    await t.test('local mode uses your OpenSSH identity, with connection sharing', async t => {
-      const target = await container(t)
-      await execute('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', join(directory, 'id')])
-      await target.authorize(await readFile(join(directory, 'id.pub'), 'utf8'))
-      // Keep host keys out of the real ~/.ssh: OpenSSH ignores $HOME for known_hosts.
-      const bin = join(directory, 'bin')
-      await mkdir(bin)
+    await execute('docker', ['build', '-q', '-t', 'outpost-ssh-target', fixtures], { timeout: 600000 })
+    const platform = process.arch + '-glibc'
+    const serviceDir = join(directory, 'release')
+    await mkdir(serviceDir)
+    const file = 'outpost-terminal-linux-' + platform
+    await copyFile(join(process.cwd(), 'machine/dist', file), join(serviceDir, file))
+    const digest = async (path: string) =>
+      createHash('sha256')
+        .update(await readFile(path))
+        .digest('hex')
+    await writeFile(join(serviceDir, 'SHA256SUMS'), (await digest(join(serviceDir, file))) + '  ' + file + '\n')
+    const toolDir = join(directory, 'tools', platform)
+    await mkdir(toolDir, { recursive: true })
+    let manifest = ''
+    for (const id of ['claude', 'claude-agent-acp']) {
+      const stage = join(directory, id)
+      await mkdir(stage)
+      const dest = id === 'claude' ? '.local/bin' : '.outpost/bin'
+      await copyFile(id === 'claude' ? join(fixtures, 'coding-tool-fixture.py') : acpFixture, join(stage, id))
       await writeFile(
-        join(bin, 'ssh'),
-        `#!/bin/sh\nexec /usr/bin/ssh -o UserKnownHostsFile=${join(directory, 'known_hosts')} "$@"\n`,
-        { mode: 0o700 },
+        join(stage, 'install.sh'),
+        `set -eu\nmkdir -p "$HOME/${dest}"\ninstall -m 700 ${id} "$HOME/${dest}/${id}"\n`,
       )
-      const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` }
-      await lifecycle(t, target.id, await LocalDeployment.open(join(directory, 'local')), env, {
-        kind: 'ssh',
-        name: 'Container',
-        host: '127.0.0.1',
-        user: 'dev',
-        port: target.port,
-        identityFile: join(directory, 'id'),
-        tools: ['claude'],
+      const name = id + '.tar.gz'
+      await execute('tar', ['-czf', join(toolDir, name), '-C', stage, '.'])
+      manifest += (await digest(join(toolDir, name))) + '  ' + name + '\n'
+    }
+    await writeFile(join(toolDir, 'SHA256SUMS'), manifest)
+    for (const mode of ['local', 'hosted'] as const)
+      await t.test(mode + ' provisions an isolated target through an SSH bastion', async t => {
+        const network = 'outpost-test-' + randomUUID()
+        await execute('docker', ['network', 'create', '--internal', network])
+        const jump = await container(t, ['-p', '127.0.0.1::22'])
+        const target = await container(t, ['--network', network, '--network-alias', 'coding-host'])
+        await execute('docker', ['network', 'connect', network, jump.id])
+        t.after(() => execute('docker', ['network', 'rm', network]).catch(() => {}))
+        await execute('docker', ['exec', target.id, 'rm', '/usr/local/bin/claude'])
+        const port = Number((await execute('docker', ['port', jump.id, '22/tcp'])).stdout.trim().split(':').pop())
+        const settings = {
+          kind: 'ssh',
+          name: 'Workstation',
+          host: 'coding-host',
+          user: 'dev',
+          jump: { user: 'dev', host: '127.0.0.1', port },
+          tools: ['claude'],
+        }
+        const env = {
+          ...process.env,
+          OUTPOST_TERMINAL_ASSET_DIR: serviceDir,
+          OUTPOST_TOOL_ASSET_DIR: join(directory, 'tools'),
+        }
+        if (mode === 'local') {
+          const key = join(directory, 'id')
+          await execute('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key])
+          const pub = await readFile(key + '.pub', 'utf8')
+          await jump.authorize(pub)
+          await target.authorize(pub)
+          const bin = join(directory, 'bin')
+          await mkdir(bin)
+          const config = join(directory, 'ssh_config')
+          await writeFile(
+            config,
+            `Host *\n IdentityFile "${key}"\n IdentitiesOnly yes\n StrictHostKeyChecking accept-new\n UserKnownHostsFile "${directory}/known_hosts"\n`,
+          )
+          await writeFile(join(bin, 'ssh'), `#!/bin/sh\nexec /usr/bin/ssh -F '${config}' "$@"\n`, { mode: 0o700 })
+          await lifecycle(
+            t,
+            await LocalDeployment.open(join(directory, mode)),
+            { ...env, PATH: bin + ':' + process.env.PATH },
+            settings,
+          )
+        } else {
+          const deployment = await HostedDeployment.open({
+            directory: join(directory, mode),
+            publicUrl: 'http://127.0.0.1:5173',
+            mailer: null,
+          })
+          const user = deployment.store.create('ada@example.com', 'Ada', 'fixture-hash')
+          deployment.store.consumeToken(deployment.store.issueToken(user.id, 'verify', 60000), 'verify')
+          const login = deployment.store.issueSession(deployment.store.profile(user.id)!)
+          const pub = (await deployment.keys.publicKey(user.id)).publicKey
+          await jump.authorize(pub)
+          await target.authorize(pub)
+          await lifecycle(t, deployment, env, settings, { cookie: `outpost_session=${login.token}` })
+          const known = await readFile(join(directory, mode, 'users', user.id, 'known_hosts'), 'utf8')
+          assert.match(known, /coding-host/)
+          assert.match(known, /127\.0\.0\.1/)
+        }
       })
-    })
-
-    await t.test('hosted mode uses only the account key', async t => {
-      const target = await container(t)
-      const deployment = await HostedDeployment.open({
-        directory: join(directory, 'hosted'),
-        publicUrl: 'http://127.0.0.1:5173',
-        mailer: null,
-      })
-      const user = deployment.store.create(
-        'ada@example.com',
-        'Ada',
-        'scrypt$131072$8$1$' + 'A'.repeat(22) + '$' + 'B'.repeat(86),
-      )
-      deployment.store.consumeToken(deployment.store.issueToken(user.id, 'verify', 60_000), 'verify')
-      const login = deployment.store.issueSession(deployment.store.profile(user.id)!)
-      await target.authorize((await deployment.keys.publicKey(user.id)).publicKey)
-      await lifecycle(
-        t,
-        target.id,
-        deployment,
-        process.env,
-        { kind: 'ssh', name: 'Container', host: '127.0.0.1', user: 'dev', port: target.port, tools: ['claude'] },
-        { cookie: `outpost_session=${login.token}` },
-      )
-      assert.match(await readFile(join(directory, 'hosted', 'users', user.id, 'known_hosts'), 'utf8'), /127\.0\.0\.1/)
-    })
   },
 )

@@ -8,8 +8,7 @@ async function addMachine(page: Page, name: string) {
   await page.goto('/')
   await page.getByRole('button', { name: 'Add a machine' }).first().click()
   const dialog = page.getByRole('dialog', { name: 'Add a machine' })
-  await dialog.getByRole('tab', { name: 'On the Outpost server' }).click()
-  await dialog.getByRole('button', { name: 'Continue' }).click()
+  await dialog.getByRole('button', { name: 'Run sessions on this computer' }).click()
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByText('Codex').click()
   await dialog.getByRole('button', { name: 'Add machine' }).click()
@@ -27,61 +26,32 @@ async function createSession(page: Page, name: string, directory: string) {
   await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible()
 }
 
-test('direct-only setup offers terminal tools and restores Chat tools for server-connected machines', async ({
+test('remote setup offers SSH with a bastion or one outbound install command and the same coding tools', async ({
   page,
 }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: 'Add a machine', exact: true }).first().click()
+  await page.getByRole('button', { name: 'Add a machine' }).first().click()
   const dialog = page.getByRole('dialog', { name: 'Add a machine' })
-  const deepseek = dialog.getByRole('checkbox', { name: 'DeepSeek Harness' })
   const next = dialog.getByRole('button', { name: 'Continue' })
-  const back = dialog.getByRole('button', { name: 'Back' })
-  await expect(dialog.getByRole('tab', { name: 'SSH', exact: true })).toBeFocused()
+  await expect(dialog.getByRole('tab', { name: 'Connect over SSH' })).toBeFocused()
   await next.click()
   await dialog.getByLabel('Host', { exact: true }).fill('build.example.test')
-  await deepseek.check()
-  await back.click()
-  await page.keyboard.press('ArrowRight')
-  await expect(dialog.getByRole('tab', { name: 'Install the connector' })).toBeFocused()
-  await expect(dialog.getByRole('radio', { name: 'Direct only' })).toBeChecked()
-  await expect(dialog.getByRole('tabpanel')).toContainText('Get install command')
+  await dialog.getByText('Use an SSH bastion').click()
+  await expect(dialog.getByLabel('Bastion host', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Back' }).click()
+  await dialog.getByRole('tab', { name: 'Run setup on the machine' }).click()
   await next.click()
-  await expect(deepseek).toHaveCount(0)
-  await dialog.getByRole('checkbox', { name: 'Codex' }).check()
-  await back.click()
-  await dialog.getByRole('tab', { name: 'SSH', exact: true }).click()
-  await next.click()
-  await expect(dialog.getByLabel('Host', { exact: true })).toHaveValue('build.example.test')
-  await expect(deepseek).toBeChecked()
+  await dialog.getByLabel('Name', { exact: true }).fill('Outbound installer')
+  await dialog.getByRole('checkbox', { name: 'DeepSeek Harness' }).check()
+  await dialog.getByRole('button', { name: 'Add machine' }).click()
+  const panel = page.getByRole('region', { name: 'Machine installation' })
+  await panel.getByRole('button', { name: 'Get install command' }).click()
+  const command = panel.getByLabel('Install command', { exact: true })
+  await expect(command).toContainText('/api/install/machine.sh')
+  const first = await command.innerText()
+  await panel.getByRole('button', { name: 'Generate new command' }).click()
+  await expect(command).not.toHaveText(first)
 })
-
-for (const method of ['Direct only', 'Relay enabled']) {
-  test(`${method} offers an install command for the new machine`, async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('button', { name: 'Add a machine' }).first().click()
-    const dialog = page.getByRole('dialog', { name: 'Add a machine' })
-    await dialog.getByRole('tab', { name: 'Install the connector' }).click()
-    await dialog.getByRole('radio', { name: method }).check()
-    await dialog.getByRole('button', { name: 'Continue' }).click()
-    await dialog.getByLabel('Name', { exact: true }).fill(`Installer test · ${method}`)
-    if (method === 'Direct only') await dialog.getByLabel(/Machine HTTPS address/).fill('https://machine.example.test')
-    await dialog.getByRole('button', { name: 'Add machine' }).click()
-    const panel = page.getByRole('region', { name: 'Machine installation' })
-    await panel.getByRole('button', { name: 'Get install command' }).click()
-    const command = panel.getByLabel('Install command', { exact: true })
-    if (method === 'Direct only') {
-      await expect(command).toHaveCount(0)
-      await expect(panel.getByLabel('Offline install command')).toContainText('sh ./machine.sh direct')
-    } else {
-      await expect(panel).toContainText('loopback')
-      await expect(command).toContainText('/api/install/machine.sh')
-      await expect(command).toContainText('sh -s -- relay')
-      const first = await command.innerText()
-      await panel.getByRole('button', { name: 'Generate new command' }).click()
-      await expect(command).not.toHaveText(first)
-    }
-  })
-}
 
 test('add a machine, create a session, and work in the web terminal', async ({ page }) => {
   await addMachine(page, 'Browser box')

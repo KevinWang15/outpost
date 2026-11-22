@@ -13,21 +13,24 @@ export const harnessId = Type.Enum(harnessIds)
 const tools = Type.Array(harnessId, { minItems: 1, maxItems: harnessIds.length, uniqueItems: true })
 
 // Targets ---------------------------------------------------------------------
+const sshAddress = {
+  host: Type.String({ minLength: 1, maxLength: 253, pattern: '^(?:[a-zA-Z0-9][a-zA-Z0-9._:-]*|::[a-fA-F0-9:]*)$' }),
+  /** The Linux user sessions run as; root is allowed, never assumed. */
+  user: Type.String({ minLength: 1, maxLength: 32, pattern: '^[A-Za-z_][A-Za-z0-9._-]*$' }),
+  port: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
+}
 const ssh = {
   kind: Type.Literal('ssh'),
   name,
   tools,
-  host: Type.String({ minLength: 1, maxLength: 253, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._:-]*$' }),
-  /** The Linux user sessions run as; root is allowed, never assumed. */
-  user: Type.String({ minLength: 1, maxLength: 32, pattern: '^[A-Za-z_][A-Za-z0-9._-]*$' }),
-  port: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
+  ...sshAddress,
+  jump: Type.Optional(Type.Object(sshAddress, strict)),
   identityFile: Type.Optional(
     Type.String({ minLength: 1, maxLength: 1024, pattern: '^(~/|/)[^\\u0000-\\u001f\\u007f]+$' }),
   ),
 }
 const local = { kind: Type.Literal('local'), name, tools }
-const direct = { kind: Type.Literal('direct'), name, tools, endpoint: text(2048) }
-const paired = { kind: Type.Literal('paired'), name, tools, endpoint: Type.Optional(text(2048)) }
+const outbound = { kind: Type.Literal('outbound'), name, tools }
 export const environment = Type.Object(
   { home: absolutePath, username: text(256), uid: Type.Integer({ minimum: 0 }), shell: absolutePath },
   strict,
@@ -37,20 +40,17 @@ const metadata = { id: text(80), createdAt: text(80), environment: Type.Optional
 export const targetInput = Type.Union([
   Type.Object(ssh, strict),
   Type.Object(local, strict),
-  Type.Object(paired, strict),
-  Type.Object(direct, strict),
+  Type.Object(outbound, strict),
 ])
 export const targetRecord = Type.Union([
   Type.Object({ ...ssh, ...metadata }, strict),
   Type.Object({ ...local, ...metadata }, strict),
-  Type.Object({ ...paired, ...metadata }, strict),
-  Type.Object({ ...direct, ...metadata }, strict),
+  Type.Object({ ...outbound, ...metadata }, strict),
 ])
 export const targetUpdate = Type.Object(
   {
     name: Type.Optional(name),
     tools: Type.Optional(tools),
-    endpoint: Type.Optional(Type.Union([text(2048), Type.Null()])),
   },
   { ...strict, minProperties: 1 },
 )
@@ -194,10 +194,3 @@ export const directoryQuery = Type.Object(
 
 // Software ----------------------------------------------------------------------
 export const softwareIds = ['bash', 'outpost-terminal', ...harnessIds, 'claude-agent-acp'] as const
-export const installationInput = Type.Object(
-  {
-    softwareId: Type.Enum(softwareIds),
-    script: Type.String({ minLength: 1, maxLength: 64 * 1024, pattern: '^[^\\u0000]+$' }),
-  },
-  strict,
-)

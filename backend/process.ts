@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { Readable } from 'node:stream'
 import { StringDecoder } from 'node:string_decoder'
 import { AppError } from './errors'
 
@@ -30,19 +31,30 @@ interface CommandOptions {
  * only for explicitly read-only callers with buffered output. */
 export async function runCommand(
   command: Command,
-  input: string | Uint8Array,
+  input: string | Uint8Array | Readable,
   options: CommandOptions = {},
 ): Promise<CommandResult> {
   const deadline = performance.now() + (options.timeoutMs ?? 30_000)
   const result = await runCommandOnce(command, input, options)
-  if (!options.readOnly || result.stdout.length !== 0 || options.onOutput || !command.retry?.when(result)) return result
+  if (
+    input instanceof Readable ||
+    !options.readOnly ||
+    result.stdout.length !== 0 ||
+    options.onOutput ||
+    !command.retry?.when(result)
+  )
+    return result
   return runCommandOnce({ ...command, args: command.retry.args }, input, {
     ...options,
     timeoutMs: deadline - performance.now(),
   })
 }
 
-function runCommandOnce(command: Command, input: string | Uint8Array, options: CommandOptions): Promise<CommandResult> {
+function runCommandOnce(
+  command: Command,
+  input: string | Uint8Array | Readable,
+  options: CommandOptions,
+): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const aborted = () => new AppError(`${command.label} operation aborted`, 502)
     const timedOut = () => new AppError(`${command.label} operation timed out. Check the machine and retry.`, 504)
@@ -62,6 +74,7 @@ function runCommandOnce(command: Command, input: string | Uint8Array, options: C
       stderr = '',
       settled = false
     const cleanup = () => {
+      if (input instanceof Readable) input.destroy()
       clearTimeout(timer)
       options.signal?.removeEventListener('abort', cancel)
     }
@@ -113,6 +126,11 @@ function runCommandOnce(command: Command, input: string | Uint8Array, options: C
       if (options.onOutput) options.onOutput(decoder.end())
       resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr })
     })
-    child.stdin.end(input)
+    if (input instanceof Readable) {
+      input.once('error', error =>
+        fail(new AppError('Could not read the installation artifact: ' + error.message, 502)),
+      )
+      input.pipe(child.stdin)
+    } else child.stdin.end(input)
   })
 }

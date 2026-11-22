@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import type { Installation, InstallationEvent, SoftwareId } from '../shared/model'
-import { requiredSoftware, softwareLabel } from '../shared/model'
+import type { Installation, InstallationEvent } from '../shared/model'
 import type { Owner } from './deployment'
 import type { LogInput } from './logs/activity'
 import { AppError } from './errors'
@@ -45,29 +44,28 @@ export class Installations {
     })
     return result
   }
-  /** Run a target removal unless an installation is running on it. */
+  /** Cancel the target’s in-flight setup before releasing its workspace entry. */
   removeTarget(owner: Owner, targetId: string, remove: () => Promise<void>) {
     const id = key(owner, targetId)
     return this.serialize(id, async () => {
-      if (this.jobs.get(id)?.installation.status === 'running')
-        throw new AppError('Wait for the installation to finish before removing this machine.', 409)
+      const job = this.jobs.get(id)
+      if (job?.installation.status === 'running') {
+        job.controller.abort()
+        await job.completion
+      }
       await remove()
       this.jobs.delete(id)
     })
   }
-  start(context: TargetContext, softwareId: SoftwareId, script: string) {
+  start(context: TargetContext) {
     const id = key(context.owner, context.target.id)
     return this.serialize(id, async () => {
       if (this.closed) throw new AppError('Outpost is shutting down. No new installations can start.', 503)
       const target = await context.workspace.get(context.target.id)
-      if (!target.environment) throw new AppError('Check Required software before installing.', 409)
-      if (!requiredSoftware(target).includes(softwareId))
-        throw new AppError('This machine does not need this software.', 400)
-      if (this.jobs.get(id)?.installation.status === 'running')
-        throw new AppError('An installation is already running on this machine. Open its log to follow progress.', 409)
+      const running = this.jobs.get(id)?.installation
+      if (running?.status === 'running') return running
       const installation: Installation = {
         id: randomUUID(),
-        softwareId,
         status: 'running',
         startedAt: new Date().toISOString(),
         finishedAt: null,
@@ -84,13 +82,11 @@ export class Installations {
       }
       this.jobs.set(id, job)
       const machine = { id: context.target.id, name: context.target.name }
-      const label = softwareLabel(softwareId)
       this.log(context.owner, {
         kind: 'machine',
         type: 'installing',
-        message: `Installing ${label} on ${machine.name}`,
+        message: `Setting up ${machine.name}`,
         machine,
-        details: { software: softwareId },
       })
       const emit = (event: InstallationEvent) => {
         // A slow viewer must not accumulate unbounded output or block an installer.
@@ -103,14 +99,17 @@ export class Installations {
       }
       job.completion = Promise.resolve().then(async () => {
         try {
-          const code = await this.software.install(context, script, output, job.controller.signal)
-          installation.exitCode = code
-          installation.status = code === 0 ? 'succeeded' : 'failed'
-          // A new Outpost machine service takes effect on the next connection.
-          if (code === 0) context.machine.restart()
-          if (code !== 0)
-            installation.error = `Installation exited with ${code === null ? 'a disconnected process' : `status ${code}`}.`
+          let selected = target
+          for (;;) {
+            await this.software.setup({ ...context, target: selected }, output, job.controller.signal)
+            const latest = await context.workspace.get(target.id)
+            if (latest.tools.join() === selected.tools.join()) break
+            selected = latest
+          }
+          installation.status = 'succeeded'
+          installation.exitCode = 0
         } catch (error) {
+          installation.exitCode = 1
           installation.status = 'failed'
           installation.error = (error as Error).message
         } finally {
@@ -121,10 +120,10 @@ export class Installations {
             type: installation.status === 'succeeded' ? 'installed' : 'install-failed',
             message:
               installation.status === 'succeeded'
-                ? `Installed ${label} on ${machine.name}`
-                : `Could not install ${label} on ${machine.name}: ${installation.error}`,
+                ? `${machine.name} is ready`
+                : `Could not set up ${machine.name}: ${installation.error}`,
             machine,
-            details: { software: softwareId, exitCode: installation.exitCode, error: installation.error },
+            details: { exitCode: installation.exitCode, error: installation.error },
           })
           emit({ type: 'complete', installation })
           for (const stream of job.subscribers) stream.end()

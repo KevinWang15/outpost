@@ -138,7 +138,7 @@ test(
         ],
         label: 'Fixture machine ' + id,
       })
-      const transport = { label: 'Fixture', login: command, management: () => command('exec sh -s') }
+      const transport = { label: 'Fixture', login: command, shell: command, management: () => command('exec sh -s') }
       return {
         owner,
         target: await deployment.workspace().get(id),
@@ -280,22 +280,14 @@ test('history: hosted owners have separate indexes and cursors; offline machines
     owners.push(owner)
     await deployment.workspace(owner).add({
       id: name,
-      kind: 'ssh',
+      ...(name === 'alice'
+        ? { kind: 'ssh' as const, host: `${name}.example`, user: 'dev' }
+        : { kind: 'outbound' as const }),
       name,
-      host: `${name}.example`,
-      user: 'dev',
       tools: ['codex'],
       createdAt: new Date().toISOString(),
     })
   }
-  await deployment.workspace(owners[0]).add({
-    id: 'restricted',
-    kind: 'direct',
-    name: 'Direct only',
-    endpoint: 'https://restricted.example',
-    tools: ['codex'],
-    createdAt: new Date().toISOString(),
-  })
   let offline = false
   let readCalls = 0
   const reader = {
@@ -378,7 +370,7 @@ test('history: hosted owners have separate indexes and cursors; offline machines
     await rm(directory, { recursive: true, force: true })
   })
   for (const owner of owners) await hub.call(owner, 'refresh_index', {})
-  assert.equal(readCalls, 2, 'direct-only machines must never be polled')
+  assert.equal(readCalls, 2, 'both SSH and outbound machines are indexed')
   await assert.rejects(
     hub.call(owners[0], 'search_history', { query: 'test', mode: 'hybrid' }),
     /Invalid history tool arguments/,

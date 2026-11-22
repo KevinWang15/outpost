@@ -40,7 +40,7 @@ await writeFile(
   `#!/bin/sh
 set -eu
 case "$1:\${2:-}" in
-  node:--socket|--version:--managed)
+  node:--socket|--version:--socket)
     machine=$(readlink ${quote(nodes)}/"\${3##*/}")
     export HOME="$machine" CODEX_HOME="$machine/.codex" CLAUDE_CONFIG_DIR="$machine/.claude" KIMI_CODE_HOME="$machine/.kimi-code" DSH_HOME="$machine/.dsh" ANTIGRAVITY_GEMINI_DIR="$machine/.gemini"
     exec "$machine/.outpost/bin/outpost-terminal" "$@" ;;

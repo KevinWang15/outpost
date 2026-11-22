@@ -1,8 +1,6 @@
 import { createHmac } from 'node:crypto'
 import type { Services } from './services'
 import type { SessionForkInput, SessionInput } from '../shared/model'
-import { machineEndpoint } from '../shared/model'
-import { machineAuthority } from './paired'
 import { AppError } from './errors'
 import { launchSize, type TargetContext } from './sessions'
 
@@ -30,8 +28,6 @@ export function sessionCreationKey(services: Services, userId: string, targetId:
     : undefined
 }
 
-// The enrolled machine checks the session when a client attaches directly.
-// Server-managed launches can resolve its name through their existing connection.
 export async function terminalLaunch(
   services: Services,
   context: TargetContext,
@@ -39,15 +35,8 @@ export async function terminalLaunch(
   signal: AbortSignal,
 ) {
   const { owner, target } = context
-  let title = target.name
-  if (machineEndpoint(target)) {
-    if (!/^[\w-]{1,128}$/.test(sessionId)) throw new AppError('Invalid session.', 400)
-    if (!machineAuthority(services.deployment, owner, target))
-      throw new AppError('Enroll this machine before connecting.', 409)
-  } else {
-    const session = await services.sessions.get(context, sessionId, signal)
-    title = `${session.name} · ${target.name}`
-  }
+  const session = await services.sessions.get(context, sessionId, signal)
+  const title = `${session.name} · ${target.name}`
   if (!services.active(owner)) throw new AppError('Sign in again to connect.', 401)
   return { launch: services.tokens.issue({ owner, targetId: target.id, sessionId }), title }
 }
@@ -65,6 +54,7 @@ export { desktopSession } from '../shared/desktopSession'
 export async function inspectTargetSoftware(services: Services, context: TargetContext, signal: AbortSignal) {
   const report = await services.software.inspect(context, signal)
   if (!services.active(context.owner)) throw new AppError('Sign in again to inspect this machine.', 401)
-  await context.workspace.setEnvironment(context.target.id, report.environment)
-  return { ...report, installation: services.installations.latest(context.owner, context.target.id) }
+  if (report.software.every(item => item.status === 'installed'))
+    await context.workspace.setEnvironment(context.target.id, report.environment)
+  return report
 }

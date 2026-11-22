@@ -1,15 +1,17 @@
+import type { TerminalBroker } from './broker'
+import type { Grant } from './tokens'
 import { randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
-import { parseSessionActivity, unavailableActivity } from '../activity'
-import type { ClientMessage, CloseReason, ServerMessage } from '../protocol'
-import { maxInputMessage, maxInputQueue, terminalConnectionPolicy } from '../protocol'
-import { FrameDecoder, terminalControl, terminalFrame } from './terminalFrames'
-import { signalValidators } from '../signals'
-import { sessionFileId, maxSessionFiles } from '../sessionFiles'
-import { terminalFileChunk, validImageWrite, validFileRead } from '../terminalFiles'
-import { terminalSize } from '../terminalService'
-import { terminalFailure } from '../../backend/terminal/failures'
-import type { Stream } from '../../backend/machines'
+import { parseSessionActivity, unavailableActivity } from '../../shared/activity'
+import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
+import { maxInputMessage, maxInputQueue, terminalConnectionPolicy } from '../../shared/protocol'
+import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
+import { signalValidators } from '../../shared/signals'
+import { sessionFileId, maxSessionFiles } from '../../shared/sessionFiles'
+import { terminalFileChunk, validImageWrite, validFileRead } from '../../shared/terminalFiles'
+import { terminalSize } from '../../shared/terminalService'
+import { terminalFailure } from './failures'
+import type { Stream } from '../machines'
 
 const highWater = 256 * 1024
 export const closedMessages: Record<'ended' | 'expired', string> = {
@@ -17,17 +19,9 @@ export const closedMessages: Record<'ended' | 'expired', string> = {
   expired: 'This connection expired. Click Connect in Outpost to open a new terminal.',
 }
 
-interface ViewerHost<Identity> {
-  renew?(ticket: string): void
-  logged(connection: Connection<Identity>, change: 'opened' | 'closed'): void
-  activate(grant: Identity, token: string): boolean
-  forget(connection: Connection<Identity>): void
-}
 /** One client socket attached to one terminal stream on the machine connection.
  * Closing either end ends both; the machine's terminal service keeps the session. */
-export class Connection<Identity> {
-  private routeChoice?: { challenge: string; finish: (direct: boolean) => void }
-  private controlOnly = false
+export class Connection {
   private stream: Stream | null = null
   private decoder = new FrameDecoder()
   private started = false
@@ -51,9 +45,9 @@ export class Connection<Identity> {
   closing: { reason: CloseReason; message: string } | null = null
 
   constructor(
-    readonly grant: Identity,
+    readonly grant: Grant,
     private socket: WebSocket,
-    private broker: ViewerHost<Identity>,
+    private broker: TerminalBroker,
   ) {
     socket.on('message', (data, binary) => this.receive(data as Buffer, binary))
     socket.on('close', () => this.finish())
@@ -74,7 +68,7 @@ export class Connection<Identity> {
   }
 
   private checkTarget() {
-    if (this.controlOnly || !this.started || this.finished) return
+    if (!this.started || this.finished) return
     const now = Date.now()
     // The response shares stdout with output. A viewer deliberately applying
     // backpressure must drain before we can judge the target's responsiveness.
@@ -101,25 +95,6 @@ export class Connection<Identity> {
 
   send(message: ServerMessage) {
     if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message))
-  }
-
-  chooseRoute(offer: Extract<ServerMessage, { type: 'route-offer' }>) {
-    return new Promise<boolean>(resolve => {
-      const finish = (direct: boolean) => {
-        clearTimeout(timer)
-        this.routeChoice = undefined
-        resolve(direct)
-      }
-      const timer = setTimeout(() => finish(false), offer.relay ? 3000 : 10000).unref()
-      this.routeChoice = { challenge: offer.challenge, finish }
-      this.send(offer)
-    })
-  }
-
-  authorizeDirect() {
-    this.controlOnly = true
-    this.started = true
-    clearTimeout(this.attachTimer)
   }
 
   start(stream: Stream) {
@@ -279,7 +254,6 @@ export class Connection<Identity> {
     if (this.window.until <= now) this.window = { messages: 0, bytes: 0, until: now + 1000 }
     if (++this.window.messages > 300) return this.socket.close(1008, 'Message rate exceeded')
     if (binary) {
-      if (this.controlOnly) return this.socket.close(1008, 'Session traffic belongs on the direct attachment')
       if (data.length > maxInputMessage || (this.window.bytes += data.length) > 1024 * 1024)
         return this.socket.close(1008, 'Input rate exceeded')
       return this.write(terminalFrame('I', data))
@@ -298,17 +272,6 @@ export class Connection<Identity> {
       return this.socket.close(1008, 'Invalid terminal message')
     if (['ping', 'send', 'paste', 'activate', 'acknowledge', 'clear'].includes(message.type) && id === undefined)
       return this.socket.close(1008, 'A terminal request ID is required')
-    if (message.type === 'direct-lease' && this.broker.renew) {
-      this.broker.renew(message.ticket)
-      return
-    }
-    if (message.type === 'route-choice') {
-      if (this.routeChoice?.challenge === message.challenge && typeof message.direct === 'boolean')
-        this.routeChoice?.finish(message.direct)
-      return
-    }
-    if (this.controlOnly && message.type !== 'activate')
-      return this.socket.close(1008, 'Invalid attachment control message')
     switch (message.type) {
       case 'file-list':
       case 'file-remove':
@@ -420,7 +383,6 @@ export class Connection<Identity> {
   private finish() {
     if (this.finished) return
     this.finished = true
-    this.routeChoice?.finish(false)
     clearInterval(this.heartbeat)
     clearTimeout(this.attachTimer)
     this.abort.abort()

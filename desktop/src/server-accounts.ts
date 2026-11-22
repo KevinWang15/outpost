@@ -1,10 +1,10 @@
 import {
-  desktopOrigin,
   validDesktopLogin,
   type DesktopEntry,
   type DesktopSessionReference,
   type DesktopSessionChoice,
 } from '../../shared/desktopAuth'
+import { serverOrigin } from '../../shared/serverOrigin'
 import type { ServerTrust } from './server-trust'
 import type { ServerAccountsSnapshot, ServerConnection } from './server-accounts-api'
 import { ServerApiError, serverRequest, requestQueue, revokeDesktopLogin } from './server-api'
@@ -140,7 +140,7 @@ export class ServerAccounts {
   }
   /** Both user entry points reuse a current account or start the same browser approval. */
   async connect(intent: DesktopEntry) {
-    const origin = desktopOrigin(intent.server)
+    const origin = serverOrigin(intent.server)
     await this.signingOut.get(origin)
     this.lifetime.signal.throwIfAborted()
     const entry = this.store.get(origin)
@@ -157,7 +157,7 @@ export class ServerAccounts {
     return null
   }
   async login(value: string) {
-    const origin = desktopOrigin(value)
+    const origin = serverOrigin(value)
     await this.signingOut.get(origin)
     this.lifetime.signal.throwIfAborted()
     const entry = this.store.get(origin)
@@ -180,13 +180,13 @@ export class ServerAccounts {
     if (this.trust.has(origin)) await this.signIn.start(origin, intent)
   }
   cancel(value: string) {
-    this.signIn.cancel(desktopOrigin(value))
+    this.signIn.cancel(serverOrigin(value))
   }
   complete(value: string) {
     return this.signIn.complete(value)
   }
   logout(value: string): Promise<void> {
-    const origin = desktopOrigin(value)
+    const origin = serverOrigin(value)
     const pending = this.signingOut.get(origin)
     if (pending) return pending
     const work = this.clearLogin(origin).finally(() => {

@@ -1,10 +1,9 @@
-import { useId, useRef, type KeyboardEvent } from 'react'
+import { useId, type KeyboardEvent } from 'react'
 import { ArrowLeft, ArrowRight, Cable, HardDrive, Laptop, Server, SquareTerminal } from 'lucide-react'
 import { machineSetupLabels, type Target } from '../../shared/model'
 
 type Kind = Target['kind']
 function ConnectionRoute({ kind }: { kind: Kind }) {
-  const server = kind !== 'direct'
   const machine = kind !== 'local'
   return (
     <div className="machine-route" aria-hidden="true">
@@ -13,13 +12,11 @@ function ConnectionRoute({ kind }: { kind: Kind }) {
         Your device
       </span>
       <ArrowRight />
-      {server && (
-        <span>
-          <Server />
-          Outpost server
-        </span>
-      )}
-      {server && machine && (kind === 'paired' ? <ArrowLeft /> : <ArrowRight />)}
+      <span>
+        <Server />
+        Outpost server
+      </span>
+      {machine && (kind === 'outbound' ? <ArrowLeft /> : <ArrowRight />)}
       {machine && (
         <span>
           <HardDrive />
@@ -35,88 +32,39 @@ export default function MachineSetupGuide({
   localAvailable,
   hosted,
   onSelect,
+  onLocal,
 }: {
   kind: Kind
   localAvailable: boolean
   hosted: boolean
   onSelect: (kind: Kind) => void
+  onLocal: () => void
 }) {
   const id = useId()
-  type Method = 'ssh' | 'connector' | 'local'
-  const connector = kind === 'direct' || kind === 'paired'
-  const method = connector ? 'connector' : kind
-  const policy = useRef<'direct' | 'paired'>(kind === 'paired' ? 'paired' : 'direct')
-  const options: Method[] = localAvailable ? ['ssh', 'connector', 'local'] : ['ssh', 'connector']
+  const options = ['ssh', 'outbound'] as const
   const tabs = {
     ssh: { label: machineSetupLabels.ssh, icon: SquareTerminal },
-    connector: { label: 'Install the connector', icon: Cable },
-    local: { label: machineSetupLabels.local, icon: HardDrive },
+    outbound: { label: machineSetupLabels.outbound, icon: Cable },
   }
-  const select = (value: Method) => onSelect(value === 'connector' ? policy.current : value)
-  const methods = {
-    ssh: {
-      title: 'Let Outpost connect over SSH',
-      when: 'Use SSH when the Outpost server can log in to the Linux machine, even if your own device cannot reach it.',
-      route: 'Your device connects to Outpost. The server opens the SSH connection as the Linux user you choose.',
-      needs: hosted ? (
-        <>
-          The SSH host, port and Linux username. The next screen gives you a public key to add to that user’s{' '}
-          <code>~/.ssh/authorized_keys</code>.
-        </>
-      ) : (
-        'The SSH host and Linux username. Outpost uses SSH credentials on the server. You can also specify an identity file.'
-      ),
-      next: (
-        <>
-          Open <strong>Required software</strong> on the machine page to check the tools available to that user, then
-          create a session.
-        </>
-      ),
-    },
-    direct: {
-      title: 'Connect straight to the machine',
-      when: 'Use Direct only when your device can reach the machine over HTTPS, for example on a company VPN. The connector opens no outbound connection.',
-      route:
-        'Your device obtains permission from Outpost and opens the connection to the machine. Terminal traffic and files travel directly. Server-side Chat is unavailable.',
-      needs: 'A device-reachable HTTPS address that forwards requests and WebSockets to the machine service.',
-      next: (
-        <>
-          Choose <strong>Get install command</strong>.{' '}
-          {hosted
-            ? 'Run it on the machine, or transfer the offline kit for restricted networks.'
-            : 'Download the offline kit on this computer and transfer it to the machine.'}
-        </>
-      ),
-    },
-    paired: {
-      title: 'Reach a machine behind NAT',
-      when: 'Use the relay for a home or office machine behind a router, or whenever your device cannot reliably reach the machine.',
-      route:
-        'Your device and machine both connect to Outpost. If you configure a reachable HTTPS address, your device tries that direct route first.',
-      needs: hosted
-        ? 'The machine must be able to reach this Outpost server. No inbound port is needed for relay.'
-        : 'This deployment accepts only loopback connections. Forward the same loopback port on the machine to this server through a trusted tunnel. Anyone who can use that port can access your local workspace. For a public relay, use a hosted deployment.',
-      next: (
-        <>
-          Choose <strong>Get install command</strong> on the machine page. Paste it into a Linux terminal within five
-          minutes to install, pair and start the connector.
-        </>
-      ),
-    },
-    local: {
-      title: 'Run sessions on the Outpost server',
-      when: 'Choose this when your projects and coding tools live on the same Linux host that runs Outpost.',
-      route: 'Your device connects to Outpost. Sessions run there, with no SSH login or pairing step.',
-      needs:
-        'The account running Outpost needs access to your project directories and the coding tools you want to use.',
-      next: (
-        <>
-          Check <strong>Required software</strong> on the machine page, then choose <strong>New session</strong> and
-          select a project directory on this server.
-        </>
-      ),
-    },
-  }
+  const method = kind === 'outbound' ? kind : 'ssh'
+  const description =
+    method === 'ssh'
+      ? {
+          title: 'Outpost can SSH to this machine',
+          when: hosted
+            ? 'The hosted server opens SSH with your account key. A bastion must be reachable from that server.'
+            : 'This computer opens SSH with your OpenSSH configuration, keys and jump hosts.',
+          needs: 'The Linux execution account, host and SSH port. This machine never connects back to Outpost.',
+          next: 'Outpost checks installed versions and sets up the machine service and selected tools over SSH. Use the same connection to create or reattach to a session.',
+        }
+      : {
+          title: 'The machine can reach Outpost',
+          when: 'Choose this when Outpost cannot open SSH to the machine. Running the setup command explicitly allows a persistent outbound connection.',
+          needs: hosted
+            ? 'A shell on the Linux machine and access to this Outpost server.'
+            : 'A shell on the Linux machine and a reachable address for this instance. A remote machine cannot reach the default workstation loopback address.',
+          next: 'Run the one-time command on the machine as the user who will own its sessions. The service reconnects to this Outpost instance after logout or reboot.',
+        }
 
   function navigate(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const next = {
@@ -129,7 +77,7 @@ export default function MachineSetupGuide({
     }[event.key]
     if (next === undefined) return
     event.preventDefault()
-    select(options[next])
+    onSelect(options[next])
     document.getElementById(id + options[next])?.focus()
   }
 
@@ -147,7 +95,7 @@ export default function MachineSetupGuide({
               aria-selected={option === method}
               aria-controls={id + '-panel'}
               tabIndex={option === method ? 0 : -1}
-              onClick={() => select(option)}
+              onClick={() => onSelect(option)}
               onKeyDown={event => navigate(event, index)}
             >
               <Icon size={17} />
@@ -163,44 +111,27 @@ export default function MachineSetupGuide({
         tabIndex={0}
         className="machine-guide-panel"
       >
-        {connector && (
-          <fieldset className="field machine-policy">
-            <legend className="label">May this machine maintain an outbound connection to Outpost?</legend>
-            <div className="toggle-group">
-              {(['direct', 'paired'] as const).map(option => (
-                <label key={option} className="toggle">
-                  <input
-                    type="radio"
-                    name="connector-policy"
-                    checked={kind === option}
-                    onChange={() => {
-                      policy.current = option
-                      onSelect(option)
-                    }}
-                  />
-                  {machineSetupLabels[option]}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
-        <h3>{methods[kind].title}</h3>
-        <p>{methods[kind].when}</p>
+        <h3>{description.title}</h3>
+        <p>{description.when}</p>
         <div className="machine-path">
           <ConnectionRoute kind={kind} />
-          <p>{methods[kind].route}</p>
         </div>
         <dl>
           <div>
             <dt>What you need</dt>
-            <dd>{methods[kind].needs}</dd>
+            <dd>{description.needs}</dd>
           </div>
           <div>
             <dt>After adding</dt>
-            <dd>{methods[kind].next}</dd>
+            <dd>{description.next}</dd>
           </div>
         </dl>
       </section>
+      {localAvailable && (
+        <button type="button" className="button" onClick={onLocal}>
+          Run sessions on this computer
+        </button>
+      )}
     </div>
   )
 }

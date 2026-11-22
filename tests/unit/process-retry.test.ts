@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,9 +8,7 @@ import test from 'node:test'
 import { AppError } from '../../backend/errors'
 import { runCommand, type Command } from '../../backend/process'
 import type { TargetContext } from '../../backend/sessions'
-import { SoftwareClient } from '../../backend/software'
 import { Workspace } from '../../backend/workspace'
-import { requiredSoftware } from '../../shared/model'
 
 const muxError = 'mux_client_request_session: read from master failed: Connection reset by peer\n'
 const success = 'recovered\n'
@@ -245,50 +244,12 @@ test('a timed-out or unlaunchable command never consults the recovery policy', a
   )
 })
 
-test('software inspection can recover while installation streams only one invocation', async t => {
-  const software = new SoftwareClient()
-  await t.test('inspect', async t => {
-    const { context, command, records } = await fixture(t)
-    const response = [
-      '',
-      '$MARKER',
-      '/root',
-      '0',
-      'root',
-      '/bin/bash',
-      ...requiredSoftware(context.target).flatMap(id => [id, '', '127', '']),
-      'END',
-      '',
-    ].join('\0')
-    command.retry!.args[command.retry!.args.length - 1] = JSON.stringify({ code: 0, stdout: response })
-    const report = await software.inspect(context)
-    assert.equal(report.environment.home, '/root')
-    assert.ok(report.software.every(item => item.status === 'missing'))
-    const attempts = await records()
-    assert.deepEqual(
-      attempts.map(record => record.phase),
-      ['first', 'second'],
-    )
-    assert.equal(attempts[0].input, attempts[1].input)
-  })
-  await t.test('install', async t => {
-    const { context, records } = await fixture(t)
-    let output = ''
-    assert.equal(
-      await software.install(
-        context,
-        'installation script',
-        text => {
-          output += text
-        },
-        t.signal,
-      ),
-      255,
-    )
-    assert.equal(output, muxError)
-    assert.deepEqual(
-      (await records()).map(record => record.phase),
-      ['first'],
-    )
-  })
+test('a streamed installation artifact is never replayed', async t => {
+  const { command, records } = await fixture(t)
+  const result = await runCommand(command, Readable.from(['artifact']), { readOnly: true })
+  assert.equal(result.code, 255)
+  assert.deepEqual(
+    (await records()).map(item => item.phase),
+    ['first'],
+  )
 })

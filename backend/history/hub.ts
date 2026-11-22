@@ -100,7 +100,7 @@ export class HistoryHub {
     void this.sync(account)
   }
   private async machines(account: Account) {
-    const targets = await this.dependencies.deployment.workspace(account.owner).listForServer()
+    const targets = await this.dependencies.deployment.workspace(account.owner).list()
     account.machines = targets.map(target => ({
       id: target.id,
       name: target.name,

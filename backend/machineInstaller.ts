@@ -1,115 +1,127 @@
 import { quote } from '../shared/shell'
 import { terminalService } from '../shared/terminalService'
 
-export const packages = `install_packages() {
-  elevate=''
-  if [ "$(id -u)" != 0 ]; then
-    command -v sudo >/dev/null 2>&1 && sudo -n true || { echo 'Package installation requires passwordless sudo. Edit the script or install manually.' >&2; exit 1; }
-    elevate='sudo -n'
-  fi
-  if command -v apt-get >/dev/null 2>&1; then
-    $elevate apt-get update
-    $elevate env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
-  elif command -v dnf >/dev/null 2>&1; then
-    $elevate dnf install -y "$@"
-  elif command -v yum >/dev/null 2>&1; then
-    $elevate yum install -y "$@"
-  elif command -v apk >/dev/null 2>&1; then
-    $elevate apk add --no-cache "$@"
-  elif command -v pacman >/dev/null 2>&1; then
-    $elevate pacman -S --noconfirm --needed "$@"
-  else
-    echo 'No supported package manager found. Edit this script to install the software manually.' >&2
-    exit 1
-  fi
-}`
-
-export const machineReleaseBase = () =>
-  process.env.OUTPOST_TERMINAL_RELEASE_BASE ||
-  `https://github.com/${terminalService.repository}/releases/download/terminal-v${terminalService.version}`
-
-/** A socket selects the server-managed installation. The public script accepts relay or direct enrollment. */
-export function machineInstaller(socket?: string) {
-  return `#!/bin/sh
-set -eu
-# Install the matching, immutable Outpost machine service build as the execution user.
-install_machine() {
-${
-  socket === undefined
-    ? `case "\${1:-}" in
-  relay) [ "$#" -eq 2 ] && [ -n "$2" ] || { echo 'Expected relay SERVER.' >&2; exit 1; }; pair_arg=$2 ;;
-  direct) [ "$#" -eq 1 ] || exit 1; pair_arg=--direct ;;
-  *) echo 'Use the installation command from your Outpost machine page.' >&2; exit 1 ;;
-esac
-enrollment=\${OUTPOST_ENROLLMENT:?Missing Outpost enrollment data}
-unset OUTPOST_ENROLLMENT
-asset_dir=\${OUTPOST_ASSET_DIR:-}
-[ -z "$asset_dir" ] || [ "$1" = direct ] || { echo 'Offline installation requires Direct only.' >&2; exit 1; }`
-    : 'asset_dir='
-}
-${packages}
-[ "$(uname -s)" = Linux ] || { echo 'Outpost machine service requires Linux.' >&2; exit 1; }
+export const detectPlatform = `[ "$(uname -s)" = Linux ] || { echo 'Outpost machines require Linux.' >&2; exit 1; }
 case "$(uname -m)" in
   x86_64) arch=x64 ;;
   aarch64|arm64) arch=arm64 ;;
-  *) echo 'Supported Linux architectures: x86_64 and aarch64.' >&2; exit 1 ;;
+  *) echo 'Unsupported machine architecture.' >&2; exit 1 ;;
 esac
-if [ -n "$asset_dir" ]; then
-  command -v sha256sum >/dev/null || { echo 'Install sha256sum before offline installation.' >&2; exit 1; }
-else
-  command -v curl >/dev/null 2>&1 || install_packages curl ca-certificates
-  command -v sha256sum >/dev/null 2>&1 || install_packages coreutils
-fi
 libc=glibc
-if ldd --version 2>&1 | grep -qi musl; then
-  libc=musl
-  # Bun's musl executable uses the system C++ runtime (absent on minimal Alpine).
-  if [ ! -e /usr/lib/libstdc++.so.6 ]; then
-    [ -z "$asset_dir" ] || { echo 'Install libstdc++ before offline installation.' >&2; exit 1; }
-    install_packages libstdc++
-  fi
-fi
-asset="outpost-terminal-linux-$arch-$libc"
-base=${quote(machineReleaseBase())}
-umask 077
+if ldd --version 2>&1 | grep -qi musl; then libc=musl; fi
+platform="$arch-$libc"`
+
+const asRoot = 'as_root() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo -n "$@"; fi; }'
+
+const prepare = `umask 077
 mkdir -p "$HOME/.outpost/bin"
-# Stage on the destination filesystem, then atomically replace the executable.
-# Already running sessions keep their original process and in-memory history.
-work=$(mktemp -d "$HOME/.outpost/bin/.terminal-install.XXXXXX")
-trap 'rm -rf "$work"' EXIT HUP INT TERM
-if [ -n "$asset_dir" ]; then
-  cp "$asset_dir/$asset" "$asset_dir/SHA256SUMS" "$work/"
-else
-  echo "Downloading Outpost machine service ${terminalService.version} ($arch, $libc)..."
-  curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 15 --max-time 300 "$base/$asset" -o "$work/$asset"
-  curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 15 --max-time 60 "$base/SHA256SUMS" -o "$work/SHA256SUMS"
-fi
-echo 'Verifying download...'
-(cd "$work" && awk -v asset="$asset" '$2 == asset {print}' SHA256SUMS > selected.sha256 && test -s selected.sha256 && sha256sum -c selected.sha256)
-chmod 700 "$work/$asset"
-[ "$("$work/$asset" --version)" = 'outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}' ] || { echo 'Unexpected terminal build version.' >&2; exit 1; }
-# Reserve this Linux host for its execution account. Never take over an existing reservation.
+work=$(mktemp -d "$HOME/.outpost/bin/.setup.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+trap 'exit 1' HUP INT TERM
 if [ ! -d /var/lib/outpost-machine ]; then
-  if [ "$(id -u)" = 0 ]; then mkdir -m 700 /var/lib/outpost-machine
-  else ${socket === undefined ? 'sudo' : 'sudo -n'} sh -c 'mkdir -m 700 /var/lib/outpost-machine && chown "$1" /var/lib/outpost-machine' sh "$(id -u)"; fi
+  as_root sh -c 'mkdir -m 700 /var/lib/outpost-machine && chown "$1" /var/lib/outpost-machine' sh "$(id -u)" ||
+    { echo 'Ask an administrator to provision /var/lib/outpost-machine with mode 700 for this execution account.' >&2; exit 1; }
+fi`
+
+const verify = `(cd "$work" && printf '%s  machine\\n' "$checksum" | sha256sum -c -)
+chmod 700 "$work/machine"
+[ "$("$work/machine" --version)" = 'outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}' ] ||
+  { echo 'Unexpected machine service build. Check system libraries and the release.' >&2; exit 1; }`
+
+export function sshServiceInstaller(socket: string, sha256: string) {
+  return `set -eu
+${asRoot}
+${prepare}
+cat > "$work/machine"
+checksum=${quote(sha256)}
+${verify}
+"$work/machine" enroll ssh ${quote(socket)}
+mv -f "$work/machine" "$HOME/.outpost/bin/outpost-terminal"`
+}
+
+export function sshToolInstaller(sha256: string) {
+  return `set -eu
+umask 077
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+trap 'exit 1' HUP INT TERM
+cd "$work"
+cat > tool.tar.gz
+printf '%s  tool.tar.gz\\n' ${quote(sha256)} | sha256sum -c -
+mkdir tool
+tar -xzf tool.tar.gz -C tool
+cd tool
+sh ./install.sh`
+}
+
+/** The operator explicitly installs one visible, boot-managed outbound service. */
+export function machineInstaller() {
+  return `#!/bin/sh
+set -eu
+[ "$#" -eq 2 ] || { echo 'Use the install command from the machine page.' >&2; exit 1; }
+origin=$1
+target=$2
+enrollment=\${OUTPOST_ENROLLMENT:?Missing enrollment code}
+unset OUTPOST_ENROLLMENT
+case "$origin" in https://*|http://127.0.0.1:*|http://localhost:*|http://\\[::1\\]:*) ;; *) echo 'Use the HTTPS address of your Outpost server.' >&2; exit 1 ;; esac
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null; then manager=systemd
+elif command -v rc-update >/dev/null && command -v supervise-daemon >/dev/null; then manager=openrc
+else echo 'Outbound setup requires systemd or OpenRC to start at boot. Connect over SSH on other machines.' >&2; exit 1; fi
+${asRoot}
+as_root true || { echo 'An administrator must authorize service installation. Run sudo -v in this shell, then retry.' >&2; exit 1; }
+${detectPlatform}
+${prepare}
+base="$origin/api/install/$platform"
+curl -fsS --connect-timeout 15 --max-time 300 "$base/binary" -o "$work/machine"
+checksum=$(curl -fsS --connect-timeout 15 --max-time 60 "$base/sha256")
+${verify}
+printf '%s\\n' "$enrollment" | "$work/machine" enroll outbound "$origin" "$target"
+unset enrollment
+mv -f "$work/machine" "$HOME/.outpost/bin/outpost-terminal"
+if [ "$manager" = systemd ]; then
+  {
+    cat <<'UNIT'
+[Unit]
+Description=Outpost enrolled machine connection
+After=network-online.target
+Wants=network-online.target
+[Service]
+UNIT
+    printf 'User=%s\\n' "$(id -u)"
+    cat <<'UNIT'
+ExecStart=/bin/sh -c 'exec "$$HOME/.outpost/bin/outpost-terminal" connect'
+Restart=on-failure
+RestartSec=5s
+KillMode=process
+[Install]
+WantedBy=multi-user.target
+UNIT
+  } > "$work/unit"
+  as_root install -m 644 "$work/unit" /etc/systemd/system/outpost-machine.service
+  as_root systemctl daemon-reload
+  as_root systemctl enable outpost-machine.service
+  as_root systemctl restart outpost-machine.service
+else
+  cat > "$work/service" <<'OPENRC'
+#!/sbin/openrc-run
+description="Outpost enrolled machine connection"
+uid=$(stat -c %u /var/lib/outpost-machine)
+command_user=$(stat -c %U /var/lib/outpost-machine)
+if command -v getent >/dev/null; then account=$(getent passwd "$command_user")
+else account=$(awk -F: -v uid="$uid" '$3 == uid {print; exit}' /etc/passwd); fi
+HOME=$(printf '%s' "$account" | cut -d: -f6)
+SHELL=$(printf '%s' "$account" | cut -d: -f7)
+export HOME SHELL
+command="$HOME/.outpost/bin/outpost-terminal"
+command_args="connect"
+supervisor="supervise-daemon"
+respawn_delay=5
+depend() { need net; }
+OPENRC
+  as_root install -m 755 "$work/service" /etc/init.d/outpost-machine
+  as_root rc-update add outpost-machine default
+  as_root rc-service outpost-machine restart
 fi
-${
-  socket === undefined
-    ? `printf '%s\\n' "$enrollment" | "$work/$asset" pair "$pair_arg"
-unset enrollment`
-    : `"$work/$asset" pair --managed ${quote(socket)}`
-}
-mv -f "$work/$asset" "$HOME/.outpost/bin/outpost-terminal"
-echo 'Outpost machine service ${terminalService.version} installed.'
-${
-  socket === undefined
-    ? `rm -rf "$work"
-trap - EXIT HUP INT TERM
-echo 'Starting the connector in this terminal. To start it again, run ~/.outpost/bin/outpost-terminal connect.'
-exec "$HOME/.outpost/bin/outpost-terminal" connect </dev/null`
-    : ''
-}
-}
-install_machine "$@"
+echo 'Outpost machine enrolled. Follow software setup on the machine page.'
 `
 }

@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { machineSetupLabels, type Target } from '../shared/model'
 import type { Command, CommandResult } from './process'
 import { AppError } from './errors'
-import { quote } from '../shared/shell'
-import { loginScriptShell, type LoginMode } from './shell'
+import { quote, shellJoin, supportingPath } from '../shared/shell'
+import { loginShell, type LoginMode } from '../shared/node/loginShell'
 
 /** Hosted accounts connect with their own key and known hosts; local mode uses OpenSSH defaults. */
 export interface SshIdentity {
@@ -18,6 +18,7 @@ export interface SshIdentity {
 export interface Transport {
   readonly label: string
   management(mode: LoginMode): Command
+  shell(script: string): Command
   login(command: string): Command
 }
 
@@ -108,7 +109,7 @@ export function sshArgs(
     // Shared masters authenticate once. Scope them by owner and identity so a
     // connection opened with one credential is never reused by another.
     const scope = createHash('sha256')
-      .update(JSON.stringify([options.scope, identity?.identityFile ?? target.identityFile ?? '']))
+      .update(JSON.stringify([options.scope, identity?.identityFile ?? target.identityFile ?? '', target.jump]))
       .digest('hex')
       .slice(0, 12)
     args.push(
@@ -123,6 +124,20 @@ export function sshArgs(
     // ControlMaster=no alone still permits using a configured ControlPath.
     // Explicitly override all sharing options, including ~/.ssh/config.
     args.push('-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'ControlPersist=no')
+  }
+  if (target.jump) {
+    // A ProxyJump subprocess does not inherit the parent SSH credentials. Both
+    // hops must use this owner's identity and host-key policy on a hosted instance.
+    const { jump, ...destination } = target
+    if (identity) {
+      const hop = sshArgs({ ...destination, ...jump, port: jump.port }, identity, { scope: options.scope })
+      const at = hop.indexOf('--')
+      hop.splice(at, 0, '-W', '[%h]:%p')
+      args.push('-o', 'ProxyCommand=' + shellJoin(['ssh', ...hop]))
+    } else {
+      const host = jump.host.includes(':') ? '[' + jump.host + ']' : jump.host
+      args.push('-J', jump.user + '@' + host + (jump.port ? ':' + jump.port : ''))
+    }
   }
   args.push('-l', target.user, '--', target.host)
   return args
@@ -149,12 +164,15 @@ class SshTransport implements Transport {
     }
     return command
   }
+  shell(script: string): Command {
+    return this.command('sh -c ' + quote(script))
+  }
   management(mode: LoginMode): Command {
-    return this.command(`sh -c ${quote(loginScriptShell(mode))}`)
+    return this.command(`sh -c ${quote(loginShell(mode))}`)
   }
   login(command: string): Command {
     const shell = this.target.environment ? quote(this.target.environment.shell) : 'bash'
-    return this.command(`${shell} -lic ${quote(command)}`)
+    return this.command(`${shell} -lic ${quote(supportingPath + '\n' + command)}`)
   }
 }
 
@@ -164,31 +182,38 @@ class LocalTransport implements Transport {
   constructor(private target: Extract<Target, { kind: 'local' }>) {
     if (process.platform !== 'linux') throw new AppError('Running sessions on the Outpost server requires Linux.', 409)
   }
+  shell(script: string): Command {
+    return { executable: 'sh', args: ['-c', script], label: this.label }
+  }
   management(mode: LoginMode): Command {
-    return { executable: 'sh', args: ['-c', loginScriptShell(mode)], label: this.label }
+    return { executable: 'sh', args: ['-c', loginShell(mode)], label: this.label }
   }
   login(command: string): Command {
-    return { executable: this.target.environment?.shell ?? 'bash', args: ['-lic', command], label: this.label }
+    return {
+      executable: this.target.environment?.shell ?? 'bash',
+      args: ['-lic', supportingPath + '\n' + command],
+      label: this.label,
+    }
   }
 }
 
-export function transportFor(target: Target, identity: SshIdentity | null, options: TransportOptions): Transport {
+export function transportFor(
+  target: Exclude<Target, { kind: 'outbound' }>,
+  identity: SshIdentity | null,
+  options: TransportOptions,
+): Transport
+export function transportFor(target: Target, identity: SshIdentity | null, options: TransportOptions): Transport | null
+export function transportFor(
+  target: Target,
+  identity: SshIdentity | null,
+  options: TransportOptions,
+): Transport | null {
   switch (target.kind) {
     case 'ssh':
       return new SshTransport(target, identity, options)
     case 'local':
       return new LocalTransport(target)
-    case 'direct': {
-      const deny = (): never => {
-        throw new AppError('This direct-only machine requires a connection from your client.', 409)
-      }
-      return { label: machineSetupLabels.direct, login: deny, management: deny }
-    }
-    case 'paired': {
-      const offline = (): never => {
-        throw new AppError('Run outpost-terminal connect on this machine. Install or update its software there.', 503)
-      }
-      return { label: machineSetupLabels.paired, login: offline, management: offline }
-    }
+    case 'outbound':
+      return null
   }
 }

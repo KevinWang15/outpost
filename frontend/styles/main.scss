@@ -389,23 +389,6 @@ kbd {
   > button {
     justify-self: start;
   }
-  summary {
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 13px;
-  }
-  details[open] > :not(summary) {
-    margin-top: 8px;
-  }
-  .machine-assets {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  a {
-    color: var(--link);
-    text-decoration: underline;
-  }
 }
 .machine-wizard .dialog-header {
   h2 {
@@ -448,9 +431,6 @@ kbd {
       color: var(--accent-hover);
     }
   }
-}
-.machine-policy {
-  margin-bottom: 16px;
 }
 .machine-guide-panel {
   min-width: 0;
@@ -1106,12 +1086,6 @@ textarea.code,
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.script-editor {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
 /* Sessions */
 .table {
   display: grid;

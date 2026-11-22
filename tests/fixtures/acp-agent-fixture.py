@@ -322,7 +322,10 @@ def run(identifier, params):
         members = re.search(r'Members: ([^\n]+?)\.', instructions) if body else None
         last = '' if direct else body.split('\n')[-1]
         # "publish NAME" writes a file and publishes it with Outpost's MCP tool.
-        published = re.search(r'(?:^|\s)publish ([\w.-]+)', text if direct else last)
+        instruction = text if direct else last
+        if text.startswith('[Outpost: Scheduled'):
+            instruction = text.split('\n', 1)[-1].split('\n\n', 1)[0]
+        published = re.search(r'(?:^|\s)publish ([\w.-]+)', instruction)
         if published:
             path = os.path.join(session['cwd'], published.group(1))
             with open(path, 'w') as output:

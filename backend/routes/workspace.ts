@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
-import type { Environment, SoftwareId, Target, TargetInput, TargetUpdate } from '../../shared/model'
-import { machineSetupLabels, requiredSoftware } from '../../shared/model'
-import { AppError } from '../errors'
+import type { Environment, Target, TargetInput, TargetUpdate } from '../../shared/model'
+import { machineSetupLabels } from '../../shared/model'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
-import { planInstallation } from '../software'
-import { installationInput, targetInput, targetUpdate } from '../../shared/schemas'
+import { targetInput, targetUpdate } from '../../shared/schemas'
 import { inspectTargetSoftware } from '../session-actions'
 
 type Params = { targetId: string }
 
-export function workspaceRoutes(app: FastifyInstance, services: Services, forgetPairing: (targetId: string) => void) {
+export function workspaceRoutes(
+  app: FastifyInstance,
+  services: Services,
+  forgetEnrollment: (targetId: string) => void,
+) {
   const { deployment, installations, log } = services
   app.get('/api/environment', async request => {
     const owner = deployment.owner(request)
@@ -39,14 +41,10 @@ export function workspaceRoutes(app: FastifyInstance, services: Services, forget
       message: `${added.name} was added`,
       machine: { id: added.id, name: added.name },
       details: {
-        address:
-          added.kind === 'ssh'
-            ? `${added.user}@${added.host}`
-            : added.kind === 'direct'
-              ? added.endpoint
-              : machineSetupLabels[added.kind],
+        address: added.kind === 'ssh' ? `${added.user}@${added.host}` : machineSetupLabels[added.kind],
       },
     })
+    if (added.kind === 'ssh') await installations.start(await services.resolve(owner, added.id))
     return reply.code(201).send(added)
   })
   app.patch<{ Params: Params; Body: TargetUpdate }>(
@@ -64,13 +62,14 @@ export function workspaceRoutes(app: FastifyInstance, services: Services, forget
         message: `${edited.name} was edited`,
         machine: { id: edited.id, name: edited.name },
       })
+      if (request.body.tools) await installations.start(await services.resolve(owner, edited.id))
       return edited
     },
   )
   app.delete<{ Params: Params }>('/api/targets/:targetId', async (request, reply) => {
     const { owner, workspace, target } = await services.context(request, request.params.targetId)
     await installations.removeTarget(owner, target.id, () => workspace.remove(target.id))
-    if (target.kind === 'paired') forgetPairing(target.id)
+    if (target.kind === 'outbound') forgetEnrollment(target.id)
     services.broker.closeTarget(owner, target.id)
     services.machines.forget(owner, target.id)
     log.record(owner, {
@@ -87,29 +86,10 @@ export function workspaceRoutes(app: FastifyInstance, services: Services, forget
       return inspectTargetSoftware(services, context, signal)
     }),
   )
-  app.get<{ Params: Params & { softwareId: SoftwareId } }>(
-    '/api/targets/:targetId/software/:softwareId/script',
-    async request => {
-      const { target, machine } = await services.context(request, request.params.targetId)
-      if (target.kind === 'paired' || target.kind === 'direct')
-        throw new AppError('Install software locally on this machine.', 409)
-      if (!requiredSoftware(target).includes(request.params.softwareId))
-        throw new AppError('This machine does not need this software.', 400)
-      return planInstallation(request.params.softwareId, machine.socket)
-    },
-  )
-  app.post<{ Params: Params; Body: { softwareId: SoftwareId; script: string } }>(
-    '/api/targets/:targetId/installations',
-    {
-      schema: { body: installationInput },
-    },
-    async (request, reply) => {
-      const context = await services.context(request, request.params.targetId)
-      if (context.target.kind === 'paired' || context.target.kind === 'direct')
-        throw new AppError('Install the required software on this machine, then check again.', 409)
-      return reply.code(202).send(await installations.start(context, request.body.softwareId, request.body.script))
-    },
-  )
+  app.post<{ Params: Params }>('/api/targets/:targetId/installations', async (request, reply) => {
+    const context = await services.context(request, request.params.targetId)
+    return reply.code(202).send(await installations.start(context))
+  })
   app.get<{ Params: Params }>('/api/targets/:targetId/installations', async request => {
     const { owner, target } = await services.context(request, request.params.targetId)
     return { installation: installations.latest(owner, target.id) }

@@ -15,7 +15,6 @@ export function restoreEmptyTerminal(socket: WebSocketRoute) {
     allowProposedApi: true,
   })
   try {
-    socket.send(JSON.stringify({ type: 'route-selected', route: 'server-managed' }))
     for (const part of checkpoint(terminal)) socket.send(JSON.stringify({ type: 'restore', checkpoint: part }))
     socket.send(JSON.stringify({ type: 'ready' }))
   } finally {

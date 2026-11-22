@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { desktopOrigin } from '../../shared/desktopAuth'
+import { serverOrigin } from '../../shared/serverOrigin'
 import { writeJsonFile } from '../../shared/node/jsonFile'
 
 /** Persistent first-use trust, separate from app logins and terminal grants. */
@@ -18,7 +18,7 @@ export class ServerTrust {
       for (const origin of data) {
         if (typeof origin !== 'string') continue
         try {
-          this.servers.add(desktopOrigin(origin))
+          this.servers.add(serverOrigin(origin))
         } catch {
           /* Ignore invalid entries. */
         }
@@ -32,7 +32,7 @@ export class ServerTrust {
     return this.servers.has(origin)
   }
   ensure(value: string) {
-    const origin = desktopOrigin(value)
+    const origin = serverOrigin(value)
     if (this.has(origin)) return Promise.resolve(true)
     const pending = this.prompts.get(origin)
     if (pending) return pending

@@ -29,9 +29,6 @@ conversation in Chat or either terminal.
 | Web terminal | Any current browser, including on phones. |
 | Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Native GPUI terminal with local shells and managed Outpost sessions. |
 
-The remote setup below follows the accepted v3 design. Implementation is pending.
-If you are enrolling a machine today, use the [current-build instructions](#current-build-setup).
-
 ## Run the local tool
 
 ```sh
@@ -56,7 +53,7 @@ That instance opens SSH connections to its enrolled machines from the computer w
 
 ## Start a session on a machine
 
-In the v3 design, open **Machines → Add a machine**. Choose the method based on whether the
+Open **Machines → Add a machine**. Choose the method based on whether the
 computer running Outpost can SSH to the Linux account that will run the coding agent.
 
 | Choose | When to use it | What happens |
@@ -77,14 +74,15 @@ project directory. **Connect** opens the session in the web terminal or Outpost 
 **Open in chat** opens its conversation. Both methods support the same session features.
 Reconnecting uses the method you chose. [V3 connectivity design](docs/V3.md)
 
-### Current-build setup
+### Machine setup and removal
 
-Today’s wizard offers **SSH** and **Install the connector**. The **Direct only** connector
-supports terminal sessions. For Chat and unattended delivery, use an SSH machine, a
-connected **Relay enabled** machine, or a session on the local Linux Outpost server.
-Use **Required software** to install missing dependencies. For exact steps, see the
-[current-build machine setup guide](https://github.com/KevinWang15/outpost/blob/a568e89800eb6b06f9b34a445db78dcecb8844ec/README.md#start-a-session-on-a-machine)
-and [installation and removal commands](https://github.com/KevinWang15/outpost/blob/a568e89800eb6b06f9b34a445db78dcecb8844ec/docs/ARCHITECTURE.md#installing-and-removing-a-machine).
+On the machine page, **Required software → View setup log** shows what Outpost installed. **Set up required software** retries the checks and installs missing components. For initial SSH setup the execution account needs to own `/var/lib/outpost-machine` with mode 700 or have permission to create it using noninteractive sudo. Outbound setup also needs permission to install a systemd or OpenRC service. Run `sudo -v` first if your account uses sudo interactively.
+
+For a machine without internet access, set `OUTPOST_TERMINAL_ASSET_DIR` on the Outpost server to a directory containing the matching Linux releases and `SHA256SUMS`. Put approved tool packages under `OUTPOST_TOOL_ASSET_DIR/<arch>-<libc>/`. Supply a `SHA256SUMS` and one `<software-id>.tar.gz` for each missing requirement. Each archive contains an `install.sh` at its root and its offline dependencies. Outpost transfers and verifies these files over SSH and runs the installer as the execution account. With this directory configured, a missing package is reported in the setup log. Without it, missing coding tools use their official installers.
+
+For outbound access to a local instance, set `OUTPOST_MACHINE_ORIGIN` to a machine-reachable HTTPS origin. Configure a trusted reverse proxy on the workstation to preserve the public Host header and forward only `/api/machine/` and `/api/install/` to Outpost on loopback. Keep workspace and login routes on loopback. Use hosted Outpost if your workstation cannot provide a reachable address.
+
+Use `~/.outpost/bin/outpost-terminal status` to inspect enrollment. **Remove machine** in Outpost closes its connections and revokes its outbound credential. Run `~/.outpost/bin/outpost-terminal unenroll` as the execution user to release local ownership before changing servers or methods. To remove the binary as well, stop the machine’s sessions and run `~/.outpost/bin/outpost-terminal uninstall`. Session files stay in the execution account’s home. Remove the old hosted account’s authorized SSH key separately if you granted it exclusively for Outpost.
 
 ## Edit a session and its conversations
 
@@ -563,7 +561,7 @@ remain accessible through history MCP. See the [official ACP contract](https://g
 Set `OUTPOST_MODE=hosted`. Each verified account gets its own workspace.
 For an SSH machine, add the account’s Ed25519 public key to
 `~/.ssh/authorized_keys` for the Linux user that runs the sessions.
-If the server cannot SSH to the machine, the v3 design offers outbound setup
+If the server cannot SSH to the machine, choose outbound setup
 from a shell on the machine. Both terminal clients sign in through the hosted Outpost server.
 
 ```dotenv
@@ -597,7 +595,7 @@ instance per data directory.
 
 ## How it works
 
-In the v3 design, a remote machine enrolls with one Outpost server under one Linux execution
+A remote machine enrolls with one Outpost server under one Linux execution
 account. The browser and Outpost Desktop attach through that server. An SSH enrollment
 starts `outpost-terminal node` with `ssh -T`. An outbound enrollment carries the same protocol
 over the machine’s authenticated connection to Outpost. Requests and results flow both ways.

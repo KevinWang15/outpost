@@ -3,45 +3,34 @@ import { ArrowLeft, ArrowRight } from 'lucide-react'
 import MachineSetupGuide from './MachineSetupGuide'
 import {
   machineSetupLabels,
-  machineEndpoint,
   type Environment,
   type Target,
   type TargetInput,
   type TargetUpdate,
 } from '../../shared/model'
-import { harnesses, supportsTerminal, type HarnessId } from '../../shared/harnesses'
+import { harnesses, type HarnessId } from '../../shared/harnesses'
 import { api } from '../api'
 import { useAuth } from '../auth/useAuth'
 import { Dialog } from '../ui/Dialog'
 import AccountKey from '../auth/AccountKey'
 
-function ToolChoice({
-  value,
-  direct,
-  onChange,
-}: {
-  value: HarnessId[]
-  direct: boolean
-  onChange: (tools: HarnessId[]) => void
-}) {
+function ToolChoice({ value, onChange }: { value: HarnessId[]; onChange: (tools: HarnessId[]) => void }) {
   return (
     <fieldset className="field">
       <legend className="label">Coding tools</legend>
       <div className="toggle-group">
-        {harnesses
-          .filter(harness => !direct || supportsTerminal(harness.id))
-          .map(harness => (
-            <label key={harness.id} className="toggle">
-              <input
-                type="checkbox"
-                checked={value.includes(harness.id)}
-                onChange={event =>
-                  onChange(event.target.checked ? [...value, harness.id] : value.filter(tool => tool !== harness.id))
-                }
-              />
-              {harness.label}
-            </label>
-          ))}
+        {harnesses.map(harness => (
+          <label key={harness.id} className="toggle">
+            <input
+              type="checkbox"
+              checked={value.includes(harness.id)}
+              onChange={event =>
+                onChange(event.target.checked ? [...value, harness.id] : value.filter(tool => tool !== harness.id))
+              }
+            />
+            {harness.label}
+          </label>
+        ))}
       </div>
       <small>Sessions on this machine can use these tools. You can change this later.</small>
     </fieldset>
@@ -61,7 +50,7 @@ export default function TargetDialog({
   const hosted = useAuth().mode === 'hosted'
   const [environment, setEnvironment] = useState<Environment | null>(null)
   const [kind, setKind] = useState<Target['kind']>(target?.kind ?? 'ssh')
-  const [chosenTools, setTools] = useState<HarnessId[]>(target?.tools ?? ['claude'])
+  const [tools, setTools] = useState<HarnessId[]>(target?.tools ?? ['claude'])
   const [choosing, setChoosing] = useState(!target)
   const [draft, setDraft] = useState<Record<string, string>>({})
   const form = useRef<HTMLFormElement>(null)
@@ -81,7 +70,6 @@ export default function TargetDialog({
     setChoosing(true)
   }
 
-  const tools = kind === 'direct' ? chosenTools.filter(supportsTerminal) : chosenTools
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('')
   useEffect(() => {
@@ -99,11 +87,7 @@ export default function TargetDialog({
     setBusy(true)
     setError('')
     try {
-      const connector = kind === 'direct' || kind === 'paired'
-      if (target) await onSave({ name: text('name'), tools, ...(connector && { endpoint: text('endpoint') || null }) })
-      else if (kind === 'direct') await onSave({ kind, name: text('name'), tools, endpoint: text('endpoint') })
-      else if (kind === 'paired')
-        await onSave({ kind, name: text('name'), tools, ...(text('endpoint') && { endpoint: text('endpoint') }) })
+      if (target) await onSave({ name: text('name'), tools })
       else if (kind !== 'ssh') await onSave({ kind, name: text('name'), tools })
       else
         await onSave({
@@ -113,6 +97,13 @@ export default function TargetDialog({
           user: text('user'),
           tools,
           ...(text('port') ? { port: Number(text('port')) } : {}),
+          ...(text('jumpHost') && {
+            jump: {
+              host: text('jumpHost'),
+              user: text('jumpUser') || text('user'),
+              ...(text('jumpPort') && { port: Number(text('jumpPort')) }),
+            },
+          }),
           ...(text('identityFile') ? { identityFile: text('identityFile') } : {}),
         })
     } catch (problem) {
@@ -177,6 +168,10 @@ export default function TargetDialog({
             localAvailable={Boolean(environment?.localTargets)}
             hosted={hosted}
             onSelect={setKind}
+            onLocal={() => {
+              setKind('local')
+              setChoosing(false)
+            }}
           />
         </div>
       ) : (
@@ -191,23 +186,6 @@ export default function TargetDialog({
               placeholder={kind === 'local' ? machineSetupLabels.local : 'dev-box'}
             />
           </label>
-          {(kind === 'direct' || kind === 'paired') && (
-            <label className="field">
-              <span className="label">Machine HTTPS address {kind === 'paired' && <em>optional</em>}</span>
-              <input
-                required={kind === 'direct'}
-                name="endpoint"
-                defaultValue={draft.endpoint ?? (target && machineEndpoint(target))}
-                type="url"
-                placeholder="https://terminal.corp.example"
-              />
-              <small>
-                {kind === 'paired'
-                  ? 'Set this to try direct connections first. Leave it empty to use the relay.'
-                  : 'Your device must be able to reach this address.'}
-              </small>
-            </label>
-          )}
           {!target && kind === 'ssh' && (
             <>
               <div className="form-row">
@@ -238,7 +216,10 @@ export default function TargetDialog({
                   maxLength={32}
                   placeholder="ubuntu"
                 />
-                <small>Sessions run as this Linux user. It needs no root access.</small>
+                <small>
+                  Sessions run as this Linux user. First setup needs the machine ownership directory provisioned for
+                  this account or permission to create it with sudo.
+                </small>
               </label>
               {!hosted && (
                 <label className="field">
@@ -254,23 +235,40 @@ export default function TargetDialog({
                   <small>Otherwise Outpost uses your SSH config and agent.</small>
                 </label>
               )}
+              <details>
+                <summary>Use an SSH bastion</summary>
+                <label className="field">
+                  <span className="label">Bastion host</span>
+                  <input name="jumpHost" defaultValue={draft.jumpHost} autoCapitalize="off" spellCheck={false} />
+                </label>
+                <div className="form-row">
+                  <label className="field grow">
+                    <span className="label">Bastion user</span>
+                    <input name="jumpUser" defaultValue={draft.jumpUser} placeholder="Same as the machine user" />
+                  </label>
+                  <label className="field port">
+                    <span className="label">Bastion port</span>
+                    <input
+                      name="jumpPort"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      defaultValue={draft.jumpPort}
+                      placeholder="22"
+                    />
+                  </label>
+                </div>
+                {hosted && <small>Authorize your account key on both the bastion and the machine.</small>}
+              </details>
               {hosted && <AccountKey />}
             </>
           )}
-          {!target && kind === 'paired' && (
+          {!target && kind === 'outbound' && (
             <p className="hint">
               After adding the machine, copy the install command from its machine page and run it on the machine.
             </p>
           )}
-          <ToolChoice
-            direct={kind === 'direct'}
-            value={tools}
-            onChange={updated =>
-              setTools(
-                kind === 'direct' ? [...chosenTools.filter(tool => !supportsTerminal(tool)), ...updated] : updated,
-              )
-            }
-          />
+          <ToolChoice value={tools} onChange={setTools} />
           {error && (
             <p className="error" role="alert">
               {error}

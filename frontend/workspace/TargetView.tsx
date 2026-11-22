@@ -47,15 +47,16 @@ export default function TargetView({
   onRemoved: (target: Target) => void
 }) {
   const toast = useToast()
-  const { sessions, error, refreshing, refresh } = useSessions(target.id)
+  const [available, setAvailable] = useState(target.kind !== 'outbound')
+  const { sessions, error, refreshing, refresh } = useSessions(target.id, available)
   const connectFlow = useConnect(target, refresh)
-  const software = useSoftware(target.id, target.tools.join(','))
+  const software = useSoftware(target.id, target.tools.join(','), available)
   const [panel, setPanel] = useState<Panel | null>(() =>
     request?.kind === 'link' ? { kind: 'session', conversation: request.match } : null,
   )
   const [checking, setChecking] = useState<string[]>([])
   const options = sessionCreationOptions(target, software.report?.software ?? [])
-  const tools = target.kind === 'direct' ? options.tools.filter(supportsTerminal) : options.tools
+  const tools = options.tools
   const missing = options.missing
   const ready = missing.length === 0 && tools.length > 0
   const directories = useCallback(
@@ -71,10 +72,6 @@ export default function TargetView({
   const close = () => setPanel(null)
 
   function connect(session: Session) {
-    if (target.kind === 'direct' && !supportsTerminal(session.tool)) {
-      toast('This tool requires Chat on a server-connected machine.', 'error')
-      return
-    }
     close()
     connectFlow.connect(session)
   }
@@ -85,8 +82,7 @@ export default function TargetView({
     window.location.assign(chatHref(target.id, session.id, extra))
 
   /** The session's main action: chat when it runs there or has no terminal, else a terminal. */
-  const opensInChat = (session: Session) =>
-    target.kind !== 'direct' && (session.driver === 'chat' || !supportsTerminal(session.tool))
+  const opensInChat = (session: Session) => session.driver === 'chat' || !supportsTerminal(session.tool)
   function open(session: Session) {
     if (opensInChat(session)) inChat(session)
     else connect(session)
@@ -94,10 +90,9 @@ export default function TargetView({
 
   /** Stop the session and start it again in the same conversation with its current settings. */
   async function restart(session: Session) {
-    if (target.kind === 'direct' && !supportsTerminal(session.tool)) return connect(session)
     try {
       await api(`${sessionPath(session)}/terminate`, 'POST')
-      if (target.kind !== 'direct' && session.driver === 'chat') inChat(session, { start: true })
+      if (session.driver === 'chat') inChat(session, { start: true })
       else connect(session)
       await refresh()
     } catch (problem) {
@@ -132,9 +127,6 @@ export default function TargetView({
 
   return (
     <div className="target-view">
-      {(target.kind === 'direct' || target.kind === 'paired') && (
-        <MachineInstall key={target.id} id={target.id} direct={target.kind === 'direct'} />
-      )}
       <header className="page-header">
         <div className="page-title">
           <span className="page-icon">
@@ -182,39 +174,42 @@ export default function TargetView({
           />
         </div>
       </header>
-      <SoftwarePanel target={target} state={software} onInstalled={() => void refresh()} />
-      <SessionTable
-        sessions={sessions}
-        error={error}
-        refreshing={refreshing}
-        canCreate={ready}
-        checking={checking}
-        onRefresh={() => void refresh()}
-        onCreate={() => setPanel({ kind: 'session', conversation: null })}
-        primary={session =>
-          opensInChat(session)
-            ? { kind: 'chat', href: chatHref(target.id, session.id) }
-            : supportsTerminal(session.tool)
-              ? { kind: 'terminal', connect: () => connect(session) }
-              : { kind: 'unavailable' }
-        }
-        actionsFor={session => ({
-          ...(target.kind === 'direct'
-            ? {}
-            : opensInChat(session)
-              ? { terminal: () => connect(session) }
-              : { chat: () => inChat(session) }),
-          conversations: () => setPanel({ kind: 'conversations', session }),
-          edit: () => setPanel({ kind: 'settings', session }),
-          fork: () => setPanel({ kind: 'fork', session }),
-          ...(target.kind !== 'direct' && { schedule: () => inChat(session, { schedule: true }) }),
-          stop: () => setPanel({ kind: 'stop', session }),
-          remove: () => setPanel({ kind: 'delete', session }),
-        })}
-        onRestart={session => void restart(session)}
-        onConversations={session => setPanel({ kind: 'conversations', session })}
-        onCheck={session => void check(session)}
-      />
+      {target.kind === 'outbound' && <MachineInstall key={target.id} id={target.id} onReady={setAvailable} />}
+      {available && (
+        <>
+          <SoftwarePanel target={target} state={software} onInstalled={() => void refresh()} />
+          <SessionTable
+            sessions={sessions}
+            error={error}
+            refreshing={refreshing}
+            canCreate={ready}
+            checking={checking}
+            onRefresh={() => void refresh()}
+            onCreate={() => setPanel({ kind: 'session', conversation: null })}
+            primary={session =>
+              opensInChat(session)
+                ? { kind: 'chat', href: chatHref(target.id, session.id) }
+                : { kind: 'terminal', connect: () => connect(session) }
+            }
+            actionsFor={session => ({
+              ...(opensInChat(session)
+                ? supportsTerminal(session.tool)
+                  ? { terminal: () => connect(session) }
+                  : {}
+                : { chat: () => inChat(session) }),
+              conversations: () => setPanel({ kind: 'conversations', session }),
+              edit: () => setPanel({ kind: 'settings', session }),
+              fork: () => setPanel({ kind: 'fork', session }),
+              schedule: () => inChat(session, { schedule: true }),
+              stop: () => setPanel({ kind: 'stop', session }),
+              remove: () => setPanel({ kind: 'delete', session }),
+            })}
+            onRestart={session => void restart(session)}
+            onConversations={session => setPanel({ kind: 'conversations', session })}
+            onCheck={session => void check(session)}
+          />
+        </>
+      )}
 
       {panel?.kind === 'session' && (
         <SessionDialog

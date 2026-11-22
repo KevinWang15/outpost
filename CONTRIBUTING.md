@@ -67,6 +67,8 @@ SSH known hosts or provider credentials. Existing browser assertions inspect
 xterm DOM text, so Playwright disables WebGL to exercise the fallback renderer.
 Native GPU behavior and OS integration require checks on the supported systems.
 
+On Linux, build the musl binary with `npm run build:terminal -- x64-musl` and the boot fixture with `docker build -t outpost-openrc-test -f tests/fixtures/OpenRC.Dockerfile tests/fixtures`. Set `OUTPOST_OPENRC_TEST_IMAGE=outpost-openrc-test` when running the integration suite to verify outbound installation, boot-time reconnection and service removal.
+
 When implementing v3 connectivity, verify SSH setup and reattachment through a bastion
 with target egress blocked. Exercise outbound enrollment with inbound access blocked,
 including reconnect and credential revocation. Check file transfer, image paste, ACP
@@ -101,7 +103,7 @@ publishing a new release.
 
 For a self-hosted release, `OUTPOST_TERMINAL_RELEASE_BASE` can point to an HTTPS
 directory containing the four version-matched Linux executables and their `SHA256SUMS`.
-In the v3 design the Outpost instance supplies the matching executable and checksum
+The Outpost instance supplies the matching executable and checksum
 over SSH, or the operator’s outbound setup command fetches the installer from Outpost.
 Both methods must verify the checksum and service version before installation.
 For a bundled Apple silicon installer, set `VITE_OUTPOST_MAC_ARM64_INSTALLER` at web

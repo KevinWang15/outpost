@@ -1,10 +1,7 @@
-import { randomUUID, randomBytes } from 'node:crypto'
-import { endpointProof, type directAuthority } from '../../shared/node/directTickets'
 import { WebSocket } from 'ws'
-import { Connection, closedMessages } from '../../shared/node/terminalViewer'
+import { Connection, closedMessages } from './connection'
 import type { CloseReason, ServerMessage } from '../../shared/protocol'
 import { protocolVersion } from '../../shared/protocol'
-import { machineEndpoint, type Target } from '../../shared/model'
 import { terminalService } from '../../shared/terminalService'
 import type { Owner } from '../deployment'
 import { terminalFailure } from './failures'
@@ -21,7 +18,6 @@ export interface TerminalQuery {
 }
 
 interface Dependencies {
-  authority(owner: Owner, target: Target): ReturnType<typeof directAuthority> | undefined
   tokens: ConnectTokens
   active(owner: Owner): boolean
   sessions: SessionService
@@ -31,7 +27,7 @@ interface Dependencies {
 }
 
 export class TerminalBroker {
-  private connections = new Set<Connection<Grant>>()
+  private connections = new Set<Connection>()
   private sweep: NodeJS.Timeout
   private stopped = false
   constructor(private dependencies: Dependencies) {
@@ -42,11 +38,11 @@ export class TerminalBroker {
       }
     }, 5000).unref()
   }
-  forget(connection: Connection<Grant>) {
+  forget(connection: Connection) {
     this.connections.delete(connection)
   }
 
-  logged(connection: Connection<Grant>, change: 'opened' | 'closed') {
+  logged(connection: Connection, change: 'opened' | 'closed') {
     const { named, closing } = connection
     if (!named) return
     const problem = closing && (closing.reason === 'error' || closing.reason === 'unavailable') ? closing : null
@@ -104,46 +100,6 @@ export class TerminalBroker {
       const context = await this.dependencies.resolve(grant.owner, grant.targetId)
       if (connection.abort.signal.aborted) return
       const resume = this.dependencies.tokens.resume(redeemed.id, grant)
-      const endpoint = machineEndpoint(context.target)
-      const authority = endpoint && this.dependencies.authority(grant.owner, context.target)
-      if (endpoint && authority) {
-        const challenge = randomBytes(24).toString('base64url')
-        const direct = await connection.chooseRoute({
-          type: 'route-offer',
-          origin: endpoint,
-          challenge,
-          proof: endpointProof(authority.proofKey, challenge),
-          resume,
-          relay: context.target.kind === 'paired' && context.machine.relayConnected,
-        })
-        if (connection.abort.signal.aborted) return
-        if (direct) {
-          const lease = randomUUID()
-          connection.authorizeDirect()
-          connection.send({
-            type: 'direct-attach',
-            ticket: authority.issue('attach', {
-              lease,
-              session: grant.sessionId,
-              name: context.target.name,
-              cols,
-              rows,
-              start,
-            }),
-          })
-          const timer = setInterval(() => {
-            if (!this.dependencies.active(grant.owner)) return connection.close('expired', 'Sign in again.')
-            connection.send({ type: 'direct-lease', ticket: authority.issue('renew', { lease }) })
-          }, 15000).unref()
-          connection.abort.signal.addEventListener('abort', () => clearInterval(timer), { once: true })
-          return
-        }
-        if (context.target.kind === 'direct')
-          return connection.close(
-            'error',
-            'The direct-only machine is unreachable. Check its HTTPS address and your network connection.',
-          )
-      }
       const session = await this.dependencies.sessions.get(context, grant.sessionId, connection.abort.signal)
       if (socket.readyState !== WebSocket.OPEN) return
       connection.named = {
@@ -164,10 +120,6 @@ export class TerminalBroker {
         start,
         connection.abort.signal,
       )
-      connection.send({
-        type: 'route-selected',
-        route: context.target.kind === 'paired' ? 'relay' : 'server-managed',
-      })
       connection.start(stream)
     } catch (error) {
       const failure = terminalFailure(error)

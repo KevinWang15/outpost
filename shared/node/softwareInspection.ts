@@ -30,7 +30,7 @@ probe() {
   # Bound version probes, including a broken executable that waits for input.
   rm -f "$work/finished"
   set -- --version
-  ${managedSocket ? `if [ "$tool" = outpost-terminal ]; then set -- "$@" --managed ${quote(managedSocket)}; fi` : ''}
+  ${managedSocket ? `if [ "$tool" = outpost-terminal ]; then set -- "$@" --socket ${quote(managedSocket)}; fi` : ''}
   (ulimit -f 32; exec "$path" "$@") >"$work/output" 2>&1 < /dev/null &
   pid=$!
   (

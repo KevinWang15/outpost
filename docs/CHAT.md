@@ -6,7 +6,7 @@ on a session to work with streamed replies, agent steps, and permission requests
 Chat also supports channels and schedules. Each session still runs on its machine
 and keeps its conversation when you switch interfaces.
 
-In the accepted v3 design, Chat, channels and schedules work over either machine connection.
+Chat, channels and schedules work over either machine connection.
 The Outpost instance can open SSH itself or use the persistent outbound connection established
 during enrollment. A channel mention or scheduled prompt can reach the agent with every viewer
 closed. [V3 connectivity design](V3.md#what-the-connection-carries)
@@ -66,7 +66,7 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 | Antigravity CLI | `agy acp`, through `outpost-terminal agent antigravity` | Antigravity CLI itself |
 
 The Claude adapter depends on Anthropic's proprietary Agent SDK. Outpost does not
-redistribute it. In the v3 design SSH setup can reuse an installed adapter or transfer
+redistribute it. SSH setup can reuse an installed adapter or transfer
 an operator-approved copy of the official release to a restricted machine. The release
 archive's own `claude` is removed after installation. Codex's adapter and its
 dependencies are Apache-2.0/MIT/BSD JavaScript using only Node built-ins.

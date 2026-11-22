@@ -9,13 +9,10 @@ export type TargetInput = Static<typeof schemas.targetInput>
 export type TargetUpdate = Static<typeof schemas.targetUpdate>
 export type Target = Static<typeof schemas.targetRecord>
 export const machineSetupLabels = {
-  ssh: 'SSH',
+  ssh: 'Connect over SSH',
   local: 'On the Outpost server',
-  paired: 'Relay enabled',
-  direct: 'Direct only',
+  outbound: 'Run setup on the machine',
 } as const satisfies Record<Target['kind'], string>
-/** The saved endpoint is usable before or without a relay registration. */
-export const machineEndpoint = (target: TargetInput) => ('endpoint' in target ? target.endpoint : undefined)
 
 export type SshTarget = Extract<Target, { kind: 'ssh' }>
 export type SessionCreationRequest = Static<typeof schemas.desktopSessionCreationInput>
@@ -104,7 +101,6 @@ export interface SoftwareStatus {
 }
 export interface Installation {
   id: string
-  softwareId: SoftwareId
   status: 'running' | 'succeeded' | 'failed'
   startedAt: string
   finishedAt: string | null
@@ -115,11 +111,6 @@ export interface SoftwareReport {
   environment: ExecutionEnvironment
   checkedAt: string
   software: SoftwareStatus[]
-  installation: Installation | null
-}
-export interface InstallationPlan {
-  softwareId: SoftwareId
-  script: string
 }
 export type InstallationEvent =
   { type: 'output'; text: string } | { type: 'status' | 'complete'; installation: Installation }

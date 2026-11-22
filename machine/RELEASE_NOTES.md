@@ -1,40 +1,7 @@
-# Outpost machine service 2.8.0
+# Outpost machine service 3.0.0
 
-Everything Outpost runs on a machine, as one executable. Terminal service
-protocol 6, chat host protocol 3, node protocol 5.
+Linux builds are available for x64 and arm64 with glibc or musl. The machine node speaks protocol 6. Terminal services use protocol 6 and chat hosts use protocol 3.
 
-- Chat and Terminal can share a running agent. A terminal-backed session queues Chat messages around keyboard input. An ACP-backed session offers a terminal transcript with prompts, approvals and session files. Simultaneous first connections start one agent.
-- File publication and removal notify each attached terminal once. Closing an attachment releases its machine stream.
-- Machine state locks are released automatically if the process exits.
-- History search uses `mixed` for combined keyword and semantic results. Message pages count Unicode code points. Existing V3 installations must rebuild the generated history index with the matching server.
-
-- The CLI reports enrollment as Relay enabled, Direct only or Server-managed.
-- Both connector policies share a direct listener and authenticate it before the client sends the attachment grant. Direct-only machines import their enrollment keys offline and accept
-  authenticated client requests on their HTTPS endpoint. They never establish
-  an Outpost relay link. The native and browser terminals use the same policy.
-- Linux installations reserve one execution account and one server/machine
-  identity for the host. `outpost-terminal status` shows the owner and
-  `outpost-terminal unpair` disconnects the installation before reassignment.
-  Upgrade the server and machine executable together.
-- Relay-enabled machines enroll with `outpost-terminal pair SERVER` and stay online
-  with `outpost-terminal connect`. A client can reach a session through the
-  public server when both machines are behind NAT. An HTTPS endpoint saved in the workspace enables direct connections even while the relay link is down. Terminal data, pasted images and published files
-  travel over the selected attachment.
-- `outpost-terminal node`: the machine end of the one connection Outpost keeps
-  to each machine an account uses. It answers session, file, search and history
-  operations, carries terminal and chat attachments and file transfers as
-  streams, and forwards agents' calls to Outpost's tools to the server. It also
-  serves the machine's event log, so Outpost's Logs show when sessions start,
-  work, finish and stop, including while Outpost was not connected.
-- `outpost-terminal serve` and `chat-serve`: a session's terminal service (its
-  coding tool in a persistent PTY) and chat host (its ACP client). Both keep the
-  session's activity, and the terminal service types in messages from other
-  sessions, channels and schedules when the agent is idle and nobody is typing.
-  Both start the coding tool with the session's instructions, model and MCP
-  servers where the tool supports them; chat also selects its mode.
-- `outpost-terminal mcp` and `hook`: Outpost's MCP server, with the same tools
-  for every session, and the coding tools' activity hook. `publish`, `open` and
-  `signal` serve programs running in a session.
-- `outpost-terminal agent codex | deepseek | antigravity`: the bundled ACP adapters for chat.
-
-Install the binary matching the Outpost server before deploying the server.
+- **Connect over SSH** checks the execution account and selected tools, transfers the verified service and opens the machine protocol on SSH stdin and stdout. SSH bastions and offline tool packages are supported.
+- **Run setup on the machine** enrolls a supervised outbound connection with a single-use code. The same node handles terminal attachments, files, ACP, Chat, schedules and history.
+- Each Linux host has one enrollment. Use `outpost-terminal status` to inspect it and `outpost-terminal unenroll` to release it. Closing an attachment leaves the session running on its machine.

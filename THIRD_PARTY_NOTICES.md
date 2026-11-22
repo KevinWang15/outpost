@@ -12,7 +12,7 @@ The application uses native system font stacks and ships no font files.
 
 ## Dependencies
 
-React, CodeMirror, Radix UI, Fastify, Ajv, and xterm.js are distributed under MIT
+React, Radix UI, Fastify, Ajv, and xterm.js are distributed under MIT
 licenses. Lucide uses the ISC license and includes Feather-derived icons under
 the MIT license. dotenv uses the BSD 2-Clause license. Other installed packages
 retain the license notices supplied with their distributions in `node_modules`.

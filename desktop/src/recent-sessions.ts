@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
-import { validDesktopId, desktopSessionId, desktopOrigin, type DesktopSessionReference } from '../../shared/desktopAuth'
+import { validDesktopId, desktopSessionId, type DesktopSessionReference } from '../../shared/desktopAuth'
+import { serverOrigin } from '../../shared/serverOrigin'
 import { isHarnessId, type HarnessId } from '../../shared/harnesses'
 import { writeJsonFile } from '../../shared/node/jsonFile'
 
@@ -40,7 +41,7 @@ export class RecentSessions {
         )
           continue
         try {
-          const origin = desktopOrigin(server)
+          const origin = serverOrigin(server)
           const id = desktopSessionId({ server: origin, accountId, targetId, sessionId })
           if ((entries.get(id)?.lastConnectedAt ?? -1) <= lastConnectedAt)
             entries.set(id, { id, server: origin, accountId, targetId, sessionId, title, tool, lastConnectedAt })

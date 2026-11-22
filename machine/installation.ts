@@ -2,17 +2,20 @@
 // in the execution account's home across disconnection and unenrollment.
 import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { removeSupervisor } from './supervisor'
 import { driverStatus } from './drivers'
 import { readRegistry } from './registry'
 import { randomUUID } from 'node:crypto'
-import { desktopOrigin } from '../shared/desktopAuth'
-import type { DirectEnrollment } from '../shared/direct'
-import { DirectTickets } from '../shared/node/directTickets'
 import { locked, readJson, state, statePath, writeJson } from './state'
-
-export type RelayInstall = DirectEnrollment & { mode: 'relay'; credential: string; socket: string }
-export type DirectInstall = DirectEnrollment & { mode: 'direct' }
-type Configuration = RelayInstall | DirectInstall | { mode: 'ssh'; socket: string }
+import { serverOrigin } from '../shared/serverOrigin'
+export type OutboundInstall = {
+  mode: 'outbound'
+  origin: string
+  targetId: string
+  credential: string
+  socket: string
+}
+type Configuration = OutboundInstall | { mode: 'ssh'; socket: string }
 export type Installation = Configuration & { home: string; generation: string }
 declare const OUTPOST_ISOLATED_TEST_HOST: boolean
 export const hostDirectory = () =>
@@ -39,7 +42,7 @@ function directory() {
 }
 const file = () => join(directory(), 'machine.json')
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
-export function validRelayIdentity(pair: Pick<RelayInstall, 'targetId' | 'credential' | 'socket'>) {
+export function validOutboundIdentity(pair: Pick<OutboundInstall, 'targetId' | 'credential' | 'socket'>) {
   return (
     pair &&
     typeof pair.targetId === 'string' &&
@@ -55,11 +58,8 @@ function validConfiguration(config: Configuration) {
   switch (config.mode) {
     case 'ssh':
       return validNodeSocket(config.socket)
-    case 'relay':
-      if (!validRelayIdentity(config)) return false
-      return validEnrollment(config)
-    case 'direct':
-      return validEnrollment(config)
+    case 'outbound':
+      return validOutboundIdentity(config) && serverOrigin(config.origin) === config.origin
     default:
       return false
   }
@@ -82,33 +82,15 @@ export function writeInstallation(c: Configuration) {
 }
 export const installationLock = <T>(action: () => Promise<T> | T) => locked('ownership', action, 15000, directory())
 export const runtimeLock = <T>(action: () => Promise<T> | T, timeout = 300) =>
-  locked('connector', action, timeout, directory())
-export async function requireUnpaired() {
+  locked('outbound', action, timeout, directory())
+export async function requireUnenrolled() {
   const current = installation()
   if (current)
     throw Error(
-      'This machine already has an owner. Stop the Outpost machine service and run outpost-terminal unpair before changing servers.',
+      'This machine already has an owner. Stop the Outpost machine service and run outpost-terminal unenroll before changing servers.',
     )
   await runtimeLock(() => {})
   await nodeLock(() => {}, 300)
-}
-function validEnrollment(c: DirectEnrollment) {
-  return (
-    c &&
-    uuid.test(c.targetId) &&
-    typeof c.publicKey === 'string' &&
-    c.publicKey.length <= 128 &&
-    typeof c.proofKey === 'string' &&
-    /^[A-Za-z0-9_-]{43}$/.test(c.proofKey) &&
-    desktopOrigin(c.origin) === c.origin
-  )
-}
-
-export function validateEnrollment(value: DirectEnrollment): DirectEnrollment {
-  if (!validEnrollment(value)) throw Error('Invalid machine enrollment.')
-  new DirectTickets(value.publicKey, value.targetId)
-  const { origin, targetId, publicKey, proofKey } = value
-  return { origin, targetId, publicKey, proofKey }
 }
 export const nodeLock = <T>(action: () => Promise<T> | T, timeout = 5000) =>
   locked('node-runtime', action, timeout, directory())
@@ -116,7 +98,7 @@ async function removableExecutable() {
   const path = statePath('bin', 'outpost-terminal')
   if (!existsSync(path) || !lstatSync(path).isFile() || realpathSync(process.execPath) !== realpathSync(path))
     throw Error(
-      'Run uninstall from the installed ~/.outpost/bin/outpost-terminal. For a separately packaged executable, unpair it and remove it with its installer.',
+      'Run uninstall from the installed ~/.outpost/bin/outpost-terminal. For a separately packaged executable, unenroll it and remove it with its installer.',
     )
   for (const { id } of readRegistry().sessions) {
     const { terminal, chat } = await driverStatus(id)
@@ -125,7 +107,7 @@ async function removableExecutable() {
   }
   return path
 }
-export async function unpair(removeExecutable = false) {
+export async function unenroll(removeExecutable = false) {
   if (!removeExecutable && !existsSync(hostDirectory())) {
     console.log('Machine is not enrolled.')
     return
@@ -133,6 +115,16 @@ export async function unpair(removeExecutable = false) {
   const previous = await installationLock(async () => {
     const previous = installation()
     if (removeExecutable) await removableExecutable()
+    if (previous?.mode === 'outbound') {
+      try {
+        await removeSupervisor()
+      } catch (error) {
+        throw Error(
+          'Could not remove the Outpost boot service. Authorize sudo for this account or ask an administrator to remove the service, then retry.',
+          { cause: error },
+        )
+      }
+    }
     rmSync(file(), { force: true })
     // Pinning the ownership lock here prevents a new install during teardown.
     await runtimeLock(() => {}, 10000)
@@ -146,7 +138,7 @@ export async function unpair(removeExecutable = false) {
   })
   if (previous && 'credential' in previous) {
     try {
-      const r = await fetch(desktopOrigin(previous.origin) + '/api/paired/revoke', {
+      const r = await fetch(serverOrigin(previous.origin) + '/api/machine/revoke', {
         method: 'POST',
         redirect: 'error',
         headers: { authorization: 'Bearer ' + previous.credential, 'x-outpost-request': '1' },
@@ -176,7 +168,7 @@ export function watchInstallation(record: Installation, onChange: () => void) {
 }
 export function authorizeNode(socket: string) {
   const current = installation()
-  if (current && (current.mode === 'ssh' || current.mode === 'relay') && current.socket === socket) return current
+  if (current?.socket === socket) return current
   throw Error('This node does not belong to the installed Outpost server.')
 }
 
@@ -184,12 +176,12 @@ export function validNodeSocket(value: unknown): value is string {
   return typeof value === 'string' && /^run\/node-[0-9a-f]{32}\.sock$/.test(value)
 }
 
-export async function installManaged(socket: string) {
-  if (!validNodeSocket(socket)) throw Error('Invalid managed installation identity.')
+export async function enrollSsh(socket: string) {
+  if (!validNodeSocket(socket)) throw Error('Invalid SSH enrollment identity.')
   await installationLock(async () => {
     const current = installation()
     if (current?.mode === 'ssh' && current.socket === socket) return
-    await requireUnpaired()
+    await requireUnenrolled()
     writeInstallation({ mode: 'ssh', socket })
   })
 }

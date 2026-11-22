@@ -48,7 +48,7 @@ export class MachineEventLog {
       for (const owner of this.dependencies.deployment.backgroundOwners())
         void this.dependencies.deployment
           .workspace(owner)
-          .listForServer()
+          .list()
           .then(
             targets => targets.forEach(target => this.read(owner, target.id)),
             () => {},

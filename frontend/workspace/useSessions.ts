@@ -4,13 +4,14 @@ import { api } from '../api'
 
 /** Live sessions for one target. Sessions are always read from the target;
  * a failed read shows the error rather than an old list. */
-export function useSessions(targetId: string) {
+export function useSessions(targetId: string, enabled = true) {
   const [sessions, setSessions] = useState<Session[] | null>(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(true)
   const request = useRef<AbortController | null>(null)
   const refresh = useCallback(
     async (quiet = false) => {
+      if (!enabled) return
       // Polls wait for a running request; explicit refreshes replace it.
       if (quiet && request.current) return
       request.current?.abort()
@@ -40,7 +41,7 @@ export function useSessions(targetId: string) {
         }
       }
     },
-    [targetId],
+    [targetId, enabled],
   )
   useEffect(() => {
     const initial = setTimeout(() => void refresh(), 0)

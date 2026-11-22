@@ -4,8 +4,8 @@ import { resolve } from 'node:path'
 import { terminalService } from '../shared/terminalService'
 import { serveChat } from './chat'
 import { command, hook } from './commands'
-import { unpair, installation, installManaged, authorizeNode } from './installation'
-import { pairTarget, runConnector, installDirect } from './connector'
+import { unenroll, installation, enrollSsh, authorizeNode } from './installation'
+import { enrollOutbound, runOutbound } from './outbound'
 import { serveMcp } from './mcp'
 import { serveNode } from './node'
 import { enterState, useBinding } from './state'
@@ -14,11 +14,10 @@ import { serveTerminal } from './terminal'
 const usage = `Usage: outpost-terminal COMMAND
   node --socket PATH   the machine end of Outpost's connection (Outpost runs it)
   serve | chat-serve   a session's terminal service or chat host (the node runs them)
-  pair SERVER          enroll with a single-use ${machineSetupLabels.paired} pairing code
-  pair --managed PATH  bind a server-managed installation to its node socket
-  pair --direct        enroll a direct-only machine with the server’s offline enrollment JSON
-  connect              serve this installation using its configured network policy
-  status | unpair      inspect ownership or disconnect locally and release it for reinstallation
+  enroll ssh SOCKET    bind this machine to the Outpost instance opening SSH
+  enroll outbound URL ID enroll with a single-use code read on stdin
+  connect              maintain this machine’s enrolled outbound connection
+  status | unenroll    inspect ownership or release the local enrollment
   uninstall            disconnect and remove the managed executable after sessions stop
   mcp | hook           Outpost's MCP server and activity hook (coding tools run them)
   publish FILE [NAME]  share a file with the user of this session
@@ -39,19 +38,19 @@ const run = async () => {
   switch (role) {
     case '--version':
       if (args.length) {
-        if (args.length !== 2 || args[0] !== '--managed') throw Error(usage)
+        if (args.length !== 2 || args[0] !== '--socket') throw Error(usage)
         const owner = authorizeNode(args[1])
-        if (owner.mode !== 'ssh') throw Error('This installation is paired through its connector.')
+        if (owner.mode !== 'ssh') throw Error('This machine uses outbound enrollment.')
       }
       return console.log(`outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`)
-    case 'pair':
-      if (args.length === 2 && args[0] === '--managed') return installManaged(args[1])
-      if (args.length !== 1) throw new Error(usage)
-      return args[0] === '--direct' ? installDirect() : pairTarget(args[0])
+    case 'enroll':
+      if (args.length === 2 && args[0] === 'ssh') return enrollSsh(args[1])
+      if (args.length === 3 && args[0] === 'outbound') return enrollOutbound(args[1], args[2])
+      throw Error(usage)
     case 'uninstall':
-    case 'unpair':
+    case 'unenroll':
       if (args.length) throw Error(usage)
-      return unpair(role === 'uninstall')
+      return unenroll(role === 'uninstall')
     case 'status': {
       if (args.length) throw Error(usage)
       const r = installation()
@@ -59,18 +58,14 @@ const run = async () => {
         !r
           ? 'Not enrolled'
           : r.mode === 'ssh'
-            ? 'Server-managed · ' + r.socket
-            : (r.mode === 'direct' ? machineSetupLabels.direct : machineSetupLabels.paired) +
-              ' · ' +
-              r.origin +
-              ' · ' +
-              r.targetId,
+            ? machineSetupLabels.ssh + ' · ' + r.socket
+            : machineSetupLabels.outbound + ' · ' + r.origin + ' · ' + r.targetId,
       )
       return
     }
     case 'connect':
       if (args.length) throw new Error(usage)
-      return runConnector()
+      return runOutbound()
     case 'node':
       if (args[0] !== '--socket' || args.length !== 2) throw new Error(usage)
       return serveNode(args[1])

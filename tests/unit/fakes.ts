@@ -196,7 +196,5 @@ export const fakeSoftware: SoftwareService = {
       software: [],
     }
   },
-  async install() {
-    return 0
-  },
+  async setup() {},
 }

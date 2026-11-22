@@ -866,7 +866,6 @@ impl Workspace {
                             }
                             "connection" => {
                                 let state = &e["state"];
-                                p.route = state["routeLabel"].as_str().map(str::to_owned);
                                 p.restoring = state["kind"] != "connected";
                                 if !p.restoring {
                                     p.command("files", json!({}));
@@ -1777,9 +1776,6 @@ impl Workspace {
                             s.show(Page::Terminal, w, cx)
                         })),
                 );
-                if let Some(route) = self.active().and_then(|p| p.read(cx).route.clone()) {
-                    content = content.child(text(format!("Connection route: {route}"), 12., MUTED));
-                }
                 if self.active().is_some_and(|p| p.read(cx).server.is_some()) {
                     content = content.child(row().child(control(
                         "Session files",

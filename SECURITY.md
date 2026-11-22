@@ -25,7 +25,7 @@ SameSite=Lax, Secure over HTTPS, and last 30 days; only token hashes are
 stored. Verification links last 24 hours and reset links one hour, both single
 use. Password changes and resets revoke every login; logout revokes its own.
 
-**SSH.** In the current build, hosted SSH uses only the account's Ed25519 key
+**SSH.** Hosted SSH uses only the account's Ed25519 key
 and known-hosts file (`-F none`, no agent, no passwords), and rejects changed
 host keys. Local Outpost uses the workstation's OpenSSH configuration and
 agent. Commands run as the Linux execution account. Authorize an Outpost key
@@ -75,8 +75,7 @@ minute per connection, and delivers it at most once.
 **Machines.** The machine’s Linux execution account is the trust boundary.
 Session terminal services and chat hosts keep running between connections.
 Their files and Unix sockets are owner-only under `~/.outpost`. An agent’s Outpost tools
-act only as its own session. In the current build operators review and submit installation
-scripts. Find a conversation returns bounded metadata and excerpts. The
+act only as its own session. Owners choose the tools to provision. Built-in installers and administrator-approved packages run as the execution account. Find a conversation returns bounded metadata and excerpts. The
 cross-machine history index keeps message text and embeddings on the Outpost
 server, in each account's own index; native history files are only read, never
 changed. Pasted images are kept under `~/.outpost/clipboard/` (newest 20 per
@@ -88,8 +87,8 @@ Protect and back it up like credentials, and run one server per directory.
 
 ## Remote machine enrollment in v3
 
-These are requirements for the upcoming implementation. See the [accepted connectivity
-design](docs/V3.md) and the [current-build setup and cleanup procedures](README.md#current-build-setup).
+See the [accepted connectivity
+design](docs/V3.md) and the [setup and cleanup procedures](README.md#machine-setup-and-removal).
 
 - **Connect over SSH.** The local or hosted Outpost instance authenticates to the
   execution account, including through any approved bastion. It supplies the machine

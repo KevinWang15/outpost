@@ -488,9 +488,10 @@ require **System Settings → Privacy & Security → Open Anyway**. Windows may
 show **SmartScreen → More info → Run anyway**. Only proceed with a release
 you trust; release artifacts include checksums.
 
-The desktop workspace opens your local shell on startup. The **+** button opens
-another terminal. Right-click it to choose a shell or a managed Outpost
-session. Use the Outpost logo to connect a server, sign in through your browser,
+The desktop workspace opens your local shell on startup. Click **+** in the
+title bar to choose a local shell. Select **Outpost session…** in the same menu
+to open or create a managed session. When you’re signed out, choose
+**Connect to an Outpost server…** to sign in. Use the Outpost logo to connect a server, sign in through your browser,
 reopen recent sessions, or create a session on a machine. Choose **Machines ↗** next to a signed-in server to open its machine workspace in the system browser.
 
 Use the split button to place a shell beside the focused terminal. Right-click

@@ -49,6 +49,7 @@ pub struct Workspace {
     tabs: Vec<Tab>,
     current: usize,
     startup_local: bool,
+    new_tab_menu_open: bool,
     close_pending: bool,
     page: Page,
     focus: FocusHandle,
@@ -249,6 +250,7 @@ impl Workspace {
         cx.on_release(|s: &mut Self, cx| s.end_preview(cx)).detach();
         cx.observe_window_activation(w, |s, w, cx| {
             if !w.is_window_active() {
+                s.set_new_tab_menu(false, cx);
                 s.cancel_drag(cx);
             }
             if w.is_window_active() {
@@ -271,6 +273,7 @@ impl Workspace {
             handle: w.window_handle(),
             id: next_id() as u64,
             startup_local: local && !ready,
+            new_tab_menu_open: false,
             close_pending: false,
             bridge,
             panes: Default::default(),
@@ -368,6 +371,7 @@ impl Workspace {
             page
         };
         self.message.clear();
+        self.new_tab_menu_open = false;
         self.files_menu = None;
         self.preview_id = None;
         self.preview = None;
@@ -458,13 +462,16 @@ impl Workspace {
         self.watches
             .insert(id, ([sub, menu, paste_error, ready], SnapshotSource::new()));
     }
-    fn local(&mut self, profile: Option<String>, w: &mut Window, cx: &mut Context<Self>) {
+    fn local_profile(&self, id: Option<&str>) -> Option<&Value> {
         let profiles = items(&self.prefs["profiles"]);
-        let preferred = profile.or_else(|| self.prefs["localShell"].as_str().map(str::to_owned));
-        let profile = profiles
+        let preferred = id.or_else(|| self.prefs["localShell"].as_str());
+        profiles
             .iter()
-            .find(|s| s["id"].as_str() == preferred.as_deref())
-            .or(profiles.first());
+            .find(|profile| profile["id"].as_str() == preferred)
+            .or(profiles.first())
+    }
+    fn local(&mut self, profile: Option<String>, w: &mut Window, cx: &mut Context<Self>) {
+        let profile = self.local_profile(profile.as_deref());
         let executable = profile.map(|s| strval(s, "executable")).unwrap_or_else(|| {
             std::env::var("SHELL").unwrap_or_else(|_| {
                 if cfg!(windows) {
@@ -1051,11 +1058,11 @@ impl Workspace {
             }
             Page::Switch | Page::Choose => {
                 let q = self.query.read(cx).value().to_lowercase();
-                if let Some((&id, _)) = self
-                    .panes
-                    .iter()
-                    .find(|(_, p)| p.read(cx).title.to_lowercase().contains(&q))
-                {
+                if let Some((&id, _)) = self.panes.iter().find(|(_, p)| {
+                    let p = p.read(cx);
+                    (self.page == Page::Switch || p.server.is_some())
+                        && p.title.to_lowercase().contains(&q)
+                }) {
                     self.select(id, w, cx)
                 } else if let Some(item) = items(&self.accounts["sessions"]).iter().find(|v| {
                     format!("{} {}", strval(v, "title"), strval(v, "server"))
@@ -1101,7 +1108,7 @@ impl Workspace {
         self.show(Page::Choose, w, cx)
     }
     fn shortcuts(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
-        if self.file_key(e, w, cx) {
+        if self.new_tab_menu_open || self.file_key(e, w, cx) {
             return;
         }
         if e.keystroke.key == "escape" && self.drag.gesture.is_some() {
@@ -1194,6 +1201,97 @@ impl Workspace {
         }
         w.prevent_default();
         cx.stop_propagation()
+    }
+    fn set_new_tab_menu(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.new_tab_menu_open != open {
+            self.new_tab_menu_open = open;
+            if open {
+                self.files_menu = None;
+            }
+            cx.notify();
+        }
+    }
+    fn new_tab_menu(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let open = self.new_tab_menu_open;
+        // The menu also dismisses on outside mouse-down. Both handlers use
+        // the state of this frame so a second press on + closes it once.
+        let toggle =
+            || cx.listener(move |s, _: &MouseDownEvent, _, cx| s.set_new_tab_menu(!open, cx));
+        let trigger = div()
+            .on_mouse_down(MouseButton::Left, toggle())
+            .on_mouse_down(MouseButton::Right, toggle())
+            .child(
+                gpui::components::Button::icon("new", LucideIcon::Plus)
+                    .ghost()
+                    .size(ComponentSize::Sm)
+                    .w(px(30.))
+                    .h(px(30.))
+                    .tooltip_text("Open a terminal or session")
+                    .on_click(cx.listener(move |s, e: &ClickEvent, _, cx| {
+                        if !matches!(e, ClickEvent::Mouse(_)) {
+                            s.set_new_tab_menu(!open, cx);
+                        }
+                    })),
+            );
+        let local_entry = |label: SharedString, profile: Option<String>| {
+            MenuEntry::item_with_icon(
+                label,
+                LucideIcon::Terminal,
+                cx.listener(move |s, _, w, cx| {
+                    s.split_at = None;
+                    s.local(profile.clone(), w, cx)
+                }),
+            )
+        };
+        let mut menu = dropdown_menu("new-tab-menu", open)
+            .trigger(trigger)
+            .min_width(px(240.))
+            .bg(rgb(0x191919))
+            .on_close(cx.listener(|s, _, _, cx| s.set_new_tab_menu(false, cx)));
+        let profiles = items(&self.prefs["profiles"]);
+        let shortcut = if cfg!(target_os = "macos") {
+            "⌘T"
+        } else {
+            "Ctrl+Shift+T"
+        };
+        if profiles.len() <= 1 {
+            menu = menu.entry(local_entry("Local terminal".into(), None).with_shortcut(shortcut));
+        } else {
+            menu = menu.entry(MenuEntry::Label("Local shells".into()));
+            let preferred = self
+                .local_profile(None)
+                .and_then(|profile| profile["id"].as_str());
+            for profile in profiles {
+                let entry =
+                    local_entry(strval(profile, "name").into(), Some(strval(profile, "id")));
+                menu = menu.entry(if profile["id"].as_str() == preferred {
+                    entry.with_shortcut(shortcut)
+                } else {
+                    entry
+                });
+            }
+        }
+        menu = menu.entry(MenuEntry::Separator);
+        if items(&self.accounts["accounts"]).is_empty() {
+            menu.entry(MenuEntry::item_with_icon(
+                "Connect to an Outpost server…",
+                LucideIcon::Server,
+                cx.listener(|s, _, w, cx| {
+                    s.split_at = None;
+                    s.show(Page::Home, w, cx);
+                    s.address.read(cx).focus_handle(cx).focus(w, cx);
+                }),
+            ))
+        } else {
+            menu.entry(MenuEntry::item_with_icon(
+                "Outpost session…",
+                LucideIcon::Server,
+                cx.listener(|s, _, w, cx| {
+                    s.split_at = None;
+                    s.catalogue(w, cx)
+                }),
+            ))
+        }
     }
     fn chrome(&self, cx: &mut Context<Self>) -> Div {
         let mut strip = row()
@@ -1331,19 +1429,7 @@ impl Workspace {
                     })),
             )
             .child(strip)
-            .child(
-                icon("new", LucideIcon::Plus, cx, |s, w, cx| {
-                    s.split_at = None;
-                    s.local(None, w, cx)
-                })
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(|s, _, w, cx| {
-                        s.split_at = None;
-                        s.catalogue(w, cx)
-                    }),
-                ),
-            )
+            .child(self.new_tab_menu(cx))
             .child(snapshot_source(
                 &self.drag.empty_bar,
                 div()
@@ -1562,9 +1648,22 @@ impl Workspace {
         };
         match self.page {
             Page::Home => {
-                content=content.child(row().gap(px(20.)).child(img(self.logo.clone()).size(px(52.))).child(title("YOUR TERMINAL WORKSPACE","A place for every session.")))
-                   .child(text("Open a local terminal with +, or right-click + to find or create a session on your logged-in Outpost servers. Local terminals and managed sessions share the same tabs and splits.",13.,MUTED))
-                   .child(section("Recent sessions"));
+                content = content
+                    .child(
+                        row()
+                            .gap(px(20.))
+                            .child(img(self.logo.clone()).size(px(52.)))
+                            .child(title(
+                                "YOUR TERMINAL WORKSPACE",
+                                "A place for every session.",
+                            )),
+                    )
+                    .child(text(
+                        "Use + to open a local shell or an Outpost session in a new tab.",
+                        13.,
+                        MUTED,
+                    ))
+                    .child(section("Recent sessions"));
                 for item in items(&self.accounts["recent"]) {
                     let id = strval(item, "id");
                     let label =
@@ -1715,20 +1814,9 @@ impl Workspace {
                     })
                     .child(field(&self.query));
                 let q = self.query.read(cx).value().to_lowercase();
-                if choose {
-                    for p in items(&self.prefs["profiles"]) {
-                        let id = strval(p, "id");
-                        content = content.child(row().child(control(
-                            format!("Local · {}", strval(p, "name")),
-                            false,
-                            cx,
-                            move |s, w, cx| s.local(Some(id.clone()), w, cx),
-                        )))
-                    }
-                }
                 for (&id, p) in &self.panes {
                     let p = p.read(cx);
-                    if p.title.to_lowercase().contains(&q) {
+                    if (!choose || p.server.is_some()) && p.title.to_lowercase().contains(&q) {
                         let label = format!(
                             "{}    ·    {}",
                             p.title,
@@ -2376,9 +2464,72 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     assert_eq!(focused(), vec![(2, true)], "a hidden tab must stay unread");
     test.update_window(remote_window.into(), |_, w, _| w.remove_window())?;
     test.run_until_parked();
-    // Click the actual title-bar button, then type through GPUI's input method.
+    // Open the menu from the real + target. Dismissing it must leave the workspace alone.
     let x = if cfg!(target_os = "macos") { 132. } else { 62. };
+    let menu_open = |test: &mut HeadlessAppContext| {
+        test.update_window(window.into(), |root, _, cx| {
+            let s = root.downcast::<Workspace>().unwrap();
+            assert!(s.read(cx).tabs.is_empty());
+            s.read(cx).new_tab_menu_open
+        })
+        .unwrap()
+    };
     click(&mut test, x, 20.)?;
+    draw(&mut test);
+    assert!(menu_open(&mut test));
+    click(&mut test, x, 20.)?;
+    draw(&mut test);
+    assert!(!menu_open(&mut test));
+    click(&mut test, x, 20.)?;
+    draw(&mut test);
+    click(&mut test, 950., 300.)?;
+    draw(&mut test);
+    assert!(!menu_open(&mut test));
+    click(&mut test, x, 20.)?;
+    draw(&mut test);
+    test.update_window(window.into(), |_, w, cx| {
+        w.dispatch_keystroke(Keystroke::parse("escape").unwrap(), cx)
+    })?;
+    draw(&mut test);
+    assert!(!menu_open(&mut test));
+    click(&mut test, x, 20.)?;
+    draw(&mut test);
+    click(&mut test, x + 45., 99.)?;
+    draw(&mut test);
+    test.update_window(window.into(), |root,w,cx| {
+        root.downcast::<Workspace>().unwrap().update(cx, |s,cx| {
+            assert!(s.page == Page::Home && !s.new_tab_menu_open && s.tabs.is_empty());
+            assert!(s.address.read(cx).focus_handle(cx).is_focused(w));
+            s.accounts=json!({"accounts":[{"origin":"https://example.com","account":{"id":"test"},"canCreate":true}]});
+            cx.notify();
+        })
+    })?;
+    click(&mut test, x, 20.)?;
+    draw(&mut test);
+    if let Some(dir) = std::env::var_os("OUTPOST_TEST_SCREENSHOTS") {
+        test.advance_clock(gpui::components::ANIM_FAST);
+        draw(&mut test);
+        test.capture_screenshot(window.into())?
+            .save(PathBuf::from(dir).join("new-tab-menu.png"))?;
+    }
+    click(&mut test, x + 45., 99.)?;
+    draw(&mut test);
+    test.update_window(window.into(), |root, _, cx| {
+        let s = root.downcast::<Workspace>().unwrap();
+        assert!(
+            s.read(cx).page == Page::Choose
+                && !s.read(cx).new_tab_menu_open
+                && s.read(cx).tabs.is_empty()
+        );
+    })?;
+    click(&mut test, x, 20.)?;
+    draw(&mut test);
+    test.update_window(window.into(), |_, w, cx| {
+        w.dispatch_keystroke(Keystroke::parse("down").unwrap(), cx);
+        let enter = Keystroke::parse("enter").unwrap();
+        w.dispatch_keystroke(enter.clone(), cx);
+        w.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke: enter }), cx);
+    })?;
     draw(&mut test);
     let p = test
         .update_window(window.into(), |root, _, cx| {

@@ -2,7 +2,7 @@
 """A scripted Agent Client Protocol server standing in for a coding tool's adapter.
 
 It speaks ACP v1 on stdio, keeps conversations in the tool's native store (so
-terminal and chat mode continue the same one), and drives Outpost's real MCP
+the terminal and Chat continue the same one), and drives Outpost's real MCP
 server for session messaging. No model is involved.
 
 Prompt scripts: text containing "permission" asks before its tool call, "wait"

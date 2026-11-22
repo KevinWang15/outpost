@@ -53,7 +53,9 @@ export default function TargetView({
     request?.kind === 'link' ? { kind: 'session', conversation: request.match } : null,
   )
   const [checking, setChecking] = useState<string[]>([])
-  const { tools, missing } = sessionCreationOptions(target, software.report?.software ?? [])
+  const options = sessionCreationOptions(target, software.report?.software ?? [])
+  const tools = target.kind === 'direct' ? options.tools.filter(supportsTerminal) : options.tools
+  const missing = options.missing
   const ready = missing.length === 0 && tools.length > 0
   const directories = useCallback(
     (path: string, signal: AbortSignal) =>
@@ -68,6 +70,10 @@ export default function TargetView({
   const close = () => setPanel(null)
 
   function connect(session: Session) {
+    if (target.kind === 'direct' && !supportsTerminal(session.tool)) {
+      toast('This tool requires Chat on a server-connected machine.', 'error')
+      return
+    }
     close()
     connectFlow.connect(session)
   }
@@ -87,6 +93,7 @@ export default function TargetView({
 
   /** Stop the session and start it again in the same conversation with its current settings. */
   async function restart(session: Session) {
+    if (target.kind === 'direct' && !supportsTerminal(session.tool)) return connect(session)
     try {
       await api(`${sessionPath(session)}/terminate`, 'POST')
       if (target.kind !== 'direct' && session.driver === 'chat') inChat(session, { start: true })
@@ -173,12 +180,7 @@ export default function TargetView({
           />
         </div>
       </header>
-      <SoftwarePanel
-        manualInstall={target.kind === 'paired' || target.kind === 'direct'}
-        targetId={target.id}
-        state={software}
-        onInstalled={() => void refresh()}
-      />
+      <SoftwarePanel target={target} state={software} onInstalled={() => void refresh()} />
       <SessionTable
         sessions={sessions}
         error={error}
@@ -190,10 +192,12 @@ export default function TargetView({
         primary={session =>
           opensInChat(session)
             ? { kind: 'chat', href: chatHref(target.id, session.id) }
-            : { kind: 'terminal', connect: () => connect(session) }
+            : supportsTerminal(session.tool)
+              ? { kind: 'terminal', connect: () => connect(session) }
+              : { kind: 'unavailable' }
         }
         actionsFor={session => ({
-          ...(target.kind === 'direct'
+          ...(target.kind === 'direct' || !supportsTerminal(session.tool)
             ? {}
             : opensInChat(session)
               ? {

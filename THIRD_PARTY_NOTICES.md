@@ -17,7 +17,7 @@ licenses. Lucide uses the ISC license and includes Feather-derived icons under
 the MIT license. dotenv uses the BSD 2-Clause license. Other installed packages
 retain the license notices supplied with their distributions in `node_modules`.
 
-## Chat mode
+## Outpost Chat
 
 - The [Agent Client Protocol SDK](https://github.com/agentclientprotocol/typescript-sdk)
   (`@agentclientprotocol/sdk`) is distributed under the Apache License 2.0.

@@ -44,7 +44,7 @@ export async function fixtureHome(prefix: string) {
     await copyFile(join(fixtures, 'coding-tool-fixture.py'), join(bin, tool))
   for (const tool of ['claude', 'codex', 'kimi', 'dsh', 'agy'])
     await import('node:fs/promises').then(fs => fs.chmod(join(bin, tool), 0o700))
-  // Chat mode: the scripted ACP agent stands in for Claude Code's adapter and Kimi's own server.
+  // Outpost Chat: the scripted ACP agent stands in for Claude Code's adapter and Kimi's own server.
   await copyFile(join(fixtures, 'acp-agent-fixture.py'), join(bin, 'acp-agent-fixture'))
   await copyFile(join(fixtures, 'acp-agent-fixture.py'), join(service, 'claude-agent-acp'))
   await import('node:fs/promises').then(fs => fs.chmod(join(service, 'claude-agent-acp'), 0o700))

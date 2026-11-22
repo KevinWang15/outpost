@@ -1,4 +1,4 @@
-# Chat mode
+# Outpost Chat
 
 Outpost opens the Machines workspace at `/`. Select a machine to manage sessions
 and open a coding tool’s terminal. Choose **Chat** in the sidebar or **Open in chat**
@@ -32,7 +32,7 @@ and keeps its conversation when you switch interfaces.
 ## Components
 
 ```text
-browser (including Chat opened from Outpost Desktop)
+browser at /chat
         ⇅  one WebSocket per page: /api/chat (session lists, journals, actions)
 Outpost server — ChatHub: links to chat hosts, channels, deliveries, schedules
         ⇅  the machine connection, as for terminals: a chat stream through the node
@@ -51,13 +51,13 @@ coding tool's ACP server: claude-agent-acp · codex-acp (bundled) · kimi acp ·
 | Harness adapters | `chat`, `chatResumable`, `chatServers` in `machine/harnesses/` | How each tool serves ACP |
 | Server | `backend/chat/` | Links, hub (routing), store, socket, tokens |
 | Web app | `frontend/chat/` | The browser chat UI |
-| Desktop | `desktop/native/workspace.rs` | Opens the selected server’s Chat page in the system browser |
+| Desktop | `desktop/native/workspace.rs` | Opens the server’s Machines workspace in the system browser, with Chat in the sidebar |
 
 ## Coding tools over ACP
 
 | Tool | ACP server | Installed by |
 | --- | --- | --- |
-| Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the machine's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Required software (`claude-agent-acp`, pinned in `shared/chatAgents.json`) |
+| Claude Code | Official [`claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) release, run with the machine's own `claude` (`CLAUDE_CODE_EXECUTABLE`) | Install the Chat adapter from Required software (`claude-agent-acp`, pinned in `shared/chatAgents.json`). Terminal sessions use Claude Code directly. |
 | Codex | Official [`codex-acp`](https://github.com/agentclientprotocol/codex-acp), run with the machine's own `codex` (`CODEX_PATH`) | Bundled in Outpost machine service (`outpost-terminal agent codex`), fetched with an integrity pin by `scripts/vendor-agents.mjs` |
 | Kimi Code | `kimi acp` | Kimi itself |
 | DeepSeek Harness | `dsh --profile acp`, through `outpost-terminal agent deepseek` | DeepSeek itself |
@@ -103,7 +103,7 @@ and the chat starts again in it.
 ten minutes with no viewer, no turn, no request waiting for approval and no
 unseen reply, it stops; Start in chat or the next message starts it again in
 the same conversation. Its `status` reports its state and the same `SessionActivity` as
-terminal sessions, so lists and badges work in both modes. **Stop coding tool**
+terminal sessions, so Machines and Chat show the same activity. **Stop coding tool**
 ends either driver.
 
 Requests (`shared/chatHost.ts`): `hello`, `prompt` (with a key: a retried key
@@ -223,7 +223,7 @@ most once per matching minute while the server runs. A schedule's prompt runs in
 its session's own chat.
 
 **Authorization.** Browser pages use their login cookie; the socket is subject
-to the same origin checks as every route. The GPUI workspace opens the server’s Chat page in that browser.
+to the same origin checks as every route.
 Uploads are buffered (at most two at a time per account) before they are stored.
 
 ## Limits and known gaps

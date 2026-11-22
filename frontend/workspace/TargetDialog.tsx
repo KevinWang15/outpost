@@ -7,29 +7,39 @@ import {
   type TargetInput,
   type TargetUpdate,
 } from '../../shared/model'
-import { harnesses, type HarnessId } from '../../shared/harnesses'
+import { harnesses, supportsTerminal, type HarnessId } from '../../shared/harnesses'
 import { api } from '../api'
 import { useAuth } from '../auth/useAuth'
 import { Dialog } from '../ui/Dialog'
 import AccountKey from '../auth/AccountKey'
 
-function ToolChoice({ value, onChange }: { value: HarnessId[]; onChange: (tools: HarnessId[]) => void }) {
+function ToolChoice({
+  value,
+  direct,
+  onChange,
+}: {
+  value: HarnessId[]
+  direct: boolean
+  onChange: (tools: HarnessId[]) => void
+}) {
   return (
     <fieldset className="field">
       <legend className="label">Coding tools</legend>
       <div className="toggle-group">
-        {harnesses.map(harness => (
-          <label key={harness.id} className="toggle">
-            <input
-              type="checkbox"
-              checked={value.includes(harness.id)}
-              onChange={event =>
-                onChange(event.target.checked ? [...value, harness.id] : value.filter(tool => tool !== harness.id))
-              }
-            />
-            {harness.label}
-          </label>
-        ))}
+        {harnesses
+          .filter(harness => !direct || supportsTerminal(harness.id))
+          .map(harness => (
+            <label key={harness.id} className="toggle">
+              <input
+                type="checkbox"
+                checked={value.includes(harness.id)}
+                onChange={event =>
+                  onChange(event.target.checked ? [...value, harness.id] : value.filter(tool => tool !== harness.id))
+                }
+              />
+              {harness.label}
+            </label>
+          ))}
       </div>
       <small>Sessions on this machine can use these tools. You can change this later.</small>
     </fieldset>
@@ -49,7 +59,8 @@ export default function TargetDialog({
   const hosted = useAuth().mode === 'hosted'
   const [environment, setEnvironment] = useState<Environment | null>(null)
   const [kind, setKind] = useState<Target['kind']>(target?.kind ?? 'ssh')
-  const [tools, setTools] = useState<HarnessId[]>(target?.tools ?? ['claude'])
+  const [chosenTools, setTools] = useState<HarnessId[]>(target?.tools ?? ['claude'])
+  const tools = kind === 'direct' ? chosenTools.filter(supportsTerminal) : chosenTools
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('')
   useEffect(() => {
@@ -185,7 +196,7 @@ export default function TargetDialog({
         {!target && kind === 'local' && (
           <p className="hint">Sessions run on the Linux machine running the Outpost server.</p>
         )}
-        <ToolChoice value={tools} onChange={setTools} />
+        <ToolChoice direct={kind === 'direct'} value={tools} onChange={setTools} />
         {error && (
           <p className="error" role="alert">
             {error}

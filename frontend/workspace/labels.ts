@@ -23,7 +23,7 @@ export const address = (target: Target) =>
           ? `${target.environment.username} on the Outpost server`
           : machineSetupLabels.local
 
-/** Where a session runs now, in the words both modes use. */
+/** Where a session runs now, as shown in Machines and Chat. */
 export function placeLabel(session: Pick<Session, 'driver' | 'status'>) {
   if (session.driver === 'chat') return 'In chat'
   if (session.driver === 'terminal')

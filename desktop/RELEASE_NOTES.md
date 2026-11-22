@@ -1,7 +1,6 @@
 # Outpost Desktop 1.0.0 preview
 
-Outpost's desktop app for macOS and Windows: your sessions in tabbed windows
-with splits, local terminals alongside them, and Outpost Chat in the system browser.
+Outpost Desktop connects to sessions on your machines and opens local shells alongside them in tabs and split panes.
 
 - **Sessions:** **Connect → Outpost Desktop** on the website, or the app's
   session finder, opens a session in a tab or split. Closing a tab disconnects;
@@ -9,7 +8,7 @@ with splits, local terminals alongside them, and Outpost Chat in the system brow
 - Drag a tab to move its entire layout, or drag a pane header to move one terminal. Drop at a pane edge to split, on a tab strip to insert, or outside the workspace to open a window. Drag its tab to dock it again. Dragging empty title-bar space moves the window. Escape cancels the drag.
 - **Local terminals:** your own shell opens at startup and with **+**. Local
   tabs work offline and end when closed.
-- **Chat:** choose **Chat** next to a saved server to open its Chat page in your browser.
+- **Machines:** choose **Machines ↗** next to a signed-in server to manage its machines in your browser. Chat is available in that workspace’s sidebar.
 - **Terminal engine:** GPUI draws Alacritty cells. Managed sessions retain their history on the machine when the desktop disconnects.
 
 ## Install

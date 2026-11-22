@@ -41,7 +41,7 @@ export default function DesktopDownloadPage() {
         Sign in through your browser and approve app access for 30 days. Connect several servers in the app and search
         all their sessions. The app never handles your password.
       </p>
-      <a href={pagePaths.workspace}>Back to Outpost</a>
+      <a href={pagePaths.workspace}>Back to machines</a>
     </main>
   )
 }

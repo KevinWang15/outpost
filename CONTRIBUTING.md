@@ -2,13 +2,16 @@
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: it explains the
 principles every change should keep (one connection path, machine-owned persistent sessions,
-Outpost as the hub, modes that differ only in identity, one installed machine executable).
+Outpost as the hub, local and hosted deployments that differ in identity, one installed machine executable).
 
 Outpost is unreleased. Keep one current implementation and schema: remove
 obsolete paths when replacing a feature instead of adding migration readers,
 aliases or compatibility modes. Version checks reject stale inputs; update the
 shared contracts and callers together. Supported OS/browser/terminal-engine handling is
 part of the current platform contract.
+
+The web home is Machines. Keep session actions attached to the machine that owns
+the session. Chat has its own address and uses the same machine-owned sessions.
 
 ## Local setup
 

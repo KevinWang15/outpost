@@ -15,9 +15,7 @@ import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { Confirm, Dialog } from '../ui/Dialog'
 import { Menu, type MenuItem } from '../ui/Menu'
 
-/** What a session's menu can do. Both modes show the same actions in the same
- * order; `chat` and `terminal` are left out where that is the primary action
- * or the current view. */
+/** Machines and Chat share the session menu. Each page supplies the actions available there. */
 export interface SessionActions {
   chat?: () => void
   terminal?: () => void

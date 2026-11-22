@@ -141,7 +141,7 @@ test('Edit source edits every setting as JSON, and a new session can copy them',
   // The form shows what the source said.
   await settings.getByRole('button', { name: 'Edit as form' }).click()
   await expect(settings.getByLabel('Model')).toHaveValue('opus')
-  await expect(settings.getByLabel('Chat mode')).toHaveValue('plan')
+  await expect(settings.getByLabel('Agent mode in Chat')).toHaveValue('plan')
   await expect(settings.getByLabel('MCP servers')).toHaveValue(/example\.com\/mcp/)
   await expect(settings.getByLabel('Variable 1 name')).toHaveValue('REVIEW')
   await settings.getByRole('button', { name: 'Save', exact: true }).click()

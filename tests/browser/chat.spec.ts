@@ -13,7 +13,7 @@ test('Machines remains the home page after visiting Chat', async ({ page }) => {
   await expect(page.getByRole('navigation', { name: 'Machines' })).toBeVisible()
 })
 
-test('chat mode: talk to a session, approve a step, and work with sessions in a channel', async ({ page }) => {
+test('Outpost Chat: talk to a session, approve a step, and work with sessions in a channel', async ({ page }) => {
   if (process.env.CHAT_DEBUG)
     page.on('websocket', socket => {
       if (!socket.url().includes('/api/chat')) return
@@ -25,6 +25,7 @@ test('chat mode: talk to a session, approve a step, and work with sessions in a 
   await page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('link', { name: 'Chat' }).click()
   await expect(page).toHaveURL(/\/chat$/)
 
+  await expect(page.getByRole('heading', { name: 'Chat box' }).getByRole('link')).toHaveAttribute('href', /\/\?target=/)
   await newSession(page, 'Coder', '~/chat-coder', 'Be brief.')
   const composer = page.getByRole('textbox', { name: 'Message' })
   await composer.fill('Check the build')

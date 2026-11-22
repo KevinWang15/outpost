@@ -1,14 +1,11 @@
 # Outpost
 
-![Outpost — keep the session, keep your flow.](docs/images/banner.png)
+![Outpost running coding sessions on a Linux workstation.](docs/images/banner.png)
 
-Outpost keeps your **Claude Code, Codex, Kimi Code and Antigravity CLI** sessions running in persistent terminals
-on your Linux machines, and lets you come back to them from the web terminal or
-Outpost Desktop — with paste, copy, Shift+Enter and links working as if
-the agent ran on your computer.
-
-**DeepSeek Harness** also runs in Outpost Chat, with named persistent sessions,
-default Outpost MCP tools and cross-machine history search.
+Outpost runs coding agents on your Linux machines. Open **Machines** to choose
+a machine, start a session in a project directory, or reconnect to a running
+agent. Claude Code, Codex, Kimi Code and Antigravity CLI offer persistent
+terminals in the browser and Outpost Desktop. DeepSeek Harness uses Chat.
 
 - **One Connect button.** Choose the web terminal or Outpost Desktop for macOS and Windows. Both attach to the same machine-owned session.
 - **Feels native.** Paste screenshots with your normal paste shortcut and the agent receives the image. Shift+Enter inserts a newline. Text the agent copies lands on your clipboard. Links it opens open in your browser.
@@ -57,67 +54,17 @@ To use Outpost running on another machine, forward its port to the **same**
 port locally (`ssh -L 3000:127.0.0.1:3000 that-machine`) and open
 http://127.0.0.1:3000.
 
-## Chat with your sessions
+## Start a session on a machine
 
-Outpost opens on Machines. Select a machine to manage its software and sessions
-or connect to a terminal. Open **Chat** from the sidebar to message a session or
-a channel. Replies stream in, the steps the agent took fold into
-one line you can open (commands and their output, file edits as diffs), and
-permission requests appear as buttons. Choose the agent's mode and model in the
-header, attach files and images (paste, drop or the paperclip), and use its
-slash commands.
-
-- **Files go both ways.** What you attach is stored in the session's files on
-  its machine and handed to the agent, which reads it with its own tools.
-  Files the agent shares (`publish_file`) appear in its reply and in **Files**.
-- **Channels** bring sessions from any of your machines together. A session
-  replies when you mention it (`@api`, or `@all`); a reply that mentions another
-  member passes the conversation on. Files attached in a channel are copied to
-  each member that receives them.
-- **Sessions message each other.** Agents get Outpost tools to list your
-  machines and sessions, ask one of them for help, post to their channels and
-  copy each other's files; the answer comes back as a message. A session running
-  in a terminal gets messages typed in when its agent is idle and you are not
-  typing, or holds them until you choose **Deliver now** (**Edit session**).
-- **Schedules** send a session a message at set times, e.g. a weekday summary.
-- **Instructions** give a session a role, added to the coding tool's own.
-  A session can also start with a model, a chat mode and MCP servers of its
-  own, next to Outpost's.
-
-A session runs in a terminal or in chat, never both, and each view shows which
-(**Runs in** in Machines). Opening a session that is not running starts nothing;
-**Connect** starts it in a terminal, and **Start in chat** or sending it a message
-starts it in chat. **Continue in chat** or **Continue in a terminal**, in the
-session's **…** menu in either view, ends the coding tool where it runs and
-continues the same conversation in the other. Both views offer the same session
-actions in the same order. Outpost
-Desktop opens chat in the system browser (**Chat** next to a signed-in server, or
-**File → Chat**). Chat uses each tool's [Agent Client Protocol](https://agentclientprotocol.com)
-server; Claude Code's is installed from Required software. See
-[docs/CHAT.md](docs/CHAT.md) for how it works.
-
-### DeepSeek Harness
-
-Enable **DeepSeek Harness** on a machine and use **Required software** to install
-the official `dsh` CLI (`@deepseek-ai/dsh@0.2.2-rc.1`). It requires Node.js 24.9+
-and npm on that machine. Configure its normal DeepSeek credentials, or provide
-`DEEPSEEK_API_KEY` in the session environment, then create a named session in
-**Chat**. Outpost uses `dsh --profile acp`, preserves its native session ID and
-`DSH_HOME` (default `~/.dsh`), and resumes the conversation after reconnecting.
-Its Outpost MCP has the same tools as every session's, from file publishing to
-history search and messaging other sessions. User profile and home configuration remain intact.
-
-The official package has no bundled terminal interface, so Outpost opens these
-sessions in Chat. The terminal picker excludes them. DeepSeek's ACP interface
-does not apply custom session instructions or replay imported native messages;
-Outpost retains messages from its own Chat journal, and earlier native messages
-remain accessible through history MCP. See the [official ACP contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md).
+1. Open **Machines** at the server’s home address and choose **Add a machine**.
+2. Select the machine and check **Required software**. Choose **New session**, then select a coding tool and its project directory.
+3. Choose **Connect** to open the session in the web terminal or Outpost Desktop. Return to the same machine to reconnect. For a tool that runs in Chat, the session action is **Open in chat**.
 
 ## Edit a session and its conversations
 
 **Edit session** in a session’s **…** menu changes its name, how messages reach
 its terminal, its instructions and, under **Model, MCP servers and launch**, its
-model, chat mode, MCP servers, arguments and environment. The name and message
+model, agent mode for Chat, MCP servers, arguments and environment. The name and message
 delivery change at once. The rest applies when the session next starts: a running
 session shows **Changes apply at the next start** with **Restart now**, which
 restarts it in the same conversation. The coding tool and project directory stay
@@ -510,8 +457,7 @@ you trust; release artifacts include checksums.
 The desktop workspace opens your local shell on startup. The **+** button opens
 another terminal. Right-click it to choose a shell or a managed Outpost
 session. Use the Outpost logo to connect a server, sign in through your browser,
-reopen recent sessions, or create a session on a machine. The **Chat** action
-opens the selected server in the system browser.
+reopen recent sessions, or create a session on a machine. Choose **Machines ↗** next to a signed-in server to open its machine workspace in the system browser.
 
 Use the split button to place a shell beside the focused terminal. Right-click
 it to split top and bottom. Drag the divider to resize, or double-click a pane
@@ -540,6 +486,56 @@ ends its shell. A managed session continues running on its machine.
 
 Build and run the native app from a checkout with the commands in
 [CONTRIBUTING.md](CONTRIBUTING.md#desktop-development-and-previews).
+
+## Chat with your sessions
+
+Open **Chat** from the Machines sidebar to message sessions on server-connected machines or bring them into a channel. Replies stream in, the steps the agent took fold into
+one line you can open (commands and their output, file edits as diffs), and
+permission requests appear as buttons. Choose the agent's mode and model in the
+header, attach files and images (paste, drop or the paperclip), and use its
+slash commands.
+
+- **Files go both ways.** What you attach is stored in the session's files on
+  its machine and handed to the agent, which reads it with its own tools.
+  Files the agent shares (`publish_file`) appear in its reply and in **Files**.
+- **Channels** bring sessions from your server-connected machines together. A session
+  replies when you mention it (`@api`, or `@all`); a reply that mentions another
+  member passes the conversation on. Files attached in a channel are copied to
+  each member that receives them.
+- **Sessions message each other.** Agents get Outpost tools to list your
+  machines and sessions, ask one of them for help, post to their channels and
+  copy each other's files; the answer comes back as a message. A session running
+  in a terminal gets messages typed in when its agent is idle and you are not
+  typing, or holds them until you choose **Deliver now** (**Edit session**).
+- **Schedules** send a session a message at set times, e.g. a weekday summary.
+- **Instructions** give a session a role, added to the coding tool's own.
+  A session can also start with a model, an agent mode for Chat and MCP servers of its
+  own, next to Outpost's.
+
+A session runs in a terminal or in chat, never both, and each view shows which
+(**Runs in** in Machines). Opening a session that is not running starts nothing;
+**Connect** starts it in a terminal, and **Start in chat** or sending it a message
+starts it in chat. **Continue in chat** or **Continue in a terminal**, in the
+session's **…** menu in either view, ends the coding tool where it runs and
+continues the same conversation in the other. Chat uses each tool's [Agent Client Protocol](https://agentclientprotocol.com)
+server. Install the Claude Code chat adapter from **Required software** to use Claude in Chat. Its terminal works without the adapter. See
+[docs/CHAT.md](docs/CHAT.md) for how it works.
+
+### DeepSeek Harness
+
+Enable **DeepSeek Harness** on a server-connected machine and use **Required software** to install
+the official `dsh` CLI (`@deepseek-ai/dsh@0.2.2-rc.1`). It requires Node.js 24.9+
+and npm on that machine. Configure its normal DeepSeek credentials, or provide
+`DEEPSEEK_API_KEY` in the session environment, then choose **New session** on that machine. Open the session in Chat. Outpost uses `dsh --profile acp`, preserves its native session ID and
+`DSH_HOME` (default `~/.dsh`), and resumes the conversation after reconnecting.
+Its Outpost MCP has the same tools as every session's, from file publishing to
+history search and messaging other sessions. User profile and home configuration remain intact.
+
+The official package has no bundled terminal interface, so Outpost opens these
+sessions in Chat. The terminal picker excludes them. DeepSeek's ACP interface
+does not apply custom session instructions or replay imported native messages;
+Outpost retains messages from its own Chat journal, and earlier native messages
+remain accessible through history MCP. See the [official ACP contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md).
 
 ## Run a hosted service
 

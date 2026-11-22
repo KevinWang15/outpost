@@ -60,15 +60,16 @@ function Welcome() {
         </span>
         <h2>Chat with your coding sessions</h2>
         <p>
-          Every session is a coding agent on one of your machines. Message one directly, or bring several into a channel
-          where they reply when you mention them. They keep working while you are away.
+          Select a session under its machine to message it. Use a channel to mention sessions from several machines.
         </p>
-        <button className="button primary" disabled={!client.targets.length} onClick={() => open({ kind: 'session' })}>
-          <Plus size={15} /> New session
-        </button>
+        {client.targets.length > 0 && !client.sessions.length && (
+          <button className="button primary" onClick={() => open({ kind: 'session' })}>
+            <Plus size={15} /> New session
+          </button>
+        )}
         {client.sessionsLoaded && !client.targets.length && (
           <p className="muted">
-            <MachineLink>Add a machine</MachineLink> to create sessions on it.
+            Chat uses server-connected machines. <MachineLink>Add a machine</MachineLink>.
           </p>
         )}
       </div>

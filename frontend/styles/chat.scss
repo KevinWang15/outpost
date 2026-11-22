@@ -1,4 +1,4 @@
-/* Chat mode. Same tokens as the workspace: light surfaces, slate text, one blue accent. */
+/* Outpost Chat. Same tokens as the workspace: light surfaces, slate text, one blue accent. */
 
 .chat-app {
   display: grid;
@@ -75,6 +75,15 @@
   color: var(--muted);
   font-size: 12px;
   font-weight: 500;
+  a {
+    overflow: hidden;
+    color: inherit;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    &:hover {
+      color: var(--accent);
+    }
+  }
   svg {
     color: var(--warning);
   }
@@ -184,28 +193,6 @@
     color: #d97706;
   }
 }
-.chat-new {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin: 8px 4px 12px;
-  height: 34px;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--ink);
-  font-weight: 500;
-  box-shadow: var(--shadow);
-  transition:
-    background-color 0.12s,
-    border-color 0.12s;
-  &:hover:not(:disabled) {
-    border-color: #94a3b8;
-    background: var(--surface-muted);
-  }
-}
-
 /* Avatars and presence */
 .chat-avatar {
   position: relative;

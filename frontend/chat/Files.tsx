@@ -1,6 +1,6 @@
 // A session's files: those its agent published (Outpost MCP publish_file) and
 // those sent to it in messages. They are stored on the session's target, as in
-// terminal mode; chat reads them with its grant.
+// the terminal; chat reads them with its grant.
 import { useContext, useEffect, useRef } from 'react'
 import { Download, Files, X } from 'lucide-react'
 import type { SessionFile } from '../../shared/sessionFiles'

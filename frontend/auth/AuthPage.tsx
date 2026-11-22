@@ -47,14 +47,14 @@ export default function AuthPage({ path }: { path: string }) {
   const [complete, setComplete] = useState(false)
   const titles = {
     login: 'Welcome back.',
-    signup: 'Give your work a home.',
+    signup: 'Create your Outpost account.',
     verify: 'Verify your email.',
     forgot: 'Forgot your password?',
     reset: 'Choose a new password.',
   }
   const subtitles = {
     login: 'Sign in to open your machines and sessions.',
-    signup: 'Your own workspace for AI sessions across your dev servers.',
+    signup: 'Add your machines and run coding sessions on them.',
     verify: token
       ? 'Confirm your email to open your Outpost workspace.'
       : 'Open the link in your inbox, or request a fresh one below.',

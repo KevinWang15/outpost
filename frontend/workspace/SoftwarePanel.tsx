@@ -1,26 +1,27 @@
 import { useState } from 'react'
 import { Check, ChevronDown, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
-import { softwareLabel, type Installation, type SoftwareId } from '../../shared/model'
+import { softwareLabel, type Installation, type SoftwareId, type Target } from '../../shared/model'
 import type { useSoftware } from './useSoftware'
 import InstallDialog from './InstallDialog'
 import { shortVersion } from './labels'
 
 /** Required software, checked live on the machine. Collapsed to one line when everything is ready. */
 export default function SoftwarePanel({
-  manualInstall,
-  targetId,
+  target,
   state,
   onInstalled,
 }: {
-  manualInstall?: boolean
-  targetId: string
+  target: Target
   state: ReturnType<typeof useSoftware>
   onInstalled: () => void
 }) {
   const { report, checking, error, refresh } = state
   const [expanded, setExpanded] = useState<boolean | null>(null)
   const [install, setInstall] = useState<{ softwareId: SoftwareId; installation?: Installation } | null>(null)
-  const problems = report?.software.filter(item => item.status !== 'installed') ?? []
+  const manualInstall = target.kind === 'direct' || target.kind === 'paired'
+  const software = (report?.software ?? []).filter(item => target.kind !== 'direct' || item.id !== 'claude-agent-acp')
+  const required = software.filter(item => item.id !== 'claude-agent-acp')
+  const problems = required.filter(item => item.status !== 'installed')
   const ready = Boolean(report) && !problems.length
   const open = expanded ?? (!checking && (!!error || problems.length > 0))
   const job = report?.installation
@@ -30,7 +31,7 @@ export default function SoftwarePanel({
       : error
         ? 'Could not check it'
         : ready
-          ? report!.software.map(item => `${softwareLabel(item.id)} ${shortVersion(item.version)}`).join(' · ')
+          ? required.map(item => `${softwareLabel(item.id)} ${shortVersion(item.version)}`).join(' · ')
           : `${problems.length} ${problems.length === 1 ? 'requirement needs' : 'requirements need'} attention`
   return (
     <section
@@ -73,10 +74,13 @@ export default function SoftwarePanel({
           )}
           {report && (
             <ul>
-              {report.software.map(item => (
+              {software.map(item => (
                 <li key={item.id} className={item.status}>
                   {item.status === 'installed' ? <Check size={15} /> : <TriangleAlert size={15} />}
-                  <strong>{softwareLabel(item.id)}</strong>
+                  <strong>
+                    {softwareLabel(item.id)}
+                    {item.id === 'claude-agent-acp' && ' (Chat only)'}
+                  </strong>
                   <span>
                     {item.status === 'missing'
                       ? 'Not installed'
@@ -115,7 +119,7 @@ export default function SoftwarePanel({
       )}
       {install && (
         <InstallDialog
-          targetId={targetId}
+          targetId={target.id}
           {...install}
           onClose={() => {
             setInstall(null)

@@ -1,3 +1,4 @@
+import { pagePaths } from '../../shared/pages'
 import { useEffect, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import type { TerminalTicket } from '../../shared/protocol'
@@ -82,7 +83,7 @@ export default function TerminalPage() {
           <LoaderCircle className="spin" size={18} /> Opening terminal…
         </p>
       )}
-      <a href="/">Back to Outpost</a>
+      <a href={pagePaths.workspace}>Back to machines</a>
     </main>
   )
 }

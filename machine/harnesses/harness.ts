@@ -178,7 +178,7 @@ export abstract class Harness {
   abstract hooks(launch: Launch): Promise<string[]>
   /** Arguments that open exactly this conversation. */
   abstract resume(session: SessionRecord, conversation: string): string[]
-  /** The tool's Agent Client Protocol server for chat mode. */
+  /** The tool's Agent Client Protocol server for Outpost Chat. */
   abstract chat(executable: string): { command: string[]; env: Record<string, string> }
   /** Whether `session/load` can open it; otherwise chat starts it with `session/new`. */
   chatResumable(_session: SessionRecord, _conversation: string) {

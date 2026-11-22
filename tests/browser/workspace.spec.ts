@@ -26,6 +26,21 @@ async function createSession(page: Page, name: string, directory: string) {
   await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible()
 }
 
+test('direct-only setup offers terminal tools and restores Chat tools for server-connected machines', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Add a machine', exact: true }).first().click()
+  const dialog = page.getByRole('dialog', { name: 'Add a machine' })
+  const deepseek = dialog.getByRole('checkbox', { name: 'DeepSeek Harness' })
+  await deepseek.check()
+  await dialog.getByRole('radio', { name: 'Direct only' }).click()
+  await expect(deepseek).toHaveCount(0)
+  await expect(dialog.getByRole('checkbox', { name: 'Codex' })).toBeVisible()
+  await dialog.getByRole('radio', { name: 'SSH', exact: true }).click()
+  await expect(deepseek).toBeChecked()
+})
+
 test('add a machine, create a session, and work in the web terminal', async ({ page }) => {
   await addMachine(page, 'Browser box')
   await createSession(page, 'Browser session', '~/browser-project')

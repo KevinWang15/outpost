@@ -83,7 +83,7 @@ echo 'Outpost machine service ${terminalService.version} installed.'
   if (id === 'claude-agent-acp')
     return `#!/bin/sh
 set -eu
-# Install the official Claude Code ACP adapter ${chatAgents.claude.version} (${chatAgents.claude.license}) for chat mode.
+# Install the official Claude Code ACP adapter ${chatAgents.claude.version} (${chatAgents.claude.license}) for Outpost Chat.
 # Outpost runs it with this machine's own claude, so its bundled copy is removed.
 ${packages}
 command -v curl >/dev/null 2>&1 || install_packages curl ca-certificates

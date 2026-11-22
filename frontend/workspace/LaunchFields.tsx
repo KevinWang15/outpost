@@ -68,7 +68,7 @@ export default function LaunchFields({
               />
             </label>
             <label className="field">
-              <span className="label">Chat mode</span>
+              <span className="label">Agent mode in Chat</span>
               <input
                 name="mode"
                 maxLength={200}
@@ -80,8 +80,8 @@ export default function LaunchFields({
             </label>
           </div>
           <small>
-            As {label} names them, e.g. in the chat’s model and mode menus. Chat selects both whenever a conversation
-            opens{terminal ? '; terminals start with the model' : ''}.
+            Use the model and mode names that {label} accepts. {terminal && 'Terminal sessions use the model. '}
+            Chat applies both settings when it opens a conversation.
           </small>
         </div>
         <label className="field">

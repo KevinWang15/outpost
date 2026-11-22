@@ -1,7 +1,8 @@
 # Outpost architecture
 
-Outpost keeps AI coding sessions (Claude Code, Codex, Kimi Code, DeepSeek Harness, Antigravity CLI)
-running on Linux machines, in persistent PTYs or as chats, and lets you return to them from a browser or from Outpost Desktop as if the session were running on your computer.
+A machine owns its coding sessions. The web home (`/`) lists machines and the sessions
+on the selected machine. Terminal clients attach to those sessions. On server-connected
+machines, Chat (`/chat`) can drive a session through the coding tool’s agent protocol.
 
 ## V3 terminology
 
@@ -1083,11 +1084,11 @@ programs receive terminal replies locally. Managed programs receive replies
 from the terminal service on the machine.
 
 The UI preserves the black title bar, shell tabs, splits and server launcher.
-The native app opens Chat in the system browser. `desktop/scripts/package.mjs`
+The **Machines ↗** action opens the signed-in server’s machine workspace in the system browser. `desktop/scripts/package.mjs`
 builds the macOS bundle, DMG and ZIP or the Windows per-user installer with
 the executable, session helper, Node runtime and third-party notices.
 
-## Chat mode
+## Outpost Chat
 
 Chat drives the same managed sessions through each tool's Agent Client Protocol
 server instead of a PTY. A persistent `outpost-terminal chat-serve` process per

@@ -168,6 +168,42 @@ export default function Sidebar({ selection }: { selection: Selection }) {
         )}
         <section>
           <h2 className="chat-heading">
+            Sessions
+            <button
+              className="icon-button"
+              aria-label="New session"
+              title="New session"
+              disabled={!client.targets.length}
+              onClick={() => open({ kind: 'session' })}
+            >
+              <Plus size={15} />
+            </button>
+          </h2>
+          {!client.sessionsLoaded && <LoaderCircle className="spin muted" size={16} />}
+          {byTarget.map(({ target, sessions: list }) => (
+            <div key={target.id}>
+              <h3 className="target-heading" title={target.error ?? undefined}>
+                <MachineLink targetId={target.id}>{target.name}</MachineLink>
+                {target.error && <TriangleAlert size={12} />}
+              </h3>
+              {list.map(session => (
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  active={activeKey === sessionKey({ targetId: session.targetId, sessionId: session.id })}
+                />
+              ))}
+              {!list.length && !filter && <p className="hint-row muted">No sessions on {target.name}.</p>}
+            </div>
+          ))}
+          {client.sessionsLoaded && !client.targets.length && (
+            <p className="hint-row muted">
+              Chat uses server-connected machines. <MachineLink>Add a machine</MachineLink>.
+            </p>
+          )}
+        </section>
+        <section>
+          <h2 className="chat-heading">
             Channels
             <button
               className="icon-button"
@@ -189,43 +225,6 @@ export default function Sidebar({ selection }: { selection: Selection }) {
             <button className="chat-row hint-row" onClick={() => open({ kind: 'channel', channelId: null })}>
               <Plus size={15} /> Start a channel
             </button>
-          )}
-        </section>
-        <section>
-          <h2 className="chat-heading">
-            Sessions
-            <button
-              className="icon-button"
-              aria-label="New session"
-              title="New session"
-              onClick={() => open({ kind: 'session' })}
-            >
-              <Plus size={15} />
-            </button>
-          </h2>
-          {!client.sessionsLoaded && <LoaderCircle className="spin muted" size={16} />}
-          {byTarget.map(({ target, sessions: list }) => (
-            <div key={target.id}>
-              {client.targets.length > 1 && (
-                <h3 className="target-heading" title={target.error ?? undefined}>
-                  {target.name}
-                  {target.error && <TriangleAlert size={12} />}
-                </h3>
-              )}
-              {list.map(session => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  active={activeKey === sessionKey({ targetId: session.targetId, sessionId: session.id })}
-                />
-              ))}
-              {!list.length && !filter && <p className="hint-row muted">No sessions on {target.name}.</p>}
-            </div>
-          ))}
-          {client.sessionsLoaded && !client.targets.length && (
-            <p className="hint-row muted">
-              <MachineLink>Add a machine</MachineLink> to create sessions on it.
-            </p>
           )}
         </section>
         {(schedules.length > 0 || !filter) && (
@@ -272,9 +271,6 @@ export default function Sidebar({ selection }: { selection: Selection }) {
           </button>
         )}
       </div>
-      <button className="chat-new" disabled={!client.targets.length} onClick={() => open({ kind: 'session' })}>
-        <Plus size={15} /> New session
-      </button>
     </AppSidebar>
   )
 }

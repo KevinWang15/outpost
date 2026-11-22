@@ -7,8 +7,8 @@ const dist = new URL('../dist/', import.meta.url)
 await rm(new URL('server/', dist), { recursive: true, force: true })
 await build({
   absWorkingDir: root,
-  entryPoints: ['backend/server.ts'],
-  outfile: 'dist/server/server.js',
+  entryPoints: { server: 'backend/server.ts', 'index-worker': 'backend/history/index-worker.ts' },
+  outdir: 'dist/server',
   bundle: true,
   platform: 'node',
   target: 'node24',

@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import type { HistoryBatch, HistoryMachine, HistorySource } from '../../shared/history'
 import { HistoryIndex } from '../../backend/history/index'
+import { HistoryIndexClient } from '../../backend/history/index-client'
 import type { Embed } from '../../backend/history/embeddings'
 
 const machines: HistoryMachine[] = [
@@ -97,7 +98,7 @@ test('history rejects incomplete checkpoints and truncated messages before commi
   assert.throws(() => index.ingest(machines[0], stale), /invalid history message/)
   Reflect.deleteProperty(stale.files[0].checkpoint, 'sourceSize')
   assert.throws(() => index.ingest(machines[0], stale), /invalid history checkpoint/)
-  assert.deepEqual(index.checkpoint(machines[0].id, native), initial.files[0].checkpoint)
+  assert.deepEqual(index.checkpoints(machines[0].id, [native])[0].checkpoint, initial.files[0].checkpoint)
 })
 
 test('history: keyword/substring search spans machines and tools, preserves attribution, and treats input literally', async t => {
@@ -266,13 +267,13 @@ test('history: a partial ingestion never checkpoints past missing messages and s
     s = source('durable'),
     file = batch(s, ['first message', 'second message']).files[0]
   index.ingest(machines[0], { files: [{ ...file, messages: file.messages.slice(0, 1) }], warnings: [] }, false)
-  assert.equal(index.checkpoint('alpha', s), null)
+  assert.equal(index.checkpoints('alpha', [s])[0].checkpoint, null)
   index.ingest(
     machines[0],
     { files: [{ ...file, reset: false, messages: file.messages.slice(1) }], warnings: [] },
     true,
   )
-  assert.equal(index.checkpoint('alpha', s)?.offset, 1000)
+  assert.equal(index.checkpoints('alpha', [s])[0].checkpoint?.offset, 1000)
   assert.equal((await index.search({ query: 'message', mode: 'keyword', groupBy: 'message' }, ids)).results.length, 2)
   index.ingest(machines[0], { files: [{ ...file, reset: false }], warnings: [] })
   assert.equal(index.db.prepare('SELECT count(*) n FROM messages').get()!.n, 2)
@@ -437,4 +438,79 @@ test('opening an unsupported history index preserves its contents', t => {
   } finally {
     reopened.close()
   }
+})
+
+test('history: the durable embedding queue counts shared chunks once and survives replay and source replacement', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'outpost-history-queue-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const path = join(directory, 'index.sqlite')
+  const first = new HistoryIndex(path, 'secret', embed)
+  try {
+    first.ingest(machines[0], batch(source('one'), ['shared', 'shared']))
+    await first.embedPending(['alpha'])
+    first.ingest(machines[1], batch(source('two'), ['shared', 'unique']))
+    // Rebuild just the materialized queue from the intact messages and vectors.
+    first.db.exec(
+      'DROP TRIGGER machine_chunks_insert; DROP TRIGGER machine_chunks_delete; DROP TRIGGER source_messages_delete; DROP TABLE machine_chunks',
+    )
+  } finally {
+    first.close()
+  }
+  const index = new HistoryIndex(path, 'secret', embed)
+  try {
+    assert.deepEqual(index.coverage(ids), { searchableChunks: 2, embeddedChunks: 1, pendingChunks: 1 })
+    assert.equal(index.db.prepare("SELECT refs FROM machine_chunks WHERE machine_id='alpha'").get()!.refs, 2)
+    assert.deepEqual(await Promise.all([index.embedPending(['alpha']), index.embedPending(['beta'])]), [0, 1])
+    index.ingest(machines[1], batch(source('two'), ['shared'], 'replacement'))
+    index.ingest(machines[1], batch(source('two'), ['shared'], 'replacement', 0, false))
+    index.ingest(machines[1], batch(source('three'), ['shared']))
+    index.ingest(machines[1], batch(source('two'), [], 'empty'))
+    assert.deepEqual(index.coverage(['beta']), { searchableChunks: 1, embeddedChunks: 1, pendingChunks: 0 })
+    index.db.prepare('DELETE FROM sources WHERE id=?').run(index.sourceKey('beta', 'three'))
+    assert.equal(index.coverage(['beta']).searchableChunks, 0)
+    assert.equal(index.coverage(['alpha']).embeddedChunks, 1)
+    const changes = () => index.db.prepare('SELECT total_changes() n').get()!.n
+    const before = changes()
+    assert.deepEqual(index.catalog(machines[0], [source('one')]), [])
+    assert.equal(changes(), before)
+    const renamed = { ...source('one'), title: 'Renamed' }
+    assert.deepEqual(index.catalog(machines[0], [renamed]), [])
+    assert.equal(
+      index.db.prepare('SELECT title FROM sources WHERE id=?').get(index.sourceKey('alpha', 'one'))!.title,
+      renamed.title,
+    )
+    assert.deepEqual(index.catalog(machines[0], [{ ...renamed, size: 1050 }]), [{ ...renamed, size: 1050 }])
+  } finally {
+    index.close()
+  }
+})
+
+test('history: a blocked SQLite write leaves the server event loop free and worker embeddings use the shared model', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'outpost-history-worker-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const path = join(directory, 'index.sqlite')
+  const calls: string[] = []
+  const client = new HistoryIndexClient(path, 'secret', (text, kind) => {
+    calls.push(kind)
+    return embed(text, kind)
+  })
+  const lock = new DatabaseSync(path)
+  try {
+    await client.call('coverage', ids)
+    lock.exec('BEGIN IMMEDIATE')
+    const release = setTimeout(() => lock.exec('COMMIT'), 100)
+    try {
+      assert.equal(await client.call('ingest', machines[0], batch(source('one'), ['a kitten'])), 1)
+    } finally {
+      clearTimeout(release)
+    }
+    assert.equal(await client.call('embedPending', ids), 1)
+    const result = await client.call('search', { query: 'feline', mode: 'semantic' }, ids)
+    assert.equal(result.results.length, 1)
+    assert.deepEqual(calls, ['passage', 'query'])
+  } finally {
+    lock.close()
+    await client.close()
+  }
+  await assert.rejects(client.call('coverage', ids), /closed/)
 })

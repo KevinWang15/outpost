@@ -909,6 +909,13 @@ The node carries the call over the machine connection. This works for both
 SSH and outbound enrollment.
 
 The server answers history searches, `list_machines` and `list_sessions`.
+Each account opens its SQLite history index in a dedicated worker on first use.
+Catalog pages and message batches cross the worker boundary together, so a
+busy index leaves the server event loop available for terminal traffic. In the
+same transaction as each message change, the index updates the machine's
+references to its text chunks. A durable queue prioritizes a representative
+chunk from each conversation. Machines sharing a chunk in an account share
+its vector. Workers use one server-local embedding model.
 `message_session` returns immediately and the reply arrives as a new message.
 `post_to_channel` posts to a channel the session belongs to. `fetch_file`
 copies another session's file into this one and returns its local path.

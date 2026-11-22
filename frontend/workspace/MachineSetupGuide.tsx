@@ -3,29 +3,6 @@ import { ArrowLeft, ArrowRight, Cable, HardDrive, Laptop, Server, SquareTerminal
 import { machineSetupLabels, type Target } from '../../shared/model'
 
 type Kind = Target['kind']
-function ConnectionRoute({ kind }: { kind: Kind }) {
-  const machine = kind !== 'local'
-  return (
-    <div className="machine-route" aria-hidden="true">
-      <span>
-        <Laptop />
-        Your device
-      </span>
-      <ArrowRight />
-      <span>
-        <Server />
-        Outpost server
-      </span>
-      {machine && (kind === 'outbound' ? <ArrowLeft /> : <ArrowRight />)}
-      {machine && (
-        <span>
-          <HardDrive />
-          Linux machine
-        </span>
-      )}
-    </div>
-  )
-}
 
 export default function MachineSetupGuide({
   kind,
@@ -114,7 +91,22 @@ export default function MachineSetupGuide({
         <h3>{description.title}</h3>
         <p>{description.when}</p>
         <div className="machine-path">
-          <ConnectionRoute kind={kind} />
+          <div className="machine-route" aria-hidden="true">
+            <span>
+              <Laptop />
+              Your browser
+            </span>
+            <ArrowRight />
+            <span>
+              <Server />
+              {hosted ? 'Hosted Outpost' : 'Local Outpost'}
+            </span>
+            {method === 'outbound' ? <ArrowLeft /> : <ArrowRight />}
+            <span>
+              <HardDrive />
+              Linux machine
+            </span>
+          </div>
         </div>
         <dl>
           <div>

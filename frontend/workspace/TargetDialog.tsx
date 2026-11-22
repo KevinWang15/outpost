@@ -67,6 +67,7 @@ export default function TargetDialog({
       setDraft(previous => ({ ...previous, ...fields }))
     }
     setError('')
+    if (kind === 'local') setKind('ssh')
     setChoosing(true)
   }
 

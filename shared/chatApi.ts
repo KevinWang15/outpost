@@ -2,11 +2,11 @@
 // one WebSocket per page, `/api/chat`. Client messages are validated with
 // these schemas; server messages are typed below. See docs/CHAT.md.
 import Type, { type Static } from 'typebox'
-import { chatHost, type ChatEntry, type ChatInfo, type ChatJournalSnapshot, type ChatOrigin } from './chatHost'
+import { chatHost, chatOrigin, type ChatEntry, type ChatInfo, type ChatJournalSnapshot } from './chatHost'
 import type { HarnessId } from './harnesses'
 import type { Session } from './model'
 import { conversationSearch, sessionForkInput, sessionInput, sessionUpdate } from './schemas'
-import type { SessionFile } from './sessionFiles'
+import { sessionFileSchema } from './sessionFiles'
 
 export const chatProtocol = 4
 export const chatLimits = {
@@ -30,78 +30,87 @@ export const chatLimits = {
 
 // Stored records ---------------------------------------------------------------------
 
-export interface SessionRef {
-  targetId: string
-  sessionId: string
-}
-export interface ChannelMember extends SessionRef {
-  name: string
-  handle: string
-}
-export interface Channel {
-  id: string
-  name: string
-  topic: string
-  members: ChannelMember[]
-  createdAt: string
-}
-export type MessageAuthor =
-  | { kind: 'user' }
-  | ({ kind: 'session'; name: string; handle: string } & SessionRef)
-  | { kind: 'outpost'; level: 'info' | 'warning' | 'error' }
-export interface ChannelMessage {
-  id: string
-  channelId: string
-  at: string
-  author: MessageAuthor
-  text: string
-  /** Handles this message addressed. */
-  mentions: string[]
-  /** The user message that began this chain of replies, and the reply depth. */
-  root: string
-  hop: number
-  /** The member turn that produced this reply. */
-  turn: (SessionRef & { turn: string }) | null
-  /** Idempotency key for a user post or an automatic membership notice. */
-  key: string | null
-  /** A member reply: files its turn published, kept in that session's files.
-   * A user post: files attached to it, kept with the channel on the server. */
-  files: SessionFile[]
-}
-export type DeliverySource =
-  | { kind: 'channel'; channelId: string; root: string; hop: number; through: string | null }
-  | { kind: 'session'; threadId: string; hop: number; from: ChannelMember; reply: boolean }
-  | { kind: 'schedule'; scheduleId: string }
-export interface Delivery extends SessionRef {
-  id: string
-  state: 'pending' | 'sent' | 'running' | 'done' | 'failed'
-  turn: string | null
-  source: DeliverySource
-  /** Mentioned again while working: deliver the newer messages next, in this chain. */
-  rerun: { root: string; hop: number } | null
-  /** The composed prompt, kept until it is accepted so a restart can resend it. */
-  prompt: string | null
-  /** Files sent with the prompt, already copied into the member's session files. */
-  files: string[]
-  /** The chat host instance the prompt was sent to; a resend is safe only to the same one. */
-  host: string | null
-  /** How it reached the session: a chat prompt, or typed into its terminal. */
-  via: 'chat' | 'terminal' | null
-  origin: ChatOrigin | null
-  error: string | null
-  createdAt: string
-  updatedAt: string
-}
-export interface Schedule extends SessionRef {
-  id: string
-  name: string
-  prompt: string
-  cron: string
-  timeZone: string
-  enabled: boolean
-  createdAt: string
-  lastRun: { at: string; ok: boolean; message: string | null } | null
-}
+const strict = { additionalProperties: false } as const
+const id = Type.String({ pattern: '^[A-Za-z0-9_-]{1,80}$' })
+const uuid = Type.String({ pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' })
+const files = Type.Array(Type.String({ pattern: '^[0-9a-f]{32}$' }), { maxItems: chatHost.maxFiles })
+const targetId = Type.String({ minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
+const session = { targetId, sessionId: uuid }
+const sessionRef = Type.Object(session, strict)
+export type SessionRef = Static<typeof sessionRef>
+const string = Type.String()
+const nullableString = Type.Union([string, Type.Null()])
+const hop = Type.Integer({ minimum: 0 })
+const text = (maxLength: number) => Type.String({ maxLength, pattern: '^[^\\u0000]*$' })
+const channelName = Type.String({ pattern: '^[a-z0-9][a-z0-9_-]{0,39}$' })
+const channelDetails = { name: channelName, topic: text(500) }
+const member = Type.Object({ ...session, name: string, handle: string }, strict)
+export type ChannelMember = Static<typeof member>
+export const channelRecord = Type.Object(
+  { id: uuid, ...channelDetails, members: Type.Array(member), createdAt: string },
+  strict,
+)
+export type Channel = Static<typeof channelRecord>
+const author = Type.Union([
+  Type.Object({ kind: Type.Literal('user') }, strict),
+  Type.Object({ kind: Type.Literal('session'), ...member.properties }, strict),
+  Type.Object({ kind: Type.Literal('outpost'), level: Type.Enum(['info', 'warning', 'error']) }, strict),
+])
+export type MessageAuthor = Static<typeof author>
+export const channelMessage = Type.Object(
+  {
+    id: uuid,
+    channelId: uuid,
+    at: string,
+    author,
+    text: string,
+    /** Handles this message addressed. */
+    mentions: Type.Array(string),
+    /** The user message that began this chain of replies, and the reply depth. */
+    root: string,
+    hop,
+    /** The member turn that produced this reply. */
+    turn: Type.Union([Type.Object({ ...session, turn: string }, strict), Type.Null()]),
+    /** Idempotency key for a user post or an automatic membership notice. */
+    key: nullableString,
+    /** A member reply: files its turn published, kept in that session's files.
+     * A user post: files attached to it, kept with the channel on the server. */
+    files: Type.Array(sessionFileSchema),
+  },
+  strict,
+)
+export type ChannelMessage = Static<typeof channelMessage>
+const deliverySource = Type.Union([
+  Type.Object({ kind: Type.Literal('channel'), channelId: uuid, root: string, hop, through: nullableString }, strict),
+  Type.Object({ kind: Type.Literal('session'), threadId: string, hop, from: member, reply: Type.Boolean() }, strict),
+  Type.Object({ kind: Type.Literal('schedule'), scheduleId: uuid }, strict),
+])
+export type DeliverySource = Static<typeof deliverySource>
+export const deliveryRecord = Type.Object(
+  {
+    ...session,
+    id: uuid,
+    state: Type.Enum(['pending', 'sent', 'running', 'done', 'failed']),
+    turn: nullableString,
+    source: deliverySource,
+    /** Mentioned again while working: deliver the newer messages next, in this chain. */
+    rerun: Type.Union([Type.Object({ root: string, hop }, strict), Type.Null()]),
+    /** The composed prompt, kept until it is accepted so a restart can resend it. */
+    prompt: nullableString,
+    /** Files sent with the prompt, already copied into the member's session files. */
+    files,
+    /** The chat host instance the prompt was sent to; a resend is safe only to the same one. */
+    host: nullableString,
+    /** How it reached the session: a chat prompt, or typed into its terminal. */
+    via: Type.Union([Type.Enum(['chat', 'terminal']), Type.Null()]),
+    origin: Type.Union([chatOrigin, Type.Null()]),
+    error: nullableString,
+    createdAt: string,
+    updatedAt: string,
+  },
+  strict,
+)
+export type Delivery = Static<typeof deliveryRecord>
 
 // Views ------------------------------------------------------------------------------
 
@@ -123,16 +132,7 @@ export interface ChannelView extends Channel {
 
 // Client → server ----------------------------------------------------------------------
 
-const id = Type.String({ pattern: '^[A-Za-z0-9_-]{1,80}$' })
-const uuid = Type.String({ pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' })
-const files = Type.Array(Type.String({ pattern: '^[0-9a-f]{32}$' }), { maxItems: chatHost.maxFiles })
-const targetId = Type.String({ minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
-const session = { targetId, sessionId: uuid }
-const strict = { additionalProperties: false } as const
-const text = (maxLength: number) => Type.String({ maxLength, pattern: '^[^\\u0000]*$' })
-const channelName = Type.String({ pattern: '^[a-z0-9][a-z0-9_-]{0,39}$' })
-const memberRefs = Type.Array(Type.Object(session, strict), { maxItems: chatLimits.members })
-const channelDetails = { name: channelName, topic: text(500) }
+const memberRefs = Type.Array(sessionRef, { maxItems: chatLimits.members })
 const channelInput = Type.Union([
   Type.Object({ ...channelDetails, members: memberRefs }, strict),
   Type.Object({ id: uuid, ...channelDetails }, strict),
@@ -150,6 +150,19 @@ const scheduleInput = Type.Object(
   },
   strict,
 )
+export const scheduleRecord = Type.Object(
+  {
+    ...scheduleInput.properties,
+    id: uuid,
+    createdAt: string,
+    lastRun: Type.Union([
+      Type.Object({ at: string, ok: Type.Boolean(), message: nullableString }, strict),
+      Type.Null(),
+    ]),
+  },
+  strict,
+)
+export type Schedule = Static<typeof scheduleRecord>
 const message = <K extends string, T extends Record<string, Type.TSchema>>(type: K, fields: T) =>
   Type.Object({ type: Type.Literal(type), ...fields }, strict)
 

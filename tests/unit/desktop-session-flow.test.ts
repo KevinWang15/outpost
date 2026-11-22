@@ -1,9 +1,38 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { desktopSessionId, type DesktopSessionChoice } from '../../shared/desktopAuth'
+import {
+  desktopEntryUrl,
+  desktopSessionId,
+  parseDesktopEntry,
+  type DesktopSessionChoice,
+} from '../../shared/desktopAuth'
 import { loadSessionCatalogue, type SessionCatalogue } from '../../desktop/src/server-catalogue'
 import { sessionCreationServer } from '../../desktop/src/server-session-creation'
 import { ServerApiError } from '../../desktop/src/server-api'
+
+test('public, account and session links use the same Desktop action on macOS and Windows', () => {
+  const server = 'https://outpost.example'
+  const accountId = 'account'
+  const session = { targetId: 'machine', sessionId: 'session' }
+  for (const entry of [{ server }, { server, accountId }, { server, accountId, session }]) {
+    const url = desktopEntryUrl(entry)
+    assert.equal(new URL(url).host, 'server')
+    assert.deepEqual(parseDesktopEntry(url), entry)
+    assert.deepEqual(parseDesktopEntry(url.replace('?', '/?')), entry)
+  }
+  const url = desktopEntryUrl({ server })
+  for (const query of [
+    'target=machine&session=session',
+    'account=account&target=machine',
+    'account=account&session=session',
+    'account=',
+    'account=one&account=two',
+    'origin=https%3A%2F%2Fanother.example',
+    'token=private',
+  ])
+    assert.throws(() => parseDesktopEntry(url + '&' + query))
+  assert.throws(() => parseDesktopEntry(url.replace('://server', '://other')))
+})
 
 const choice = (sessionId: string, targetId = 'target'): DesktopSessionChoice => {
   const reference = { server: 'https://example.com', accountId: 'account', targetId, sessionId }
@@ -12,11 +41,13 @@ const choice = (sessionId: string, targetId = 'target'): DesktopSessionChoice =>
 test('catalogue retains failed scopes, replaces successful empty scopes, and drops invalid accounts', async () => {
   let current = true,
     result!: SessionCatalogue
+  let requests = 0
   const server = {
     origin: 'https://example.com',
     accountId: 'account',
     current: () => current,
     request: async (path: string) => {
+      requests++
       if (path === '/targets')
         return [
           { id: 'failed', name: 'Failed' },
@@ -41,6 +72,7 @@ test('catalogue retains failed scopes, replaces successful empty scopes, and dro
   )
   assert.equal(result.errors.length, 1)
   current = false
+  const previousRequests = requests
   await loadSessionCatalogue(
     [server],
     new AbortController().signal,
@@ -50,6 +82,8 @@ test('catalogue retains failed scopes, replaces successful empty scopes, and dro
     previous,
   )
   assert.deepEqual(result.sessions, [])
+  assert.deepEqual(result.errors, [])
+  assert.equal(requests, previousRequests)
 })
 
 test('creation capability sends the request identity and validates display metadata', async () => {

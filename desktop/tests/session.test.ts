@@ -12,8 +12,8 @@ import { randomUUID, createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { WebSocketServer } from 'ws'
 import { checkpoint, writeHeadless } from '../../shared/terminalCheckpoint'
-import { desktopConnectUrl } from '../../shared/desktopAuth'
-import { protocolVersion } from '../../shared/protocol'
+import { desktopEntryUrl, type DesktopLaunch } from '../../shared/desktopAuth'
+import { protocolVersion, type ServerMessage } from '../../shared/protocol'
 import { ServerAccounts } from '../src/server-accounts'
 import { ServerTrust } from '../src/server-trust'
 import { ServerLoginStore } from '../src/server-login-store'
@@ -39,7 +39,10 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
     detail: 'Fixture terminal',
     tool: 'codex',
   }
-  const credential = 'op_app_' + 'a'.repeat(43)
+  let credential = 'op_app_' + 'a'.repeat(43)
+  let loginId = 'desktop:' + randomUUID()
+  let grant = 'fixture.grant'
+  const expectedAccounts: Array<string | undefined> = []
   let state = '',
     challenge = ''
   const code = 'c'.repeat(43),
@@ -55,6 +58,7 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
       const payload = JSON.parse(data)
       res.setHeader('Content-Type', 'application/json')
       if (req.url.endsWith('authorizations')) {
+        expectedAccounts.push(payload.accountId)
         state = payload.state
         challenge = payload.challenge
         res.end(JSON.stringify({ requestId }))
@@ -86,12 +90,14 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
         break
       case '/api/desktop/targets/machine/sessions/session/connect':
         body = {
-          ...session,
+          title: session.title,
+          targetId: session.targetId,
+          sessionId: session.sessionId,
           accountId: 'account',
-          loginId: 'desktop:' + randomUUID(),
+          loginId,
           server: origin,
-          token: 'fixture.grant',
-        }
+          token: grant,
+        } satisfies DesktopLaunch
         break
       default:
         res.writeHead(404).end()
@@ -107,7 +113,7 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   const origin = 'http://127.0.0.1:' + address.port
   const ws = new WebSocketServer({ server })
   const seen: string[] = []
-  const finished = (id: string) => ({
+  const finished = (id: string): Extract<ServerMessage, { type: 'activity' }> => ({
     type: 'activity',
     activity: {
       state: 'finished',
@@ -133,11 +139,18 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
     const url = new URL(req.url!, origin)
     assert.equal(req.headers.origin, origin)
     assert.equal(url.searchParams.get('protocol'), String(protocolVersion))
-    assert.equal(url.searchParams.get('token'), connections ? 'fixture.resume' : 'fixture.grant')
-    assert.equal(url.searchParams.get('start'), connections ? '0' : '1')
+    const socketLogin = loginId
+    const recovering = connections === 1
+    assert.equal(url.searchParams.get('token'), recovering ? 'fixture.resume' : grant)
+    assert.equal(url.searchParams.get('start'), recovering ? '0' : '1')
     connections++
-    const send = (v: unknown) => socket.send(JSON.stringify(v))
-    send({ type: 'hello', resume: 'fixture.resume', session: { id: 'session', name: 'Fixture', tool: 'codex' } })
+    const send = (v: ServerMessage) => socket.send(JSON.stringify(v))
+    send({
+      type: 'hello',
+      resume: 'fixture.resume',
+      session: { id: session.sessionId, name: session.title, tool: 'codex' },
+      target: { id: session.targetId, name: 'Test machine' },
+    })
     for (const part of parts) send({ type: 'restore', checkpoint: part })
     if (connections > 1) send(finished('c'.repeat(64)))
     send({ type: 'ready' })
@@ -145,6 +158,7 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
       if (binary) socket.send(bytes)
       else {
         const m = JSON.parse(bytes.toString())
+        if (m.type === 'activate') send({ type: 'result', id: m.id, ok: socketLogin === loginId && m.token === grant })
         if (m.type === 'acknowledge') {
           seen.push(m.completionId)
           send({ type: 'result', ok: true, id: m.id })
@@ -219,7 +233,7 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
       if (e.event === 'connection' && e.state.kind === 'closed') assert.fail(e.state.message)
     }
   }
-  cmd({ op: 'link', value: desktopConnectUrl(origin) })
+  cmd({ op: 'link', value: desktopEntryUrl({ server: origin }) })
   if (quitDuringSave) {
     await wait(e => e.event === 'credentialWriteStarted')
     const exited = once(child, 'exit')
@@ -296,6 +310,25 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   await sync('viewed-reconnect')
   assert.deepEqual(seen, [first, second, 'c'.repeat(64)])
   assert.equal(connections, 2)
+  const link = desktopEntryUrl({
+    server: origin,
+    accountId: login.account.id,
+    session: { targetId: session.targetId, sessionId: session.sessionId },
+  })
+  cmd({ op: 'link', value: link })
+  assert.equal((await wait(e => e.event === 'select')).pane, opened.pane)
+  assert.equal(connections, 2, 'opening a session with its current login keeps the live socket')
+
+  // The old socket may still be open when browser approval renews the app login.
+  credential = 'op_app_' + 'b'.repeat(43)
+  loginId = 'desktop:' + randomUUID()
+  grant = 'renewed.grant'
+  cmd({ op: 'link', value: link })
+  const renewed = await wait(e => e.event === 'connection' && e.state.kind === 'connected')
+  assert.equal(renewed.pane, opened.pane)
+  assert.equal(connections, 3, 'the renewed login opens a fresh attachment in the same pane')
+  assert.deepEqual(expectedAccounts, [undefined, login.account.id])
+  await sync('renewed-login')
   cmd({ op: 'logout', origin })
   const removed = await wait(e => e.event === 'paneRemoved')
   assert.equal(removed.pane, pane)

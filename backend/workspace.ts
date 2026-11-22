@@ -1,10 +1,11 @@
-import { chmod, mkdir, readFile } from 'node:fs/promises'
+import { chmod, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Ajv } from 'ajv'
 import type { ExecutionEnvironment, Target, TargetUpdate } from '../shared/model'
 import Type from 'typebox'
 import { targetRecord } from '../shared/schemas'
 import { AppError } from './errors'
+import { readStateFile } from './stateFile'
 import { writeJsonFile } from '../shared/node/jsonFile'
 
 interface WorkspaceFile {
@@ -24,32 +25,23 @@ function validateSettings(target: Target) {
 /** Target settings live with the server. Sessions are always read from their target. */
 export class Workspace {
   private queue: Promise<unknown> = Promise.resolve()
-  constructor(readonly directory: string) {}
+  constructor(
+    readonly directory: string,
+    private deploymentPolicy?: (target: Target) => void,
+  ) {}
   private get path() {
     return join(this.directory, 'workspace.json')
   }
   private async read(): Promise<WorkspaceFile> {
-    let raw: string
-    try {
-      raw = await readFile(this.path, 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      return { version: 3, targets: [] }
-    }
-    let data: unknown
-    try {
-      data = JSON.parse(raw)
-    } catch {
-      throw new AppError('Invalid JSON in workspace.json. No data was modified.', 409)
-    }
-    if (!validFile(data))
-      throw new AppError('Invalid workspace.json. Expected the current schema; no data was modified.', 409)
+    const data = await readStateFile(this.path, { version: 3, targets: [] }, validFile)
     if (
       new Set(data.targets.map(target => target.id)).size !== data.targets.length ||
-      new Set(data.targets.map(target => target.name.toLowerCase())).size !== data.targets.length
+      new Set(data.targets.map(target => target.name.toLowerCase())).size !== data.targets.length ||
+      data.targets.filter(target => target.kind === 'local').length > 1
     ) {
       throw new AppError('Duplicate machines in workspace.json. No data was modified.', 409)
     }
+    for (const target of data.targets) this.deploymentPolicy?.(target)
     return data
   }
   private transaction<T>(action: (data: WorkspaceFile) => T | Promise<T>): Promise<T> {
@@ -88,6 +80,7 @@ export class Workspace {
   add(target: Target) {
     return this.transaction(data => {
       validateSettings(target)
+      this.deploymentPolicy?.(target)
       if (target.kind === 'local' && data.targets.some(item => item.kind === 'local'))
         throw new AppError('The Outpost server is already in this workspace.', 409)
       if (data.targets.some(item => item.id === target.id))

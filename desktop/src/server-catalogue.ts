@@ -37,7 +37,7 @@ export async function loadSessionCatalogue(
       })
   }
   const failed = (server: CatalogueServer, error: unknown, target?: string) => {
-    if (signal.aborted) return
+    if (signal.aborted || !server.current()) return
     errors.push(
       `${server.origin}${target ? ' · ' + target : ''}: ${error instanceof Error ? error.message : 'Could not load sessions.'}`,
     )
@@ -45,6 +45,7 @@ export async function loadSessionCatalogue(
   }
   await Promise.all(
     servers.map(async server => {
+      if (!server.current()) return
       try {
         const targets = parseServerTargets(await queue(() => server.request('/targets', signal)))
         if (!server.current() || signal.aborted) return

@@ -14,6 +14,7 @@ import {
   ChatJournal,
   journalBlock,
   linkedFile,
+  validChatOrigin,
   type ChatEntryInput,
   type ChatHostMessage,
   type ChatHostStatus,
@@ -30,7 +31,6 @@ import { contentPath, filesDirectory, readFile } from './files'
 import { socketAddress, statePath } from './state'
 import { terminalService } from '../shared/terminalService'
 
-const originKinds = new Set(['user', 'channel', 'session', 'reply', 'schedule'])
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value)
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -57,10 +57,6 @@ function validLaunch(value: unknown): value is ChatLaunch {
       (typeof launch.instructions === 'string' && launch.instructions.length <= 32_000)) &&
     [launch.model, launch.mode].every(value => value === null || (typeof value === 'string' && value.length <= 200))
   )
-}
-
-function validOrigin(value: unknown): value is ChatOrigin {
-  return record(value) && originKinds.has(value.kind as string) && JSON.stringify(value).length <= chatHost.maxOrigin
 }
 
 /** Prompt content from a viewer: bounded text blocks and session file IDs. */
@@ -758,7 +754,7 @@ export class ChatHost {
           return fail('The coding tool stopped. Start the session again to continue.')
         const key = message.key
         if (key !== null && !identifier(key)) return fail('Invalid message key.')
-        if (!validOrigin(message.origin)) return fail('Invalid message origin.')
+        if (!validChatOrigin(message.origin)) return fail('Invalid message origin.')
         const prompt = validPrompt(message.prompt, message.files)
         if (typeof prompt === 'string') return fail(prompt)
         try {

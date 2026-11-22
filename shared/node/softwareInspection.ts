@@ -6,7 +6,7 @@ import chatAgents from '../chatAgents.json' with { type: 'json' }
 import type { CommandResult } from '../../backend/process'
 
 // Read-only, POSIX sh: it must work before Bash is installed.
-export function inspectionScript(ids: SoftwareId[], marker: string, managedSocket?: string) {
+export function inspectionScript(ids: SoftwareId[], marker: string, machineSocket?: string) {
   return `set -eu
 ${supportingPath}
 [ "$(uname -s)" = Linux ] || { echo "Outpost machines must run Linux." >&2; exit 1; }
@@ -30,7 +30,7 @@ probe() {
   # Bound version probes, including a broken executable that waits for input.
   rm -f "$work/finished"
   set -- --version
-  ${managedSocket ? `if [ "$tool" = outpost-terminal ]; then set -- "$@" --socket ${quote(managedSocket)}; fi` : ''}
+  ${machineSocket ? `if [ "$tool" = outpost-terminal ]; then set -- "$@" --socket ${quote(machineSocket)}; fi` : ''}
   (ulimit -f 32; exec "$path" "$@") >"$work/output" 2>&1 < /dev/null &
   pid=$!
   (

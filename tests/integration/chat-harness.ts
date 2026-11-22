@@ -156,7 +156,9 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
   const deployment = await LocalDeployment.open(join(directory, 'data'))
   const target = await deployment.workspace().add({
     id: 'workstation',
-    kind: 'local',
+    kind: 'ssh',
+    host: 'workstation.test',
+    user: 'test',
     name: 'Workstation',
     tools: ['claude'],
     createdAt: new Date().toISOString(),

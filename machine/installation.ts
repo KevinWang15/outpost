@@ -1,22 +1,25 @@
 // The Linux host has one durable owner directory. Private session data remains
 // in the execution account's home across disconnection and unenrollment.
-import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { removeSupervisor } from './supervisor'
 import { driverStatus } from './drivers'
 import { readRegistry } from './registry'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { locked, readJson, state, statePath, writeJson } from './state'
 import { serverOrigin } from '../shared/serverOrigin'
-export type OutboundInstall = {
+export type OutboundEnrollment = {
   mode: 'outbound'
   origin: string
   targetId: string
   credential: string
   socket: string
 }
-type Configuration = OutboundInstall | { mode: 'ssh'; socket: string }
-export type Installation = Configuration & { home: string; generation: string }
+type PendingOutbound = Omit<OutboundEnrollment, 'socket'> & { socket: null }
+type Configuration = OutboundEnrollment | { mode: 'ssh'; socket: string }
+type Owner = { home: string; generation: string }
+export type Installation = Configuration & Owner
+type Ownership = Installation | (PendingOutbound & Owner)
 declare const OUTPOST_ISOLATED_TEST_HOST: boolean
 export const hostDirectory = () =>
   process.platform === 'linux' && !(typeof OUTPOST_ISOLATED_TEST_HOST !== 'undefined' && OUTPOST_ISOLATED_TEST_HOST)
@@ -42,32 +45,28 @@ function directory() {
 }
 const file = () => join(directory(), 'machine.json')
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
-export function validOutboundIdentity(pair: Pick<OutboundInstall, 'targetId' | 'credential' | 'socket'>) {
-  return (
-    pair &&
-    typeof pair.targetId === 'string' &&
-    uuid.test(pair.targetId) &&
-    validNodeSocket(pair.socket) &&
-    typeof pair.credential === 'string' &&
-    pair.credential.startsWith(pair.targetId + '.') &&
-    /^[A-Za-z0-9_-]{43}$/.test(pair.credential.slice(pair.targetId.length + 1))
-  )
-}
-
-function validConfiguration(config: Configuration) {
+function validConfiguration(config: Configuration | PendingOutbound) {
   switch (config.mode) {
     case 'ssh':
       return validNodeSocket(config.socket)
     case 'outbound':
-      return validOutboundIdentity(config) && serverOrigin(config.origin) === config.origin
+      return (
+        typeof config.targetId === 'string' &&
+        uuid.test(config.targetId) &&
+        (config.socket === null || validNodeSocket(config.socket)) &&
+        typeof config.credential === 'string' &&
+        config.credential.startsWith(config.targetId + '.') &&
+        /^[A-Za-z0-9_-]{43}$/.test(config.credential.slice(config.targetId.length + 1)) &&
+        serverOrigin(config.origin) === config.origin
+      )
     default:
       return false
   }
 }
 
-export function installation() {
+export function ownership() {
   if (!existsSync(hostDirectory())) return null
-  const current = readJson<Installation | undefined>(file(), undefined)
+  const current = readJson<Ownership | undefined>(file(), undefined)
   if (current === undefined) return null
   if (!current || !uuid.test(current.generation) || !validConfiguration(current))
     throw Error('Invalid machine installation record.')
@@ -75,22 +74,50 @@ export function installation() {
     throw Error('This host already belongs to another Outpost installation.')
   return current
 }
-export function writeInstallation(c: Configuration) {
-  const record = { ...c, generation: randomUUID(), home: realpathSync(state.directory) }
+export function installation(): Installation | null {
+  const current = ownership()
+  return current?.socket === null ? null : current
+}
+
+function flushOwnership() {
+  const descriptor = openSync(directory(), 'r')
+  try {
+    fsyncSync(descriptor)
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+export function writeOwnership<T extends Configuration | PendingOutbound>(configuration: T) {
+  const record = { ...configuration, generation: randomUUID(), home: realpathSync(state.directory) }
   writeJson(file(), record)
+  flushOwnership()
   return record
 }
 export const installationLock = <T>(action: () => Promise<T> | T) => locked('ownership', action, 15000, directory())
 export const runtimeLock = <T>(action: () => Promise<T> | T, timeout = 300) =>
   locked('outbound', action, timeout, directory())
-export async function requireUnenrolled() {
-  const current = installation()
+async function requireUnenrolled(current: Ownership | null) {
   if (current)
-    throw Error(
-      'This machine already has an owner. Stop the Outpost machine service and run outpost-terminal unenroll before changing servers.',
-    )
+    throw Error('This machine already has an owner. Run outpost-terminal unenroll before enrolling it elsewhere.')
   await runtimeLock(() => {})
   await nodeLock(() => {}, 300)
+}
+
+/** Under the ownership lock, save the machine's credential before sending it to the server. */
+export async function reserveOutbound(origin: string, targetId: string): Promise<PendingOutbound | null> {
+  if (!uuid.test(targetId)) throw Error('Invalid Outpost machine ID.')
+  const current = ownership()
+  if (current?.mode === 'outbound' && current.origin === origin && current.targetId === targetId)
+    return current.socket === null ? current : null
+  await requireUnenrolled(current)
+  return writeOwnership({
+    mode: 'outbound',
+    origin,
+    targetId,
+    credential: targetId + '.' + randomBytes(32).toString('base64url'),
+    socket: null,
+  })
 }
 export const nodeLock = <T>(action: () => Promise<T> | T, timeout = 5000) =>
   locked('node-runtime', action, timeout, directory())
@@ -107,15 +134,28 @@ async function removableExecutable() {
   }
   return path
 }
+async function revokeOutbound(owner: OutboundEnrollment | PendingOutbound) {
+  try {
+    const response = await fetch(owner.origin + '/api/machine/revoke', {
+      method: 'POST',
+      redirect: 'error',
+      headers: { authorization: 'Bearer ' + owner.credential, 'x-outpost-request': '1' },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!response.ok && response.status !== 401) throw Error()
+  } catch {
+    console.error('Could not confirm credential revocation. Remove this machine from its workspace to revoke it there.')
+  }
+}
 export async function unenroll(removeExecutable = false) {
   if (!removeExecutable && !existsSync(hostDirectory())) {
     console.log('Machine is not enrolled.')
     return
   }
-  const previous = await installationLock(async () => {
-    const previous = installation()
+  await installationLock(async () => {
+    const previous = ownership()
     if (removeExecutable) await removableExecutable()
-    if (previous?.mode === 'outbound') {
+    if (previous?.mode === 'outbound' && previous.socket !== null) {
       try {
         await removeSupervisor()
       } catch (error) {
@@ -125,33 +165,19 @@ export async function unenroll(removeExecutable = false) {
         )
       }
     }
+    if (previous?.mode === 'outbound') await revokeOutbound(previous)
     rmSync(file(), { force: true })
+    flushOwnership()
     // Pinning the ownership lock here prevents a new install during teardown.
     await runtimeLock(() => {}, 10000)
     await nodeLock(() => {}, 10000)
-    if (previous && 'socket' in previous && validNodeSocket(previous.socket)) {
+    if (previous?.socket) {
       const path = statePath(previous.socket)
       if (lstatSync(path, { throwIfNoEntry: false })?.isSocket()) rmSync(path)
     }
     if (removeExecutable) rmSync(await removableExecutable())
-    return previous
   })
-  if (previous && 'credential' in previous) {
-    try {
-      const r = await fetch(serverOrigin(previous.origin) + '/api/machine/revoke', {
-        method: 'POST',
-        redirect: 'error',
-        headers: { authorization: 'Bearer ' + previous.credential, 'x-outpost-request': '1' },
-        signal: AbortSignal.timeout(5000),
-      })
-      if (!r.ok && r.status !== 401) throw Error()
-    } catch {
-      console.error(
-        'Local credential removed. Remove the machine from the old workspace to revoke its server credential.',
-      )
-    }
-  }
-  if (removeExecutable) console.log('Removed the managed Outpost machine service executable.')
+  if (removeExecutable) console.log('Removed the installed Outpost machine service executable.')
   console.log('Machine disconnected. Remove its entry from the old workspace. Session data is kept.')
 }
 export function watchInstallation(record: Installation, onChange: () => void) {
@@ -179,9 +205,9 @@ export function validNodeSocket(value: unknown): value is string {
 export async function enrollSsh(socket: string) {
   if (!validNodeSocket(socket)) throw Error('Invalid SSH enrollment identity.')
   await installationLock(async () => {
-    const current = installation()
+    const current = ownership()
     if (current?.mode === 'ssh' && current.socket === socket) return
-    await requireUnenrolled()
-    writeInstallation({ mode: 'ssh', socket })
+    await requireUnenrolled(current)
+    writeOwnership({ mode: 'ssh', socket })
   })
 }

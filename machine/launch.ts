@@ -9,10 +9,10 @@ import { quote, shellJoin } from '../shared/shell'
 import type { Launch, McpServer, McpStdioServer } from './harnesses/harness'
 import { harness } from './harnesses'
 import { current, readRegistry, RegistryError } from './registry'
-import { machineExecutable, state, statePath, writeFile } from './state'
+import { machineExecutable, state, statePath, writeFile, type SessionBinding } from './state'
 import { driverStatus } from './drivers'
 
-type Driver = 'terminal' | 'chat'
+type Driver = SessionBinding['driver']
 export const terminalSocket = (session: string) => `terminals/${session}.sock`
 export const chatSocket = (session: string) => `chats/${session}.sock`
 

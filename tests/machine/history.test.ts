@@ -227,7 +227,7 @@ test('Kimi: the current wire format reads canonical messages without duplicate c
 })
 
 test(
-  "Outpost's MCP server offers each driver its tools, and fails closed on a partial binding",
+  'terminal and chat expose the same MCP tools, and session helpers reject incomplete launch bindings',
   { skip: process.platform !== 'linux' && !process.env.TEST_TERMINAL },
   async t => {
     const home = machine(t)
@@ -279,6 +279,17 @@ test(
     }
     const partial = run({ OUTPOST_SESSION_ID: session, OUTPOST_STATE_DIRECTORY: state })
     assert.equal(partial.status, 1)
+    const env = { ...clean, HOME: home, OUTPOST_SESSION_ID: session, OUTPOST_DRIVER: 'terminal' }
+    for (const args of [
+      ['publish', '/tmp/report'],
+      ['open', 'https://example.com'],
+      ['signal', 'test', '{}'],
+    ]) {
+      const result = spawnSync(binary, args, { env, encoding: 'utf8' })
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /inside an Outpost session/)
+    }
+    assert.equal(spawnSync(binary, ['hook'], { env, input: '{}' }).status, 0)
   },
 )
 

@@ -5,7 +5,7 @@ import { cp, mkdir, rename, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createApp } from '../../backend/app'
 import { LocalDeployment } from '../../backend/deployment'
-import { managedSocket } from '../../backend/machines'
+import { machineSocket } from '../../backend/machines'
 import { quote } from '../../shared/shell'
 import { fixtureHome, provisionMachine, removeHome } from '../integration/helpers'
 
@@ -61,7 +61,7 @@ app.addHook('preSerialization', async (request, reply, payload) => {
     if (target.kind === 'local') {
       const fixture = await fixtureHome('outpost-browser-node-')
       hosts.push(fixture)
-      const socket = managedSocket(deployment.secret, deployment.owner(), target.id)
+      const socket = machineSocket(deployment.secret, deployment.owner(), target.id)
       provisionMachine(fixture.home, socket)
       await cp(project, join(fixture.home, 'fork-project'), { recursive: true })
       const shared = join(fixture.home, 'shared-terminal')

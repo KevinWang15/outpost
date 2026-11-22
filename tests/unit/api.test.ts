@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -220,7 +221,7 @@ test('fork validates input, resolves the source on its target, and inherits laun
   assert.equal((await call('POST', path, input)).status, 400)
 })
 
-test('the broker identifies a server-managed SSH attachment and reports attach failures', async t => {
+test('the broker sends the machine and session identity and reports SSH attachment failures', async t => {
   const { port, call, sessions, addSession } = await setup(t)
   const { target, session } = await addSession()
   const connect = async () =>
@@ -315,29 +316,73 @@ test('the production server serves the terminal page on direct navigation and re
   }
 })
 
-test('outbound codes expire, supersede prior codes and bind one machine until revoked', async t => {
-  const { call } = await setup(t)
+test('outbound enrollment binds one machine, recovers a lost reply and invalidates codes on release', async t => {
+  const { call, deployment } = await setup(t)
   const target = (await call('POST', '/targets', { kind: 'outbound', name: 'Enrolled machine', tools: ['codex'] })).body
-  const issue = async () => (await call('POST', '/targets/' + target.id + '/enrollment')).body.code
-  const redeem = (code: string) => call('POST', '/machine/enroll', { code })
+  const targetId: string = target.id
+  const setupPath = '/targets/' + targetId + '/enrollment'
+  const issue = async () => (await call('POST', setupPath)).body.code as string
+  const proof = () => randomBytes(32).toString('base64url')
+  const secret = proof()
+  const redeem = (code: string, claim = secret, id = targetId) =>
+    call('POST', '/machine/enroll', { targetId: id, code, secret: claim })
+  const revoke = (claim: string) =>
+    call('POST', '/machine/revoke', undefined, { authorization: 'Bearer ' + targetId + '.' + claim })
+
   const expired = await issue()
   const clock = t.mock.method(Date, 'now', () => new Date().getTime() + 301_000)
   assert.equal((await redeem(expired)).status, 401)
   clock.mock.restore()
-  const old = await issue(),
-    current = await issue()
+  const old = await issue()
+  const current = await issue()
   assert.equal((await redeem(old)).status, 401)
-  const credential = await redeem(current)
-  assert.equal(credential.status, 200)
-  assert.equal(credential.body.targetId, target.id)
-  assert.equal((await redeem(current)).status, 401)
-  assert.equal((await redeem(await issue())).status, 409)
-  assert.equal((await call('DELETE', '/targets/' + target.id)).status, 204)
-  assert.equal(
-    (await call('POST', '/machine/revoke', undefined, { authorization: 'Bearer ' + credential.body.credential }))
-      .status,
-    401,
+  assert.equal((await redeem(current, secret, randomUUID())).status, 401)
+  assert.equal((await call('POST', '/machine/enroll', { code: current })).status, 400)
+  assert.equal((await call('POST', '/machine/enroll', { code: current, targetId, secret, extra: true })).status, 400)
+
+  const first = await redeem(current)
+  assert.equal(first.status, 200)
+  assert.deepEqual(Object.keys(first.body).sort(), ['socket', 'targetId'])
+  assert.equal(first.body.targetId, targetId)
+  assert.match(first.body.socket, /^run\/node-[a-f0-9]{32}\.sock$/)
+  assert.equal((await call('GET', setupPath)).body.enrolled, true)
+  const saved = JSON.parse(
+    await readFile(join(deployment.directory, 'machine-enrollments', targetId + '.json'), 'utf8'),
   )
+  assert.deepEqual(Object.keys(saved).sort(), ['hash', 'targetId', 'userId'])
+  assert.match(saved.hash, /^[a-f0-9]{64}$/)
+  assert.deepEqual((await redeem(current)).body, first.body)
+  assert.deepEqual((await redeem(expired)).body, first.body)
+  assert.equal((await redeem(current, proof())).status, 401)
+  assert.equal((await redeem(await issue(), proof())).status, 409)
+
+  const beforeRelease = await issue()
+  assert.equal((await revoke(proof())).status, 401)
+  assert.equal((await revoke(secret)).status, 204)
+  assert.equal((await call('GET', setupPath)).body.enrolled, false)
+  assert.equal((await redeem(current)).status, 401)
+  assert.equal((await redeem(beforeRelease)).status, 401)
+  const next = proof()
+  assert.equal((await redeem(await issue(), next)).status, 200)
+  const beforeRemoval = await issue()
+  assert.equal((await call('DELETE', '/targets/' + targetId)).status, 204)
+  assert.equal((await revoke(next)).status, 401)
+  assert.equal((await redeem(beforeRemoval, next)).status, 401)
+})
+
+test('an invalid enrollment record is reported without changing its contents', async t => {
+  const { call, deployment } = await setup(t)
+  const { body: target } = await call('POST', '/targets', { kind: 'outbound', name: 'Dev', tools: ['codex'] })
+  const path = join(deployment.directory, 'machine-enrollments', target.id + '.json')
+  for (const contents of [
+    '{',
+    JSON.stringify({ targetId: target.id, userId: 'local', hash: 'a'.repeat(64), other: 1 }),
+  ]) {
+    await writeFile(path, contents)
+    const response = await call('GET', '/targets/' + target.id + '/enrollment')
+    assert.equal(response.status, 409)
+    assert.equal(await readFile(path, 'utf8'), contents)
+  }
 })
 
 test('a local machine ingress exposes only installer and authenticated machine routes', async t => {
@@ -353,8 +398,14 @@ test('a local machine ingress exposes only installer and authenticated machine r
     assert.equal((await app.inject({ url, headers })).statusCode, 403, url)
   assert.equal((await app.inject({ url: '/api/install/machine.sh', headers })).statusCode, 200)
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/machine/enroll', headers, payload: { code: 'unknown' } }))
-      .statusCode,
+    (
+      await app.inject({
+        method: 'POST',
+        url: '/api/machine/enroll',
+        headers,
+        payload: { targetId: randomUUID(), code: 'A'.repeat(43), secret: 'B'.repeat(43) },
+      })
+    ).statusCode,
     401,
   )
   assert.equal(

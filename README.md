@@ -211,26 +211,24 @@ paths produce an error without creating a session.
 ## Connect
 
 Click **Connect** next to a session and choose a terminal. Check **Remember my
-choice** first to open that terminal directly on future connections. This applies
-to all sessions on this Outpost server in the current browser. Remembered
-connections skip the dialog, including desktop opening and success messages;
-the dialog returns if opening fails or takes longer than six seconds. To change it or
-show the chooser again, open **Connection preferences** in the sidebar, choose a
-terminal or **Ask every time**, and save. This preference does not change login
-or desktop server trust requirements.
+choice** to use that terminal for every session on this server in the current
+browser. To change the choice, open **Connection preferences** in the sidebar.
+Select **Ask every time** to see the chooser again.
 
 | Choice | Opens in | Installation | Authorization |
 | --- | --- | --- | --- |
-| Web terminal | A regular browser window; also works on phones | None | Your Outpost browser login requests a session ticket |
-| Outpost Desktop | A native GPUI window with its own Outpost Dock/taskbar identity | Outpost Desktop | Transfers a session ticket from your signed-in browser; no second login |
+| Web terminal | A browser window on a computer or phone | None | The terminal page requests a session grant using your browser's access to Outpost |
+| Outpost Desktop | A native GPUI window | Outpost Desktop | The browser sends a link identifying the session. Desktop requests its own session grant |
 
-Every choice attaches to the same persistent session. Closing a client disconnects
-it; the coding session keeps running. You can change clients later.
+Both choices attach to the same persistent session. Closing a terminal leaves
+the coding session running on its machine, so you can return with either client.
 
-Desktop Connect brings the app forward and selects the session's tab. If that
-session is already open from the same browser login, its existing tab is reused,
-including its draft and live connection. Keep Outpost Desktop and your server
-updated together; an incompatible terminal interface shows an update message.
+The first time you open Desktop for a server, confirm that you trust the server
+and approve the app's sign-in in your browser. Desktop then uses its saved
+account. Opening the same machine session again brings its existing pane and
+draft forward. If you choose Desktop manually and the browser stays focused,
+the chooser offers to retry or install the app. Keep Desktop and the server
+updated together.
 
 ### Web terminal
 
@@ -469,10 +467,13 @@ on your server. Download the matching macOS DMG (arm64 for Apple silicon,
 x64 for Intel) or Windows x64 installer from
 [GitHub releases](https://github.com/KevinWang15/outpost/releases).
 
-1. On macOS, drag Outpost into Applications; on Windows, run the installer.
+1. Drag Outpost into Applications on macOS or run the installer on Windows.
 2. Open Outpost once to register its links.
-3. In your browser, choose **Connect → Outpost Desktop** for a session.
-4. Allow the browser to open the app and confirm the server on first use.
+3. Choose **Connect the installed app to this server** on the download page to
+   add a server, or **Connect → Outpost Desktop** in the workspace to open a session.
+4. Allow the browser to open Outpost. On first use, confirm the server in the
+   app and approve access in your browser. A link from the workspace requires
+   approval from the same account.
 
 These are **unsigned previews**. After the first launch attempt, macOS may
 require **System Settings → Privacy & Security → Open Anyway**. Windows may

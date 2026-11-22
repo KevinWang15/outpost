@@ -27,7 +27,6 @@ export function workspaceRoutes(
   app.get('/api/targets', async request => deployment.workspace(deployment.owner(request)).list())
   app.post<{ Body: TargetInput }>('/api/targets', { schema: { body: targetInput } }, async (request, reply) => {
     const owner = deployment.owner(request)
-    deployment.validateTarget(request.body)
     const target: Target = {
       ...request.body,
       name: request.body.name.trim(),

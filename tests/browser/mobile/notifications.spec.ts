@@ -138,7 +138,7 @@ test('service-worker bells group alerts and late cleanup cannot dismiss a newer 
   expect(first).toMatchObject({
     tag: 'outpost-bell:mobile-target/mobile-session',
     data: {
-      url: 'http://127.0.0.1:4178/terminal?target=mobile-target&session=mobile-session',
+      url: new URL('/terminal?target=mobile-target&session=mobile-session', page.url()).href,
     },
   })
   expect(JSON.stringify(first)).not.toContain('SECRET')

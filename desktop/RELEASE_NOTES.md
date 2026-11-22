@@ -1,7 +1,8 @@
-# Outpost Desktop 1.3.0 preview
+# Outpost Desktop 1.3.1 preview
 
 Outpost Desktop connects to sessions on your machines and opens local shells alongside them in tabs and split panes.
 
+- Open the installed app from the download page, your workspace or a session with the same server link. A session opens in its existing pane even after you renew your app login.
 - An open terminal can share an agent with Chat. Sessions started in Chat open an interactive transcript with prompts and approvals, including DeepSeek Harness on enrolled machines.
 - **Sessions:** **Connect → Outpost Desktop** on the website, or the app's
   session finder, opens a session in a tab or split. Closing a tab disconnects;
@@ -15,8 +16,8 @@ Outpost Desktop connects to sessions on your machines and opens local shells alo
 
 ## Install
 
-- **Apple silicon Mac:** download `Outpost-1.3.0-mac-arm64.dmg`.
-- **Intel Mac:** download `Outpost-1.3.0-mac-x64.dmg`.
-- **Windows x64:** download `Outpost-1.3.0-windows-x64.exe`.
+- **Apple silicon Mac:** download `Outpost-1.3.1-mac-arm64.dmg`.
+- **Intel Mac:** download `Outpost-1.3.1-mac-x64.dmg`.
+- **Windows x64:** download `Outpost-1.3.1-windows-x64.exe`.
 
 On macOS, drag Outpost to Applications and open it once. These previews have no Developer ID signature or notarization; after the first launch attempt, use **System Settings → Privacy & Security → Open Anyway** if macOS blocks the app. Windows may show **SmartScreen → More info → Run anyway**. `SHA256SUMS` lists the artifact checksums.

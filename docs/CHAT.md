@@ -161,8 +161,9 @@ sessions deleted outside the server. An unavailable machine keeps its members.
 
 **Session messages.** Outpost's MCP server (`machine/mcp.ts`) serves
 `list_sessions`, `message_session` and `post_to_channel` to every session, in
-chat or in a terminal (see "Outpost MCP" in ARCHITECTURE.md). The call travels
-agent → MCP process → the session's node → the machine connection → hub. The
+Chat or in a terminal (see "Outpost MCP" in ARCHITECTURE.md). The MCP process
+reads the machine's current enrollment and sends the caller's session ID and
+request through its node to the server's Chat hub. The
 recipient works in its own chat, or in its terminal, where the message is typed
 in when the agent is idle (see "Messages into terminals" in ARCHITECTURE.md);
 its final message returns to the sender as a new turn. A thread allows 6

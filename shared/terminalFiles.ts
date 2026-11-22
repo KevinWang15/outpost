@@ -1,8 +1,7 @@
 import { imageProblem } from './images'
 import { maxSessionFileBytes, sessionFileId, type SessionFile } from './sessionFiles'
 
-// Small chunks leave room for interactive
-// output and avoids buffering a file on the relay or the persistent PTY process.
+// Small chunks leave room for terminal output and bound memory use on the server and machine.
 export const terminalFileChunk = 64 * 1024
 
 export interface FileRead {

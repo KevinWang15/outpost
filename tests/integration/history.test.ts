@@ -1,8 +1,8 @@
-import { managedSocket } from '../../backend/machines'
+import { machineSocket } from '../../backend/machines'
 import { provisionMachine } from './helpers'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -43,7 +43,7 @@ test(
       await writeFile(join(home, 'bin', 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o700 })
       await mkdir(join(home, '.outpost', 'bin'), { recursive: true })
       await copyFile(terminalBinary, join(home, '.outpost', 'bin', 'outpost-terminal'))
-      provisionMachine(home, managedSocket('history', deployment.owner(), id))
+      provisionMachine(home, machineSocket('history', deployment.owner(), id))
       await deployment.workspace().add({
         id,
         kind: 'ssh',
@@ -314,6 +314,8 @@ test('history: hosted owners have separate indexes and cursors; offline machines
     async read(context: TargetContext): Promise<HistoryBatch> {
       readCalls++
       const source = (await this.catalog(context)).sources[0]
+      const text = `private deployment plan for ${context.target.name}`
+      const identity = `${context.target.name}:0`
       return {
         files: [
           {
@@ -328,19 +330,22 @@ test('history: hosted owners have separate indexes and cursors; offline machines
               prefixSize: 0,
               tail: '',
               tailSize: 0,
+              identity,
             },
             reset: true,
             pending: false,
             messages: [
               {
                 position: 0,
-                identity: `${context.target.name}:0`,
+                identity,
                 role: 'user',
                 kind: 'message',
-                text: `private deployment plan for ${context.target.name}`,
+                text,
                 timestamp: null,
                 turnId: null,
                 truncated: false,
+                totalChars: [...text].length,
+                contentHash: createHash('sha256').update(text).digest('hex'),
               },
             ],
           },

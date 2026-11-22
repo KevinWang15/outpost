@@ -1,6 +1,6 @@
 // Webhooks: what an account saves, what a receiver gets, and where a hosted server may send.
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingHttpHeaders } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -59,6 +59,19 @@ async function setup(t: TestContext, mode: 'local' | 'hosted' = 'local', statuse
   }
   return { directory, webhooks, received, input, until }
 }
+
+test('saved webhooks must use the current version and complete records before any changes', async t => {
+  const { directory, webhooks, input } = await setup(t)
+  const path = join(directory, 'webhooks.json')
+  for (const file of [{ webhooks: [] }, { version: 2, webhooks: [] }, { version: 1, webhooks: [input()] }]) {
+    const saved = JSON.stringify(file)
+    await writeFile(path, saved)
+    await assert.rejects(webhooks.create(owner, input()), /current schema/)
+    assert.equal(await readFile(path, 'utf8'), saved)
+  }
+  await rm(path)
+  assert.equal((await webhooks.create(owner, input())).name, 'Alerts')
+})
 
 test('header values are kept on the server and an edit without one keeps it', async t => {
   const { directory, webhooks, input } = await setup(t)

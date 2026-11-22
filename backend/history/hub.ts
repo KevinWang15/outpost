@@ -140,7 +140,7 @@ export class HistoryHub {
             !checkpoint ||
             checkpoint.modified !== source.modified ||
             checkpoint.offset < checkpoint.size ||
-            (checkpoint.sourceSize ?? checkpoint.size) !== source.size
+            checkpoint.sourceSize !== source.size
           )
             state.pending.set(source.id, source)
           else

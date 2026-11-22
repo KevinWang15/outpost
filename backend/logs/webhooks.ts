@@ -7,12 +7,14 @@ import { lookup } from 'node:dns/promises'
 import { request as httpRequest, type RequestOptions } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { isIP } from 'node:net'
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { Ajv } from 'ajv'
+import Type, { type Static } from 'typebox'
 import { writeJsonFile } from '../../shared/node/jsonFile'
 import {
   logLevels,
   reservedHeaders,
+  webhookInput,
   type LogEvent,
   type Webhook,
   type WebhookDelivery,
@@ -21,10 +23,35 @@ import {
 } from '../../shared/logs'
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
+import { readStateFile } from '../stateFile'
 
-interface StoredWebhook extends Omit<Webhook, 'headers'> {
-  headers: { name: string; value: string }[]
-}
+const strict = { additionalProperties: false } as const
+const storedWebhook = Type.Object(
+  {
+    ...webhookInput.properties,
+    id: Type.String(),
+    // The URL is persisted after URL normalization, which may expand non-ASCII characters.
+    url: Type.String({ pattern: '^https?://' }),
+    headers: Type.Array(Type.Required(webhookInput.properties.headers.items), { maxItems: 16 }),
+    createdAt: Type.String(),
+    lastDelivery: Type.Union([
+      Type.Null(),
+      Type.Object(
+        {
+          at: Type.String(),
+          ok: Type.Boolean(),
+          status: Type.Union([Type.Integer(), Type.Null()]),
+          error: Type.Union([Type.String(), Type.Null()]),
+        },
+        strict,
+      ),
+    ]),
+  },
+  strict,
+)
+type StoredWebhook = Static<typeof storedWebhook>
+const webhooksFile = Type.Object({ version: Type.Literal(1), webhooks: Type.Array(storedWebhook) }, strict)
+const validFile = new Ajv().compile<Static<typeof webhooksFile>>(webhooksFile)
 interface Account {
   webhooks: StoredWebhook[]
   saving: Promise<void>
@@ -84,13 +111,10 @@ export class Webhooks {
   private account(owner: Owner) {
     let account = this.accounts.get(owner.userId)
     if (!account) {
-      account = readFile(this.path(owner), 'utf8').then(
-        text => ({ webhooks: (JSON.parse(text) as { webhooks: StoredWebhook[] }).webhooks, saving: Promise.resolve() }),
-        error => {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { webhooks: [], saving: Promise.resolve() }
-          throw error
-        },
-      )
+      account = readStateFile(this.path(owner), { version: 1, webhooks: [] }, validFile).then(({ webhooks }) => ({
+        webhooks,
+        saving: Promise.resolve(),
+      }))
       account.catch(() => this.accounts.delete(owner.userId))
       this.accounts.set(owner.userId, account)
     }

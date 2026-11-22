@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   chatLimits,
@@ -34,7 +34,6 @@ import { ChannelFiles } from './files'
 import { ChatLink, type ChatConnector, type LinkEvent } from './links'
 import { channelPrompt, replyPrompt, schedulePrompt, sessionPrompt, summary } from './prompts'
 import { ChatStore } from './store'
-import { writeJsonFile } from '../../shared/node/jsonFile'
 
 export interface ChatClient {
   owner: Owner
@@ -127,22 +126,6 @@ export class ChatHub {
 
   // Accounts -------------------------------------------------------------------------
 
-  private get ownersPath() {
-    return join(this.dependencies.deployment.directory, 'chat-owners.json')
-  }
-
-  private async rememberOwner(userId: string) {
-    let owners: string[] = []
-    try {
-      owners = JSON.parse(await readFile(this.ownersPath, 'utf8')).owners ?? []
-    } catch {
-      /* A missing or unreadable index lists nobody. */
-    }
-    if (owners.includes(userId)) return
-    owners.push(userId)
-    await writeJsonFile(this.ownersPath, { version: 1, owners })
-  }
-
   private account(owner: Owner): Promise<Account> {
     let account = this.accounts.get(owner.userId)
     if (!account) {
@@ -177,16 +160,11 @@ export class ChatHub {
 
   /** Recover in-flight work and start schedules (server start). */
   async start() {
-    let owners: string[] = []
-    try {
-      owners = JSON.parse(await readFile(this.ownersPath, 'utf8')).owners ?? []
-    } catch {
-      /* No chat state yet. */
-    }
-    for (const userId of owners) {
-      if (!this.dependencies.deployment.account(userId)) continue
+    for (const owner of this.dependencies.deployment.backgroundOwners()) {
       try {
-        const account = await this.account({ userId, loginId: 'background' })
+        // Work created by a schedule or the machine's MCP is restored even if nobody opened Chat.
+        await access(join(this.dependencies.deployment.workspace(owner).directory, 'chat'))
+        const account = await this.account(owner)
         // Reconcile membership before resending any pending channel messages.
         void this.refresh(account)
           .then(() => this.recover(account))
@@ -216,7 +194,6 @@ export class ChatHub {
     const account = await this.account(client.owner)
     account.owner = client.owner
     account.clients.add(client)
-    await this.rememberOwner(account.userId)
     if (!account.poller) {
       account.poller = setInterval(() => void this.refresh(account), pollMs)
       account.poller.unref()
@@ -490,7 +467,8 @@ export class ChatHub {
   ): Delivery {
     const at = now()
     return {
-      ...ref,
+      targetId: ref.targetId,
+      sessionId: ref.sessionId,
       id: randomUUID(),
       state: 'pending',
       turn: null,
@@ -511,9 +489,11 @@ export class ChatHub {
    * to the same host instance, so a resend after a lost answer cannot run twice. */
   private async send(account: Account, delivery: Delivery) {
     if (this.stopped || this.sending.has(delivery.id) || !notStopped(delivery)) return
+    const { prompt, origin } = delivery
+    if (!prompt || !origin) return this.failDelivery(account, delivery, 'The message was not prepared for delivery.')
     // A session running in a terminal gets it typed in; any other one in its chat.
     if (delivery.via === 'terminal' || (delivery.via === null && this.find(account, delivery)?.driver === 'terminal'))
-      return this.sendTerminal(account, delivery)
+      return this.sendTerminal(account, delivery, prompt)
     this.sending.add(delivery.id)
     try {
       const link = await this.link(account.owner, delivery)
@@ -523,13 +503,14 @@ export class ChatHub {
         {
           type: 'prompt',
           key: promptKey(delivery),
-          origin: delivery.origin ?? { kind: 'user' },
-          prompt: [{ type: 'text', text: delivery.prompt ?? '' }],
+          origin,
+          prompt: [{ type: 'text', text: prompt }],
           files: delivery.files,
         },
         this.dependencies.promptMs ?? 180_000,
         instance => {
-          if (delivery.host !== instance) void this.update(account, delivery, { state: 'sent', host: instance })
+          if (delivery.host !== instance)
+            void this.update(account, delivery, { state: 'sent', host: instance, via: 'chat' })
         },
       )
       // Unconfirmed: the journal's `queued` entry or the next reconnect settles it.
@@ -545,7 +526,7 @@ export class ChatHub {
 
   /** Hand the message to the session's terminal service, which types it in when
    * the agent is idle and nobody is typing. The key makes a resend harmless. */
-  private async sendTerminal(account: Account, delivery: Delivery) {
+  private async sendTerminal(account: Account, delivery: Delivery, prompt: string) {
     this.sending.add(delivery.id)
     try {
       const context = await this.dependencies.resolve(account.owner, delivery.targetId)
@@ -553,7 +534,7 @@ export class ChatHub {
         context,
         delivery.sessionId,
         promptKey(delivery),
-        delivery.prompt ?? '',
+        prompt,
       )
       if (delivery.via !== 'terminal') await this.update(account, delivery, { state: 'sent', via: 'terminal' })
       await this.progress(account, delivery, progress)

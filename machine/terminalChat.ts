@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
 import type * as acp from '@agentclientprotocol/sdk'
-import { ChatJournal, chatHost, type ChatEntryInput, type ChatInfo } from '../shared/chatHost'
+import { ChatJournal, chatHost, validChatOrigin, type ChatEntryInput, type ChatInfo } from '../shared/chatHost'
 import type { SessionRecord } from '../shared/model'
 import type { SessionActivity } from '../shared/activity'
 import { sessionFileId } from '../shared/sessionFiles'
@@ -330,6 +330,7 @@ export class TerminalChat extends ViewStream {
         return result(r?.ok === true, 'This message already started or was removed.')
       }
       if (m.type !== 'prompt') return result(false, 'Use the coding tool’s terminal for this action.')
+      if (!validChatOrigin(m.origin)) return result(false, 'Invalid message origin.')
       if (
         !Array.isArray(m.prompt) ||
         !Array.isArray(m.files) ||
@@ -338,7 +339,7 @@ export class TerminalChat extends ViewStream {
         !m.prompt.every((b: acp.ContentBlock) => b?.type === 'text' && typeof b.text === 'string')
       )
         return result(false, 'Invalid message or attachments.')
-      const key = m.key ?? randomUUID()
+      const key = m.key === null ? randomUUID() : m.key
       if (typeof key !== 'string' || !keyPattern.test(key)) return result(false, 'Invalid message key.')
       const body = m.prompt.map((b: acp.TextContent) => b.text).join('\n')
       const attachments = m.files.map((id: string) => readFile(this.record.id, id).path)

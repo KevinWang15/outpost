@@ -2,19 +2,19 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pastedImage } from '../terminal-fixture'
 import { test, expect, viewport, fitsScreen } from './helpers'
-import type { Session, Target } from '../../../shared/model'
+import type { Session, Target, TargetInput } from '../../../shared/model'
 
-test('long target and session lists stay within the viewport and Connect remains tappable', async ({ page }, info) => {
+test('long machine and session lists stay within the viewport and Connect remains tappable', async ({ page }, info) => {
   const headers = { 'x-outpost-request': '1' }
   let target!: Target
   for (let index = 0; index < 10; index++) {
     const response = await page.request.post('/api/targets', {
       headers,
       data: {
-        kind: index === 9 ? 'local' : 'paired',
-        name: `Layout ${info.project.name} target ${index}`,
+        kind: index === 9 ? 'local' : 'outbound',
+        name: `Layout ${info.project.name} machine ${index}`,
         tools: ['claude'],
-      },
+      } satisfies TargetInput,
     })
     expect(response.status()).toBe(201)
     target = await response.json()
@@ -175,7 +175,7 @@ test('Home Screen mode connects in its own window and closing returns to the wor
   await expect(page.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
   expect(context.pages()).toHaveLength(1)
   await page.getByRole('button', { name: 'Close terminal', exact: true }).tap()
-  await expect(page).toHaveURL(url => url.origin === 'http://127.0.0.1:4178' && url.pathname === '/')
+  await expect(page).toHaveURL('/')
   await expect(page.getByRole('navigation', { name: 'Machines' })).toBeVisible()
   await page.getByRole('button', { name: new RegExp(`Standalone ${info.project.name}`) }).tap()
   await expect(page.getByRole('row').filter({ hasText: name })).toContainText('Native CLI')

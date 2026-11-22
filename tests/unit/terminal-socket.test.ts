@@ -323,7 +323,7 @@ test('published file bytes come back on the connected socket, alongside PTY inpu
     createdAt: new Date().toISOString(),
     size: bytes.length,
     source: 'published' as const,
-    mediaType: 'application/octet-stream',
+    mediaType: 'application/octet-stream' as const,
   }
   const progress: number[] = []
   const result = client.readFile(file, new AbortController().signal, count => progress.push(count))

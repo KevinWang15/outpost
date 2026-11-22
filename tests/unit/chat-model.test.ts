@@ -88,7 +88,13 @@ test('channel prompts: attributed header, newest messages within bounds', () => 
   assert.ok(!prompt.includes('note 9\n'))
 
   // Attached files are named in their message; ones the member could not get are listed.
-  const file = { id: 'f'.repeat(32), name: 'plan.pdf', createdAt: '', size: 3, mediaType: 'application/octet-stream' }
+  const file = {
+    id: 'f'.repeat(32),
+    name: 'plan.pdf',
+    createdAt: '',
+    size: 3,
+    mediaType: 'application/octet-stream',
+  } as const
   const attached = channelPrompt(
     channel,
     'coder',

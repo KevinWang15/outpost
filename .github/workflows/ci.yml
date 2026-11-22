@@ -44,8 +44,9 @@ jobs:
       - run: npm run test:integration
         env:
           OUTPOST_OPENRC_TEST_IMAGE: outpost-openrc-test
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:ui
+      - run: npm run test:mobile
 
   desktop:
     if: inputs.suite == 'desktop'

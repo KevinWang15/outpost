@@ -4,11 +4,11 @@ import { resolve } from 'node:path'
 import { terminalService } from '../shared/terminalService'
 import { serveChat } from './chat'
 import { command, hook } from './commands'
-import { unenroll, installation, enrollSsh, authorizeNode } from './installation'
+import { unenroll, ownership, enrollSsh, authorizeNode } from './installation'
 import { enrollOutbound, runOutbound } from './outbound'
 import { serveMcp } from './mcp'
 import { serveNode } from './node'
-import { enterState, useBinding } from './state'
+import { enterState, useSessionBinding } from './state'
 import { serveTerminal } from './terminal'
 
 const usage = `Usage: outpost-terminal COMMAND
@@ -18,7 +18,7 @@ const usage = `Usage: outpost-terminal COMMAND
   enroll outbound URL ID enroll with a single-use code read on stdin
   connect              maintain this machine’s enrolled outbound connection
   status | unenroll    inspect ownership or release the local enrollment
-  uninstall            disconnect and remove the managed executable after sessions stop
+  uninstall            disconnect and remove the installed executable after sessions stop
   mcp | hook           Outpost's MCP server and activity hook (coding tools run them)
   publish FILE [NAME]  share a file with the user of this session
   open URL             open a link on the user's computer
@@ -30,11 +30,12 @@ const [role, ...args] = process.argv.slice(2)
 const run = async () => {
   // Commands a coding tool runs follow their launch's binding; Outpost's own
   // processes (node, drivers) always use the state directory of their user.
-  if (['mcp', 'hook', 'publish', 'open', 'signal'].includes(role)) useBinding()
+  const sessionCommand = ['mcp', 'hook', 'publish', 'open', 'signal'].includes(role)
+  const binding = sessionCommand ? useSessionBinding() : null
   // Every Outpost process works in the state directory, so its sockets have
   // short addresses; a file given on the command line is resolved first.
   if (role === 'publish' && args[0]) args[0] = resolve(args[0])
-  if (role !== 'agent' && role !== '--version') enterState()
+  if (role !== 'agent' && role !== '--version' && (!sessionCommand || binding)) enterState()
   switch (role) {
     case '--version':
       if (args.length) {
@@ -53,15 +54,13 @@ const run = async () => {
       return unenroll(role === 'uninstall')
     case 'status': {
       if (args.length) throw Error(usage)
-      const r = installation()
-      console.log(
-        !r
-          ? 'Not enrolled'
-          : r.mode === 'ssh'
-            ? machineSetupLabels.ssh + ' · ' + r.socket
-            : machineSetupLabels.outbound + ' · ' + r.origin + ' · ' + r.targetId,
+      const owner = ownership()
+      if (!owner) return console.log('Not enrolled')
+      if (owner.mode === 'ssh') return console.log(`${machineSetupLabels.ssh} · ${owner.socket}`)
+      const target = `${machineSetupLabels.outbound} · ${owner.origin} · ${owner.targetId}`
+      return console.log(
+        owner.socket === null ? `${target} · Enrollment pending. Retry the enrollment command.` : target,
       )
-      return
     }
     case 'connect':
       if (args.length) throw new Error(usage)
@@ -74,13 +73,14 @@ const run = async () => {
     case 'chat-serve':
       return serveChat()
     case 'mcp':
-      return serveMcp()
+      return serveMcp(binding)
     case 'hook':
-      return hook()
+      return binding?.driver === 'terminal' ? hook(binding.session) : undefined
     case 'publish':
     case 'open':
     case 'signal':
-      return command(role, args)
+      if (!binding) throw new Error('Run this command inside an Outpost session.')
+      return command(role, args, binding)
     case 'agent':
       if (args[0] === 'codex' && args.length === 1) {
         // The bundled adapter reads its own argv; give it none.
@@ -97,6 +97,7 @@ const run = async () => {
   }
 }
 await run().catch(error => {
+  if (role === 'hook') return // An observation failure must never veto a coding tool's action.
   console.error(`outpost: ${(error as Error).message}`)
   process.exit(1)
 })

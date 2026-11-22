@@ -1,4 +1,5 @@
 import type { Target, Session } from '../../shared/model'
+import { desktopEntryUrl } from '../../shared/desktopAuth'
 import { expect, test, type Page } from './fixtures'
 import { appConnection } from './terminal-fixture'
 
@@ -129,6 +130,11 @@ test('Chat joins a running CLI and displays both terminal and Chat turns', async
 })
 
 test('Outpost Desktop hands off a session reference and uses app-owned access', async ({ page }) => {
+  await page.goto('/desktop')
+  await expect(page.getByRole('link', { name: 'Connect the installed app to this server' })).toHaveAttribute(
+    'href',
+    desktopEntryUrl({ server: new URL(page.url()).origin }),
+  )
   await addMachine(page, 'Desktop app box')
   await createSession(page, 'Desktop app session', '~/desktop-app-project')
   await page

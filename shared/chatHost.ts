@@ -4,6 +4,8 @@
 // ordered sequence numbers, many viewers, a prompt queue and turn attribution.
 // See docs/CHAT.md.
 import type * as acp from '@agentclientprotocol/sdk'
+import Type, { type Static } from 'typebox'
+import { Value } from 'typebox/value'
 import type { SessionActivity } from './activity'
 import type { SessionFile } from './sessionFiles'
 
@@ -32,17 +34,23 @@ export const chatHost = {
 } as const
 
 /** Display attribution for a prompt the user did not type in this session. */
-export type ChatOrigin =
-  | { kind: 'user' }
-  | { kind: 'channel'; channelId: string; channel: string; messageId: string; summary: string }
-  | { kind: 'session'; from: ChatPeer; threadId: string; summary: string }
-  | { kind: 'reply'; from: ChatPeer; threadId: string; summary: string }
-  | { kind: 'schedule'; scheduleId: string; name: string }
-export interface ChatPeer {
-  targetId: string
-  sessionId: string
-  name: string
-}
+const strict = { additionalProperties: false } as const
+const string = Type.String()
+const peer = Type.Object({ targetId: string, sessionId: string, name: string }, strict)
+const threadOrigin = { from: peer, threadId: string, summary: string }
+export const chatOrigin = Type.Union([
+  Type.Object({ kind: Type.Literal('user') }, strict),
+  Type.Object(
+    { kind: Type.Literal('channel'), channelId: string, channel: string, messageId: string, summary: string },
+    strict,
+  ),
+  Type.Object({ kind: Type.Literal('session'), ...threadOrigin }, strict),
+  Type.Object({ kind: Type.Literal('reply'), ...threadOrigin }, strict),
+  Type.Object({ kind: Type.Literal('schedule'), scheduleId: string, name: string }, strict),
+])
+export type ChatOrigin = Static<typeof chatOrigin>
+export const validChatOrigin = (value: unknown): value is ChatOrigin =>
+  Value.Check(chatOrigin, value) && new TextEncoder().encode(JSON.stringify(value)).byteLength <= chatHost.maxOrigin
 
 interface EntryBase {
   seq: number

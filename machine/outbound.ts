@@ -7,16 +7,17 @@ import WebSocket from 'ws'
 import { loginShell } from '../shared/node/loginShell'
 import { shellJoin } from '../shared/shell'
 import { serverOrigin } from '../shared/serverOrigin'
+import type { OutboundEnrollmentInput } from '../shared/model'
+import type { OutboundEnrollmentReply } from '../shared/machine'
 import {
   validNodeSocket,
-  validOutboundIdentity,
   installation,
   installationLock,
-  requireUnenrolled,
-  writeInstallation,
+  reserveOutbound,
+  writeOwnership,
   watchInstallation,
   runtimeLock,
-  type OutboundInstall,
+  type OutboundEnrollment,
 } from './installation'
 async function readLine(prompt: string) {
   process.stderr.write(prompt)
@@ -32,36 +33,42 @@ export async function enrollOutbound(address: string, targetId: string) {
   const origin = serverOrigin(address)
   const code = await readLine('Outpost enrollment code: ')
   await installationLock(async () => {
-    const current = installation()
-    if (current?.mode === 'outbound' && current.origin === origin && current.targetId === targetId) return
-    await requireUnenrolled()
+    const reservation = await reserveOutbound(origin, targetId)
+    if (!reservation) return
+    const input: OutboundEnrollmentInput = { targetId, code, secret: reservation.credential.slice(targetId.length + 1) }
     const res = await fetch(origin + '/api/machine/enroll', {
       method: 'POST',
       redirect: 'error',
       headers: { 'content-type': 'application/json', 'x-outpost-request': '1' },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify(input),
       signal: AbortSignal.timeout(10000),
+    }).catch(cause => {
+      throw new Error('Could not confirm enrollment. Retry the same enrollment command.', { cause })
     })
-    if (!res.ok) throw new Error('Enrollment failed. Generate a new code on the Outpost server.')
-    const pair = (await res.json()) as OutboundInstall
-    if (!validOutboundIdentity(pair) || pair.targetId !== targetId) throw new Error('Invalid enrollment reply.')
-    writeInstallation({
+    if (res.status === 401) throw new Error('Enrollment was not authorized. Request a new code for this machine.')
+    if (res.status === 409) throw new Error('This entry already has an enrollment. Release its owner before retrying.')
+    if (!res.ok) throw new Error(`Could not confirm enrollment (HTTP ${res.status}). Retry the enrollment command.`)
+    const result = (await res.json().catch(cause => {
+      throw new Error('Could not read the enrollment confirmation. Retry the same enrollment command.', { cause })
+    })) as OutboundEnrollmentReply | null
+    if (result?.targetId !== targetId || !validNodeSocket(result.socket)) throw new Error('Invalid enrollment reply.')
+    writeOwnership({
       mode: 'outbound',
       origin,
-      targetId: pair.targetId,
-      credential: pair.credential,
-      socket: pair.socket,
+      targetId,
+      credential: reservation.credential,
+      socket: result.socket,
     })
   })
   console.log('Outbound machine enrolled.')
 }
 
-function connectOnce(pair: OutboundInstall, signal: AbortSignal): Promise<'stable' | 'retry' | 'revoked'> {
+function connectOnce(enrollment: OutboundEnrollment, signal: AbortSignal): Promise<'stable' | 'retry' | 'revoked'> {
   return new Promise(resolve => {
-    const url = new URL('/api/machine/connect', serverOrigin(pair.origin))
+    const url = new URL('/api/machine/connect', enrollment.origin)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(url, {
-      headers: { Authorization: 'Bearer ' + pair.credential },
+      headers: { Authorization: 'Bearer ' + enrollment.credential },
       handshakeTimeout: 10000,
       followRedirects: false,
       perMessageDeflate: false,
@@ -95,7 +102,7 @@ function connectOnce(pair: OutboundInstall, signal: AbortSignal): Promise<'stabl
         } catch {
           return ws.close(1002)
         }
-        if (!validNodeSocket(socket) || socket !== pair.socket) return ws.close(1008, 'Incorrect node identity')
+        if (!validNodeSocket(socket) || socket !== enrollment.socket) return ws.close(1008, 'Incorrect node identity')
         // In a compiled release argv[0] is outpost-terminal; in development it is Bun.
         const args = process.argv[1]?.endsWith('/main.ts')
           ? [process.argv[1], 'node', '--socket', socket]
@@ -133,10 +140,10 @@ function connectOnce(pair: OutboundInstall, signal: AbortSignal): Promise<'stabl
     })
   })
 }
-async function maintainConnection(pair: OutboundInstall, signal: AbortSignal) {
+async function maintainConnection(enrollment: OutboundEnrollment, signal: AbortSignal) {
   let backoff = 500
   while (!signal.aborted) {
-    const stable = await connectOnce(pair, signal)
+    const stable = await connectOnce(enrollment, signal)
     if (stable === 'revoked') {
       console.error('Outpost revoked this machine credential. Release the local enrollment to set it up again.')
       // Keep supervisors from restarting a revoked credential and contacting the server again.
@@ -152,15 +159,16 @@ export async function runOutbound() {
   const initial = installation()
   if (initial?.mode !== 'outbound') throw Error('Enroll this machine first.')
   return runtimeLock(async () => {
-    const pair = installation()
-    if (pair?.mode !== 'outbound' || pair.generation !== initial.generation) throw Error('Installation changed.')
+    const enrollment = installation()
+    if (enrollment?.mode !== 'outbound' || enrollment.generation !== initial.generation)
+      throw Error('Installation changed.')
     const stop = new AbortController()
     const shutdown = () => stop.abort()
-    const unwatch = watchInstallation(pair, shutdown)
+    const unwatch = watchInstallation(enrollment, shutdown)
     process.once('SIGTERM', shutdown)
     process.once('SIGINT', shutdown)
     try {
-      await maintainConnection(pair, stop.signal)
+      await maintainConnection(enrollment, stop.signal)
     } finally {
       unwatch()
       process.off('SIGTERM', shutdown)

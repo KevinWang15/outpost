@@ -42,6 +42,14 @@ export const targetInput = Type.Union([
   Type.Object(local, strict),
   Type.Object(outbound, strict),
 ])
+export const outboundEnrollment = Type.Object(
+  {
+    targetId: Type.String({ pattern: '^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$', maxLength: 36 }),
+    code: Type.String({ pattern: '^[A-Za-z0-9_-]{43}$', maxLength: 43 }),
+    secret: Type.String({ pattern: '^[A-Za-z0-9_-]{43}$', maxLength: 43 }),
+  },
+  strict,
+)
 export const targetRecord = Type.Union([
   Type.Object({ ...ssh, ...metadata }, strict),
   Type.Object({ ...local, ...metadata }, strict),

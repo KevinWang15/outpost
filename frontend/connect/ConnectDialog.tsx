@@ -116,7 +116,7 @@ export default function ConnectDialog({
         Remember my choice
       </label>
       <p className="hint" id="connect-remember-hint">
-        Connect directly next time without this dialog. Change or clear it in Connection preferences in the sidebar.
+        Open this terminal automatically next time. Change your choice in Connection preferences in the sidebar.
       </p>
       <p className="hint">
         <a href={pagePaths.desktop} target="_blank" rel="noopener noreferrer">

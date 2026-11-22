@@ -57,8 +57,9 @@ are tested in `tests/unit/contracts.test.ts`; extend it when you add one.
 npm run check             # lint (incl. ruff), typecheck, build, unit and machine tests
 npm run build:terminal -- --fixtures  # isolated machine binary for integration and browser tests
 npm run test:integration  # persistent PTYs; the SSH test also needs Docker
-npx playwright install chromium
+npx playwright install chromium webkit
 npm run test:ui           # browser tests against a real local backend
+npm run test:mobile       # Android Chromium, iPhone WebKit and iPad WebKit
 ```
 
 Integration and browser tests use disposable homes with fixture coding tools

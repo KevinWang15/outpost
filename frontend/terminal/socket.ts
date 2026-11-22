@@ -230,7 +230,8 @@ export class TerminalSocket {
   }
 
   /** Explicitly reconnect after an ended session or an unrecoverable connection error. */
-  reconnect() {
+  reconnect(token = this.token) {
+    this.token = token
     this.stopped = false
     this.allowStart = true
     this.attempts = 0
@@ -316,8 +317,7 @@ export class TerminalSocket {
   /** Keep a live connection and its draft; use the fresh grant for recovery. */
   async activate(token: string) {
     if (!this.connected) {
-      this.token = token
-      this.reconnect()
+      this.reconnect(token)
       return
     }
     const result = await this.request({ type: 'activate', id: crypto.randomUUID(), token })

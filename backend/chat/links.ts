@@ -148,6 +148,17 @@ export class ChatLink {
       },
       message: message => {
         if (this.transport !== transport) return
+        if (message?.type === 'welcome' ? message.protocol !== chatHost.protocol : this.state !== 'live') {
+          this.transport = null
+          transport.close()
+          this.closed(
+            message?.type === 'error'
+              ? message.message
+              : 'Invalid chat handshake. Install the current Outpost machine service and restart this chat.',
+            409,
+          )
+          return
+        }
         if (message.type === 'result' && message.id === this.probe) this.probe = null
         else this.receive(message)
       },
@@ -228,7 +239,6 @@ export class ChatLink {
     if (this.state === 'stopped' || this.state === 'unavailable')
       for (const id of [...this.pending.keys()])
         this.settle(id, { ok: false, message: this.message ?? 'The session is not running in chat. Start it first.' })
-    this.message = null
     this.schedule()
   }
 

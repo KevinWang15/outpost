@@ -56,11 +56,12 @@ export class ServerSignIn {
     this.attempts.delete(attempt.origin)
     this.host.changed()
   }
-  async start(origin: string, intent?: DesktopEntry) {
+  async start(intent: DesktopEntry) {
     if (this.closed) return
+    const origin = intent.server
     const existing = this.attempts.get(origin)
     if (existing) {
-      if (intent && existing.accountId !== intent.accountId)
+      if (intent.accountId && existing.accountId !== intent.accountId)
         throw new Error('Finish or cancel the pending sign-in before connecting from another account.')
       this.addSession(existing, intent)
       return
@@ -68,7 +69,7 @@ export class ServerSignIn {
     if (this.attempts.size >= 16) throw new Error('Finish or cancel a pending sign-in before starting another.')
     const attempt: Attempt = {
       origin,
-      accountId: intent?.accountId,
+      accountId: intent.accountId,
       state: randomBytes(32).toString('base64url'),
       verifier: randomBytes(32).toString('base64url'),
       sessions: new Map(),
@@ -103,8 +104,8 @@ export class ServerSignIn {
       throw error
     }
   }
-  private addSession(attempt: Attempt, intent?: DesktopEntry) {
-    if (!intent?.session) return
+  private addSession(attempt: Attempt, intent: DesktopEntry) {
+    if (!intent.session) return
     const reference = { server: intent.server, accountId: intent.accountId, ...intent.session }
     const id = desktopSessionId(reference)
     if (attempt.sessions.size >= 16 && !attempt.sessions.has(id))

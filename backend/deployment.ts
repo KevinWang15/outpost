@@ -3,7 +3,6 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { IncomingHttpHeaders } from 'node:http'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import type { TargetInput } from '../shared/model'
 import type { DesktopAccount } from '../shared/desktopAuth'
 import { isLoopbackAddress } from '../shared/loopback'
 import { AppError } from './errors'
@@ -50,7 +49,6 @@ export interface Deployment {
   identity(owner: Owner): Promise<SshIdentity | null>
   /** Public origin used in links that leave the browser, e.g. outpost:// URLs. */
   origin(request: FastifyRequest): string
-  validateTarget(input: TargetInput): void
   register(app: FastifyInstance): void
   close(): void
 }
@@ -89,7 +87,10 @@ export class LocalDeployment implements Deployment {
     readonly secret: string,
     readonly machineOrigin?: string,
   ) {
-    this.store = new Workspace(directory)
+    this.store = new Workspace(directory, target => {
+      if (target.kind === 'local' && !this.localTargets)
+        throw new AppError('Running sessions on the Outpost server requires Linux, including WSL.', 400)
+    })
   }
   static async open(directory: string, machineOrigin?: string) {
     if (machineOrigin) {
@@ -146,10 +147,6 @@ export class LocalDeployment implements Deployment {
   }
   origin(request: FastifyRequest) {
     return `http://${request.headers.host}`
-  }
-  validateTarget(input: TargetInput) {
-    if (input.kind === 'local' && !this.localTargets)
-      throw new AppError('Running sessions on the Outpost server requires Linux, including WSL.', 400)
   }
   register(app: FastifyInstance) {
     app.get('/api/auth/session', async () => ({ mode: 'local', user: null }))

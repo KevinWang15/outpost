@@ -4,12 +4,12 @@ import type { Target } from '../../shared/model'
 export { expect }
 export type { Page } from '@playwright/test'
 
-// Each test owns the server machine it creates in the disposable browser workspace.
+// Browser tests share a disposable server and each starts with an empty machine list.
 export const test = base.extend<{ machineWorkspace: void }>({
   machineWorkspace: [
     async ({ request }, use) => {
       const targets: Target[] = await (await request.get('/api/targets')).json()
-      for (const target of targets.filter(item => item.kind === 'local')) {
+      for (const target of targets) {
         const removed = await request.delete('/api/targets/' + target.id, { headers: { 'x-outpost-request': '1' } })
         expect(removed.status()).toBe(204)
       }

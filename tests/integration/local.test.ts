@@ -1,4 +1,4 @@
-import { managedSocket } from '../../backend/machines'
+import { machineSocket } from '../../backend/machines'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -25,7 +25,7 @@ async function localApp(t: TestContext) {
     await app.close()
     await removeHome(directory, home)
   })
-  const provision = (id: string) => provisionMachine(home, managedSocket(deployment.secret, deployment.owner(), id))
+  const provision = (id: string) => provisionMachine(home, machineSocket(deployment.secret, deployment.owner(), id))
   return { provision, home, env, port, request: api(`http://127.0.0.1:${port}`), clients }
 }
 const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)])

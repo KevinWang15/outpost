@@ -139,16 +139,16 @@ authentication or desktop trust confirmation.
 1. The UI chooses `web` or `desktop` (`shared/terminals.ts`). Web opens
    `/terminal?target=…&session=…`; that authenticated page requests a signed,
    single-use launch ticket valid for five minutes.
-2. Desktop receives `outpost://server?origin=…&account=…&target=…&session=…`.
-   `useDesktopEntry` builds this link synchronously in the browser click handler.
-   It is only an intent and contains no credential; ownership is checked when
-   the app requests a terminal grant. The website's **Open in Outpost Desktop**
-   button uses the same link without a session. The session helper validates the URL and
-   confirms first-use server trust before contacting it.
+2. Every website entry uses `outpost://server?origin=…`. The public download
+   page identifies just the server. The workspace's **Open in Outpost Desktop**
+   button adds the expected `account`. A session's **Connect** action also
+   adds the `target` and `session` IDs. A session link requires all three IDs.
+   The link contains no credentials. The native helper validates the link and
+   confirms first-use trust before contacting the server.
 3. `ServerAccounts` uses an existing app login for the requested account, or
-   starts browser approval (see below). Website entry binds the expected account;
-   browser consent refuses a different one. Pending session intents complete
-   after login. Every app entry point requests a fresh scoped launch through
+   starts browser approval. When the workspace supplied an expected account,
+   consent requires that account. Pending session intents complete after login.
+   Every session entry point requests a fresh scoped launch through
    `/api/desktop/targets/:t/sessions/:s/connect`.
 4. The web terminal and the native session helper use `TerminalSocket` to connect
    to `/api/terminal`. The broker returns a 30-day resume token in `hello`.
@@ -160,9 +160,8 @@ authentication or desktop trust confirmation.
    pane across windows. A connected pane consumes a fresh launch with `activate`
    on its existing socket; a renewed app login reloads the same pane with its
    new grant. The broker always checks the full grant, including login identity.
-   OS links are bounded to 16 concurrent dispatches and processed independently,
-   so one unavailable server cannot delay another server's login callback.
-   There are at most 16 pending sign-ins and 32 terminal panes.
+   Desktop tracks up to 16 pending server sign-ins, each with up to 16 session
+   requests waiting for approval.
 
 ### Client choices and shared responsibilities
 
@@ -436,10 +435,12 @@ owner. Session data belongs to the execution account under `~/.outpost`.
   connections to Outpost.
 - **Run setup on the machine** covers a machine Outpost cannot SSH to. An operator runs the
   wizard’s one-time command in a shell on the machine. It retrieves the installer from the
-  chosen Outpost instance, verifies and installs the service, and exchanges a short-lived,
-  single-use enrollment code for a machine-scoped credential. A service manager keeps the
-  service running after logout and starts it at boot. It reconnects to the enrolled
-  instance after link loss.
+  chosen Outpost instance and verifies and installs the service. Before redeeming the
+  short-lived code, the service records its own random machine credential locally. The
+  server binds that credential to the owner and machine. If the response is lost, the
+  same installation can confirm its enrollment with the saved credential. A service
+  manager keeps it running after logout, starts it at boot and restores the outbound
+  connection after link loss.
 
 Switching methods or transferring a machine requires releasing its local enrollment and
 enrolling it again. Removing the machine from its old workspace revokes Outpost access
@@ -448,9 +449,10 @@ reconnection. Remove the old Outpost key from the Linux account if the server sh
 also lose SSH access.
 
 Releasing the enrollment or removing the executable preserves the account’s session
-data and published files. Stop coding tools before uninstalling the executable and
-disable the outbound service if installed. A new owner using the same Linux account can
-access its existing session data. Use a fresh account to keep owners’ data separate.
+data and published files. Stop coding tools before uninstalling the executable.
+Both `unenroll` and `uninstall` remove the outbound service when installed. A new
+owner using the same Linux account can access its existing session data. Use a
+fresh account to keep owners’ data separate.
 The [operator instructions](../README.md#machine-setup-and-removal) cover setup, revocation and removal.
 
 #### Shared machine protocol
@@ -877,18 +879,20 @@ is the launch's environment: `OUTPOST_SESSION_ID`, `OUTPOST_STATE_DIRECTORY` and
 environment, and a tool call can never select a session. A process with no
 binding lists no tools; a partial or invalid binding fails closed.
 
-`tools` in `machine/mcp.ts` is the one registry: each tool declares the drivers
-it serves and how it is answered, and `tools/list` and the server instructions
-derive from the tools the binding allows. Every session, in a terminal or in
-chat, gets the same tools. `publish_file` is answered on the machine. The others
-are answered by the server, through the node bound to the session (see "Machine
-connection"): the history tools; `list_machines` and `list_sessions`;
-`message_session`, whose reply arrives later as a new message; `post_to_channel`
-for channels the session belongs to; and `fetch_file`, which copies another
-session's file into this one and returns its local path. Messages and posts
-share a limit of 20 a minute per session, and a thread between sessions allows
-6 messages. Adding a tool is one registry entry. `outpost publish FILE` publishes from any
-shell in a managed session.
+`machine/mcp.ts` exposes the same tool registry to bound terminal and Chat
+sessions. The machine handles `publish_file` locally, even while disconnected.
+For every server-backed call, the MCP process reads the machine's current
+enrollment and sends the bound session ID and request to its node socket.
+The node carries the call over the machine connection. This works for both
+SSH and outbound enrollment.
+
+The server answers history searches, `list_machines` and `list_sessions`.
+`message_session` returns immediately and the reply arrives as a new message.
+`post_to_channel` posts to a channel the session belongs to. `fetch_file`
+copies another session's file into this one and returns its local path.
+Messages and posts share a limit of 20 per minute per session, and a thread
+between sessions allows 6 messages. `outpost publish FILE` publishes from
+any shell in a managed session.
 
 Adapters only translate the descriptors into their tool's native form; they
 never construct Outpost's server:
@@ -982,9 +986,9 @@ attach to the same broker and terminal service as the browser.
 `desktop/src/native-helper.ts` runs in one bundled Node process per profile.
 It reuses the V3 TypeScript account, first-use trust, session discovery,
 creation and WebSocket clients. The GUI exchanges events and requests over
-private child-process pipes. Account credentials remain in the helper. The app
-retains the existing server logins, recent sessions and preference file
-formats. Browser authorization returns through the registered `outpost://`
+private child-process pipes. The helper stores server logins separately from
+recent session references and presentation preferences. Browser authorization
+returns through the registered `outpost://`
 handler. On platforms that launch a second process, the profile lock and a
 per-run secret route links to the owner of the sign-in verifier.
 
@@ -1159,14 +1163,13 @@ connects to the address it checked.
 - Hosted SSH uses only the account's key and known-hosts file (`-F none`, no
   agent). Connection multiplexing sockets are scoped per owner and identity.
 - An SSH enrollment never initiates an Outpost connection from the machine. An outbound enrollment requires an operator to redeem a single-use code. Its machine credential authorizes Outpost operations for that enrollment. Revocation closes the connection and prevents reconnection. [Enrollment security](../SECURITY.md#remote-machine-enrollment-in-v3)
-- Desktop confirms unknown server origins before contacting them. Accepted trust
-  persists independently of login and has no management UI; declining cancels
-  only the current attempt. Only HTTPS and localhost HTTP qualify.
-- On a machine, the Linux account is the trust boundary: Outpost's sockets and
-  files are owner-only, and anything running as that account may use them. An
-  agent's Outpost tools act only as its own session (the launch's binding),
-  through the node of the account that launched it; tool arguments cannot name
-  another session or account.
+- Desktop confirms unknown server origins before contacting them. It accepts
+  HTTPS and loopback HTTP. Signing out removes saved trust, the local login and
+  that server's sessions from Desktop and requests token revocation.
+- The Linux execution account owns Outpost's private files and sockets.
+  Processes running as that account can use them. Agent tool calls use the
+  caller's bound session ID and travel through the current machine enrollment.
+  Outpost checks the caller before serving the request.
 - Images are limited to 16 MB, signals to 32 KiB and 120 per minute per
   connection, clipboard text to 1 MiB.
 - Each account can read its own activity log and configure webhooks for event
@@ -1196,10 +1199,9 @@ waits for its append; search reads the same decoded records. Checkpoints use
 decoded byte positions, so added frames retain cursors. The other stores are
 read as plain files.
 
-**Add an Outpost MCP tool.** Add an entry to `tools` in `machine/mcp.ts` with
-the drivers it serves, and an instruction sentence if the agent needs one.
-Harness configuration does not change. A tool the server answers goes through
-the session's bound node, never a path or identity in its arguments.
+**Add an Outpost MCP tool.** Register the tool in `machine/mcp.ts` for terminal
+and Chat sessions. Supply instructions if the agent needs them. Server-backed
+tools use the machine's enrolled node and the caller's session binding.
 
 **Add a signal type.** Define a validator in `shared/signals.ts`, allow it in
 the broker, and handle it in the shared client, delegating native actions through the bridge.
@@ -1213,7 +1215,7 @@ The table describes the existing test suites. The connectivity refactor also has
 | Machine | `tests/machine/` — the machine's modules in a disposable state directory: registry, creation receipts, forks, edits and switching, images, activity from hooks and transcripts, native stores and history reads, DeepSeek decoding, store readers, locks; opt-in real Claude Code, Codex and Kimi Code hooks |
 | Server | `tests/unit/` — tokens, workspace, API validation and network policy, hosted isolation and revocation, the machine connection against a fake node, the broker against a fake terminal stream, contracts |
 | Whole path | `tests/integration/` — local machines over WebSocket; SSH in Docker with the built service in both modes; conversation discovery and history over real machine connections; chat through the node |
-| Browser | `tests/browser/` — real backend: add machine, create session, web terminal, desktop ticket flow, phone layout; mobile WebGL rendering, real clipboard copying, and GPU context-loss fallback |
+| Browser | `tests/browser/` exercises machine setup, sessions, web terminals and the Desktop session handoff against a real backend. It also covers phone layout, WebGL rendering, clipboard copying and GPU context loss. |
 | Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
 | Native desktop | `npm run test:desktop` exercises V3 restore, reconnect and layout logic. `npm --prefix desktop run test:ui` exercises GPUI controls, native shell I/O and moving a live pane across windows. |
 | Chat | `tests/unit/chat-*.test.ts` (journal, transcript, mentions, cron and prompts); `tests/integration/node-chat.test.ts` (chat host through the node: conversation timeline, one driver, Outpost tools, files, queue, DeepSeek and Kimi); `tests/integration/chat.test.ts` (hub with real chat hosts: channels, floor passing, session messages, schedules); `tests/browser/chat.spec.ts`. A scripted ACP agent (`tests/fixtures/acp-agent-fixture.py`) stands in for the tools; no model is called |

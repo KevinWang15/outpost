@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -51,12 +52,15 @@ function batch(
         checkpoint: {
           offset: 1000,
           size: 1000,
+          sourceSize: 1000,
           modified: '1000',
           generation,
           prefix: 'prefix',
           prefixSize: 10,
           tail: 'tail',
           tailSize: 10,
+          identity:
+            identities.at(-1) ?? (texts.length ? `${s.id}:${generation}:${start + (texts.length - 1) * 100}` : null),
         },
         reset,
         pending: false,
@@ -69,6 +73,8 @@ function batch(
           timestamp: `2026-11-${String(1 + i).padStart(2, '0')}T12:00:00.000Z`,
           turnId: null,
           truncated: false,
+          totalChars: [...text].length,
+          contentHash: createHash('sha256').update(text).digest('hex'),
         })),
       },
     ],
@@ -80,6 +86,19 @@ function setup(t: test.TestContext) {
   t.after(() => index.close())
   return index
 }
+
+test('history rejects incomplete checkpoints and truncated messages before committing the batch', t => {
+  const index = setup(t),
+    native = source('stale')
+  const initial = batch(native, ['indexed'])
+  index.ingest(machines[0], initial)
+  const stale = batch(native, ['replacement'])
+  Reflect.deleteProperty(stale.files[0].messages[0], 'contentHash')
+  assert.throws(() => index.ingest(machines[0], stale), /invalid history message/)
+  Reflect.deleteProperty(stale.files[0].checkpoint, 'sourceSize')
+  assert.throws(() => index.ingest(machines[0], stale), /invalid history checkpoint/)
+  assert.deepEqual(index.checkpoint(machines[0].id, native), initial.files[0].checkpoint)
+})
 
 test('history: keyword/substring search spans machines and tools, preserves attribution, and treats input literally', async t => {
   const index = setup(t)
@@ -155,7 +174,8 @@ test('history: only a page inside the uncached tail needs a native read', async 
   const index = setup(t)
   const native = source('partial')
   const input = batch(native, ['find 😀'])
-  Object.assign(input.files[0].messages[0], { truncated: true, totalChars: 10, contentHash: 'native-hash' })
+  const contentHash = createHash('sha256').update('find 😀tail').digest('hex')
+  Object.assign(input.files[0].messages[0], { truncated: true, totalChars: 10, contentHash })
   index.ingest(machines[0], input)
   const { cursor } = (await index.search({ query: 'find', mode: 'keyword' }, ids)).results[0]
   const cached = index.readMessage({ cursor, offset: 5 }, ids)
@@ -164,7 +184,7 @@ test('history: only a page inside the uncached tail needs a native read', async 
   assert.equal(cached.source, undefined)
   const tail = index.readMessage({ cursor, offset: 6, limit: 3 }, ids)
   assert.equal(tail.machineId, 'alpha')
-  assert.deepEqual(tail.source, { source: native, position: 0, contentHash: 'native-hash', offset: 6, limit: 3 })
+  assert.deepEqual(tail.source, { source: native, position: 0, contentHash, offset: 6, limit: 3 })
   const end = index.readMessage({ cursor, offset: 10 }, ids)
   assert.equal(end.source, undefined)
   assert.equal(end.page.nextOffset, null)

@@ -418,8 +418,8 @@ export class MachineConnection {
   }
 }
 
-/** Every account's machine connections. */
-export function managedSocket(secret: string, owner: Owner, targetId: string) {
+/** Stable identity for a machine’s node socket under its execution account. */
+export function machineSocket(secret: string, owner: Pick<Owner, 'userId'>, targetId: string) {
   return `run/node-${createHmac('sha256', secret).update(`node\0${owner.userId}\0${targetId}`).digest('hex').slice(0, 32)}.sock`
 }
 
@@ -442,7 +442,7 @@ export class Machines {
     let connection = this.connections.get(key)
     if (!connection) {
       // This stable node identity is pinned by the machine installation.
-      const socket = managedSocket(this.secret, owner, targetId)
+      const socket = machineSocket(this.secret, owner, targetId)
       connection = new MachineConnection(socket, transport, {
         env: this.env,
         agent: call => this.agent(owner, targetId, call),
@@ -457,9 +457,6 @@ export class Machines {
     const key = `${owner.userId}\0${targetId}`
     this.connections.get(key)?.close()
     this.connections.delete(key)
-  }
-  restart(owner: Owner, targetId: string) {
-    this.connections.get(`${owner.userId}\0${targetId}`)?.restart()
   }
 
   close() {

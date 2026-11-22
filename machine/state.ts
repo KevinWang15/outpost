@@ -17,15 +17,29 @@ import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
 import { dirname, join, relative } from 'node:path'
 
-/** `~/.outpost` of the user Outpost runs as; every path below derives from it.
- * Commands run inside a session use their binding's directory instead
- * (`useBinding`), and tests point it elsewhere. */
+/** The execution account's Outpost directory, or the directory bound to a session command. */
 export const state = { directory: join(homedir(), '.outpost') }
 
-/** For commands a coding tool runs: the state directory the launch bound. */
-export function useBinding() {
+export interface SessionBinding {
+  session: string
+  driver: 'terminal' | 'chat'
+}
+
+/** Read the complete launch binding before selecting its state directory. */
+export function useSessionBinding(): SessionBinding | null {
+  const session = process.env.OUTPOST_SESSION_ID
+  const driver = process.env.OUTPOST_DRIVER
   const directory = process.env.OUTPOST_STATE_DIRECTORY
-  if (directory?.startsWith('/')) state.directory = directory
+  if (session === undefined && driver === undefined && directory === undefined) return null
+  if (
+    !session ||
+    !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(session) ||
+    (driver !== 'terminal' && driver !== 'chat') ||
+    !directory?.startsWith('/')
+  )
+    throw new Error('Run this command inside an Outpost session.')
+  state.directory = directory
+  return { session, driver }
 }
 export const statePath = (...parts: string[]) => join(state.directory, ...parts)
 
@@ -35,7 +49,6 @@ export function enterState() {
   process.chdir(state.directory)
 }
 
-/** Replace `path` in one rename, so readers see the old or the new file. */
 /** How to address a Unix socket below the state directory. Socket paths are
  * limited to about 100 bytes, so a long one is given relative to the working
  * directory, which for Outpost's processes is the state directory. */
@@ -47,6 +60,7 @@ export function socketAddress(...parts: string[]) {
   throw new Error(`The Outpost state directory's path is too long for its sockets: ${absolute}`)
 }
 
+/** Replace `path` in one rename, so readers see the old or the new file. */
 export function writeFile(path: string, data: string | Uint8Array, mode = 0o600) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
   const temporary = join(dirname(path), `.${randomUUID()}.tmp`)

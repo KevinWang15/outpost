@@ -96,8 +96,9 @@ design](docs/V3.md) and the [setup and cleanup procedures](README.md#machine-set
   the node with `ssh -T`. The machine opens no connection back to Outpost, including
   after a failed SSH attempt.
 - **Run setup on the machine.** An operator runs the one-time command to permit persistent
-  outbound access to the chosen Outpost server. The installer exchanges a short-lived,
-  single-use code bound to the owner and machine for a separate machine credential.
+  outbound access to the chosen Outpost server. The service saves a random credential
+  locally before redeeming the owner’s short-lived code. The server authorizes that
+  credential for one machine. If the reply is lost, the same installation can retry.
   The authenticated, encrypted connection authorizes only that machine’s Outpost operations.
   Revocation closes the active connection and rejects future use of the credential.
 - **Ownership and transfer.** Each remote machine has one server, workspace owner,

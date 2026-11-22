@@ -6,6 +6,7 @@ import type * as schemas from './schemas'
 // Inputs and stored records are derived from their validation schemas.
 export type ExecutionEnvironment = Static<typeof schemas.environment>
 export type TargetInput = Static<typeof schemas.targetInput>
+export type OutboundEnrollmentInput = Static<typeof schemas.outboundEnrollment>
 export type TargetUpdate = Static<typeof schemas.targetUpdate>
 export type Target = Static<typeof schemas.targetRecord>
 export const machineSetupLabels = {

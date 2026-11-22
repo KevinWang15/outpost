@@ -1,4 +1,4 @@
-import { desktopConnectUrl } from '../../shared/desktopAuth'
+import { desktopEntryUrl } from '../../shared/desktopAuth'
 import { pagePaths } from '../../shared/pages'
 
 const desktopReleases = 'https://github.com/KevinWang15/outpost/releases'
@@ -23,7 +23,7 @@ export default function DesktopDownloadPage() {
       >
         {macInstaller ? 'Browse published releases' : 'Download for macOS or Windows'}
       </a>
-      <a className="button" href={desktopConnectUrl(window.location.origin)}>
+      <a className="button" href={desktopEntryUrl({ server: window.location.origin })}>
         Connect the installed app to this server
       </a>
       <ol>

@@ -1,37 +1,61 @@
 import { appendFile, chmod, mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Channel, ChannelMessage, Delivery, Schedule } from '../../shared/chatApi'
+import { Ajv } from 'ajv'
+import Type, { type Static } from 'typebox'
+import {
+  channelMessage,
+  channelRecord,
+  deliveryRecord,
+  scheduleRecord,
+  type ChannelMessage,
+} from '../../shared/chatApi'
 import { AppError } from '../errors'
 import { writeJsonFile } from '../../shared/node/jsonFile'
+import { readStateFile } from '../stateFile'
 
-interface ChannelsFile {
-  version: 1
-  channels: Channel[]
-  /** Last read message time per channel. */
-  reads: Record<string, string>
-  /** Per channel and member (`target/session`): the last message it received. */
-  cursors: Record<string, Record<string, string>>
+const strict = { additionalProperties: false } as const
+const version = Type.Literal(1)
+const strings = Type.Record(Type.String(), Type.String())
+const channelsFile = Type.Object(
+  {
+    version,
+    channels: Type.Array(channelRecord),
+    reads: strings,
+    /** Per channel and member (`target/session`): the last message it received. */
+    cursors: Type.Record(Type.String(), strings),
+  },
+  strict,
+)
+const deliveriesFile = Type.Object({ version, deliveries: Type.Array(deliveryRecord) }, strict)
+const schedulesFile = Type.Object({ version, schedules: Type.Array(scheduleRecord), fired: strings }, strict)
+const threadsFile = Type.Object(
+  {
+    version,
+    threads: Type.Record(
+      Type.String(),
+      Type.Object(
+        {
+          hops: Type.Integer({ minimum: 0 }),
+          at: Type.String(),
+        },
+        strict,
+      ),
+    ),
+  },
+  strict,
+)
+const ajv = new Ajv()
+const validate = <S extends Type.TSchema>(schema: S) => ajv.compile<Static<S>>(schema)
+const valid = {
+  channels: validate(channelsFile),
+  deliveries: validate(deliveriesFile),
+  schedules: validate(schedulesFile),
+  threads: validate(threadsFile),
 }
-interface DeliveriesFile {
-  version: 1
-  deliveries: Delivery[]
-}
-interface SchedulesFile {
-  version: 1
-  schedules: Schedule[]
-  /** The minute each schedule last fired, so one minute fires once. */
-  fired: Record<string, string>
-}
-interface ThreadsFile {
-  version: 1
-  /** Session-to-session threads: hops so far and when they began. */
-  threads: Record<string, { hops: number; at: string }>
-}
+const validMessage = validate(channelMessage)
 
 const recent = 500
 const keep = { deliveries: 300, threads: 500 }
-const record = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 /** One owner's chat state, in `<workspace>/chat`. Channel messages are
  * append-only JSONL; other files are replaced atomically. The Outpost server is
@@ -39,10 +63,10 @@ const record = (value: unknown): value is Record<string, unknown> =>
 export class ChatStore {
   private queue: Promise<unknown> = Promise.resolve()
   private loaded: Promise<void> | null = null
-  channels!: ChannelsFile
-  deliveries!: DeliveriesFile
-  schedules!: SchedulesFile
-  threads!: ThreadsFile
+  channels!: Static<typeof channelsFile>
+  deliveries!: Static<typeof deliveriesFile>
+  schedules!: Static<typeof schedulesFile>
+  threads!: Static<typeof threadsFile>
   private messages = new Map<string, ChannelMessage[]>()
   private complete = new Set<string>()
 
@@ -50,45 +74,28 @@ export class ChatStore {
 
   load() {
     this.loaded ??= (async () => {
-      this.channels = await this.read(
-        'channels.json',
+      this.channels = await readStateFile(
+        join(this.directory, 'channels.json'),
         { version: 1, channels: [], reads: {}, cursors: {} },
-        data => Array.isArray(data.channels) && record(data.reads) && record(data.cursors),
+        valid.channels,
       )
-      this.deliveries = await this.read('deliveries.json', { version: 1, deliveries: [] }, data =>
-        Array.isArray(data.deliveries),
+      this.deliveries = await readStateFile(
+        join(this.directory, 'deliveries.json'),
+        { version: 1, deliveries: [] },
+        valid.deliveries,
       )
-      this.schedules = await this.read(
-        'schedules.json',
+      this.schedules = await readStateFile(
+        join(this.directory, 'schedules.json'),
         { version: 1, schedules: [], fired: {} },
-        data => Array.isArray(data.schedules) && record(data.fired),
+        valid.schedules,
       )
-      this.threads = await this.read('threads.json', { version: 1, threads: {} }, data => record(data.threads))
+      this.threads = await readStateFile(
+        join(this.directory, 'threads.json'),
+        { version: 1, threads: {} },
+        valid.threads,
+      )
     })()
     return this.loaded
-  }
-
-  private async read<T extends { version: 1 }>(
-    name: string,
-    empty: T,
-    valid: (data: Record<string, unknown>) => boolean,
-  ) {
-    let raw: string
-    try {
-      raw = await readFile(join(this.directory, name), 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return empty
-      throw error
-    }
-    let data: unknown
-    try {
-      data = JSON.parse(raw)
-    } catch {
-      data = null
-    }
-    if (!record(data) || data.version !== 1 || !valid(data))
-      throw new AppError(`Invalid chat/${name}. Expected the current schema; no data was modified.`, 409)
-    return data as unknown as T
   }
 
   /** Serialize changes; `files` names what to persist afterwards. */
@@ -96,6 +103,13 @@ export class ChatStore {
     const work = this.queue.then(async () => {
       await this.load()
       const result = await action()
+      for (const file of files) {
+        if (!valid[file](this[file])) {
+          this.loaded = null
+          await this.load()
+          throw new AppError(`Cannot save invalid chat/${file}.json.`, 409)
+        }
+      }
       for (const file of files) await this.save(file)
       return result
     })
@@ -140,14 +154,19 @@ export class ChatStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
+    if (!raw) return []
+    if (!raw.endsWith('\n')) throw new AppError('The channel message log has an incomplete final record.', 409)
     const messages: ChannelMessage[] = []
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue
+    for (const line of raw.slice(0, -1).split('\n')) {
+      let message: unknown
       try {
-        messages.push(JSON.parse(line))
+        message = JSON.parse(line)
       } catch {
-        // A torn final line from a crash is skipped; earlier lines are intact.
+        /* An invalid line fails the entire read below. */
       }
+      if (!validMessage(message) || message.channelId !== channelId)
+        throw new AppError('Invalid record in the channel message log.', 409)
+      messages.push(message)
     }
     return messages
   }
@@ -181,6 +200,7 @@ export class ChatStore {
 
   /** Append within an existing store change so a roster update and its notice stay ordered. */
   async appendInChange(message: ChannelMessage) {
+    if (!validMessage(message)) throw new AppError('Invalid channel message.', 409)
     await this.prepare()
     await mkdir(join(this.directory, 'messages'), { recursive: true, mode: 0o700 })
     const cached = await this.recent(message.channelId)

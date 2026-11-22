@@ -94,31 +94,17 @@ export function parseDesktopLoginCallback(value: string) {
   return { state: match[1], code: match[2] }
 }
 
-/** Start the normal trust and browser approval flow when only the server is known. */
-export function desktopConnectUrl(origin: string) {
-  const url = new URL('outpost://connect')
-  url.searchParams.set('origin', serverOrigin(origin))
-  return url.href
-}
-export function parseDesktopConnectUrl(value: string) {
-  const url = new URL(value)
-  const origin = url.searchParams.get('origin')
-  if (!origin || desktopConnectUrl(origin) !== value) throw new Error('Invalid Outpost connection link.')
-  return serverOrigin(origin)
-}
-
-/** A website hands off an address and optional session, never a credential. */
-export interface DesktopEntry {
-  server: string
-  accountId: string
-  session?: { targetId: string; sessionId: string }
-}
+/** Session links identify their owner. A public download link only identifies its server. */
+export type DesktopEntry = { server: string } & (
+  | { accountId?: never; session?: never }
+  | { accountId: string; session?: Pick<DesktopSessionReference, 'targetId' | 'sessionId'> }
+)
 export const validDesktopId = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value)
 export function desktopEntryUrl(entry: DesktopEntry): string {
   const url = new URL('outpost://server')
   url.searchParams.set('origin', serverOrigin(entry.server))
-  url.searchParams.set('account', entry.accountId)
+  if (entry.accountId !== undefined) url.searchParams.set('account', entry.accountId)
   if (entry.session) {
     url.searchParams.set('target', entry.session.targetId)
     url.searchParams.set('session', entry.session.sessionId)
@@ -144,12 +130,15 @@ export function parseDesktopEntry(value: string): DesktopEntry {
     [...query.keys()].some(
       key => !['origin', 'account', 'target', 'session'].includes(key) || query.getAll(key).length !== 1,
     ) ||
-    !validDesktopId(accountId) ||
-    ((targetId !== null || sessionId !== null) && (!validDesktopId(targetId) || !validDesktopId(sessionId)))
+    (accountId !== null && !validDesktopId(accountId)) ||
+    ((targetId !== null || sessionId !== null) &&
+      (!accountId || !validDesktopId(targetId) || !validDesktopId(sessionId)))
   )
     throw new Error('Invalid Outpost app link.')
+  const server = serverOrigin(query.get('origin') ?? '')
+  if (!accountId) return { server }
   return {
-    server: serverOrigin(query.get('origin') ?? ''),
+    server,
     accountId,
     ...(targetId && sessionId ? { session: { targetId, sessionId } } : {}),
   }

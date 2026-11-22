@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AccountUser } from '../../shared/auth'
-import type { TargetInput } from '../../shared/model'
 import { isLoopbackAddress } from '../../shared/loopback'
 import type { Caller, Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
@@ -144,7 +143,12 @@ export class HostedDeployment implements Deployment {
   workspace(owner: Owner) {
     let workspace = this.workspaces.get(owner.userId)
     if (!workspace) {
-      workspace = new Workspace(this.keys.userDirectory(owner.userId))
+      workspace = new Workspace(this.keys.userDirectory(owner.userId), target => {
+        if (target.kind === 'local')
+          throw new AppError('Hosted accounts cannot run sessions on the Outpost server itself.', 400)
+        if (target.kind === 'ssh' && target.identityFile)
+          throw new AppError('Hosted workspaces use your account SSH key.', 400)
+      })
       this.workspaces.set(owner.userId, workspace)
     }
     return workspace
@@ -157,12 +161,6 @@ export class HostedDeployment implements Deployment {
   }
   origin() {
     return this.publicUrl.origin
-  }
-  validateTarget(input: TargetInput) {
-    if (input.kind === 'outbound') return
-    if (input.kind !== 'ssh')
-      throw new AppError('Hosted accounts cannot run sessions on the Outpost server itself.', 400)
-    if (input.identityFile) throw new AppError('Hosted workspaces use your account SSH key.', 400)
   }
 
   private cookie(reply: FastifyReply, user: AccountUser) {

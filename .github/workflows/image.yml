@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.ref == 'refs/heads/v3'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -23,21 +24,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and publish main image
-        if: github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ghcr.io/kevinwang15/outpost:${{ github.sha }}
-            ghcr.io/kevinwang15/outpost:latest
-          labels: org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
       - name: Build and publish v3 image
-        if: github.ref == 'refs/heads/v3'
         uses: docker/build-push-action@v6
         with:
           context: .

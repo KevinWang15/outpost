@@ -21,7 +21,6 @@ import { CheckpointReader } from '../../shared/terminalCheckpoint'
 import { terminalService, terminalSize } from '../../shared/terminalService'
 import {
   desktopSessionId,
-  parseDesktopConnectUrl,
   parseDesktopEntry,
   type DesktopLaunch,
   type DesktopSessionChoice,
@@ -243,7 +242,11 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
   const key = desktopSessionId(launch)
   for (const [pane, existing] of panes)
     if (existing.key === key) {
-      await existing.socket.activate(launch.token)
+      if (existing.launch.loginId === launch.loginId) await existing.socket.activate(launch.token)
+      else {
+        existing.launch = launch
+        existing.socket.reconnect(launch.token)
+      }
       emit('select', { pane })
       return
     }
@@ -355,17 +358,15 @@ async function handle(c: Cmd) {
       prompts.delete(c.id)
       return
     case 'link':
-      if (c.value.startsWith('outpost://connect?')) {
-        await accounts.login(parseDesktopConnectUrl(c.value))
-      } else if (c.value.startsWith('outpost://login/')) {
+      if (c.value.startsWith('outpost://login/')) {
         for (const ref of (await accounts.complete(c.value)) ?? []) await attach(await accounts.launch(ref), c.window)
       } else {
-        const l = await accounts.connect(parseDesktopEntry(c.value))
-        if (l) await attach(l, c.window)
+        const launch = await accounts.connect(parseDesktopEntry(c.value))
+        if (launch) await attach(launch, c.window)
       }
       return refresh()
     case 'login':
-      await accounts.login(c.origin)
+      await accounts.connect({ server: c.origin })
       return refresh()
     case 'cancel':
       accounts.cancel(c.origin)

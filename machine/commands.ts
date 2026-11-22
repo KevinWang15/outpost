@@ -1,16 +1,9 @@
 // Commands the coding tool runs inside a session. Each reads the launch's
 // binding from its environment; none can name another session.
-import { harnessIds } from '../shared/harnesses'
 import { publish } from './files'
 import { request } from './drivers'
 import { chatSocket, terminalSocket } from './launch'
-
-function binding() {
-  const session = process.env.OUTPOST_SESSION_ID
-  const driver = process.env.OUTPOST_DRIVER
-  if (!session || !/^[0-9a-f-]{36}$/.test(session) || (driver !== 'terminal' && driver !== 'chat')) return null
-  return { session, driver } as const
-}
+import type { SessionBinding } from './state'
 
 async function input(limit: number) {
   const chunks: Buffer[] = []
@@ -25,44 +18,36 @@ async function input(limit: number) {
 
 /** `outpost-terminal hook`: a native lifecycle hook. It must never block or
  * fail the tool's action, and passes on only what activity tracking reads. */
-export async function hook() {
-  const bound = binding()
-  if (!bound || bound.driver !== 'terminal') return
-  try {
-    const raw = await input(16 * 1024 * 1024)
-    if (!raw) return
-    const payload = JSON.parse(raw.toString('utf8'))
-    const kept = Object.fromEntries(
-      [
-        'session_id',
-        'hook_event_name',
-        'agent_id',
-        'isSidechain',
-        'source',
-        'turn_id',
-        'notification_type',
-        'is_interrupt',
-        'conversationId',
-        'hookEventName',
-        'terminationReason',
-      ]
-        .filter(key => key in payload)
-        .map(key => [key, payload[key]]),
-    )
-    if ('lastUserInput' in payload)
-      kept.hasUserInput = typeof payload.lastUserInput === 'string' && payload.lastUserInput.length > 0
-    await request(terminalSocket(bound.session), { type: 'hook', payload: kept }, 2000)
-  } catch {
-    /* Observation failures surface in Outpost, never in the tool. */
-  }
+export async function hook(session: string) {
+  const raw = await input(16 * 1024 * 1024)
+  if (!raw) return
+  const payload = JSON.parse(raw.toString('utf8'))
+  const kept = Object.fromEntries(
+    [
+      'session_id',
+      'hook_event_name',
+      'agent_id',
+      'isSidechain',
+      'source',
+      'turn_id',
+      'notification_type',
+      'is_interrupt',
+      'conversationId',
+      'hookEventName',
+      'terminationReason',
+    ]
+      .filter(key => key in payload)
+      .map(key => [key, payload[key]]),
+  )
+  if ('lastUserInput' in payload)
+    kept.hasUserInput = typeof payload.lastUserInput === 'string' && payload.lastUserInput.length > 0
+  await request(terminalSocket(session), { type: 'hook', payload: kept }, 2000)
 }
 
-async function signal(type: string, payload: unknown) {
-  const bound = binding()
-  if (!bound) throw new Error('Run this inside an Outpost session.')
+async function signal(session: string, type: string, payload: unknown) {
   if (Buffer.byteLength(JSON.stringify(payload)) > 32 * 1024) throw new Error('Signals must fit within 32 KiB.')
   const result = await request<{ ok: boolean; message?: string }>(
-    terminalSocket(bound.session),
+    terminalSocket(session),
     { type: 'signal', signal: { type, payload } },
     15_000,
   )
@@ -71,7 +56,7 @@ async function signal(type: string, payload: unknown) {
 }
 
 /** Tell the session's driver about a stored file, as a hint to refresh. */
-export async function filesChanged(session: string, driver: 'terminal' | 'chat', file: unknown) {
+export async function filesChanged(session: string, driver: SessionBinding['driver'], file: unknown) {
   await request(
     driver === 'chat' ? chatSocket(session) : terminalSocket(session),
     driver === 'chat' ? { type: 'file', file } : { type: 'files' },
@@ -79,23 +64,17 @@ export async function filesChanged(session: string, driver: 'terminal' | 'chat',
   ).catch(() => {})
 }
 
-export async function command(name: string, args: string[]) {
+export async function command(name: 'open' | 'signal' | 'publish', args: string[], binding: SessionBinding) {
   if (name === 'open') {
     if (args.length !== 1) throw new Error('Usage: outpost open URL')
-    return signal('browser.open', { url: args[0] })
+    return signal(binding.session, 'browser.open', { url: args[0] })
   }
   if (name === 'signal') {
     if (args.length !== 2) throw new Error('Usage: outpost signal TYPE JSON')
-    return signal(args[0], JSON.parse(args[1]))
+    return signal(binding.session, args[0], JSON.parse(args[1]))
   }
-  if (name === 'publish') {
-    const bound = binding()
-    if (!bound) throw new Error('Run this inside an Outpost session.')
-    if (args.length < 1 || args.length > 2) throw new Error('Usage: outpost publish FILE [NAME]')
-    const file = await publish(bound.session, args[0], args[1])
-    await filesChanged(bound.session, bound.driver, file)
-    console.log(JSON.stringify({ stored: true, file }))
-    return
-  }
-  throw new Error(`Unknown command. Coding tools: ${harnessIds.join(', ')}`)
+  if (args.length < 1 || args.length > 2) throw new Error('Usage: outpost publish FILE [NAME]')
+  const file = await publish(binding.session, args[0], args[1])
+  await filesChanged(binding.session, binding.driver, file)
+  console.log(JSON.stringify({ stored: true, file }))
 }

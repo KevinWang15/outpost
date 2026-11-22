@@ -7,6 +7,10 @@
 import type { ActivityState } from './activity'
 
 export const machineProtocol = 6
+export interface OutboundEnrollmentReply {
+  targetId: string
+  socket: string
+}
 /** Printed by the node before its first frame; login shells may print before it. */
 export const nodeMagic = '\0OUTPOST-NODE-1\0'
 /** Bytes a stream may send before the receiver grants more. */

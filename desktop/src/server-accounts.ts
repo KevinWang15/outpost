@@ -138,13 +138,13 @@ export class ServerAccounts {
       throw error
     }
   }
-  /** Both user entry points reuse a current account or start the same browser approval. */
+  /** Reuse an approved account for this server or request approval in the browser. */
   async connect(intent: DesktopEntry) {
     const origin = serverOrigin(intent.server)
     await this.signingOut.get(origin)
     this.lifetime.signal.throwIfAborted()
     const entry = this.store.get(origin)
-    if (entry?.account.id === intent.accountId && this.valid(entry)) {
+    if (entry && (!intent.accountId || entry.account.id === intent.accountId) && this.valid(entry)) {
       try {
         if (intent.session) return await this.launch({ ...intent.session, server: origin, accountId: intent.accountId })
         await this.check(entry)
@@ -153,31 +153,14 @@ export class ServerAccounts {
         if (!(error instanceof ServerApiError && error.status === 401)) throw error
       }
     }
-    await this.startSignIn(origin, intent)
-    return null
-  }
-  async login(value: string) {
-    const origin = serverOrigin(value)
-    await this.signingOut.get(origin)
-    this.lifetime.signal.throwIfAborted()
-    const entry = this.store.get(origin)
-    if (entry && this.valid(entry)) {
-      try {
-        await this.check(entry)
-        return
-      } catch (error) {
-        if (!(error instanceof ServerApiError && error.status === 401)) throw error
-      }
+    if (await this.trust.ensure(origin)) {
+      this.lifetime.signal.throwIfAborted()
+      // Sign-out can start while a native trust dialog is open.
+      await this.signingOut.get(origin)
+      this.lifetime.signal.throwIfAborted()
+      if (this.trust.has(origin)) await this.signIn.start({ ...intent, server: origin })
     }
-    await this.startSignIn(origin)
-  }
-  private async startSignIn(origin: string, intent?: DesktopEntry) {
-    if (!(await this.trust.ensure(origin))) return
-    this.lifetime.signal.throwIfAborted()
-    // Sign-out can start while a native trust dialog is open.
-    await this.signingOut.get(origin)
-    this.lifetime.signal.throwIfAborted()
-    if (this.trust.has(origin)) await this.signIn.start(origin, intent)
+    return null
   }
   cancel(value: string) {
     this.signIn.cancel(serverOrigin(value))

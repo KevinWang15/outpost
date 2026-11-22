@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -9,6 +9,30 @@ import { createApp } from '../../backend/app'
 import { HostedDeployment } from '../../backend/hosted/deployment'
 import { TerminalClient } from '../integration/helpers'
 import { FakeSessions, fakeSoftware } from './fakes'
+
+test('hosted workspaces apply the same deployment policy to persisted machines', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-hosted-storage-'))
+  const deployment = await HostedDeployment.open({ directory, publicUrl: 'http://127.0.0.1:5173', mailer: null })
+  t.after(async () => {
+    deployment.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const user = deployment.store.create('user@example.com', 'User', 'fixture')
+  const workspace = deployment.workspace({ userId: user.id, loginId: 'background' })
+  await mkdir(workspace.directory, { recursive: true })
+  const path = join(workspace.directory, 'workspace.json')
+  const metadata = { id: 'machine', name: 'Machine', tools: ['codex'], createdAt: new Date().toISOString() }
+  for (const settings of [
+    { kind: 'local' },
+    { kind: 'ssh', host: 'work.test', user: 'dev', identityFile: '~/.ssh/key' },
+  ]) {
+    const stored = JSON.stringify({ version: 3, targets: [{ ...metadata, ...settings }] })
+    await writeFile(path, stored)
+    await assert.rejects(workspace.get('machine'), /Hosted/)
+    await assert.rejects(workspace.edit('machine', { name: 'Edited' }), /Hosted/)
+    assert.equal(await readFile(path, 'utf8'), stored)
+  }
+})
 
 test(
   'hosted accounts: verified sign-in, isolated workspaces, and sign-out revokes terminals',

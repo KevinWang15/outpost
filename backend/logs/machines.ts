@@ -2,20 +2,22 @@
 // machine (machine/events.ts), read by cursor whenever the machine's node says
 // there is more and every minute, so a machine that was away catches up. It
 // also notices when a machine stops answering, and when it is back.
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { Ajv } from 'ajv'
+import Type, { type Static } from 'typebox'
 import type { MachineEvent, MachineEvents } from '../../shared/machine'
 import type { Session } from '../../shared/model'
 import { writeJsonFile } from '../../shared/node/jsonFile'
 import type { Deployment, Owner } from '../deployment'
 import type { TargetContext } from '../sessions'
-import type { ActivityLog, LogInput } from './activity'
+import { readStateFile } from '../stateFile'
+import type { LogInput } from './activity'
 
 interface Dependencies {
   deployment: Deployment
   resolve(owner: Owner, targetId: string): Promise<TargetContext>
   list(context: TargetContext): Promise<Session[]>
-  log: ActivityLog
+  log: { record(owner: Owner, input: LogInput): void }
 }
 interface Machine {
   /** Where reading continues; null until first read, which starts at the end. */
@@ -24,6 +26,18 @@ interface Machine {
   reachable: boolean | null
   reading: Promise<void> | null
   again: boolean
+}
+const cursorFile = Type.Object(
+  {
+    version: Type.Literal(1),
+    cursors: Type.Record(Type.String(), Type.String({ pattern: '^\\d+:\\d+$' })),
+  },
+  { additionalProperties: false },
+)
+const validFile = new Ajv().compile<Static<typeof cursorFile>>(cursorFile)
+interface AccountCursors {
+  file: Static<typeof cursorFile>
+  saving: Promise<void>
 }
 
 const states: Record<string, (detail: string | null) => string> = {
@@ -38,7 +52,7 @@ const place = (driver: 'terminal' | 'chat') => (driver === 'terminal' ? 'in a te
 
 export class MachineEventLog {
   private machines = new Map<string, Machine>()
-  private loaded = new Map<string, Promise<Record<string, string>>>()
+  private loaded = new Map<string, Promise<AccountCursors>>()
   private timer: NodeJS.Timeout | null = null
 
   constructor(private dependencies: Dependencies) {}
@@ -68,10 +82,11 @@ export class MachineEventLog {
   private cursors(owner: Owner) {
     let cursors = this.loaded.get(owner.userId)
     if (!cursors) {
-      cursors = readFile(this.cursorsPath(owner), 'utf8').then(
-        text => (JSON.parse(text) as { cursors: Record<string, string> }).cursors,
-        () => ({}),
-      )
+      cursors = readStateFile(this.cursorsPath(owner), { version: 1, cursors: {} }, validFile).then(file => ({
+        file,
+        saving: Promise.resolve(),
+      }))
+      cursors.catch(() => this.loaded.delete(owner.userId))
       this.loaded.set(owner.userId, cursors)
     }
     return cursors
@@ -113,8 +128,22 @@ export class MachineEventLog {
       return // Removed meanwhile.
     }
     const target = { id: context.target.id, name: context.target.name }
-    const cursors = await this.cursors(owner)
-    machine.cursor ??= cursors[targetId] ?? null
+    let cursors: AccountCursors
+    const recordStorageError = (action: 'read' | 'save', error: unknown) =>
+      this.dependencies.log.record(owner, {
+        level: 'error',
+        kind: 'machine',
+        type: 'event-cursor-error',
+        machine: target,
+        message: `Could not ${action} the activity log cursor for ${target.name}: ${(error as Error).message}`,
+      })
+    try {
+      cursors = await this.cursors(owner)
+    } catch (error) {
+      recordStorageError('read', error)
+      return
+    }
+    machine.cursor ??= cursors.file.cursors[targetId] ?? null
     try {
       for (let more = true; more;) {
         const page: MachineEvents = await context.machine.call<MachineEvents>('events', { after: machine.cursor })
@@ -122,8 +151,6 @@ export class MachineEventLog {
         machine.cursor = page.cursor
         more = page.more
       }
-      cursors[targetId] = machine.cursor!
-      await writeJsonFile(this.cursorsPath(owner), { version: 1, cursors })
       if (machine.reachable === false)
         this.dependencies.log.record(owner, {
           kind: 'machine',
@@ -143,6 +170,14 @@ export class MachineEventLog {
           details: { error: (error as Error).message },
         })
       machine.reachable = false
+      return
+    }
+    cursors.file.cursors[targetId] = machine.cursor!
+    cursors.saving = cursors.saving.catch(() => {}).then(() => writeJsonFile(this.cursorsPath(owner), cursors.file))
+    try {
+      await cursors.saving
+    } catch (error) {
+      recordStorageError('save', error)
     }
   }
 

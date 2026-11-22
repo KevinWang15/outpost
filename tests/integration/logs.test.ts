@@ -1,6 +1,6 @@
 // The activity log end to end: what a machine's drivers record reaches the
 // account's log through the node, with Outpost's own events around it.
-import { managedSocket } from '../../backend/machines'
+import { machineSocket } from '../../backend/machines'
 import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -54,7 +54,7 @@ test(
       { kind: 'local', name: 'Workstation', tools: ['claude'] },
       201,
     )
-    provisionMachine(home, managedSocket(deployment.secret, deployment.owner(), target.id))
+    provisionMachine(home, machineSocket(deployment.secret, deployment.owner(), target.id))
     await request('GET', `/targets/${target.id}/software`)
     const session = await request<Session>(
       'POST',

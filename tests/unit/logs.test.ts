@@ -1,6 +1,6 @@
 // The activity log over HTTP: what is recorded, who may read it, and the webhook routes.
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
@@ -11,7 +11,53 @@ import { createApp } from '../../backend/app'
 import type { Deployment } from '../../backend/deployment'
 import { LocalDeployment } from '../../backend/deployment'
 import { HostedDeployment } from '../../backend/hosted/deployment'
+import { MachineEventLog } from '../../backend/logs/machines'
+import type { LogInput } from '../../backend/logs/activity'
+import type { TargetContext } from '../../backend/sessions'
 import { FakeSessions, fakeSoftware } from './fakes'
+
+test('activity polling preserves incompatible cursor files and resumes when the stored state is repaired', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-cursors-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const deployment = await LocalDeployment.open(directory)
+  const recorded: LogInput[] = []
+  const positions: (string | null)[] = []
+  const log = new MachineEventLog({
+    deployment,
+    resolve: async () =>
+      ({
+        target: { id: 'dev', name: 'Dev' },
+        machine: {
+          call: async (_method: string, { after }: { after: string | null }) => {
+            positions.push(after)
+            return { events: [], cursor: '4:10', more: false }
+          },
+        },
+      }) as unknown as TargetContext,
+    list: async () => [],
+    log: {
+      record: (_owner, input) => {
+        recorded.push(input)
+      },
+    },
+  })
+  const path = join(directory, 'log-cursors.json')
+  for (const file of [
+    { version: 2, cursors: {} },
+    { version: 1, cursors: { dev: 'invalid' } },
+  ]) {
+    const raw = JSON.stringify(file)
+    await writeFile(path, raw)
+    await log.read(deployment.owner(), 'dev')
+    assert.equal(recorded.at(-1)?.type, 'event-cursor-error')
+    assert.equal(await readFile(path, 'utf8'), raw)
+  }
+  assert.deepEqual(positions, [])
+  await writeFile(path, JSON.stringify({ version: 1, cursors: { dev: '4:0' } }))
+  await log.read(deployment.owner(), 'dev')
+  assert.deepEqual(positions, ['4:0'])
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { version: 1, cursors: { dev: '4:10' } })
+})
 
 async function start(t: TestContext, deployment: (directory: string) => Promise<Deployment>) {
   const directory = await mkdtemp(join(tmpdir(), 'outpost-logs-'))

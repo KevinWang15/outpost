@@ -28,10 +28,9 @@ terminals in the browser and Outpost Desktop. DeepSeek Harness uses Chat.
 | Web terminal | Any current browser, including on phones. |
 | Outpost Desktop | macOS (Apple silicon or Intel) or Windows x64. Native GPUI terminal with local shells and managed Outpost sessions. |
 
-For corporate machines that cannot open an outbound Outpost connection, choose
-**Install the connector → Direct only** when adding the machine. The client connects to its HTTPS
-endpoint. See the [V3 glossary](docs/ARCHITECTURE.md#v3-terminology), [installation, ownership and cleanup](docs/ARCHITECTURE.md#installing-and-removing-a-machine)
-and [direct-only setup](docs/ARCHITECTURE.md#direct-only-machines).
+The accepted design gives remote machines two enrollment methods, SSH and a machine-initiated outbound connection. See the [v3 connectivity design](docs/V3.md).
+
+The setup instructions below describe the current build. It also offers **Install the connector → Direct only** for a machine with a client-reachable HTTPS endpoint. See the [V3 glossary](docs/ARCHITECTURE.md#v3-terminology), [installation, ownership and cleanup](docs/ARCHITECTURE.md#installing-and-removing-a-machine) and [direct-only setup](docs/ARCHITECTURE.md#direct-only-machines).
 
 ## Run the local tool
 
@@ -573,7 +572,7 @@ instance per data directory.
 The **terminal client** (Outpost Desktop or the web terminal) attaches to a **session** on a **machine**. The **Outpost machine service** (`outpost-terminal`) runs the coding agent there. The machine enrolls with one Outpost server. Terminal input, output, published files and image paste use the
 selected attachment.
 
-| Machine configuration | How the session is reached |
+| Machine configuration in the current build | How the session is reached |
 | --- | --- |
 | Direct only | The client obtains authorization from Outpost and connects to the machine’s HTTPS endpoint. The machine verifies the grant locally. |
 | Relay enabled | The machine maintains an outbound link to Outpost. The client tries the optional saved HTTPS endpoint first, even if the relay link is down. A registered relay handles fallback. |

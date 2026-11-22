@@ -4,6 +4,8 @@ A machine owns its coding sessions. The web home (`/`) lists machines and the se
 on the selected machine. Terminal clients attach to those sessions. On server-connected
 machines, Chat (`/chat`) can drive a session through the coding tool’s agent protocol.
 
+This reference describes the current implementation. The agreed connection methods, enrollment flows and acceptance criteria for remote machines are in the [v3 connectivity design](V3.md).
+
 ## V3 terminology
 
 | Term | Meaning |

@@ -214,7 +214,7 @@ fn icon(
         .items_center()
         .rounded(px(5.))
         .cursor_pointer()
-        .hover(|s| s.bg(rgb(0x222222)))
+        .hover(|s| s.bg(rgba(0xffffff18)))
         .child(lucide_icon(symbol).size(px(17.)))
         .on_click(cx.listener(move |s, _, w, cx| action(s, w, cx)))
 }
@@ -340,17 +340,16 @@ impl Workspace {
         cx.observe_window_activation(w, |s, w, cx| {
             if !w.is_window_active() {
                 s.set_new_tab_menu(false, cx);
-                if s.pane_menu.take().is_some() || s.context_menu.take().is_some() {
-                    cx.notify();
-                }
+                s.pane_menu = None;
+                s.context_menu = None;
                 s.cancel_drag(cx);
-            }
-            if w.is_window_active() {
+            } else {
                 s.active_order = next_id();
                 for pane in s.panes.values() {
                     pane.read(cx).command("resume", json!({}))
                 }
             }
+            cx.notify();
         })
         .detach();
         let weak = cx.weak_entity();
@@ -1526,35 +1525,46 @@ impl Workspace {
         }
     }
     fn chrome(&self, w: &Window, cx: &mut Context<Self>) -> Div {
+        let slots = self.strip_slots();
+        let active_tab_idx = (self.page == Page::Terminal).then_some(self.current);
+        let hairline = rgba(0xffffff1a);
         let mut strip = row()
-            .gap(px(3.))
+            .h_full()
+            .items_end()
+            .gap(px(2.))
             .id("tabs")
             .track_scroll(&self.drag.strip)
             .overflow_x_scroll()
             .max_w(relative(0.76));
-        for slot in self.strip_slots() {
+        for (pos, &slot) in slots.iter().enumerate() {
             let Some(i) = slot else {
                 let preview = self.drag.preview.as_ref().expect("preview slot");
                 strip = strip.child(
                     row()
-                        .mt(px(3.))
-                        .h(px(37.))
+                        .h(px(36.))
                         .min_w(px(130.))
                         .w(px(210.))
                         .max_w(px(240.))
                         .px(px(9.))
                         .items_center()
                         .truncate()
-                        .rounded_t(px(6.))
-                        .bg(rgb(0x242424))
-                        .border_b_2()
-                        .border_color(rgb(0xd4d4d4))
+                        .rounded_t(px(7.))
+                        .bg(rgb(BG))
+                        .border_t_1()
+                        .border_l_1()
+                        .border_r_1()
+                        .border_color(rgba(0xffffff24))
                         .child(preview.label.content()),
                 );
                 continue;
             };
             let tab = &self.tabs[i];
             let id = tab.active;
+            let active = active_tab_idx == Some(i);
+            let next_inactive = slots
+                .get(pos + 1)
+                .and_then(|next| *next)
+                .is_some_and(|next_i| active_tab_idx != Some(next_i));
             let title = if tab.name.is_empty() {
                 self.panes[&id].read(cx).title.clone()
             } else {
@@ -1563,7 +1573,7 @@ impl Workspace {
             let handle = row()
                 .id(("tab-handle", tab.id))
                 .role(gpui::accesskit::Role::Tab)
-                .aria_selected(i == self.current && self.page == Page::Terminal)
+                .aria_selected(active)
                 .focusable()
                 .tab_stop(i == self.current)
                 .on_click(cx.listener(move |s, e: &ClickEvent, w, cx| {
@@ -1609,30 +1619,41 @@ impl Workspace {
             let tab = row()
                 .id(("tab", tab.id))
                 .relative()
-                .mt(px(3.))
-                .h(px(37.))
                 .min_w(px(130.))
                 .w(px(210.))
                 .max_w(px(240.))
-                .border_1()
-                .border_color(gpui::transparent_black())
-                .border_b_2()
                 .pr(px(3.))
                 .gap(px(6.))
-                .rounded_t(px(6.))
                 .cursor_pointer()
-                .when(i == self.current && self.page == Page::Terminal, |e| {
-                    e.bg(rgb(0x161616)).border_color(rgb(0x2a2a2a)).child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .left_0()
-                            .right_0()
-                            .h(px(2.))
-                            .bg(rgb(0xd4d4d4)),
-                    )
+                .when(active, |e| {
+                    e.h(px(36.))
+                        .rounded_t(px(7.))
+                        .bg(rgb(BG))
+                        .border_t_1()
+                        .border_l_1()
+                        .border_r_1()
+                        .border_color(hairline)
+                        .text_color(rgb(TEXT))
+                        .font_weight(FontWeight::MEDIUM)
                 })
-                .hover(|e| e.bg(rgb(0x222222)))
+                .when(!active, |e| {
+                    e.h(px(32.))
+                        .mb(px(2.))
+                        .rounded(px(6.))
+                        .text_color(rgb(0xc8c8c8))
+                        .hover(|s| s.bg(rgba(0xffffff16)).text_color(rgb(TEXT)))
+                        .when(next_inactive, |s| {
+                            s.child(
+                                div()
+                                    .absolute()
+                                    .right_0()
+                                    .top(px(8.))
+                                    .bottom(px(8.))
+                                    .w(px(1.))
+                                    .bg(rgba(0xffffff1a)),
+                            )
+                        })
+                })
                 .child(handle)
                 .child(panes::header_button(
                     ("tab-close", tab.id),
@@ -1654,16 +1675,30 @@ impl Workspace {
                 );
             strip = strip.child(tab)
         }
+        let glass_tint = if w.is_window_active() {
+            rgba(0x111111a8)
+        } else {
+            rgba(0x111111cc)
+        };
         row()
+            .relative()
             .w_full()
             .h(px(40.))
             .flex_none()
             .px(px(8.))
             .when(cfg!(target_os = "macos"), |e| e.pl(px(78.)))
             .gap(px(4.))
-            .bg(rgb(0))
-            .border_b_1()
-            .border_color(rgb(0x1f1f1f))
+            .bg(glass_tint)
+            // Drawn behind the tab strip so the solid active tab seamlessly covers it.
+            .child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(1.))
+                    .bg(hairline),
+            )
             .child(
                 div()
                     .id("home")
@@ -1671,7 +1706,9 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .justify_center()
+                    .rounded(px(5.))
                     .cursor_pointer()
+                    .hover(|s| s.bg(rgba(0xffffff16)))
                     .child(img(self.logo.clone()).size(px(20.)))
                     .on_click(cx.listener(|s, _, w, cx| {
                         s.split_at = None;
@@ -1740,11 +1777,11 @@ impl Workspace {
                         .font_family("Segoe MDL2 Assets")
                         .text_size(px(10.))
                         .hover(move |s| {
-                            s.bg(rgb(if area == WindowControlArea::Close {
-                                0xc42b1c
+                            if area == WindowControlArea::Close {
+                                s.bg(rgb(0xc42b1c))
                             } else {
-                                0x292929
-                            }))
+                                s.bg(rgba(0xffffff18))
+                            }
                         })
                         .child(glyph)
                 };
@@ -2543,7 +2580,6 @@ impl Render for Workspace {
             .child(self.drag_listener(cx))
             .track_focus(&self.focus)
             .size_full()
-            .bg(rgb(BG))
             .text_color(rgb(TEXT))
             .text_size(px(13.))
             .child(self.chrome(w, cx))
@@ -2570,6 +2606,7 @@ impl Render for Workspace {
                     .relative()
                     .flex_1()
                     .overflow_hidden()
+                    .bg(rgb(BG))
                     .child(body)
                     .children(self.picker_overlay(cx)),
             )
@@ -2599,6 +2636,7 @@ impl Render for Workspace {
                     row()
                         .items_end()
                         .p(px(8.))
+                        .bg(rgb(BG))
                         .child(
                             col()
                                 .flex_1()

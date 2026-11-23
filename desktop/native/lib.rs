@@ -72,6 +72,8 @@ fn open_workspace_at(
             appears_transparent: cfg!(any(target_os = "macos", windows)),
             traffic_light_position: cfg!(target_os = "macos").then(|| point(px(14.), px(13.))),
         }),
+        window_background: WindowBackgroundAppearance::Blurred,
+        backdrop_blur_radius: Some(px(22.)),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(480.), px(320.))),
         ..Default::default()

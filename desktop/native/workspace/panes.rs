@@ -32,7 +32,7 @@ pub(super) fn header_button(
         .items_center()
         .rounded(px(3.))
         .cursor_pointer()
-        .hover(|s| s.bg(rgb(0x303030)).text_color(rgb(TEXT)))
+        .hover(|s| s.bg(rgba(0xffffff1c)).text_color(rgb(TEXT)))
         .when(show_hint, |e| {
             e.tooltip(move |w, cx| Tooltip::text(label, w, cx))
         })

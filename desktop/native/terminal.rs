@@ -1,4 +1,5 @@
 use crate::{
+    box_glyphs,
     bridge::Bridge,
     colors, keys,
     pty::{Local, Output},
@@ -738,18 +739,15 @@ struct BgRun {
 }
 impl BgRun {
     fn paint(self, pane: &Pane, grid_origin: Point<Pixels>, w: &mut Window) {
-        let base = grid_origin
-            + point(
-                pane.cell.width * self.col as f32,
-                pane.cell.height * self.line as f32,
-            );
-        w.paint_quad(fill(
-            Bounds::new(
-                base,
-                size(pane.cell.width * self.width as f32, pane.cell.height),
-            ),
-            rgb(self.color),
-        ));
+        let bounds = box_glyphs::snapped_cell_bounds(
+            grid_origin,
+            pane.cell,
+            self.line,
+            self.col,
+            self.width,
+            w.scale_factor(),
+        );
+        w.paint_quad(fill(bounds, rgb(self.color)));
     }
 }
 
@@ -793,6 +791,24 @@ impl GlyphRun {
         ts.shape_line(self.text.clone().into(), font_size, &[run], force_width)
     }
     fn paint(self, pane: &Pane, grid_origin: Point<Pixels>, w: &mut Window, cx: &mut App) {
+        if self.isolated && self.width == 1 {
+            let mut chars = self.text.chars();
+            if let (Some(ch), None) = (chars.next(), chars.next())
+                && box_glyphs::paint(
+                    ch,
+                    grid_origin,
+                    pane.cell,
+                    self.line,
+                    self.col,
+                    self.ink.fg,
+                    self.ink.flags.intersects(Flags::ALL_UNDERLINES),
+                    self.ink.flags.contains(Flags::STRIKEOUT),
+                    w,
+                )
+            {
+                return;
+            }
+        }
         let base = grid_origin
             + point(
                 pane.cell.width * self.col as f32,
@@ -1005,21 +1021,31 @@ impl Pane {
                 } else {
                     1
                 };
-                let cursor_span = self.cell.width * cursor_cells as f32;
+                let cursor_bounds = box_glyphs::snapped_cell_bounds(
+                    grid_origin,
+                    self.cell,
+                    cursor_row,
+                    cursor.column.0,
+                    cursor_cells,
+                    w.scale_factor(),
+                );
                 let overlay = match cursor_shape {
-                    CursorShape::Beam => Some((cursor_origin, size(px(2.), self.cell.height))),
-                    CursorShape::Underline => Some((
-                        cursor_origin + point(px(0.), self.cell.height - px(2.)),
-                        size(cursor_span, px(2.)),
+                    CursorShape::Beam => Some(Bounds::new(
+                        cursor_bounds.origin,
+                        size(px(2.), cursor_bounds.size.height),
                     )),
-                    _ if !focused => Some((
-                        cursor_origin + point(px(0.), self.cell.height - px(1.)),
-                        size(cursor_span, px(1.)),
+                    CursorShape::Underline => Some(Bounds::new(
+                        point(cursor_bounds.left(), cursor_bounds.bottom() - px(2.)),
+                        size(cursor_bounds.size.width, px(2.)),
+                    )),
+                    _ if !focused => Some(Bounds::new(
+                        point(cursor_bounds.left(), cursor_bounds.bottom() - px(1.)),
+                        size(cursor_bounds.size.width, px(1.)),
                     )),
                     _ => None,
                 };
-                if let Some((origin, extent)) = overlay {
-                    w.paint_quad(fill(Bounds::new(origin, extent), rgb(colors::FG)));
+                if let Some(bounds) = overlay {
+                    w.paint_quad(fill(bounds, rgb(colors::FG)));
                 }
             }
             if !self.marked.is_empty() {

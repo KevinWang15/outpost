@@ -1,4 +1,5 @@
 mod agent_mark;
+mod box_glyphs;
 mod bridge;
 mod clipboard_image;
 mod colors;

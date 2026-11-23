@@ -38,7 +38,10 @@ class FakeSocket {
   }
 }
 
-function setup(t: TestContext) {
+function setup(
+  t: TestContext,
+  size: () => { cols: number; rows: number } | undefined = () => ({ cols: 80, rows: 24 }),
+) {
   FakeSocket.instances = []
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
   const originalSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket')
@@ -51,7 +54,7 @@ function setup(t: TestContext) {
   const states: TerminalState[] = []
   const client = new TerminalSocket(
     'ticket',
-    () => ({ cols: 80, rows: 24 }),
+    size,
     {
       begin: () => {},
       output: (_bytes, rendered) => rendered(),
@@ -83,6 +86,29 @@ function setup(t: TestContext) {
 const settle = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve()
 }
+
+test('a connection waits for its first measured grid, including an actual 80 by 24 pane', t => {
+  const viewport: { measured?: { cols: number; rows: number } } = {}
+  const { client } = setup(t, () => viewport.measured)
+  client.resume()
+  assert.equal(FakeSocket.instances.length, 0)
+  viewport.measured = { cols: 80, rows: 24 }
+  client.resize(viewport.measured.cols, viewport.measured.rows)
+  client.resize(viewport.measured.cols, viewport.measured.rows)
+  assert.equal(FakeSocket.instances.length, 1)
+  const { searchParams } = FakeSocket.instances[0].url
+  assert.equal(searchParams.get('cols'), '80')
+  assert.equal(searchParams.get('rows'), '24')
+})
+
+test('closing an unmeasured pane prevents a late measurement from starting a session', t => {
+  const viewport: { measured?: { cols: number; rows: number } } = {}
+  const { client } = setup(t, () => viewport.measured)
+  client.close()
+  viewport.measured = { cols: 110, rows: 38 }
+  client.resize(viewport.measured.cols, viewport.measured.rows)
+  assert.equal(FakeSocket.instances.length, 0)
+})
 
 test('large restoration batches acknowledgements and preserves their exact byte count', t => {
   const { socket } = setup(t)

@@ -78,16 +78,7 @@ try {
     const app = join(staging, 'Outpost')
     await resources(join(app, 'resources'))
     await copy(bin, join(app, 'Outpost.exe'))
-    const ico = Buffer.alloc(22),
-      png = await readFile(join(root, 'public', 'outpost-256.png'))
-    ico.writeUInt16LE(1, 2)
-    ico.writeUInt16LE(1, 4)
-    ico.writeUInt16LE(1, 10)
-    ico.writeUInt16LE(32, 12)
-    ico.writeUInt32LE(png.length, 14)
-    ico.writeUInt32LE(22, 18)
-    const icon = join(staging, 'outpost.ico')
-    await writeFile(icon, Buffer.concat([ico, png]))
+    const icon = join(desktop, 'packaging', 'outpost.ico')
     run(process.env.MAKENSIS || 'makensis', [
       `/DAPP=${app}`,
       `/DICON=${icon}`,

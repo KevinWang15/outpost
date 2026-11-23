@@ -147,7 +147,7 @@ export class TerminalSession {
       this.attachInput()
       this.attachActivity()
       const initial = size()
-      term.resize(initial.cols, initial.rows)
+      if (initial) term.resize(initial.cols, initial.rows)
       this.open()
     } catch (error) {
       this.dispose()

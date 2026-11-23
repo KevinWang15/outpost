@@ -2,6 +2,7 @@ Unicode true
 RequestExecutionLevel user
 Name "Outpost"
 Icon "${ICON}"
+UninstallIcon "${ICON}"
 OutFile "${OUT}"
 InstallDir "$LOCALAPPDATA\Programs\Outpost"
 Page directory
@@ -13,11 +14,13 @@ Section
   File /r "${APP}\*"
   WriteRegStr HKCU "Software\Classes\outpost" "" "URL:Outpost session"
   WriteRegStr HKCU "Software\Classes\outpost" "URL Protocol" ""
+  WriteRegStr HKCU "Software\Classes\outpost\DefaultIcon" "" '"$INSTDIR\Outpost.exe",0'
   WriteRegStr HKCU "Software\Classes\outpost\shell\open\command" "" '"$INSTDIR\Outpost.exe" "%1"'
   CreateShortCut "$SMPROGRAMS\Outpost.lnk" "$INSTDIR\Outpost.exe"
   CreateShortCut "$DESKTOP\Outpost.lnk" "$INSTDIR\Outpost.exe"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Outpost" "DisplayName" "Outpost"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Outpost" "DisplayIcon" '"$INSTDIR\Outpost.exe",0'
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Outpost" "UninstallString" '"$INSTDIR\Uninstall.exe"'
 SectionEnd
 Section "Uninstall"

@@ -13,7 +13,7 @@ export class TerminalGeometry {
   private frame = 0
   private repaint = false
   private disposed = false
-  private last = { cols: 80, rows: 24 }
+  private last?: { cols: number; rows: number }
 
   constructor(
     private terminal: Terminal,

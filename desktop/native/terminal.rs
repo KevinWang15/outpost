@@ -53,17 +53,23 @@ impl EventListener for Events {
 }
 
 enum Transport {
-    Local(Local),
+    Local {
+        profile: LocalProfile,
+        process: LocalProcess,
+    },
     Remote(Bridge, u64),
 }
-#[derive(Clone)]
+enum LocalProcess {
+    WaitingForLayout(Vec<u8>),
+    Running(Local),
+    Failed,
+}
 struct LocalProfile {
     shell: String,
     args: Vec<String>,
     home: std::path::PathBuf,
 }
 pub struct Pane {
-    profile: Option<LocalProfile>,
     term: Term<Events>,
     parser: Processor,
     events: Events,
@@ -88,7 +94,8 @@ pub struct Pane {
     active: bool,
     bounds: Bounds<Pixels>,
     cell: Size<Pixels>,
-    desired: (u16, u16),
+    desired: Option<(u16, u16)>,
+    pub(super) grid_visible: bool,
     dragging: bool,
     marked: String,
 }
@@ -106,46 +113,26 @@ impl Pane {
         font_size: f32,
         w: &mut Window,
         cx: &mut App,
-    ) -> Result<Entity<Self>> {
-        let (local, stream) = Local::open(shell, args, home, 80, 24)?;
+    ) -> Entity<Self> {
         let title = Path::new(shell)
             .file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        Ok(cx.new(|cx| {
-            let mut pane = Self::new(Transport::Local(local), title, font_size, w, cx);
-            pane.profile = Some(LocalProfile {
-                shell: shell.to_owned(),
+        let transport = Transport::Local {
+            profile: LocalProfile {
+                shell: shell.into(),
                 args: args.to_vec(),
-                home: home.to_owned(),
-            });
-            cx.spawn(async move |this, cx| {
-                while let Ok(output) = stream.recv().await {
-                    if this
-                        .update(cx, |s, cx| match output {
-                            Output::Bytes(bytes) => s.feed(&bytes, cx),
-                            Output::Closed(reason) => {
-                                s.status = reason;
-                                cx.emit(PaneChanged);
-                                cx.notify()
-                            }
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            })
-            .detach();
-            pane
-        }))
+                home: home.into(),
+            },
+            process: LocalProcess::WaitingForLayout(Vec::new()),
+        };
+        cx.new(|cx| Self::new(transport, title, font_size, w, cx))
     }
     pub(super) fn restarted_local(&self, w: &mut Window, cx: &mut App) -> Result<Entity<Self>> {
-        let profile = self
-            .profile
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("The local shell profile is unavailable."))?;
+        let Transport::Local { profile, .. } = &self.transport else {
+            anyhow::bail!("The local shell profile is unavailable.");
+        };
         let pane = Self::local(
             &profile.shell,
             &profile.args,
@@ -153,7 +140,7 @@ impl Pane {
             self.font_size,
             w,
             cx,
-        )?;
+        );
         pane.update(cx, |next, _| {
             next.sound = self.sound;
             next.set_scrollback(self.scrollback);
@@ -189,11 +176,10 @@ impl Pane {
         };
         let focus = cx.focus_handle();
         Self {
-            term: Term::new(config, &SizeHint { cols: 80, rows: 24 }, events.clone()),
+            term: Term::new(config, &SizeHint { cols: 2, rows: 2 }, events.clone()),
             parser: Default::default(),
             events,
             transport,
-            profile: None,
             focus,
             title,
             mark: None,
@@ -214,7 +200,8 @@ impl Pane {
             active: false,
             bounds: Bounds::default(),
             cell: size(px(8.), px(17.)),
-            desired: (80, 24),
+            desired: None,
+            grid_visible: false,
             dragging: false,
             marked: String::new(),
         }
@@ -240,7 +227,7 @@ impl Pane {
     pub fn feed(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         self.parser.advance(&mut self.term, bytes);
         let events = std::mem::take(&mut *self.events.0.borrow_mut());
-        let local = matches!(self.transport, Transport::Local(_));
+        let local = matches!(self.transport, Transport::Local { .. });
         for e in events {
             match e {
                 AnsiEvent::Title(s) if local => {
@@ -267,8 +254,8 @@ impl Pane {
                 }
                 AnsiEvent::TextAreaSizeRequest(reply) if local => self.write(
                     reply(WindowSize {
-                        num_cols: self.desired.0,
-                        num_lines: self.desired.1,
+                        num_cols: self.term.columns() as u16,
+                        num_lines: self.term.screen_lines() as u16,
                         cell_width: f32::from(self.cell.width) as u16,
                         cell_height: f32::from(self.cell.height) as u16,
                     })
@@ -307,6 +294,7 @@ impl Pane {
         });
     }
     pub fn reset(&mut self, cols: u16, rows: u16) {
+        self.grid_visible = false;
         self.term = Term::new(
             Config {
                 scrolling_history: self.scrollback,
@@ -345,7 +333,7 @@ impl Pane {
             self.bell = false;
         }
         self.command("focus", json!({"active":active}));
-        if matches!(self.transport, Transport::Local(_))
+        if matches!(self.transport, Transport::Local { .. })
             && self.term.mode().contains(TermMode::FOCUS_IN_OUT)
         {
             self.write(
@@ -363,9 +351,22 @@ impl Pane {
         if bytes.is_empty() {
             return;
         }
-        match &self.transport {
-            Transport::Local(l) => {
-                if let Err(e) = l.send(bytes) {
+        match &mut self.transport {
+            Transport::Local { process, .. } => {
+                let result = match process {
+                    LocalProcess::WaitingForLayout(input)
+                        if input.len() + bytes.len() <= 1024 * 1024 =>
+                    {
+                        input.extend(bytes);
+                        Ok(())
+                    }
+                    LocalProcess::WaitingForLayout(_) => {
+                        Err(anyhow::anyhow!("Shell input queue unavailable"))
+                    }
+                    LocalProcess::Running(pty) => pty.send(bytes),
+                    LocalProcess::Failed => return,
+                };
+                if let Err(e) = result {
                     self.status = e.to_string();
                     cx.emit(PaneChanged)
                 }
@@ -485,22 +486,70 @@ impl Pane {
             .map(|a| a.width)
             .unwrap_or(px(self.font_size * 0.61));
         self.cell = size(cw, px((self.font_size * 1.24).ceil()));
-        let dims = (
-            (b.size.width / cw).floor().clamp(2., 400.) as u16,
-            (b.size.height / self.cell.height).floor().clamp(2., 200.) as u16,
-        );
-        if dims != self.desired {
-            self.desired = dims;
-            match &self.transport {
-                Transport::Local(l) => {
-                    let _ = l.resize(dims.0, dims.1);
-                    self.geometry(dims.0, dims.1)
+        let cols = (b.size.width / cw).floor();
+        let rows = (b.size.height / self.cell.height).floor();
+        if !cols.is_finite() || !rows.is_finite() || cols < 2. || rows < 2. {
+            return;
+        }
+        let dims = (cols.min(400.) as u16, rows.min(200.) as u16);
+        if self.desired == Some(dims) {
+            return;
+        }
+        self.desired = Some(dims);
+        if let Transport::Local { profile, process } = &mut self.transport {
+            match process {
+                LocalProcess::WaitingForLayout(input) => {
+                    match Local::open(&profile.shell, &profile.args, &profile.home, dims.0, dims.1)
+                    {
+                        Ok((pty, output)) => {
+                            if !input.is_empty()
+                                && let Err(error) = pty.send(std::mem::take(input))
+                            {
+                                self.status = error.to_string();
+                                cx.emit(PaneChanged);
+                            }
+                            *process = LocalProcess::Running(pty);
+                            Self::read_shell(output, cx);
+                        }
+                        Err(error) => {
+                            *process = LocalProcess::Failed;
+                            self.status = error.to_string();
+                            cx.emit(PaneChanged);
+                            cx.notify();
+                            return;
+                        }
+                    }
                 }
-                Transport::Remote(..) => {
-                    self.command("resize", json!({"cols":dims.0,"rows":dims.1}))
+                LocalProcess::Running(pty) => {
+                    let _ = pty.resize(dims.0, dims.1);
+                }
+                LocalProcess::Failed => return,
+            }
+            self.geometry(dims.0, dims.1);
+            self.grid_visible = true;
+        } else {
+            self.command("resize", json!({"cols":dims.0,"rows":dims.1}));
+        }
+    }
+    fn read_shell(stream: async_channel::Receiver<Output>, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            while let Ok(output) = stream.recv().await {
+                if this
+                    .update(cx, |s, cx| match output {
+                        Output::Bytes(bytes) => s.feed(&bytes, cx),
+                        Output::Closed(reason) => {
+                            s.status = reason;
+                            cx.emit(PaneChanged);
+                            cx.notify()
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
                 }
             }
-        }
+        })
+        .detach();
     }
     fn point(&self, p: Point<Pixels>) -> CellPoint {
         let col = ((p.x - self.bounds.origin.x) / self.cell.width)
@@ -631,6 +680,9 @@ impl GlyphRun {
 }
 impl Pane {
     pub(super) fn draw_at(&self, grid_origin: Point<Pixels>, w: &mut Window, cx: &mut App) {
+        if !self.grid_visible {
+            return;
+        }
         let view = self.term.renderable_content();
         let mut pending: Option<GlyphRun> = None;
         let cursor = view.cursor.point;
@@ -1112,6 +1164,9 @@ fn ring_bell() {
 
 #[cfg(feature = "ui-tests")]
 impl Pane {
+    pub(super) fn measured_size(&self) -> Option<(u16, u16)> {
+        self.desired
+    }
     pub fn key_for_test(&mut self, key: &'static str, w: &mut Window, cx: &mut Context<Self>) {
         self.key(
             &KeyDownEvent {

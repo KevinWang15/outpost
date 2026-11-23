@@ -39,25 +39,25 @@ try {
   }
 
   // ICO directories can embed PNG frames, preserving transparency at each size.
-  const sizes = [16, 32, 48]
-  const directory = Buffer.alloc(6 + sizes.length * 16)
-  directory.writeUInt16LE(1, 2)
-  directory.writeUInt16LE(sizes.length, 4)
-  let offset = directory.length
-  for (const [index, size] of sizes.entries()) {
-    const entry = 6 + index * 16
-    const pixels = icons.get(size)
-    directory[entry] = directory[entry + 1] = size
-    directory.writeUInt16LE(1, entry + 4)
-    directory.writeUInt16LE(32, entry + 6)
-    directory.writeUInt32LE(pixels.length, entry + 8)
-    directory.writeUInt32LE(offset, entry + 12)
-    offset += pixels.length
+  function ico(sizes) {
+    const directory = Buffer.alloc(6 + sizes.length * 16)
+    directory.writeUInt16LE(1, 2)
+    directory.writeUInt16LE(sizes.length, 4)
+    let offset = directory.length
+    for (const [index, size] of sizes.entries()) {
+      const entry = 6 + index * 16
+      const pixels = icons.get(size)
+      directory[entry] = directory[entry + 1] = size % 256
+      directory.writeUInt16LE(1, entry + 4)
+      directory.writeUInt16LE(32, entry + 6)
+      directory.writeUInt32LE(pixels.length, entry + 8)
+      directory.writeUInt32LE(offset, entry + 12)
+      offset += pixels.length
+    }
+    return Buffer.concat([directory, ...sizes.map(size => icons.get(size))])
   }
-  await writeFile(
-    new URL('favicon.ico', publicDirectory),
-    Buffer.concat([directory, ...sizes.map(size => icons.get(size))]),
-  )
+  await writeFile(new URL('favicon.ico', publicDirectory), ico([16, 32, 48]))
+  await writeFile(new URL('../../desktop/packaging/outpost.ico', import.meta.url), ico([16, 32, 48, 256]))
   console.log(`Generated logo PNG, Apple touch icon, and PNG/ICO favicons in ${fileURLToPath(publicDirectory)}`)
 } finally {
   await browser.close()

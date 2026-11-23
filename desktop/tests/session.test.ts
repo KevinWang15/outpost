@@ -138,6 +138,11 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   let connections = 0
   ws.on('connection', (socket, req) => {
     const url = new URL(req.url!, origin)
+    assert.deepEqual(
+      [url.searchParams.get('cols'), url.searchParams.get('rows')],
+      connections === 1 || connections === 2 ? ['50', '12'] : ['137', '41'],
+      'The first attachment and reconnects use the last measured pane size',
+    )
     assert.equal(req.headers.origin, origin)
     assert.equal(url.searchParams.get('protocol'), String(protocolVersion))
     const history = url.searchParams.get('scrollback')
@@ -236,6 +241,7 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
       if (e.event === 'opened') {
         pane = e.pane
         firstPane ||= pane
+        cmd({ op: 'resize', pane, cols: 137, rows: 41 })
       }
       if (e.event === 'paneRemoved') removedPanes.push(e.pane)
       if (e.event === 'accounts' && e.accounts[0]?.account.id === 'second') {

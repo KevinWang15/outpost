@@ -1033,7 +1033,13 @@ Alacritty. The native client acknowledges output after applying it. Local PTY
 programs receive terminal replies locally. Managed programs receive replies
 from the terminal service on the machine.
 
+A local shell starts after its pane measures the grid. Browser and Desktop
+use the measured grid for the first managed attachment and retain it for
+reconnects. Desktop reveals the restored screen once the checkpoint is complete.
+
 The UI preserves the black title bar, shell tabs, splits and server launcher.
+On Windows, the tab strip supplies the native caption hit targets for dragging,
+snapping and window controls. The executable and installer share the Outpost icon.
 The **Machines ↗** action opens the signed-in server’s machine workspace in the system browser. `desktop/scripts/package.mjs`
 builds the macOS bundle, DMG and ZIP or the Windows per-user installer with
 the executable, session helper, Node runtime and third-party notices.

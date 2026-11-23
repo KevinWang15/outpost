@@ -243,8 +243,7 @@ interface Attachment {
   files: SessionFileCache
   activity: TerminalActivity
   focused: boolean
-  cols: number
-  rows: number
+  size?: { cols: number; rows: number }
 }
 const creations = new Map<number, { key: string; id: string }>()
 const panes = new Map<number, Attachment>()
@@ -283,7 +282,7 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
   const rendering = new NativeRendering(pane, reason => state.socket.fail(reason))
   const socket = new TerminalSocket(
     launch.token,
-    () => ({ cols: state.cols, rows: state.rows }),
+    () => state.size,
     rendering,
     {
       state: connection => {
@@ -346,8 +345,6 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
       socket.readFile(file, signal, received => emit('fileProgress', { pane, id: file.id, received })),
     ),
     rendering,
-    cols: 80,
-    rows: 24,
     focused: false,
     activity: new TerminalActivity(socket, message => emit('error', { pane, message })),
   }
@@ -467,8 +464,7 @@ async function handle(c: Cmd) {
       return
     case 'resize':
       if (terminalSize(c.cols, c.rows)) {
-        p.cols = c.cols
-        p.rows = c.rows
+        p.size = { cols: c.cols, rows: c.rows }
         p.socket.resize(c.cols, c.rows)
       }
       return

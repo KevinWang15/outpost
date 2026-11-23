@@ -33,6 +33,7 @@ export class TerminalSocket {
   private attempts = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
+  private waitingForSize = false
   private started = false
   private allowStart = true
   private ready = false
@@ -56,7 +57,7 @@ export class TerminalSocket {
 
   constructor(
     token: string,
-    private size: () => { cols: number; rows: number },
+    private size: () => { cols: number; rows: number } | undefined,
     private rendering: TerminalRendering,
     private handlers: Handlers,
     private endpoint?: { origin: string; open: (url: URL) => WebSocket },
@@ -71,11 +72,14 @@ export class TerminalSocket {
   open() {
     if (this.stopped) return
     this.started = true
+    const size = this.size()
+    this.waitingForSize = !size
+    if (!size) return
     clearTimeout(this.retryTimer)
     this.retryTimer = undefined
     this.detach()
     this.handlers.activity(null)
-    const { cols, rows } = this.size()
+    const { cols, rows } = size
     const url = new URL('/api/terminal', this.endpoint?.origin ?? window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     url.search = new URLSearchParams({
@@ -162,8 +166,8 @@ export class TerminalSocket {
           clearTimeout(attachTimer)
           this.scheduleProbe()
           this.handlers.state({ kind: 'connected' })
-          const { cols, rows } = this.size()
-          this.resize(cols, rows)
+          const size = this.size()
+          if (size) this.resize(size.cols, size.rows)
           this.send({ type: 'focus', active: this.active })
           if (this.drafting) this.send({ type: 'draft', active: true })
         })
@@ -384,6 +388,7 @@ export class TerminalSocket {
   }
 
   resize(cols: number, rows: number) {
+    if (this.waitingForSize) return this.open()
     if (!this.connected || (this.requestedSize?.cols === cols && this.requestedSize.rows === rows)) return
     // Track requests, not rendered geometry: the target's acknowledgement may
     // still be in flight when the user resizes back to an earlier dimension.
@@ -406,8 +411,8 @@ export class TerminalSocket {
     this.active = active
     if (!this.connected) return
     // Store this viewer's latest size before claiming control of the PTY.
-    const { cols, rows } = this.size()
-    this.resize(cols, rows)
+    const size = this.size()
+    if (size) this.resize(size.cols, size.rows)
     this.send({ type: 'focus', active })
   }
 

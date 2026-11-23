@@ -496,15 +496,8 @@ impl Workspace {
                     vec!["-l".into()]
                 }
             });
-        match Pane::local(&executable, &args, &home_dir(), self.fontsize(), w, cx) {
-            Ok(p) => {
-                self.insert(p, w, cx);
-            }
-            Err(e) => {
-                self.message = e.to_string();
-                cx.notify()
-            }
-        }
+        let pane = Pane::local(&executable, &args, &home_dir(), self.fontsize(), w, cx);
+        self.insert(pane, w, cx);
     }
     fn split(&mut self, axis: Axis, w: &mut Window, cx: &mut Context<Self>) {
         self.split_at = self.tabs.get(self.current).map(|t| (t.active, axis));
@@ -935,6 +928,7 @@ impl Workspace {
                                 let state = &e["state"];
                                 p.restoring = state["kind"] != "connected";
                                 if !p.restoring {
+                                    p.grid_visible = true;
                                     p.command("files", json!({}));
                                 }
                                 p.status = if state["kind"] == "connected" {
@@ -1289,7 +1283,7 @@ impl Workspace {
             ))
         }
     }
-    fn chrome(&self, cx: &mut Context<Self>) -> Div {
+    fn chrome(&self, w: &Window, cx: &mut Context<Self>) -> Div {
         let mut strip = row()
             .gap(px(3.))
             .id("tabs")
@@ -1433,12 +1427,14 @@ impl Workspace {
                     .flex_1()
                     .h_full()
                     .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, |event, w, _| {
-                        if event.click_count == 2 {
-                            w.zoom_window();
-                        } else {
-                            w.start_window_move();
-                        }
+                    .when(!cfg!(windows), |area| {
+                        area.on_mouse_down(MouseButton::Left, |event, w, _| {
+                            if event.click_count == 2 {
+                                w.zoom_window();
+                            } else {
+                                w.start_window_move();
+                            }
+                        })
                     }),
             ))
             .child(icon("switch", LucideIcon::Search, cx, |s, w, cx| {
@@ -1467,6 +1463,53 @@ impl Workspace {
             .child(icon("settings", LucideIcon::Settings, cx, |s, w, cx| {
                 s.show(Page::Settings, w, cx)
             }))
+            .when(cfg!(windows), |bar| {
+                // Win32 handles clicks, Snap Layouts, and the normal close request through these hitboxes.
+                let caption = |id: &'static str, area: WindowControlArea, glyph: &'static str| {
+                    div()
+                        .id(id)
+                        .w(px(46.))
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .window_control_area(area)
+                        .font_family("Segoe MDL2 Assets")
+                        .text_size(px(10.))
+                        .hover(move |s| {
+                            s.bg(rgb(if area == WindowControlArea::Close {
+                                0xc42b1c
+                            } else {
+                                0x292929
+                            }))
+                        })
+                        .child(glyph)
+                };
+                bar.pr_0().child(
+                    row()
+                        .h_full()
+                        .flex_none()
+                        .child(caption(
+                            "window-minimize",
+                            WindowControlArea::Min,
+                            "\u{e921}",
+                        ))
+                        .child(caption(
+                            "window-maximize",
+                            WindowControlArea::Max,
+                            if w.is_maximized() {
+                                "\u{e923}"
+                            } else {
+                                "\u{e922}"
+                            },
+                        ))
+                        .child(caption(
+                            "window-close",
+                            WindowControlArea::Close,
+                            "\u{e8bb}",
+                        )),
+                )
+            })
     }
     fn node(&self, node: &Layout, headers: bool, cx: &mut Context<Self>) -> AnyElement {
         match node {
@@ -1509,18 +1552,20 @@ impl Workspace {
                             ),
                     )
                 }
-                if !pane.status.is_empty() {
-                    body = body.child(
-                        row()
-                            .px(px(8.))
-                            .child(text(pane.status.clone(), 12., MUTED))
-                            .when(pane.server.is_some(), |e| {
-                                e.child(control("Reconnect", false, cx, move |s, _, cx| {
-                                    s.panes[&id].read(cx).command("reconnect", json!({}))
-                                }))
-                            }),
-                    )
-                }
+                let status = (!pane.status.is_empty()).then(|| {
+                    row()
+                        .absolute()
+                        .top(px(5.))
+                        .left(px(5.))
+                        .bg(rgb(BG))
+                        .px(px(8.))
+                        .child(text(pane.status.clone(), 12., MUTED))
+                        .when(pane.server.is_some(), |e| {
+                            e.child(control("Reconnect", false, cx, move |s, _, cx| {
+                                s.panes[&id].read(cx).command("reconnect", json!({}))
+                            }))
+                        })
+                });
                 if pane.waiting > 0 {
                     body = body.child(control(
                         format!("Deliver waiting message ({})", pane.waiting),
@@ -1537,6 +1582,7 @@ impl Workspace {
                     .flex_1()
                     .overflow_hidden()
                     .child(p)
+                    .children(status)
                     .children(
                         badge.map(|badge| div().absolute().top(px(6.)).right(px(8.)).child(badge)),
                     );
@@ -2174,7 +2220,7 @@ impl Workspace {
     }
 }
 impl Render for Workspace {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.prefetch_thumbnail(cx);
         self.drag.rendered_tabs = self
             .strip_slots()
@@ -2201,7 +2247,7 @@ impl Render for Workspace {
             .bg(rgb(BG))
             .text_color(rgb(TEXT))
             .text_size(px(13.))
-            .child(self.chrome(cx))
+            .child(self.chrome(w, cx))
             .when(self.page == Page::Find, |e| {
                 e.child(
                     row()
@@ -2283,7 +2329,7 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         crate::init(cx);
         cx.set_global(crate::hub::Hub {
             bridge: None,
-            prefs: json!({"fontSize":13.5,"sound":false,"profiles":[if cfg!(windows){json!({"id":"fixture","executable":"cmd.exe","args":["/D","/Q"],"syntax":"cmd"})}else{json!({"id":"fixture","executable":"/bin/sh","args":["-i"],"syntax":"posix"})}]}),
+            prefs: json!({"fontSize":13.5,"sound":false,"profiles":[if cfg!(windows){json!({"id":"fixture","executable":"cmd.exe","args":["/D","/Q"]})}else{json!({"id":"fixture","executable":"/bin/sh","args":["-c",r#"printf 'INITIAL-SIZE=%s\n' "$(stty size)"; exec /bin/sh -i"#]})}]}),
             accounts: Value::Null,
             error: String::new(),
         })
@@ -2604,6 +2650,32 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    #[cfg(unix)]
+    let check_startup_size =
+        |test: &mut HeadlessAppContext, pane: &Entity<Pane>| -> anyhow::Result<()> {
+            let deadline = Instant::now() + Duration::from_secs(8);
+            loop {
+                draw(test);
+                if test.update(|cx| {
+                    let pane = pane.read(cx);
+                    pane.measured_size().is_some_and(|(cols, rows)| {
+                        (cols, rows) != (80, 24)
+                            && pane
+                                .screen_text()
+                                .contains(&format!("INITIAL-SIZE={rows} {cols}"))
+                    })
+                }) {
+                    return Ok(());
+                }
+                anyhow::ensure!(
+                    Instant::now() < deadline,
+                    "The shell did not start at the measured pane size"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+    #[cfg(unix)]
+    check_startup_size(&mut test, &p)?;
     #[cfg(target_os = "macos")]
     {
         // Use a real raw-mode reader. An image-only Command-V must leave its first
@@ -2654,6 +2726,17 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     assert!(test.update_window(window.into(), |root, _, cx| {
         root.downcast::<Workspace>().unwrap().read(cx).panes.len() == 2
     })?);
+    #[cfg(unix)]
+    {
+        let split_pane = test.update_window(window.into(), |root, _, cx| {
+            root.downcast::<Workspace>()
+                .unwrap()
+                .read(cx)
+                .active()
+                .unwrap()
+        })?;
+        check_startup_size(&mut test, &split_pane)?;
+    }
     if let Some(dir) = std::env::var_os("OUTPOST_TEST_SCREENSHOTS") {
         test.capture_screenshot(window.into())?
             .save(PathBuf::from(dir).join("split.png"))?;

@@ -69,7 +69,7 @@ fn open_workspace_at(
         app_id: Some("dev.outpost.desktop".into()),
         titlebar: Some(TitlebarOptions {
             title: Some("Outpost".into()),
-            appears_transparent: cfg!(target_os = "macos"),
+            appears_transparent: cfg!(any(target_os = "macos", windows)),
             traffic_light_position: cfg!(target_os = "macos").then(|| point(px(14.), px(13.))),
         }),
         window_bounds: Some(WindowBounds::Windowed(bounds)),

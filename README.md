@@ -289,7 +289,7 @@ settings still control whether an alert is displayed.
 #### Keyboard, clipboard, and history
 
 On macOS, **Ctrl+V** also pastes an image or text with the terminal focused,
-in both the browser and Outpost Desktop. **Command+V** continues to work.
+in managed sessions in both the browser and Outpost Desktop. **Command+V** continues to work.
 The browser may ask for clipboard permission for Ctrl+V; if access is blocked,
 use Command+V instead.
 
@@ -299,11 +299,22 @@ image upload, the message box and on-screen keys.
 
 Attach images directly in the terminal: paste from the clipboard, drop a file
 onto the terminal, or use the image button (also available in the context menu).
-PNG, JPEG, GIF and WebP images up to 16 MB are supported. Outpost saves the image
-on the session's machine and pastes its reference into the current prompt;
-press Enter when you are ready to send. Uploads run separately from terminal
-input and are cancelled if the connection drops. Local shell tabs save images
-on your own computer.
+Outpost sends PNG, JPEG, GIF and WebP images up to 16 MiB over the active
+connection. In a native Codex, Claude Code or Kimi session, the tool reads the
+image from its own private Linux clipboard. In a session started in Chat,
+an image-capable agent accepts up to eight draft images of 5 MiB each. Press
+Backspace with an empty input line to remove the last one. In either case,
+type your question and press Enter when you are ready.
+
+On Debian or Ubuntu, install the optional native clipboard dependencies with
+`sudo apt install xvfb xauth xclip python3-gi gir1.2-gtk-3.0` and restart the
+agent session. The virtual display accepts local connections only. For tools or
+machines without clipboard support, choose **Paste image as file path** in
+terminal actions. This explicitly saves a file on the machine and inserts its path.
+
+In a **local terminal** on macOS, ⌘V pastes text and Ctrl+V goes to the foreground
+program. A local coding tool can read the same system clipboard as other Mac
+apps. On Windows, Ctrl+Shift+V pastes text and Ctrl+V goes to the program.
 
 Press **Cmd+F** on macOS or **Ctrl+F** on Windows/Linux to find text in the
 current terminal. The search box floats at the top-right without resizing the
@@ -503,7 +514,7 @@ its output, shell or managed connection, and message draft.
 
 Right-click a tab or the terminal to open terminal actions. You can search
 scrollback, change its limit in **Terminal Settings**, compose a multiline message, clear the screen, copy a selection or
-paste text and images. Managed panes also list session files, preview raster
+paste text. Managed panes can attach clipboard images, list session files, preview raster
 images and save files through a native file dialog. Closing a local terminal
 ends its shell. A managed session continues running on its machine.
 

@@ -1,11 +1,11 @@
-import { pastedImage } from './terminal-fixture'
+import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test, type Page } from './fixtures'
 import type { Session, Target } from '../../shared/model'
 
-const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 32, 10])
+const bytes = readFileSync('public/favicon-32x32.png')
 
 async function openSession(page: Page) {
   const headers = { 'x-outpost-request': '1' }
@@ -45,7 +45,7 @@ async function gesture(page: Page, kind: 'paste' | 'drop', files = [{ type: 'ima
   )
 }
 
-test(`Web terminal: picker, clipboard paste and drop upload exact bytes and paste only one bracketed reference`, async ({
+test(`Web terminal: picker, clipboard paste and drop deliver exact pixels through one native paste`, async ({
   page,
 }) => {
   const errors: string[] = []
@@ -58,13 +58,31 @@ test(`Web terminal: picker, clipboard paste and drop upload exact bytes and past
     if (kind === 'picker')
       await page.locator('input[type=file]').setInputFiles({ name: 'screen.png', mimeType: 'image/png', buffer: bytes })
     else expect(await gesture(page, kind)).toBe(true)
-    await expect.poll(async () => pastedImage((await input()).slice(before.length))).toContain('/.outpost/clipboard/')
-    const path = pastedImage((await input()).slice(before.length))
-    expect(await input()).toBe(`${before}\x1b[200~${path}\x1b[201~`)
-    expect(await readFile(path)).toEqual(bytes)
+    await expect.poll(async () => (await input()).slice(before.length)).toBe('\x16')
+    await expect.poll(() => readFile(join(session.rootDir, 'clipboard.png')).catch(() => null)).toEqual(bytes)
     expect(await page.locator('.xterm-screen').boundingBox()).toEqual(originalSize)
   }
   expect(errors).toEqual([])
+})
+
+test('the explicit file path action inserts a readable path without pressing Enter', async ({ page }) => {
+  const session = await openSession(page)
+  await page.evaluate(
+    pixels => {
+      const blob = new Blob([new Uint8Array(pixels)], { type: 'image/png' })
+      Object.defineProperty(navigator.clipboard, 'read', {
+        value: async () => [new ClipboardItem({ 'image/png': blob })],
+      })
+    },
+    [...bytes],
+  )
+  await page.locator('.xterm-screen').click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Paste image as file path' }).click()
+  const capture = () => readFile(join(session.rootDir, 'input.bin'), 'utf8').catch(() => '')
+  await expect.poll(capture).toContain('.png')
+  const inserted = (await capture()).replaceAll('\x1b[200~', '').replaceAll('\x1b[201~', '')
+  expect(inserted).toMatch(/^\/[^\r\n]+\.png$/)
+  expect(await readFile(inserted)).toEqual(bytes)
 })
 
 test('invalid or multiple image drops are rejected without navigation or terminal input', async ({ page }) => {
@@ -133,7 +151,7 @@ test('upload progress leaves the viewport and live typing intact, and a second i
   } finally {
     release()
   }
-  await expect(page.getByRole('status').filter({ hasText: 'Image pasted' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Image attached' })).toBeVisible()
   expect(await page.locator('.xterm-screen').boundingBox()).toEqual(size)
   expect(uploads).toBe(1)
 })

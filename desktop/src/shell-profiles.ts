@@ -7,15 +7,13 @@ export interface ShellProfile {
   name: string
   executable: string
   args: string[]
-  syntax: 'posix' | 'powershell' | 'cmd'
-  wsl: boolean
 }
 
 /** Resolve executables natively; the renderer selects a profile ID, never a command. */
 export function shellProfiles(): ShellProfile[] {
   if (process.platform !== 'win32') {
     const executable = userInfo().shell || process.env.SHELL || '/bin/sh'
-    return [{ id: 'login', name: basename(executable), executable, args: ['-l'], syntax: 'posix', wsl: false }]
+    return [{ id: 'login', name: basename(executable), executable, args: ['-l'] }]
   }
   const system = join(process.env.SystemRoot || 'C:\\Windows', 'System32')
   const path = Object.entries(process.env).find(([key]) => key.toLowerCase() === 'path')?.[1] || ''
@@ -33,8 +31,6 @@ export function shellProfiles(): ShellProfile[] {
       name: 'PowerShell',
       executable: pwsh,
       args: ['-NoLogo'],
-      syntax: 'powershell',
-      wsl: false,
     })
   const powershell = join(system, 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   if (existsSync(powershell))
@@ -43,16 +39,12 @@ export function shellProfiles(): ShellProfile[] {
       name: 'Windows PowerShell',
       executable: powershell,
       args: ['-NoLogo'],
-      syntax: 'powershell',
-      wsl: false,
     })
   profiles.push({
     id: 'cmd',
     name: 'Command Prompt',
     executable: join(system, 'cmd.exe'),
     args: [],
-    syntax: 'cmd',
-    wsl: false,
   })
   const wsl = join(system, 'wsl.exe')
   if (existsSync(wsl))
@@ -61,8 +53,6 @@ export function shellProfiles(): ShellProfile[] {
       name: 'WSL (default distribution)',
       executable: wsl,
       args: ['--cd', '~'],
-      syntax: 'posix',
-      wsl: true,
     })
   return profiles
 }

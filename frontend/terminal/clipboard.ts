@@ -1,3 +1,4 @@
+import type { ImagePasteMode } from '../../shared/terminalFiles'
 import type { Terminal } from '@xterm/xterm'
 import { touchInput } from '../browser'
 
@@ -20,7 +21,7 @@ export function attachClipboard(
   term: Terminal,
   options: {
     connected: () => boolean
-    pasteImage: (file: File) => void
+    pasteImage: (file: File, mode?: ImagePasteMode) => void
     status: (message: string) => void
     pasteFallback?: () => void
   },
@@ -133,7 +134,7 @@ export function attachClipboard(
       if (text === null) return options.status('Select text to copy.')
       await writeClipboard(text, false)
     },
-    async paste() {
+    async paste(mode: ImagePasteMode = 'attachment', chooseFile?: () => void) {
       if (disposed || !options.connected()) return
       try {
         let value: string | undefined
@@ -145,17 +146,21 @@ export function attachClipboard(
             const type =
               image.types.find(type => type === 'image/png') ?? image.types.find(type => type.startsWith('image/'))!
             const data = await image.getType(type)
-            if (!disposed && options.connected()) options.pasteImage(new File([data], 'clipboard-image', { type }))
+            if (!disposed && options.connected())
+              options.pasteImage(new File([data], 'clipboard-image', { type }), mode)
             return
           }
+          if (mode === 'path') return chooseFile?.()
           const text = items.find(item => item.types.includes('text/plain'))
           if (text) value = await (await text.getType('text/plain')).text()
-        } else value = await navigator.clipboard.readText()
+        } else if (mode === 'path') return chooseFile?.()
+        else value = await navigator.clipboard.readText()
         if (disposed || !options.connected()) return
         if (value !== undefined) term.paste(value)
         term.focus()
       } catch {
         if (disposed) return
+        if (mode === 'path') return chooseFile?.()
         if (touchInput()) options.pasteFallback?.()
         options.status(
           touchInput()

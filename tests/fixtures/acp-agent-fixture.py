@@ -13,6 +13,8 @@ member. "slow N" waits N seconds before replying; "crash" exits mid-turn, as a
 failing tool would. Other replies echo the prompt without its @-mentions.
 """
 
+import base64
+import hashlib
 import json
 import os
 import re
@@ -261,6 +263,10 @@ def run(identifier, params):
     )
     stop = 'end_turn'
     reply = 'Fixture reply to: ' + re.sub(r'^\[Outpost: [^\]]*\]\n', '', text).strip()[:200].replace('@', '')
+    if 'identify clipboard pixels' in text:
+        for block in params['prompt']:
+            if block.get('type') == 'image':
+                reply += ' clipboard sha256 ' + hashlib.sha256(base64.b64decode(block['data'])).hexdigest()
     if images:
         reply += ' (' + str(images) + ' image)'
     for link in links:

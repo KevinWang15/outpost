@@ -2,7 +2,7 @@
 # test installs the built Outpost machine service in its home. Python runs the
 # fixture coding tools.
 FROM ubuntu:22.04
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server python3 git ca-certificates \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server python3 git ca-certificates xvfb xauth xclip python3-gi gir1.2-gtk-3.0 \
     && rm -rf /var/lib/apt/lists/* && mkdir -p /run/sshd \
     && useradd --create-home --shell /bin/bash dev && install -d -m 700 -o dev -g dev /home/dev/.ssh /home/dev/.outpost /home/dev/.outpost/bin /var/lib/outpost-machine
 COPY coding-tool-fixture.py /usr/local/bin/claude

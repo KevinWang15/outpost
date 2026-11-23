@@ -1,6 +1,9 @@
-# Outpost machine service 3.0.4
+# Outpost machine service 3.0.5
 
-Linux builds are available for x64 and arm64 with glibc or musl. Machine nodes and native terminal workers use protocol 8. ACP chat hosts use protocol 3.
+Linux builds are available for x64 and arm64 with glibc or musl. Machine nodes and native terminal workers use protocol 9. ACP chat hosts use protocol 3.
+
+- Managed native image paste uses an isolated clipboard. Codex, Claude Code and Kimi can attach screenshots on headless Linux machines with Xvfb and Python GTK 3 installed.
+- ACP terminal viewers can add or remove images in their own draft and send them with Enter. Paste image as file path is available explicitly.
 
 - Native terminal workers accept a scrollback line limit or unlimited history from Outpost Desktop. The default is 10,000 lines. Each viewer restores the amount it requests. Opening a viewer with a smaller limit preserves the history available to other viewers.
 - A running worker keeps its scrollback in memory while every viewer is disconnected. Restarting the worker clears its terminal history. Restart workers from an earlier release to use the new scrollback settings.

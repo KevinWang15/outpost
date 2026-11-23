@@ -68,10 +68,6 @@ pub struct Pane {
     parser: Processor,
     events: Events,
     transport: Transport,
-    pub image_syntax: String,
-    pub wsl: bool,
-    images: Option<tempfile::TempDir>,
-    image_bytes: usize,
     pub focus: FocusHandle,
     pub title: String,
     pub mark: Option<&'static crate::agent_mark::AgentMark>,
@@ -159,8 +155,6 @@ impl Pane {
             cx,
         )?;
         pane.update(cx, |next, _| {
-            next.image_syntax = self.image_syntax.clone();
-            next.wsl = self.wsl;
             next.sound = self.sound;
             next.set_scrollback(self.scrollback);
         });
@@ -200,10 +194,6 @@ impl Pane {
             events,
             transport,
             profile: None,
-            image_syntax: "posix".into(),
-            wsl: false,
-            images: None,
-            image_bytes: 0,
             focus,
             title,
             mark: None,
@@ -786,68 +776,31 @@ impl Pane {
         let Some(item) = cx.read_from_clipboard() else {
             return;
         };
-        match crate::clipboard_image::read(&item) {
-            Ok(Some((mime, bytes))) => {
-                if self.server.is_some() {
-                    self.command("image", json!({"mime":mime,"data":STANDARD.encode(&bytes)}));
-                } else {
-                    let ext = mime.split('/').next_back().unwrap_or("png");
-                    let outcome = (|| -> Result<String> {
-                        anyhow::ensure!(
-                            self.image_bytes + bytes.len() <= 256 * 1024 * 1024,
-                            "This tab has reached its image storage limit."
-                        );
-                        if self.images.is_none() {
-                            self.images = Some(
-                                tempfile::Builder::new()
-                                    .prefix("outpost-images-")
-                                    .tempdir()?,
-                            );
-                        }
-                        let mut file = tempfile::Builder::new()
-                            .prefix("clipboard-")
-                            .suffix(&format!(".{ext}"))
-                            .tempfile_in(self.images.as_ref().unwrap().path())?;
-                        use std::io::Write;
-                        file.write_all(&bytes)?;
-                        let (_, path) = file.keep()?;
-                        self.image_bytes += bytes.len();
-                        let path = if self.wsl {
-                            let output = std::process::Command::new("wsl.exe")
-                                .args(["--exec", "wslpath", "-u"])
-                                .arg(path)
-                                .output()?;
-                            let path = String::from_utf8(output.stdout)?.trim().to_owned();
-                            anyhow::ensure!(
-                                output.status.success() && path.starts_with('/'),
-                                "Could not resolve image path in WSL"
-                            );
-                            path
-                        } else {
-                            path.display().to_string()
-                        };
-                        Ok(match self.image_syntax.as_str() {
-                            "powershell" => format!("'{}' ", path.replace('\'', "''")),
-                            "cmd" => format!("\"{}\" ", path),
-                            _ => format!("'{}' ", path.replace('\'', "'\''")),
-                        })
-                    })();
-                    match outcome {
-                        Ok(path) => self.paste(path, cx),
-                        Err(e) => {
-                            cx.emit(PasteError(e.to_string()));
-                        }
-                    }
-                }
+        if self.server.is_none() {
+            if let Some(text) = item.text() {
+                self.paste(text, cx);
             }
+            return;
+        }
+        self.paste_managed_item(&item, false, cx);
+    }
+    pub fn paste_image_path(&mut self, cx: &mut Context<Self>) {
+        if let Some(item) = cx.read_from_clipboard() {
+            self.paste_managed_item(&item, true, cx);
+        }
+    }
+    fn paste_managed_item(&mut self, item: &ClipboardItem, as_path: bool, cx: &mut Context<Self>) {
+        match crate::clipboard_image::read(item) {
+            Ok(Some((mime, bytes))) => self.command("image", json!({
+                "mime": mime, "data": STANDARD.encode(bytes), "mode": if as_path { "path" } else { "attachment" }
+            })),
+            Ok(None) if as_path => cx.emit(PasteError("Copy an image first.".into())),
             Ok(None) => {
                 if let Some(text) = item.text() {
                     self.paste(text, cx);
                 }
             }
-            Err(error) => {
-                cx.emit(PasteError(error.to_string()));
-            }
+            Err(error) => cx.emit(PasteError(error.to_string())),
         }
     }
     fn observe_completion(&self, w: &Window) {
@@ -861,7 +814,11 @@ impl Pane {
             return;
         }
         let k = &e.keystroke;
-        if cfg!(target_os = "macos") && k.key == "v" && k.modifiers == Modifiers::control() {
+        if self.server.is_some()
+            && cfg!(target_os = "macos")
+            && k.key == "v"
+            && k.modifiers == Modifiers::control()
+        {
             self.paste_clipboard(cx);
             w.prevent_default();
             cx.stop_propagation();

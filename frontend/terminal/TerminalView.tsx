@@ -1,3 +1,4 @@
+import type { ImagePasteMode } from '../../shared/terminalFiles'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Bell,
@@ -139,7 +140,11 @@ export default function TerminalView({ token, title, onClose }: Props) {
     setTextToSelect(screenText(session.current.terminal))
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
   }
-  const pasteImage = (file: File) => session.current?.pasteImage(file)
+  const imageMode = useRef<ImagePasteMode>('attachment')
+  const chooseImage = (mode: ImagePasteMode) => {
+    imageMode.current = mode
+    chooser.current?.click()
+  }
 
   useEffect(() => () => clearTimeout(statusTimer.current), [])
 
@@ -263,7 +268,7 @@ export default function TerminalView({ token, title, onClose }: Props) {
             onChange={event => {
               const file = event.target.files?.[0]
               event.target.value = ''
-              if (file) void pasteImage(file)
+              if (file) void session.current?.pasteImage(file, imageMode.current)
             }}
           />
           <button
@@ -271,7 +276,7 @@ export default function TerminalView({ token, title, onClose }: Props) {
             title="Paste an image"
             aria-label="Paste an image"
             disabled={!connected}
-            onClick={() => chooser.current?.click()}
+            onClick={() => chooseImage('attachment')}
           >
             <ImagePlus size={17} />
             <span className="terminal-action-label">Image</span>
@@ -327,7 +332,10 @@ export default function TerminalView({ token, title, onClose }: Props) {
             selectText,
             find: openSearch,
             clear: () => session.current?.clearScreen(),
-            pasteImage: () => chooser.current?.click(),
+            pasteImage: mode =>
+              mode === 'path'
+                ? void session.current?.clipboard.paste('path', () => chooseImage('path'))
+                : chooseImage(mode),
             focus: () => {
               if (!touch()) session.current?.terminal.focus()
             },

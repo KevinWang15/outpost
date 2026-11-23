@@ -51,9 +51,3 @@ export async function appConnection(
     })
   ).json()
 }
-
-/** Extract the path actually delivered to the fixture tool in bracketed paste mode. */
-export function pastedImage(input: string) {
-  const start = input.lastIndexOf('\x1b[200~')
-  return start >= 0 && input.endsWith('\x1b[201~') ? input.slice(start + 6, -6) : ''
-}

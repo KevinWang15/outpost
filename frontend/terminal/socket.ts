@@ -1,3 +1,4 @@
+import type { ImagePasteMode } from '../../shared/terminalFiles'
 import type { Scrollback } from '../../shared/terminalService'
 import { terminalFileChunk, type TerminalFileReader } from '../../shared/terminalFiles'
 import { maxSessionFiles, parseSessionFile } from '../../shared/sessionFiles'
@@ -226,7 +227,7 @@ export class TerminalSocket {
 
   private detach() {
     this.upload?.abort(
-      new Error('The terminal disconnected before the image was pasted. Attach it again after reconnecting.'),
+      new Error('The terminal disconnected before confirming image paste. Check the draft before retrying.'),
     )
     this.cleanup?.()
     this.cleanup = null
@@ -518,14 +519,12 @@ export class TerminalSocket {
         chunk: btoa(binary),
       })
       if (!reply.ok) throw new Error(reply.message || 'Image upload failed.')
-      if (offset + bytes.length === file.size && typeof reply.reference === 'string' && reply.reference)
-        return reply.reference
     }
-    throw new Error('The session did not confirm the image upload.')
+    return transfer
   }
 
   /** Upload independently of interactive input, then paste into this attachment only. */
-  async pasteImage(file: File) {
+  async pasteImage(file: File, mode: ImagePasteMode = 'attachment') {
     if (!this.connected) throw new Error('Connect the terminal before attaching an image.')
     if (this.upload) throw new Error('Wait for the previous image to finish.')
     const socket = this.socket
@@ -536,15 +535,12 @@ export class TerminalSocket {
       150_000,
     )
     try {
-      const reference = await this.uploadOnSocket(file, controller.signal)
+      const transfer = await this.uploadOnSocket(file, controller.signal)
       controller.signal.throwIfAborted()
       if (!this.connected || this.socket !== socket)
         throw new Error('The terminal changed before the image was pasted. Attach it again.')
-      // The service applies the running application's bracketed-paste mode.
-      // A successful upload never submits the prompt or retries a paste.
-      const result = await this.request({ type: 'paste', id: crypto.randomUUID(), data: reference })
+      const result = await this.request({ type: 'image-paste', id: crypto.randomUUID(), transfer, mode })
       if (!result.ok) throw new Error(result.message)
-      return reference
     } finally {
       clearTimeout(timeout)
       if (this.upload === controller) this.upload = null

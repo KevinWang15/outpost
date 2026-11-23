@@ -18,6 +18,9 @@ import { chatHost } from '../shared/chatHost'
 import { parseSessionFile, sessionFileId } from '../shared/sessionFiles'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { isUserInput, TerminalActivity } from './activity'
+import { imageExtensions } from '../shared/images'
+import { saveImage } from './files'
+import { openTerminalClipboard, unavailableClipboard } from './terminalClipboard'
 import { TerminalFileRequests } from './terminalFileRequests'
 import { TerminalAttachment } from './attachment'
 import { Deliveries } from './delivery'
@@ -67,6 +70,19 @@ export async function serveTerminal() {
   if (!terminalSize(launch.cols, launch.rows) || !/^terminals\/[a-f0-9-]+\.sock$/.test(launch.socket))
     throw new Error('Invalid session configuration')
   const record = findSession(readRegistry(), launch.session)
+  const supportsClipboard = ['codex', 'claude', 'kimi'].includes(record.tool)
+  const clipboard = supportsClipboard ? await openTerminalClipboard(launch.env) : null
+  const agentEnv = { ...launch.env }
+  if (clipboard) {
+    Object.assign(agentEnv, {
+      DISPLAY: clipboard.display,
+      XAUTHORITY: clipboard.authority,
+      XDG_SESSION_TYPE: 'x11',
+      GDK_BACKEND: 'x11',
+    })
+    delete agentEnv.WAYLAND_DISPLAY
+    delete agentEnv.WAYLAND_SOCKET
+  }
   const term = new headless.Terminal({
     cols: launch.cols,
     rows: launch.rows,
@@ -137,7 +153,7 @@ export async function serveTerminal() {
   }
   term.onData(reply)
   headlessColors(term, reply)
-  const child = Bun.spawn(launch.command, { cwd: launch.cwd, env: launch.env, terminal: pty })
+  const child = Bun.spawn(launch.command, { cwd: launch.cwd, env: agentEnv, terminal: pty })
 
   // Messages from other sessions, channels and schedules.
   /** While a message goes in, input from viewers waits so it cannot interleave. */
@@ -286,6 +302,26 @@ export async function serveTerminal() {
       record.id,
       message => clients.get(socket)?.attachment.output(terminalControl(message)),
       () => broadcast(terminalControl({ type: 'files' })),
+      async (image, mode, signal) => {
+        if (childExited || ended) throw new Error('The coding tool exited.')
+        if (mode === 'path') {
+          const path = saveImage(record.id, imageExtensions[image.mime], image.bytes)
+          write(term.modes.bracketedPasteMode ? `\x1b[200~${path}\x1b[201~` : path)
+          deliveries.input(path)
+          activity.input()
+          return
+        }
+        if (!supportsClipboard)
+          throw new Error('This tool has no supported clipboard shortcut. Use “Paste image as file path”.')
+        if (!clipboard) throw new Error(unavailableClipboard)
+        await clipboard.paste(image, signal, () => {
+          if (childExited || ended) throw new Error('The coding tool exited.')
+          if (held) throw new Error('The agent is receiving a message. Paste again in a moment.')
+          write('\x16')
+          activity.input()
+          deliveries.input('image')
+        })
+      },
     )
     socket.once('close', () => files.close())
     socket.setTimeout(10_000, () => socket.destroy())
@@ -467,6 +503,7 @@ export async function serveTerminal() {
     } catch {
       /* Already removed during explicit termination. */
     }
+    clipboard?.close()
     pty.close()
     term.dispose()
     // Slow readers cannot retain a dead service indefinitely. Healthy viewers

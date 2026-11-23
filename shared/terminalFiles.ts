@@ -31,6 +31,20 @@ export type TerminalFileReader = (
   progress?: (received: number) => void,
 ) => Promise<Blob>
 
+export type ImagePasteMode = 'attachment' | 'path'
+export interface ImagePaste {
+  type: 'image-paste'
+  id: string
+  transfer: string
+  mode: ImagePasteMode
+}
+
+const transferId = (id: unknown) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(id)
+
+export function validImagePaste(request: ImagePaste) {
+  return transferId(request.transfer) && (request.mode === 'attachment' || request.mode === 'path')
+}
+
 export interface ImageWrite {
   type: 'image-write'
   id: string
@@ -48,8 +62,7 @@ export function validImageWrite(value: unknown): value is ImageWrite {
   return (
     request.type === 'image-write' &&
     typeof request.id === 'string' &&
-    typeof request.transfer === 'string' &&
-    /^[a-zA-Z0-9_-]{1,80}$/.test(request.transfer) &&
+    transferId(request.transfer) &&
     !imageProblem({ type: request.mime, size: request.size }) &&
     Number.isSafeInteger(request.offset) &&
     request.offset >= 0 &&

@@ -124,27 +124,29 @@ test(
       assert.deepEqual(result, { type: 'result', id: 'draft-1', ok: true })
     })
 
-    await t.test('images are uploaded separately and their reference pasted once', async () => {
-      const reference = await client.uploadImage(png)
-      assert.ok(reference.startsWith(join(home, '.outpost', 'clipboard', session.id)))
-      assert.deepEqual(await readFile(reference), png)
-      client.send({ type: 'paste', id: 'image-1', data: reference })
-      const result = await client.take('result')
-      assert.equal(result.ok, true, result.message ?? 'Request failed')
+    await t.test('the native agent reads the image and receives only its paste key', async () => {
+      const image = await readFile('public/outpost-256.png')
+      const before = await readFile(join(project, 'input.bin'))
+      await client.pasteImage(await client.uploadImage(image))
       await client.until(
-        async () => (await readFile(join(project, 'input.bin'), 'utf8').catch(() => '')).includes(reference),
-        'pasted reference',
+        async () => (await readFile(join(project, 'clipboard.png')).catch(() => Buffer.alloc(0))).equals(image),
+        'image pixels',
       )
+      assert.deepEqual((await readFile(join(project, 'input.bin'))).subarray(before.length), Buffer.from([22]))
     })
 
-    await t.test('a full 16 MiB binary upload preserves bytes and does not send input by itself', async () => {
+    await t.test('a full 16 MiB upload writes no input until an explicit path paste', async () => {
       const data = Buffer.alloc(16 * 1024 * 1024, 0xa5)
       png.copy(data)
-      data.set([0, 255, 13, 10, 32], data.length - 5)
       const before = await readFile(join(project, 'input.bin'))
-      const reference = await client.uploadImage(data)
-      assert.deepEqual(await readFile(reference), data)
+      const transfer = await client.uploadImage(data)
       assert.deepEqual(await readFile(join(project, 'input.bin')), before)
+      await client.pasteImage(transfer, 'path')
+      const path = await client.until(async () => {
+        const input = (await readFile(join(project, 'input.bin'))).subarray(before.length).toString()
+        return input.startsWith('\x1b[200~') && input.endsWith('\x1b[201~') ? input.slice(6, -6) : undefined
+      }, 'explicit file path')
+      assert.deepEqual(await readFile(path), data)
     })
 
     await t.test('browser links from the session reach the attached client', async () => {

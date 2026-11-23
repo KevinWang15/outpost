@@ -1,21 +1,22 @@
 import { sessionFileId } from '../shared/sessionFiles'
-import { validFileRead } from '../shared/terminalFiles'
+import { validFileRead, validImagePaste, type ImagePaste, type ImagePasteMode } from '../shared/terminalFiles'
 import { listFiles, readFileChunk, removeFile } from './files'
-import { TerminalImages } from './terminalImages'
+import { TerminalImages, type TerminalImage } from './terminalImages'
 
 /** File and clipboard requests have the same limits on every terminal attachment. */
 export class TerminalFileRequests {
-  private images: TerminalImages
+  private images = new TerminalImages()
+  private lifetime = new AbortController()
   private reads = 0
   constructor(
     private session: string,
     private send: (message: object) => void,
     private changed: () => void,
-  ) {
-    this.images = new TerminalImages(session)
-  }
+    private paste: (image: TerminalImage, mode: ImagePasteMode, signal: AbortSignal) => void | Promise<void>,
+  ) {}
 
   close() {
+    this.lifetime.abort()
     this.images.close()
   }
 
@@ -26,11 +27,26 @@ export class TerminalFileRequests {
     switch (type) {
       case 'image-write':
         try {
-          ok({ reference: this.images.write(message) })
+          this.images.write(message)
+          ok()
         } catch (error) {
           fail((error as Error).message)
         }
         break
+      case 'image-paste': {
+        const request = message as unknown as ImagePaste
+        if (!validImagePaste(request)) {
+          fail('Invalid image paste.')
+          break
+        }
+        void this.images
+          .paste(request.transfer, image => this.paste(image, request.mode, this.lifetime.signal))
+          .then(
+            () => ok(),
+            error => fail((error as Error).message),
+          )
+        break
+      }
       case 'file-list':
         ok({ files: listFiles(this.session) })
         break

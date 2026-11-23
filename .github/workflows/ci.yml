@@ -31,6 +31,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y xvfb xauth xclip python3-gi gir1.2-gtk-3.0
       - run: pipx install ruff
       - run: npm ci
         env:

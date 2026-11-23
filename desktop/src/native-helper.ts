@@ -382,6 +382,7 @@ type Cmd = {
   input: SessionInput
   file: unknown
   path: string
+  mode: import('../../shared/terminalFiles').ImagePasteMode
   mime: string
 }
 async function handle(c: Cmd) {
@@ -495,7 +496,7 @@ async function handle(c: Cmd) {
     case 'deliver':
       return p.socket.deliverNow()
     case 'image':
-      return p.socket.pasteImage(new File([Buffer.from(c.data, 'base64')], 'clipboard', { type: c.mime }))
+      return p.socket.pasteImage(new File([Buffer.from(c.data, 'base64')], 'clipboard', { type: c.mime }), c.mode)
     case 'files': {
       const files = await p.socket.listFiles(AbortSignal.timeout(20000))
       p.files.retain(files)

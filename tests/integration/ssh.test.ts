@@ -22,7 +22,6 @@ const docker = await execute('docker', ['info'], { timeout: 20_000 }).then(
   () => true,
   () => false,
 )
-const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(16, 3)])
 
 async function container(t: test.TestContext, options: string[]) {
   const id = (await execute('docker', ['run', '-d', '--rm', ...options, 'outpost-ssh-target'])).stdout.trim()
@@ -124,11 +123,9 @@ async function lifecycle(
   await client.text(/OUTPOST_FIXTURE_READY \d+ 90x28/)
   client.send({ type: 'resize', cols: 70, rows: 20 })
   await client.text('70x20')
-  const reference = await client.uploadImage(png)
-  assert.match(reference, /^\/home\/dev\/\.outpost\/clipboard\/.+\.png$/)
-  client.send({ type: 'paste', id: 'img', data: reference })
-  const pasted = await client.take('result')
-  assert.equal(pasted.ok, true, pasted.message ?? 'Request failed')
+  const image = await readFile('public/outpost-256.png')
+  await client.pasteImage(await client.uploadImage(image))
+  await client.text('OUTPOST_IMAGE_SHA256:' + createHash('sha256').update(image).digest('hex'))
   const pid = /OUTPOST_FIXTURE_READY (\d+)/.exec(client.output)![1]
   // Abrupt transport loss (no WebSocket close handshake) must only detach the
   // viewer. Repeated attachments restore the same process and its screen.

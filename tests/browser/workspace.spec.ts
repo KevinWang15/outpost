@@ -1,10 +1,11 @@
+import { readFileSync } from 'node:fs'
 import type { Target, Session } from '../../shared/model'
 import { desktopEntryUrl } from '../../shared/desktopAuth'
 import { unavailableActivity } from '../../shared/activity'
 import { expect, test, type Page } from './fixtures'
 import { appConnection } from './terminal-fixture'
 
-const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)])
+const png = readFileSync('public/outpost-256.png')
 
 async function addMachine(page: Page, name: string) {
   await page.goto('/')
@@ -147,7 +148,7 @@ test('add a machine, create a session, and work in the web terminal', async ({ p
   await expect(terminal.getByRole('status', { name: 'Connected', exact: true })).toBeVisible()
   await expect(terminal.locator('.xterm-rows')).toContainText('OUTPOST_FIXTURE_READY')
   await terminal.locator('input[type=file]').setInputFiles({ name: 'design.png', mimeType: 'image/png', buffer: png })
-  await expect(terminal.getByRole('status').filter({ hasText: 'Image pasted' })).toBeVisible()
+  await expect(terminal.getByRole('status').filter({ hasText: 'Image attached' })).toBeVisible()
   const input = terminal.getByRole('textbox', { name: 'Terminal input' })
   await input.pressSequentially('ring-bell')
   await input.press('Enter')

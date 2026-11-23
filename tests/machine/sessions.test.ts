@@ -358,10 +358,11 @@ test('image chunks stay with their attachment and an interrupted upload cannot f
   const session = record(home, 'codex', crypto.randomUUID())
   await register(session)
   const { TerminalImages } = await import('../../machine/terminalImages')
-  const viewer = new TerminalImages(session.id)
-  const replacement = new TerminalImages(session.id)
+  const viewer = new TerminalImages()
+  const replacement = new TerminalImages()
   try {
     const image = Buffer.alloc(65539, 0xf3)
+    Buffer.from('89504e470d0a1a0a', 'hex').copy(image)
     const start = {
       type: 'image-write' as const,
       id: 'first',
@@ -374,9 +375,16 @@ test('image chunks stay with their attachment and an interrupted upload cannot f
     const end = { ...start, id: 'last', offset: 65536, chunk: image.subarray(65536).toString('base64') }
     assert.equal(viewer.write(start), undefined)
     assert.throws(() => replacement.write(end), /transfer changed/)
-    const path = viewer.write(end)
-    assert.ok(path)
-    assert.deepEqual(readFileSync(path), image)
+    viewer.write(end)
+    await assert.rejects(
+      replacement.paste('test', () => assert.fail()),
+      /incomplete/,
+    )
+    await viewer.paste('test', value => assert.deepEqual(value.bytes, image))
+    await assert.rejects(
+      viewer.paste('test', () => assert.fail()),
+      /incomplete/,
+    )
     viewer.write(start)
     viewer.close()
     assert.throws(() => viewer.write(end), /transfer changed/)

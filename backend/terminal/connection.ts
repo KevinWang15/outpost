@@ -8,7 +8,7 @@ import { maxInputMessage, maxInputQueue, terminalConnectionPolicy } from '../../
 import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
 import { signalValidators } from '../../shared/signals'
 import { sessionFileId, maxSessionFiles } from '../../shared/sessionFiles'
-import { terminalFileChunk, validImageWrite, validFileRead } from '../../shared/terminalFiles'
+import { terminalFileChunk, validImagePaste, validImageWrite, validFileRead } from '../../shared/terminalFiles'
 import { terminalSize, validScrollback } from '../../shared/terminalService'
 import { terminalFailure } from './failures'
 import type { Stream } from '../machines'
@@ -190,9 +190,6 @@ export class Connection {
         id: message.id,
         ok: message.ok === true,
         ...(typeof message.message === 'string' ? { message: message.message } : {}),
-        ...(transfer === 'image-write' &&
-          typeof message.reference === 'string' &&
-          message.reference.length < 8192 && { reference: message.reference }),
         ...(transfer === 'file-list' &&
           Array.isArray(message.files) &&
           message.files.length <= maxSessionFiles && { files: message.files }),
@@ -277,11 +274,13 @@ export class Connection {
       case 'file-list':
       case 'file-remove':
       case 'image-write':
+      case 'image-paste':
       case 'file-read': {
         if (
           !id ||
           (message.type === 'file-read' && !validFileRead(message)) ||
           (message.type === 'image-write' && !validImageWrite(message)) ||
+          (message.type === 'image-paste' && !validImagePaste(message)) ||
           (message.type === 'file-remove' && !sessionFileId(message.file))
         )
           return this.socket.close(1008, 'Invalid attachment request')

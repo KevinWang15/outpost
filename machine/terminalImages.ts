@@ -1,6 +1,8 @@
-import { imageExtensions, maxImageBytes, type ImageMediaType } from '../shared/images'
+import { maxImageBytes, type ImageMediaType } from '../shared/images'
 import { terminalFileChunk, validImageWrite } from '../shared/terminalFiles'
-import { saveImage } from './files'
+import { sniffMediaType } from '../shared/sessionFiles'
+
+export type TerminalImage = { mime: ImageMediaType; bytes: Buffer }
 
 /** One upload per viewer. The persistent terminal process shares a memory
  * budget across its viewers and drops partial uploads on silence or disconnect. */
@@ -8,7 +10,7 @@ let reserved = 0
 export class TerminalImages {
   private upload?: { transfer: string; mime: string; bytes: Buffer; offset: number; timer: NodeJS.Timeout }
 
-  constructor(private readonly session: string) {}
+  private pasting = false
 
   close() {
     if (!this.upload) return
@@ -17,7 +19,8 @@ export class TerminalImages {
     this.upload = undefined
   }
 
-  write(request: unknown): string | undefined {
+  write(request: unknown) {
+    if (this.pasting) throw new Error('Wait for the current image paste.')
     if (!validImageWrite(request)) throw new Error('Invalid image chunk.')
     if (request.offset === 0) {
       this.close()
@@ -51,12 +54,24 @@ export class TerminalImages {
     chunk.copy(upload.bytes, upload.offset)
     upload.offset += chunk.length
     upload.timer.refresh()
-    if (upload.offset === upload.bytes.length) {
-      try {
-        return saveImage(this.session, imageExtensions[upload.mime as ImageMediaType], upload.bytes)
-      } finally {
-        this.close()
-      }
+  }
+
+  async paste(transfer: unknown, consume: (image: TerminalImage) => void | Promise<void>) {
+    const upload = this.upload
+    if (this.pasting || !upload || upload.transfer !== transfer || upload.offset !== upload.bytes.length)
+      throw new Error('This image is incomplete or expired. Paste it again.')
+    this.pasting = true
+    // Keep its memory reserved until the driver releases the bytes, even if the viewer disconnects.
+    this.upload = undefined
+    clearTimeout(upload.timer)
+    try {
+      const mime = sniffMediaType(upload.bytes)
+      if (mime === 'application/octet-stream' || mime !== upload.mime)
+        throw new Error('The image contents do not match its format.')
+      await consume({ mime, bytes: upload.bytes })
+    } finally {
+      this.pasting = false
+      reserved -= upload.bytes.length
     }
   }
 }

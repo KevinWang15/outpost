@@ -131,6 +131,12 @@ done`
     `export PATH=${quote(statePath('bin'))}:"$PATH"`,
     `export -- COLORTERM=truecolor BROWSER=${quote(statePath('bin', 'outpost-browser'))}`,
     `export -- ${Object.entries(exports)
+      .filter(
+        ([key]) =>
+          !['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XDG_SESSION_TYPE', 'GDK_BACKEND'].includes(
+            key,
+          ),
+      )
       .map(([key, value]) => `${key}=${quote(value)}`)
       .join(' ')}`,
     `launch_coding_tool() {\n${guard}\nexec ${quote(launch.executable)} ${shellJoin([...options, ...adapter.resume(session, launch.conversation)])} "$@"\n}`,

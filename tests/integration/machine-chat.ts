@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { readFile } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import WebSocket from 'ws'
 import { chatProtocol, type ChatServerMessage, type SessionRef } from '../../shared/chatApi'
 import type { ChatEntry } from '../../shared/chatHost'
 import type { SessionFile } from '../../shared/sessionFiles'
+import { TerminalClient } from './helpers'
 
 async function until<T>(read: () => T | undefined | Promise<T | undefined>, label: string, timeout = 20_000) {
   const end = Date.now() + timeout
@@ -59,6 +61,27 @@ export async function exerciseMachineChat(origin: string, ref: SessionRef, heade
   let page = await viewer(origin, headers)
   try {
     await page.call('open', { ...ref, start: true })
+    const ticket = await fetch(`${origin}/api/targets/${ref.targetId}/sessions/${ref.sessionId}/connect`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-outpost-request': '1', ...headers },
+      body: '{}',
+    })
+    if (!ticket.ok) assert.fail('Could not issue an ACP terminal ticket: ' + (await ticket.text()))
+    const { token } = (await ticket.json()) as { token: string }
+    const terminal = new TerminalClient(
+      origin.replace(/^http/, 'ws') + '/api/terminal?token=' + encodeURIComponent(token),
+    )
+    try {
+      await terminal.message('ready')
+      const pixels = await readFile('public/favicon-32x32.png')
+      await terminal.pasteImage(await terminal.uploadImage(pixels))
+      await terminal.text('[Image 1]')
+      terminal.input('identify clipboard pixels\r')
+      await terminal.text('clipboard sha256 ' + createHash('sha256').update(pixels).digest('hex'))
+    } finally {
+      terminal.socket.close()
+      await terminal.closed
+    }
     await page.call('prompt', { ...ref, key: randomUUID(), text: 'permission', files: [] })
     const permission = await page.entry('permission')
     await page.close()

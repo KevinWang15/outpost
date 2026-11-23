@@ -24,8 +24,8 @@ For the two enrollment methods and their acceptance criteria, see the [v3 connec
    process and journal. Closing or losing a viewer leaves the agent running.
 2. **One machine connection carries work in both directions.** Terminal attachments, Chat,
    file transfers and agent tool calls share that connection. Published files remain on
-   the machine for returning viewers. An image paste waits for the machine to confirm the
-   upload before sending its path to the agent.
+   the machine for returning viewers. A separate paste request commits an uploaded image to the original viewer.
+   The running driver handles the image in its own draft.
 3. **Outpost authorizes each attachment.** A client opens its session through Outpost.
    Access is scoped to the workspace owner, machine and session. A coding agent’s Outpost
    tools act as that session.
@@ -258,31 +258,35 @@ connection's `BoundedWriter` stops writing when the underlying stream applies
 backpressure, resumes on drain, and drops the connection after 30 seconds
 without drain.
 Overflow closes the attachment with an explicit error and discards queued input.
-Binary input, composer drafts and pasted references share the 1 MiB/s input
+Binary input, composer drafts and text pastes share the 1 MiB/s input
 budget. These are transport bounds;
 Bun's PTY write API accepts bytes into its own internal queue and does not expose
 its buffered byte count.
 
-Image paste, image file drops and the terminal's image picker all call
-`TerminalSession.pasteImage(File)`. `shared/images.ts` owns the supported formats,
-16 MiB limit and saved-image response. The workspace has no separate upload
-control. Progress and success notices remain overlays and never resize xterm.
+Clipboard, drop and picker gestures use the same `TerminalSocket.pasteImage`
+operation in both clients. A viewer uploads up to 16 MiB in acknowledged
+`image-write` chunks. The machine checks the type, size, offset and transfer
+ID and bounds outstanding memory. A complete upload stays private to its viewer
+for up to 30 seconds. An `image-paste` request consumes that transfer once,
+on the same connection. Disconnect cancels an uncommitted paste.
 
-`TerminalSocket` sends a bounded `image-write` request
-on the attached socket, waits for acknowledgement, and sends the next chunk.
-The terminal service validates the declared media type, size, transfer identity
-and offset. It releases incomplete uploads on disconnect or idle timeout. Once
-complete it stores the image and returns its path. Published files travel in
-the other direction using `file-list` and offset-based `file-read` requests
-on the same socket. Each request is scoped to the attached session.
+In a native Codex, Claude Code or Kimi session, the worker starts an authenticated
+Xvfb display with TCP disabled. A GTK selection owner offers the image on that
+display and the worker sends Ctrl+V to the agent. Success requires a request for
+pixels. Listing clipboard formats alone does not acknowledge delivery. The owner
+serves repeat reads briefly, releases expired data, and exits when the worker
+closes its pipe. Missing clipboard software leaves the terminal usable. The
+explicit file-path action stores a machine-local image and inserts its path.
 
-The client then sends `paste {id, data}` on the original terminal connection and
-waits for acknowledgement. Disconnect cancels the transfer. The paste is bound to the original attachment. One image is processed at a time per terminal.
-Neither uploads nor paste requests are automatically retried, and no Enter is
-appended. Failed/cancelled transfers can leave saved files but never submit a
-prompt; the existing newest-20 retention bounds remote clipboard storage.
-Local shells save raw bytes in their native app profile, then paste the
-quoted local/WSL path with the owning shell generation checked before insertion.
+An ACP terminal stages image files privately in the viewer's draft. Backspace on an
+empty line removes an image. Cancelling or disconnecting discards the draft's
+files. Enter commits the files and submits their IDs with the text through the same prompt path as Chat.
+The chat host sends image content when the agent advertises that capability.
+Local Desktop panes use normal text paste and forward the application's own
+clipboard key.
+
+Published files travel in the other direction with `file-list` and offset-based
+`file-read` requests scoped to the attached session.
 
 `TerminalSocket` owns recovery for both web and desktop remote terminals. Every
 15 seconds after readiness or a successful health check, it sends an authenticated
@@ -1122,7 +1126,7 @@ current conversation.
 | Activity | `~/.outpost/activity/<session>.json` |
 | Messages waiting for a terminal | `~/.outpost/deliveries/<session>.json` |
 | Event log (activity changes, driver starts and exits) | `~/.outpost/events/events.ndjson`, rotated once at 4 MiB to `events.1.ndjson` |
-| Pasted images | `~/.outpost/clipboard/<session>/` (newest 20) |
+| Explicit image file-path pastes | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Session files | `~/.outpost/files/<session>/<file-id>/` (`metadata.json`, `content/<name>`) |
 | Kimi Code plugin | `~/.outpost/integrations/kimi/` |
 | Antigravity CLI plugin | `~/.outpost/integrations/antigravity/` |
@@ -1257,8 +1261,7 @@ cleanup races with browser API doubles, plus actual worker activation in both en
 registration in Chromium. They do not prove physical iOS selection handles, OS banners, Home Screen installation, or
 background suspension behavior. Those still need a physical iPhone/iPad and Android device check.
 
-Browser image checks compare saved
-bytes and exact bracketed-paste input, including no automatic Enter; API and machine
-checks cover 16 MiB boundaries, authorization/revocation, cancellation, retention,
-and uploads that must not hold the session registry lock. Native Windows/macOS
-clipboard and WSL path conversion still require those operating systems.
+Browser and machine tests compare the PNG read by a headless clipboard
+consumer and verify its single paste keystroke. ACP tests check image content,
+draft removal and explicit submission. The native macOS workspace test checks
+text paste and raw Ctrl+V using a real local PTY.

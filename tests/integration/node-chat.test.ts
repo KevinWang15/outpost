@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 // Chat through a machine's node: the chat host, its conversation in the session
 // timeline, files, Outpost tools and one driver at a time, on a local target.
 import assert from 'node:assert/strict'
@@ -101,7 +102,7 @@ async function waitFor(check: () => boolean, message: string) {
 function terminalViewer(stream: Stream) {
   const decoder = new FrameDecoder()
   let output = ''
-  const events: { type: string; id?: string; files?: { name: string }[] }[] = []
+  const events: { type: string; id?: string; ok?: boolean; message?: string; files?: { name: string }[] }[] = []
   stream.onData(bytes => {
     for (const frame of decoder.feed(bytes)) {
       if (frame.kind === 'O') output += frame.payload.toString()
@@ -528,6 +529,27 @@ test(
     const original = await chat.ready()
     const terminal = terminalViewer(await sessions.attach(context, session.id, 90, 30, false))
     await terminal.ready()
+    const pixels = await readFile('public/favicon-32x32.png')
+    const paste = async (id: string) => {
+      terminal.send({
+        type: 'image-write',
+        id: 'write-' + id,
+        transfer: id,
+        mime: 'image/png',
+        size: pixels.length,
+        offset: 0,
+        chunk: pixels.toString('base64'),
+      })
+      terminal.send({ type: 'image-paste', id: 'paste-' + id, transfer: id, mode: 'attachment' })
+      await waitFor(() => terminal.events.some(m => m.id === 'paste-' + id), 'Image paste was not confirmed')
+      const result = terminal.events.find(m => m.id === 'paste-' + id)!
+      assert.ok(result.ok, result.message ?? 'Image paste failed')
+      await terminal.text('[Image 1]')
+    }
+    await paste('remove')
+    terminal.input('\x7f')
+    terminal.send({ type: 'ping', id: 'removed' })
+    await waitFor(() => terminal.events.some(m => m.id === 'removed'), 'Backspace was not processed')
     terminal.input('\x1b[20')
     terminal.input('0~first line\r\nsecond line\x1b[20')
     terminal.input('1~')
@@ -538,6 +560,13 @@ test(
     const pasted = await chat.entry('queued')
     assert.deepEqual(pasted.entry.prompt, [{ type: 'text', text: 'first line\nsecond line' }])
     await chat.entry('ended')
+    await paste('keep')
+    terminal.input('identify clipboard pixels')
+    terminal.send({ type: 'ping', id: 'draft-edited' })
+    await waitFor(() => terminal.events.some(m => m.id === 'draft-edited'), 'Draft was not edited')
+    assert.equal(chat.messages.filter(m => m.type === 'entry' && m.entry.kind === 'queued').length, 1)
+    terminal.input('\r')
+    await terminal.text('clipboard sha256 ' + createHash('sha256').update(pixels).digest('hex'))
     terminal.input('Check with permission\r')
     const ask = await chat.entry('permission')
     const command =

@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """A visible interactive test process, standing in for the selected coding tool."""
 
+import hashlib
 import json
 import os
 import select
 import signal
 import subprocess
 import sys
+import termios
 import time
 import tty
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-
-if Path('capture-input').exists():
-    tty.setraw(sys.stdin.fileno())
-    print('\x1b[?2004h', end='', flush=True)
 
 tool = Path(sys.argv[0]).name
 
@@ -213,6 +211,16 @@ def answer(prompt):
     hook('Stop')
 
 
+# Interactive harnesses receive Ctrl+V immediately. Keep normal line echo for
+# fixtures that inspect output and use raw input where exact bytes are captured.
+if Path('capture-input').exists():
+    tty.setraw(sys.stdin.fileno())
+    print('\x1b[?2004h', end='', flush=True)
+else:
+    attrs = termios.tcgetattr(sys.stdin.fileno())
+    attrs[3] &= ~(termios.ICANON | termios.IEXTEN)
+    termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, attrs)
+
 typed = ''
 signal.signal(signal.SIGWINCH, ready)
 heartbeat = Path('heartbeat.json')
@@ -245,6 +253,13 @@ while True:
         if Path('capture-input').exists():
             with open('input.bin', 'ab') as stream:
                 stream.write(command)
+        if b'\x16' in command and os.environ.get('DISPLAY'):
+            image = subprocess.run(
+                ['xclip', '-o', '-selection', 'clipboard', '-t', 'image/png'], capture_output=True, timeout=5
+            )
+            if image.returncode == 0:
+                Path('clipboard.png').write_bytes(image.stdout)
+                print('OUTPOST_IMAGE_SHA256:' + hashlib.sha256(image.stdout).hexdigest(), flush=True)
         incoming = input_tail + command
 
         def received(marker, incoming=incoming, input_tail=input_tail):

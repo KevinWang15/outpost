@@ -23,8 +23,8 @@
     "logo:generate": "node scripts/logo/generate.mjs",
     "docs:capture": "node scripts/screenshots.mjs",
     "dev:debug": "tsx watch --inspect=127.0.0.1:9229 --include=backend/** backend/server.ts",
-    "lint:python": "ruff check tests && ruff format --check tests",
-    "format": "prettier --write . && ruff format tests && ruff check --fix tests",
+    "lint:python": "ruff check tests machine/clipboard.py && ruff format --check tests machine/clipboard.py",
+    "format": "prettier --write . && ruff format tests machine/clipboard.py && ruff check --fix tests machine/clipboard.py",
     "build:terminal": "npm exec --yes --package=bun@1.4.3 -- node scripts/build-terminal.mjs"
   },
   "dependencies": {

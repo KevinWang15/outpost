@@ -5,9 +5,11 @@ import { PassThrough, Writable } from 'node:stream'
 import headless from '@xterm/headless'
 import type * as acp from '@agentclientprotocol/sdk'
 import { chatHost, type ChatEntry, type ChatHostMessage, type ChatHostRequest } from '../shared/chatHost'
+import { imageExtensions } from '../shared/images'
 import { FrameDecoder, terminalControl } from '../shared/node/terminalFrames'
 import { checkpoint } from '../shared/terminalCheckpoint'
 import { terminalSize } from '../shared/terminalService'
+import { removeFile, saveImage, StoredFile } from './files'
 import { chatSocket } from './launch'
 import { socketAddress } from './state'
 import { TerminalFileRequests } from './terminalFileRequests'
@@ -46,6 +48,9 @@ export class ChatTerminal extends ViewStream {
   })
   private files: TerminalFileRequests
   private permissions = new Map<string, Permission>()
+  private imagesEnabled = false
+  private draftImages: StoredFile[] = []
+  private submitting = false
   private pending = ''
   private partial = Buffer.alloc(0)
   private paste: Buffer[] | null = null
@@ -54,7 +59,7 @@ export class ChatTerminal extends ViewStream {
   private ready = false
 
   constructor(
-    session: string,
+    private session: string,
     private cols: number,
     private rows: number,
   ) {
@@ -64,13 +69,43 @@ export class ChatTerminal extends ViewStream {
       session,
       msg => this.control(msg),
       () => this.control({ type: 'files' }),
+      (image, mode) => {
+        if (mode === 'path') return this.insertPaste(saveImage(session, imageExtensions[image.mime], image.bytes))
+        if (!this.imagesEnabled) throw Error('This agent does not accept images. Use “Paste image as file path”.')
+        if (image.bytes.length > chatHost.maxImageBytes)
+          throw Error('Inline images must fit within 5 MiB. Use “Paste image as file path” for larger images.')
+        if (this.draftImages.length >= chatHost.maxFiles)
+          throw Error(`Attach at most ${chatHost.maxFiles} images per prompt.`)
+        const stored = new StoredFile(session, 'clipboard.' + imageExtensions[image.mime], 'received')
+        try {
+          stored.write(image.bytes)
+          this.draftImages.push(stored)
+        } catch (error) {
+          stored.abort()
+          throw error
+        }
+        this.refreshPrompt()
+      },
     )
     this.editorOutput.columns = cols
-    this.editor.on('line', line => this.submit(line))
+    this.editor.on('line', line => {
+      void this.submit(line).catch(error => this.destroy(error))
+    })
+    this.input.prependListener('keypress', (_key, key) => {
+      if (
+        this.draftImages.length &&
+        !this.editor.line &&
+        (key.name === 'backspace' || (key.ctrl && key.name === 'h'))
+      ) {
+        this.draftImages.pop()?.abort()
+        this.refreshPrompt()
+      }
+    })
     this.editor.on('SIGINT', () => {
-      if (this.editor.line) {
+      if (this.editor.line || this.draftImages.length) {
+        this.discardImages()
         this.editor.write(null, { ctrl: true, name: 'u' })
-        this.editor.prompt()
+        this.refreshPrompt()
       } else this.send({ type: 'cancel', id: randomUUID() })
     })
     const decoder = new FrameDecoder()
@@ -95,6 +130,7 @@ export class ChatTerminal extends ViewStream {
     })
     this.once('close', () => {
       this.files.close()
+      this.discardImages()
       this.editor.close()
       this.input.destroy()
       this.editorOutput.destroy()
@@ -117,27 +153,55 @@ export class ChatTerminal extends ViewStream {
       this.pending = ''
     }
   }
-  private submit(line: string) {
+  private discardImages() {
+    for (const file of this.draftImages.splice(0)) file.abort()
+  }
+  private refreshPrompt() {
+    const images = this.draftImages.map((_, i) => `[Image ${i + 1}]`).join(' ')
+    this.editor.setPrompt(images ? images + ' (Backspace on empty to remove) > ' : '> ')
+    this.editor.prompt(true)
+  }
+  private async submit(line: string) {
+    if (this.submitting) {
+      this.insertPaste(line)
+      return this.print('The previous prompt is still being saved. Press Enter when it finishes.')
+    }
     const text = line.replaceAll('\u2028', '\n').trim()
-    if (!text) return this.editor.prompt()
+    if (!text && !this.draftImages.length) return this.editor.prompt()
     const answer = /^\/answer ([^\s]+) (\d+)$/.exec(text)
-    if (answer) {
+    if (answer && !this.draftImages.length) {
       const [, prefix, choice] = answer
       const matches = [...this.permissions.values()].filter(p => p.id.slice(0, 8) === prefix)
       const option = matches.length === 1 && matches[0].options[Number(choice) - 1]
       if (!option) return this.print('Use the answer command shown on the pending approval.')
       this.send({ type: 'permission', id: randomUUID(), request: matches[0].id, optionId: option.optionId })
     } else {
-      this.send({
-        type: 'prompt',
-        id: randomUUID(),
-        key: randomUUID(),
-        origin: { kind: 'user' },
-        prompt: [{ type: 'text', text }],
-        files: [],
-      })
+      const images = this.draftImages.splice(0)
+      const files: string[] = []
+      this.submitting = true
+      try {
+        for (const image of images) files.push((await image.commit()).id)
+        if (this.destroyed) throw Error('The viewer disconnected before submission.')
+        this.send({
+          type: 'prompt',
+          id: randomUUID(),
+          key: randomUUID(),
+          origin: { kind: 'user' },
+          prompt: text ? [{ type: 'text', text }] : [],
+          files,
+        })
+      } catch (error) {
+        for (const file of files) await removeFile(this.session, file)
+        if (!this.destroyed) {
+          this.insertPaste(line)
+          this.print((error as Error).message)
+        }
+      } finally {
+        for (const image of images) image.abort()
+        this.submitting = false
+      }
     }
-    this.editor.prompt()
+    if (!this.destroyed) this.refreshPrompt()
   }
   private permission(p: Permission) {
     this.print(
@@ -186,6 +250,7 @@ export class ChatTerminal extends ViewStream {
     }
   }
   private event(message: ChatHostMessage) {
+    if (message.type === 'welcome' || message.type === 'info') this.imagesEnabled = message.info.images
     if (message.type === 'welcome') {
       this.replaying = true
       // Both terminal clients restore a screen before accepting any live output.

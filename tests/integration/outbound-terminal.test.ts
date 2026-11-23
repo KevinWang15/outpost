@@ -190,10 +190,14 @@ test(
     const file = await publish(session.id, resolve('public/outpost-256.png'))
     await filesChanged(session.id, 'terminal', file)
     await waitFor(() => changes === 1)
-    assert.deepEqual(
-      await readFile(await client.pasteImage(new File([bytes], 'image.png', { type: 'image/png' }))),
-      bytes,
-    )
+    // A plain cat process has no image shortcut; its explicit path paste remains useful.
+    await client.pasteImage(new File([bytes], 'image.png', { type: 'image/png' }), 'path')
+    const pastedPath = () =>
+      Buffer.concat(received)
+        .toString()
+        .match(/(\/[^\r\n]*?\/clipboard\/[^\r\n]*?\.png)/)?.[1]
+    await waitFor(() => Boolean(pastedPath()))
+    assert.deepEqual(await readFile(pastedPath()!), bytes)
     assert.ok(link)
     link.destroy()
     await waitFor(() => registrations >= 2 && client.connected)

@@ -355,16 +355,16 @@ test('image bytes, their acknowledgement and a single paste use the same termina
       type: 'result',
       id: request.id,
       ok: true,
-      ...(index === 1 && { reference: '/target/clipboard/test.png' }),
     })
   }
   await settle()
   assert.deepEqual(Buffer.concat(seen), bytes)
-  const insertions = socket.requests().filter(m => m.type === 'paste')
+  const insertions = socket.requests().filter(m => m.type === 'image-paste')
   assert.equal(insertions.length, 1)
-  assert.equal(insertions[0].data, '/target/clipboard/test.png')
+  assert.equal(insertions[0].mode, 'attachment')
+  assert.equal(insertions[0].transfer, socket.requests().find(m => m.type === 'image-write').transfer)
   socket.message({ type: 'result', id: insertions[0].id, ok: true })
-  assert.equal(await pasted, '/target/clipboard/test.png')
+  await pasted
 })
 
 test('a disconnected image upload cannot paste into a replacement attachment', async t => {
@@ -378,8 +378,8 @@ test('a disconnected image upload cannot paste into a replacement attachment', a
   assert.ok(client.input('during upload'))
   client.close()
   await assert.rejects(pending)
-  socket.message({ type: 'result', id: chunk.id, ok: true, reference: '/tmp/image' })
-  assert.equal(socket.requests().filter(m => m.type === 'paste').length, 0)
+  socket.message({ type: 'result', id: chunk.id, ok: true })
+  assert.equal(socket.requests().filter(m => m.type === 'image-paste').length, 0)
 })
 
 test('a lost paste acknowledgement does not replay input', async t => {
@@ -388,12 +388,12 @@ test('a lost paste acknowledgement does not replay input', async t => {
   const pending = client.pasteImage(screenshot())
   await new Promise<void>(resolve => setImmediate(resolve))
   const write = socket.requests().find(m => m.type === 'image-write')
-  socket.message({ type: 'result', id: write.id, ok: true, reference: '/session/image.png' })
+  socket.message({ type: 'result', id: write.id, ok: true })
   await settle()
-  assert.equal(socket.requests().filter(m => m.type === 'paste').length, 1)
+  assert.equal(socket.requests().filter(m => m.type === 'image-paste').length, 1)
   client.reconnect()
   await assert.rejects(pending)
   const replacement = FakeSocket.instances.at(-1)!
   readyForImages(replacement)
-  assert.ok(!replacement.requests().some(m => m.type === 'paste' || m.type === 'image-write'))
+  assert.ok(!replacement.requests().some(m => m.type === 'image-paste' || m.type === 'image-write'))
 })

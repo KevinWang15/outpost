@@ -1,3 +1,4 @@
+import type { ImagePasteMode } from '../../shared/terminalFiles'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { Check, ClipboardPaste, Copy, Eraser, ImagePlus, Search, TextSelect } from 'lucide-react'
@@ -14,7 +15,7 @@ interface Props {
     selectText: () => void
     find: () => void
     clear: () => void
-    pasteImage: () => void
+    pasteImage: (mode: ImagePasteMode) => void
     focus: () => void
   }
   controls: { label: string; shown: boolean; onChange: (shown: boolean) => void }[]
@@ -122,8 +123,15 @@ export default function TerminalContextMenu({ children, connected, actions, cont
           >
             <TextSelect size={15} /> Select text…
           </ContextMenu.Item>
-          <ContextMenu.Item className="menu-item" disabled={!connected} onSelect={actions.pasteImage}>
+          <ContextMenu.Item
+            className="menu-item"
+            disabled={!connected}
+            onSelect={() => actions.pasteImage('attachment')}
+          >
             <ImagePlus size={15} /> Paste an image…
+          </ContextMenu.Item>
+          <ContextMenu.Item className="menu-item" disabled={!connected} onSelect={() => actions.pasteImage('path')}>
+            <ClipboardPaste aria-hidden="true" /> Paste image as file path…
           </ContextMenu.Item>
           <ContextMenu.Item
             className="menu-item"

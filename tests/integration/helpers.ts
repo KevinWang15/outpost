@@ -214,9 +214,15 @@ export class TerminalClient {
       const result = await this.take('result')
       assert.equal(result.id, id)
       assert.ok(result.ok, result.message ?? 'Image transfer failed')
-      if (result.reference) return result.reference
     }
-    throw new Error('Missing image reference.')
+    return transfer
+  }
+  async pasteImage(transfer: string, mode: 'attachment' | 'path' = 'attachment') {
+    const id = crypto.randomUUID()
+    this.send({ type: 'image-paste', id, transfer, mode })
+    const result = await this.take('result')
+    assert.equal(result.id, id)
+    assert.ok(result.ok, result.message ?? 'Image paste failed.')
   }
   input(data: string) {
     this.socket.send(Buffer.from(data))

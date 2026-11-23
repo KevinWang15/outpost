@@ -498,12 +498,6 @@ impl Workspace {
             });
         match Pane::local(&executable, &args, &home_dir(), self.fontsize(), w, cx) {
             Ok(p) => {
-                if let Some(profile) = profile {
-                    p.update(cx, |p, _| {
-                        p.image_syntax = strval(profile, "syntax");
-                        p.wsl = profile["wsl"] == true;
-                    });
-                }
                 self.insert(p, w, cx);
             }
             Err(e) => {
@@ -1999,6 +1993,22 @@ impl Workspace {
                             }
                             s.show(Page::Terminal, w, cx)
                         }))
+                        .when(
+                            self.active().is_some_and(|p| p.read(cx).server.is_some()),
+                            |row| {
+                                row.child(control(
+                                    "Paste image as file path",
+                                    false,
+                                    cx,
+                                    |s, w, cx| {
+                                        if let Some(p) = s.active() {
+                                            p.update(cx, |p, cx| p.paste_image_path(cx));
+                                        }
+                                        s.show(Page::Terminal, w, cx)
+                                    },
+                                ))
+                            },
+                        )
                         .child(control("Select all", false, cx, |s, w, cx| {
                             s.select_all(cx);
                             s.show(Page::Terminal, w, cx)
@@ -2560,6 +2570,47 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             "Shell output did not reach the Alacritty grid"
         );
         std::thread::sleep(Duration::from_millis(20));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Use a real raw-mode reader. An image-only Command-V must leave its first
+        // byte available for the foreground program's own Control-V binding.
+        let wait_for_output = |test: &mut HeadlessAppContext, marker: &str| -> anyhow::Result<()> {
+            let deadline = Instant::now() + Duration::from_secs(8);
+            loop {
+                draw(test);
+                if test.update(|cx| p.read(cx).screen_text().contains(marker)) {
+                    return Ok(());
+                }
+                anyhow::ensure!(
+                    Instant::now() < deadline,
+                    "Missing local PTY output: {marker}"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+        test.update_window(window.into(), |_, w, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(
+                r#"stty raw -echo; printf 'READER-%s\r\n' READY; v=$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' '); stty sane; printf 'LOCAL-PASTE=%s\n' "$v""#.to_string()
+            ));
+            p.update(cx, |pane, cx| {
+                pane.key_for_test("cmd-v", w, cx);
+                pane.key_for_test("enter", w, cx);
+            });
+        })?;
+        wait_for_output(&mut test, "READER-READY")?;
+        test.update_window(window.into(), |_, w, cx| {
+            let image = gpui::Image::from_bytes(
+                gpui::ImageFormat::Png,
+                include_bytes!("../../public/outpost-256.png").to_vec(),
+            );
+            cx.write_to_clipboard(ClipboardItem::new_image(&image));
+            p.update(cx, |pane, cx| {
+                pane.key_for_test("cmd-v", w, cx);
+                pane.key_for_test("ctrl-v", w, cx);
+            });
+        })?;
+        wait_for_output(&mut test, "LOCAL-PASTE=22")?;
     }
     test.update_window(window.into(), |root, w, cx| {
         root.downcast::<Workspace>()

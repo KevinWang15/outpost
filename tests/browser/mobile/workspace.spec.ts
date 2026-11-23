@@ -1,6 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pastedImage } from '../terminal-fixture'
 import { test, expect, viewport, fitsScreen } from './helpers'
 import type { Session, Target, TargetInput } from '../../../shared/model'
 
@@ -106,18 +105,14 @@ test('create and connect on a phone, send to the real process, resize, and resum
   await terminal.locator('input[type=file]').setInputFiles({
     name: 'mobile-image.png',
     mimeType: 'image/png',
-    buffer: Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)]),
+    buffer: await readFile('public/outpost-256.png'),
   })
-  await expect(terminal.getByRole('status').filter({ hasText: 'Image pasted' })).toBeVisible()
-  await expect.poll(async () => pastedImage(await input())).toContain('/.outpost/clipboard/')
-  const path = pastedImage(await input())
-  expect(await readFile(path)).toEqual(
-    Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(32, 9)]),
-  )
+  await expect(terminal.getByRole('status').filter({ hasText: 'Image attached' })).toBeVisible()
+  await expect
+    .poll(() => readFile(join(session.rootDir, 'clipboard.png')).catch(() => null))
+    .toEqual(await readFile('public/outpost-256.png'))
   expect(await screen.boundingBox()).toEqual(imageGeometry)
-  await expect.poll(input).toContain(`\x1b[200~${path}\x1b[201~`)
-  expect((await input()).endsWith('\x1b[201~')).toBe(true)
-  await expect.poll(input).toContain(`/.outpost/clipboard/${session.id}/`)
+  expect((await input()).endsWith('\x16')).toBe(true)
   const starts = await readFile(join(session.rootDir, 'starts.log'), 'utf8')
   const sizes = await readFile(join(session.rootDir, 'sizes.log'), 'utf8')
   await viewport(terminal, { height: 350, offsetTop: 15 })

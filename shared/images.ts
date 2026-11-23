@@ -1,4 +1,4 @@
-/** Image attachments use binary bytes; only their saved reference enters the PTY. */
+/** Raster formats accepted by the terminal clipboard and file picker. */
 export const imageMediaTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 export type ImageMediaType = (typeof imageMediaTypes)[number]
 export const imageExtensions: Record<ImageMediaType, string> = {

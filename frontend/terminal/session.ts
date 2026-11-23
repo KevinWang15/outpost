@@ -1,3 +1,4 @@
+import type { ImagePasteMode } from '../../shared/terminalFiles'
 import { Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -138,7 +139,7 @@ export class TerminalSession {
       this.own(() => this.bells.dispose())
       this.clipboard = attachClipboard(term, {
         connected: () => this.connection.connected,
-        pasteImage: file => void this.pasteImage(file),
+        pasteImage: (file, mode) => void this.pasteImage(file, mode),
         status: this.notice,
         pasteFallback: options.showComposer,
       })
@@ -213,7 +214,7 @@ export class TerminalSession {
 
   private imageBusy = false
 
-  async pasteImage(file: File) {
+  async pasteImage(file: File, mode: ImagePasteMode = 'attachment') {
     if (this.disposed) return
     if (this.imageBusy) return this.notice('An image is already being attached. Please wait.', true)
     if (!this.connection.connected) return this.notice('Connect the terminal before attaching an image.')
@@ -222,8 +223,8 @@ export class TerminalSession {
     this.imageBusy = true
     this.notice('Uploading image…', true)
     try {
-      await this.connection.pasteImage(file)
-      this.notice('Image pasted')
+      await this.connection.pasteImage(file, mode)
+      this.notice(mode === 'path' ? 'Image path pasted' : 'Image attached')
     } catch (error) {
       this.notice((error as Error).message)
     } finally {

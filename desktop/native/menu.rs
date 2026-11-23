@@ -8,6 +8,11 @@ actions!(
         TerminalActions,
         Settings,
         CloseTerminal,
+        CopySelection,
+        PasteClipboard,
+        SelectAll,
+        FindInTerminal,
+        ClearScreen,
         Quit
     ]
 );
@@ -64,6 +69,14 @@ pub fn init(cx: &mut App) {
             MenuItem::action("Terminal actions", TerminalActions),
             MenuItem::separator(),
             MenuItem::action("Close terminal", CloseTerminal),
+        ]),
+        Menu::new("Edit").items([
+            MenuItem::action("Copy", CopySelection),
+            MenuItem::action("Paste", PasteClipboard),
+            MenuItem::action("Select all", SelectAll),
+            MenuItem::separator(),
+            MenuItem::action("Find in terminal", FindInTerminal),
+            MenuItem::action("Clear screen", ClearScreen),
         ]),
     ]);
 }

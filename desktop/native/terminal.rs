@@ -88,6 +88,7 @@ pub struct Pane {
     pub restoring: bool,
     pub sound: bool,
     pub server: Option<String>,
+    pub session_key: Option<String>,
     pub files: serde_json::Value,
     pub file_previews: crate::workspace::files::FilePreviews,
     focus_subs: Vec<Subscription>,
@@ -97,11 +98,35 @@ pub struct Pane {
     desired: Option<(u16, u16)>,
     pub(super) grid_visible: bool,
     dragging: bool,
+    selection_changed: bool,
+    mouse_reported_button: Option<MouseButton>,
+    pending_copy: Option<String>,
     marked: String,
 }
 pub struct PasteError(pub String);
 impl EventEmitter<PasteError> for Pane {}
-pub struct PaneMenu;
+pub struct PaneNotice {
+    pub message: String,
+    pub sticky: bool,
+}
+impl PaneNotice {
+    pub fn transient(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            sticky: false,
+        }
+    }
+    pub fn sticky(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            sticky: true,
+        }
+    }
+}
+impl EventEmitter<PaneNotice> for Pane {}
+pub struct PaneMenu {
+    pub position: Point<Pixels>,
+}
 impl EventEmitter<PaneMenu> for Pane {}
 pub struct PaneChanged;
 impl EventEmitter<PaneChanged> for Pane {}
@@ -194,6 +219,7 @@ impl Pane {
             restoring: false,
             sound: true,
             server: None,
+            session_key: None,
             files: serde_json::Value::Null,
             file_previews: Default::default(),
             focus_subs: Vec::new(),
@@ -203,6 +229,9 @@ impl Pane {
             desired: None,
             grid_visible: false,
             dragging: false,
+            selection_changed: false,
+            mouse_reported_button: None,
+            pending_copy: None,
             marked: String::new(),
         }
     }
@@ -235,8 +264,18 @@ impl Pane {
                     cx.emit(PaneChanged)
                 }
                 AnsiEvent::PtyWrite(data) if local => self.write(data.into_bytes(), cx),
-                AnsiEvent::ClipboardStore(_, text) if !self.restoring => {
-                    cx.write_to_clipboard(ClipboardItem::new_string(text))
+                AnsiEvent::ClipboardStore(_, text)
+                    if !self.restoring && text.len() <= 1024 * 1024 =>
+                {
+                    if self.active {
+                        self.pending_copy = None;
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        cx.emit(PaneNotice::transient("Copied to clipboard"));
+                    } else if !text.is_empty() {
+                        // Background panes never overwrite the system clipboard unprompted;
+                        // keep the text available for an explicit Copy action.
+                        self.pending_copy = Some(text);
+                    }
                 }
                 AnsiEvent::ColorRequest(i, reply) if local && i < 269 => {
                     let v = self.term.colors()[i]
@@ -295,6 +334,7 @@ impl Pane {
     }
     pub fn reset(&mut self, cols: u16, rows: u16) {
         self.grid_visible = false;
+        self.pending_copy = None;
         self.term = Term::new(
             Config {
                 scrolling_history: self.scrollback,
@@ -381,13 +421,26 @@ impl Pane {
         cx.notify()
     }
     pub fn paste(&mut self, text: String, cx: &mut Context<Self>) {
-        let text = text.replace('\x1b', "");
+        if text.is_empty() {
+            return;
+        }
+        let text = text
+            .replace('\x1b', "")
+            .replace("\r\n", "\r")
+            .replace('\n', "\r");
         let input = if self.term.mode().contains(TermMode::BRACKETED_PASTE) {
             format!("\x1b[200~{text}\x1b[201~")
         } else {
-            text.replace("\r\n", "\r").replace('\n', "\r")
+            text
         };
-        self.user_write(input.into_bytes(), cx);
+        let bytes = input.into_bytes();
+        if bytes.len() > 1024 * 1024 {
+            cx.emit(PasteError(
+                "Clipboard text is larger than 1 MiB. Paste a smaller section.".into(),
+            ));
+            return;
+        }
+        self.user_write(bytes, cx);
     }
     pub fn select_all(&mut self, cx: &mut Context<Self>) {
         let mut sel = Selection::new(
@@ -405,10 +458,28 @@ impl Pane {
         self.term.selection = Some(sel);
         cx.notify()
     }
-    pub fn copy(&self, cx: &mut App) {
-        if let Some(text) = self.term.selection_to_string() {
-            cx.write_to_clipboard(ClipboardItem::new_string(text))
-        }
+    pub fn has_selection(&self) -> bool {
+        self.term
+            .selection
+            .as_ref()
+            .and_then(|s| s.to_range(&self.term))
+            .is_some()
+    }
+    pub fn can_copy(&self) -> bool {
+        self.has_selection() || self.pending_copy.is_some()
+    }
+    pub fn copy(&mut self, cx: &mut App) -> bool {
+        let text = self
+            .term
+            .selection_to_string()
+            .filter(|t| !t.is_empty())
+            .or_else(|| self.pending_copy.take().filter(|t| !t.is_empty()));
+        let Some(text) = text else {
+            return false;
+        };
+        self.pending_copy = None;
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        true
     }
     #[cfg(feature = "ui-tests")]
     pub fn selected_text(&self) -> Option<String> {
@@ -551,15 +622,36 @@ impl Pane {
         })
         .detach();
     }
-    fn point(&self, p: Point<Pixels>) -> CellPoint {
-        let col = ((p.x - self.bounds.origin.x) / self.cell.width)
+    fn point_and_side(&self, p: Point<Pixels>) -> (CellPoint, Side) {
+        let cols = self.term.columns();
+        let rows = self.term.screen_lines();
+        let cell_w = f32::from(self.cell.width).max(1.0);
+        let cell_h = f32::from(self.cell.height).max(1.0);
+        let rel_x = f32::from(p.x - self.bounds.origin.x);
+        let (col, side) = if rel_x <= 0.0 {
+            (0, Side::Left)
+        } else if rel_x >= cell_w * cols as f32 {
+            (cols - 1, Side::Right)
+        } else {
+            let col = ((rel_x / cell_w).floor() as usize).min(cols - 1);
+            let side = if rel_x - (col as f32) * cell_w < cell_w * 0.5 {
+                Side::Left
+            } else {
+                Side::Right
+            };
+            (col, side)
+        };
+        let line = (f32::from(p.y - self.bounds.origin.y) / cell_h)
             .floor()
-            .clamp(0., (self.term.columns() - 1) as f32) as usize;
-        let line = ((p.y - self.bounds.origin.y) / self.cell.height)
-            .floor()
-            .clamp(0., (self.term.screen_lines() - 1) as f32) as i32
+            .clamp(0., (rows - 1) as f32) as i32
             - self.term.grid().display_offset() as i32;
-        CellPoint::new(Line(line), Column(col))
+        (CellPoint::new(Line(line), Column(col)), side)
+    }
+    fn point(&self, p: Point<Pixels>) -> CellPoint {
+        self.point_and_side(p).0
+    }
+    fn bypass_mouse_mode(mods: Modifiers) -> bool {
+        mods.shift || (cfg!(target_os = "macos") && mods.alt)
     }
     fn mouse_report(
         &mut self,
@@ -567,10 +659,11 @@ impl Pane {
         p: Point<Pixels>,
         up: bool,
         mods: Modifiers,
+        force: bool,
         cx: &mut Context<Self>,
     ) -> bool {
         let mode = *self.term.mode();
-        if mods.shift || !mode.intersects(TermMode::MOUSE_MODE) {
+        if (!force && Self::bypass_mouse_mode(mods)) || !mode.intersects(TermMode::MOUSE_MODE) {
             return false;
         }
         let pos = self.point(p);
@@ -711,8 +804,16 @@ impl Pane {
             if cell.flags.contains(Flags::INVERSE) {
                 std::mem::swap(&mut fg, &mut bg)
             }
-            if view.selection.is_some_and(|s| s.contains(item.point)) {
-                bg = 0x3d3d3d;
+            let selected = view.selection.is_some_and(|s| {
+                s.contains(item.point)
+                    || (cell.flags.contains(Flags::WIDE_CHAR)
+                        && s.contains(CellPoint::new(item.point.line, item.point.column + 1)))
+            });
+            if selected {
+                bg = 0x2b4c7e;
+                if cell.flags.contains(Flags::INVERSE) {
+                    fg = colors::FG;
+                }
             }
             if focused && view.cursor.shape == CursorShape::Block && item.point == cursor {
                 fg = colors::BG;
@@ -825,6 +926,9 @@ impl Pane {
         c.input_needs_wrap = x >= cols as u64;
     }
     pub fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
+        self.paste_clipboard_key(false, cx);
+    }
+    fn paste_clipboard_key(&mut self, is_held: bool, cx: &mut Context<Self>) {
         let Some(item) = cx.read_from_clipboard() else {
             return;
         };
@@ -834,20 +938,37 @@ impl Pane {
             }
             return;
         }
-        self.paste_managed_item(&item, false, cx);
+        self.paste_managed_item(&item, false, is_held, cx);
     }
     pub fn paste_image_path(&mut self, cx: &mut Context<Self>) {
         if let Some(item) = cx.read_from_clipboard() {
-            self.paste_managed_item(&item, true, cx);
+            self.paste_managed_item(&item, true, false, cx);
         }
     }
-    fn paste_managed_item(&mut self, item: &ClipboardItem, as_path: bool, cx: &mut Context<Self>) {
+    fn paste_managed_item(
+        &mut self,
+        item: &ClipboardItem,
+        as_path: bool,
+        is_held: bool,
+        cx: &mut Context<Self>,
+    ) {
         match crate::clipboard_image::read(item) {
-            Ok(Some((mime, bytes))) => self.command("image", json!({
-                "mime": mime, "data": STANDARD.encode(bytes), "mode": if as_path { "path" } else { "attachment" }
-            })),
+            Ok(Some((mime, bytes))) => {
+                if is_held {
+                    return;
+                }
+                cx.emit(PaneNotice::sticky("Uploading image…"));
+                self.command("image", json!({
+                    "mime": mime, "data": STANDARD.encode(bytes), "mode": if as_path { "path" } else { "attachment" }
+                }));
+            }
             Ok(None) if as_path => cx.emit(PasteError("Copy an image first.".into())),
             Ok(None) => {
+                if let Some(text) = item.text() {
+                    self.paste(text, cx);
+                }
+            }
+            Err(_) if !as_path && item.text().is_some() => {
                 if let Some(text) = item.text() {
                     self.paste(text, cx);
                 }
@@ -855,23 +976,123 @@ impl Pane {
             Err(error) => cx.emit(PasteError(error.to_string())),
         }
     }
+    fn cursor_menu_position(&self) -> Point<Pixels> {
+        let p = self.term.grid().cursor.point;
+        let row = (p.line.0 + self.term.grid().display_offset() as i32)
+            .clamp(0, self.term.screen_lines().saturating_sub(1) as i32);
+        self.bounds.origin
+            + point(
+                self.cell.width * (p.column.0 as f32 + 0.5),
+                self.cell.height * (row as f32 + 1.0),
+            )
+    }
     fn observe_completion(&self, w: &Window) {
         if self.activity == "finished" && w.is_window_active() && self.focus.is_focused(w) {
             self.command("observe", json!({}));
         }
+    }
+    fn handle_shortcut(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        let k = &e.keystroke;
+        let m = k.modifiers;
+        let key = k.key.as_str();
+
+        if !m.control && !m.alt && !m.platform && (key == "menu" || (key == "f10" && m.shift)) {
+            if !e.is_held {
+                cx.emit(PaneMenu {
+                    position: self.cursor_menu_position(),
+                });
+            }
+            return true;
+        }
+
+        // Clipboard & terminal shortcuts never use Alt (so they cannot conflict with AltGr).
+        if m.alt {
+            return false;
+        }
+
+        if cfg!(target_os = "macos") {
+            if m.platform && !m.control && !m.shift {
+                match key {
+                    "a" => self.select_all(cx),
+                    "c" => {
+                        if !e.is_held && self.copy(cx) {
+                            cx.emit(PaneNotice::transient("Copied to clipboard"));
+                        }
+                    }
+                    "v" => self.paste_clipboard_key(e.is_held, cx),
+                    "k" => {
+                        if !e.is_held {
+                            self.clear_screen(true, cx);
+                        }
+                    }
+                    _ => return false,
+                }
+                return true;
+            }
+            if self.server.is_some() && key == "v" && m == Modifiers::control() {
+                self.paste_clipboard_key(e.is_held, cx);
+                return true;
+            }
+            return false;
+        }
+
+        if m.control && m.shift && !m.platform {
+            match key {
+                "a" => self.select_all(cx),
+                "c" => {
+                    if !e.is_held && self.copy(cx) {
+                        cx.emit(PaneNotice::transient("Copied to clipboard"));
+                    }
+                }
+                "v" => self.paste_clipboard_key(e.is_held, cx),
+                "k" => {
+                    if !e.is_held {
+                        self.clear_screen(true, cx);
+                    }
+                }
+                _ => return false,
+            }
+            return true;
+        }
+        // Ctrl+C copies and clears selection when text is selected; otherwise sends SIGINT.
+        if m == Modifiers::control() && key == "c" && self.has_selection() {
+            if !e.is_held && self.copy(cx) {
+                self.term.selection = None;
+                cx.emit(PaneNotice::transient("Copied to clipboard"));
+                cx.notify();
+            }
+            return true;
+        }
+        if m == Modifiers::control() && key == "insert" {
+            if !e.is_held && self.copy(cx) {
+                cx.emit(PaneNotice::transient("Copied to clipboard"));
+            }
+            return true;
+        }
+        if m == Modifiers::shift() && key == "insert" {
+            self.paste_clipboard_key(e.is_held, cx);
+            return true;
+        }
+        if m == Modifiers::control() && key == "v" {
+            if self.server.is_some() {
+                self.paste_clipboard_key(e.is_held, cx);
+            } else if let Some(item) = cx.read_from_clipboard() {
+                if let Some(text) = item.text() {
+                    self.paste(text, cx);
+                } else if crate::clipboard_image::has_image(&item) && !e.is_held {
+                    self.user_write(vec![0x16], cx);
+                }
+            }
+            return true;
+        }
+        false
     }
     fn key(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
         self.observe_completion(w);
         if !self.marked.is_empty() {
             return;
         }
-        let k = &e.keystroke;
-        if self.server.is_some()
-            && cfg!(target_os = "macos")
-            && k.key == "v"
-            && k.modifiers == Modifiers::control()
-        {
-            self.paste_clipboard(cx);
+        if self.handle_shortcut(e, cx) {
             w.prevent_default();
             cx.stop_propagation();
             return;
@@ -879,93 +1100,168 @@ impl Pane {
         if e.prefer_character_input {
             return;
         }
-        let shortcut = if cfg!(target_os = "macos") {
-            k.modifiers.platform
-        } else {
-            k.modifiers.control && k.modifiers.shift
-        };
-        if shortcut && !k.modifiers.alt {
-            match k.key.as_str() {
-                "a" => self.select_all(cx),
-                "c" => self.copy(cx),
-                "v" => self.paste_clipboard(cx),
-                "k" => self.clear_screen(true, cx),
-                _ => return,
-            };
-            cx.stop_propagation();
-            return;
-        }
-        if let Some(bytes) = keys::encode(k, *self.term.mode()) {
+        if let Some(bytes) = keys::encode(&e.keystroke, *self.term.mode()) {
             self.user_write(bytes, cx);
             w.prevent_default();
             cx.stop_propagation()
         }
     }
+    fn hyperlink_at(&self, point: CellPoint) -> Option<String> {
+        let cell = &self.term.grid()[point];
+        let uri = cell.hyperlink().map(|l| l.uri().to_owned()).or_else(|| {
+            let line = &self.term.grid()[point.line];
+            let col = point.column.0;
+            let start = (0..col)
+                .rev()
+                .find(|i| line[Column(*i)].c.is_whitespace())
+                .map_or(0, |i| i + 1);
+            let stop = (col..self.term.columns())
+                .find(|i| line[Column(*i)].c.is_whitespace())
+                .unwrap_or(self.term.columns());
+            Some(
+                (start..stop)
+                    .map(|i| line[Column(i)].c)
+                    .collect::<String>()
+                    .trim_matches(['(', ')', '[', ']', '<', '>'])
+                    .to_owned(),
+            )
+        });
+        uri.filter(|url| url.starts_with("https://") || url.starts_with("http://"))
+    }
     fn down(&mut self, e: &MouseDownEvent, w: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(w, cx);
         self.observe_completion(w);
+        if e.button == MouseButton::Right {
+            // Preserve local selection and never let mouse-mode apps swallow the context menu.
+            cx.emit(PaneMenu {
+                position: e.position,
+            });
+            cx.stop_propagation();
+            return;
+        }
         let button = match e.button {
             MouseButton::Left => 0,
             MouseButton::Middle => 1,
-            MouseButton::Right => 2,
             _ => return,
         };
-        if self.mouse_report(button, e.position, false, e.modifiers, cx) {
-            return;
+        if e.button == MouseButton::Left && (e.modifiers.platform || e.modifiers.control) {
+            let point = self.point(e.position);
+            if let Some(url) = self.hyperlink_at(point) {
+                cx.open_url(&url);
+                return;
+            }
         }
-        if e.button == MouseButton::Right {
-            cx.emit(PaneMenu);
+        if self.mouse_report(button, e.position, false, e.modifiers, false, cx) {
+            self.mouse_reported_button = Some(e.button);
+            self.dragging = false;
+            self.selection_changed = false;
             return;
         }
         if e.button != MouseButton::Left {
             return;
         }
-        let point = self.point(e.position);
-        if e.modifiers.platform || e.modifiers.control {
-            let cell = &self.term.grid()[point];
-            let uri = cell.hyperlink().map(|l| l.uri().to_owned()).or_else(|| {
-                let line = &self.term.grid()[point.line];
-                let col = point.column.0;
-                let start = (0..col)
-                    .rev()
-                    .find(|i| line[Column(*i)].c.is_whitespace())
-                    .map_or(0, |i| i + 1);
-                let stop = (col..self.term.columns())
-                    .find(|i| line[Column(*i)].c.is_whitespace())
-                    .unwrap_or(self.term.columns());
-                Some(
-                    (start..stop)
-                        .map(|i| line[Column(i)].c)
-                        .collect::<String>()
-                        .trim_matches(['(', ')', '[', ']', '<', '>'])
-                        .to_owned(),
-                )
-            });
-            if let Some(url) = uri
-                && (url.starts_with("https://") || url.starts_with("http://"))
-            {
-                cx.open_url(&url);
-                return;
-            }
+        let (point, side) = self.point_and_side(e.position);
+        if e.modifiers.shift
+            && e.click_count == 1
+            && let Some(sel) = &mut self.term.selection
+            && !sel.is_empty()
+        {
+            sel.update(point, side);
+            self.dragging = true;
+            self.selection_changed = true;
+            cx.notify();
+            return;
         }
         let kind = match e.click_count {
             2 => SelectionType::Semantic,
             3.. => SelectionType::Lines,
+            _ if !cfg!(target_os = "macos") && e.modifiers.alt => SelectionType::Block,
             _ => SelectionType::Simple,
         };
-        self.term.selection = Some(Selection::new(kind, point, Side::Left));
+        self.term.selection = Some(Selection::new(kind, point, side));
         self.dragging = true;
+        self.selection_changed = kind != SelectionType::Simple;
         cx.notify()
     }
-    fn up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
+    fn update_drag(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.dragging {
+            if e.pressed_button != Some(MouseButton::Left) {
+                self.finish_drag(cx);
+                return;
+            }
+            let cell_h = f32::from(self.cell.height).max(1.0);
+            if !self.term.mode().contains(TermMode::ALT_SCREEN) {
+                if e.position.y < self.bounds.top() {
+                    let delta = ((f32::from(self.bounds.top() - e.position.y) / cell_h).ceil()
+                        as i32)
+                        .clamp(1, 5);
+                    self.term.scroll_display(Scroll::Delta(delta));
+                } else if e.position.y > self.bounds.bottom() {
+                    let delta = ((f32::from(e.position.y - self.bounds.bottom()) / cell_h).ceil()
+                        as i32)
+                        .clamp(1, 5);
+                    self.term.scroll_display(Scroll::Delta(-delta));
+                }
+            }
+            let (point, side) = self.point_and_side(e.position);
+            if let Some(sel) = &mut self.term.selection {
+                sel.update(point, side);
+                self.selection_changed = true;
+            }
+            cx.notify();
+            return;
+        }
+        let mouse = self.term.mode().contains(TermMode::MOUSE_MOTION)
+            || (e.pressed_button.is_some()
+                && self.mouse_reported_button == e.pressed_button
+                && self.term.mode().contains(TermMode::MOUSE_DRAG));
+        if mouse {
+            let force = self.mouse_reported_button.is_some();
+            self.mouse_report(
+                32 + match e.pressed_button {
+                    Some(MouseButton::Left) => 0,
+                    Some(MouseButton::Middle) => 1,
+                    Some(MouseButton::Right) => 2,
+                    _ => 3,
+                },
+                e.position,
+                false,
+                e.modifiers,
+                force,
+                cx,
+            );
+        }
+    }
+    fn finish_drag(&mut self, cx: &mut Context<Self>) {
+        if !self.dragging {
+            return;
+        }
         self.dragging = false;
-        let code = match e.button {
-            MouseButton::Left => 0,
-            MouseButton::Middle => 1,
-            MouseButton::Right => 2,
-            _ => return,
-        };
-        self.mouse_report(code, e.position, true, e.modifiers, cx);
+        let changed = std::mem::take(&mut self.selection_changed);
+        if changed {
+            if self.copy(cx) {
+                cx.emit(PaneNotice::transient("Copied to clipboard"));
+            }
+        } else if self.term.selection.as_ref().is_some_and(Selection::is_empty) {
+            self.term.selection = None;
+            cx.notify();
+        }
+    }
+    fn up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
+        if e.button == MouseButton::Left && self.dragging {
+            self.finish_drag(cx);
+            return;
+        }
+        if self.mouse_reported_button == Some(e.button) {
+            self.mouse_reported_button = None;
+            let code = match e.button {
+                MouseButton::Left => 0,
+                MouseButton::Middle => 1,
+                MouseButton::Right => 2,
+                _ => return,
+            };
+            self.mouse_report(code, e.position, true, e.modifiers, true, cx);
+        }
     }
 }
 impl Render for Pane {
@@ -989,13 +1285,14 @@ impl Render for Pane {
                     return;
                 }
                 let n = (delta.abs().ceil() as i32).clamp(1, 60);
-                if s.term.mode().intersects(TermMode::MOUSE_MODE) && !e.modifiers.shift {
+                if s.term.mode().intersects(TermMode::MOUSE_MODE) && !Self::bypass_mouse_mode(e.modifiers) {
                     for _ in 0..n {
                         s.mouse_report(
                             if delta > 0. { 64 } else { 65 },
                             e.position,
                             false,
                             e.modifiers,
+                            false,
                             cx,
                         );
                     }
@@ -1015,45 +1312,40 @@ impl Render for Pane {
                 cx.stop_propagation()
             }))
             .on_mouse_move(cx.listener(|s, e: &MouseMoveEvent, _, cx| {
-                let mouse = s.term.mode().contains(TermMode::MOUSE_MOTION)
-                    || e.pressed_button.is_some() && s.term.mode().contains(TermMode::MOUSE_DRAG);
-                if mouse
-                    && s.mouse_report(
-                        32 + match e.pressed_button {
-                            Some(MouseButton::Left) => 0,
-                            Some(MouseButton::Middle) => 1,
-                            Some(MouseButton::Right) => 2,
-                            _ => 3,
-                        },
-                        e.position,
-                        false,
-                        e.modifiers,
-                        cx,
-                    )
-                {
-                    return;
-                }
-                if s.dragging {
-                    let p = s.point(e.position);
-                    if let Some(sel) = &mut s.term.selection {
-                        sel.update(p, Side::Right);
-                    }
-                    cx.notify()
+                if !s.dragging && s.mouse_reported_button.is_none() {
+                    s.update_drag(e, cx);
                 }
             }));
         for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
-            area = area
-                .on_mouse_down(button, cx.listener(|s, e, w, cx| s.down(e, w, cx)))
-                .on_mouse_up(button, cx.listener(|s, e, _, cx| s.up(e, cx)));
+            area = area.on_mouse_down(button, cx.listener(|s, e, w, cx| s.down(e, w, cx)));
         }
-        area.on_mouse_up_out(
-            MouseButton::Left,
-            cx.listener(|s, _, _, _| s.dragging = false),
-        )
-        .child(
+        let drag_entity = cx.weak_entity();
+        area.child(
             canvas(
                 move |b, _, cx| measure.update(cx, |s, cx| s.layout(b, cx)),
                 move |b, (), w, cx| {
+                    let move_target = drag_entity.clone();
+                    w.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture {
+                            let _ = move_target.update(cx, |s, cx| {
+                                if s.dragging || s.mouse_reported_button.is_some() {
+                                    s.update_drag(e, cx);
+                                }
+                            });
+                        }
+                    });
+                    let up_target = drag_entity.clone();
+                    w.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture {
+                            let _ = up_target.update(cx, |s, cx| {
+                                if (e.button == MouseButton::Left && s.dragging)
+                                    || s.mouse_reported_button == Some(e.button)
+                                {
+                                    s.up(e, cx);
+                                }
+                            });
+                        }
+                    });
                     let focus = paint.read(cx).focus.clone();
                     w.handle_input(&focus, ElementInputHandler::new(b, paint.clone()), cx);
                     paint.update(cx, |pane, cx| pane.draw_at(b.origin, w, cx))
@@ -1166,6 +1458,12 @@ fn ring_bell() {
 impl Pane {
     pub(super) fn measured_size(&self) -> Option<(u16, u16)> {
         self.desired
+    }
+    pub(super) fn bounds_for_test(&self) -> Bounds<Pixels> {
+        self.bounds
+    }
+    pub(super) fn cell_for_test(&self) -> Size<Pixels> {
+        self.cell
     }
     pub fn key_for_test(&mut self, key: &'static str, w: &mut Window, cx: &mut Context<Self>) {
         self.key(

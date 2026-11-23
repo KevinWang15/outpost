@@ -1,6 +1,8 @@
 mod drag;
 pub(crate) mod files;
 mod panes;
+mod picker;
+mod settings;
 use crate::{
     agent_mark::AgentMark,
     bridge::Bridge,
@@ -38,8 +40,14 @@ enum Page {
     Find,
     Compose,
 }
+struct ToastNotice {
+    token: u64,
+    pane: Option<Id>,
+    message: String,
+    sticky: bool,
+}
 pub struct Workspace {
-    watches: HashMap<Id, ([Subscription; 4], SnapshotSource)>,
+    watches: HashMap<Id, ([Subscription; 5], SnapshotSource)>,
     drag: DragState,
     active_order: usize,
     handle: AnyWindowHandle,
@@ -52,6 +60,8 @@ pub struct Workspace {
     startup_local: bool,
     new_tab_menu_open: bool,
     pane_menu: Option<Id>,
+    context_menu: Option<(Id, Point<Pixels>)>,
+    toast: Option<ToastNotice>,
     close_pending: bool,
     page: Page,
     focus: FocusHandle,
@@ -61,6 +71,7 @@ pub struct Workspace {
     prefs: Value,
     address: Entity<InputState>,
     query: Entity<InputState>,
+    find_query: Entity<InputState>,
     history_input: Entity<InputState>,
     directory: Entity<InputState>,
     name: Entity<InputState>,
@@ -75,6 +86,9 @@ pub struct Workspace {
     targets: Value,
     options: Value,
     creating: bool,
+    picker_index: usize,
+    picker_scroll: ScrollHandle,
+    refreshing_catalogue: bool,
     files_menu: Option<Id>,
     preview_id: Option<String>,
     preview: Option<Arc<Image>>,
@@ -139,6 +153,23 @@ fn control(
 ) -> Stateful<Div> {
     let label = label.into();
     button(label.clone(), primary, cx, action).child(label)
+}
+fn control_with_icon(
+    label: impl Into<SharedString>,
+    symbol: LucideIcon,
+    trailing: bool,
+    primary: bool,
+    cx: &Context<Workspace>,
+    action: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
+) -> Stateful<Div> {
+    let label = label.into();
+    let glyph = lucide_icon(symbol).size(px(13.5));
+    let inner = if trailing {
+        row().gap(px(6.)).child(label.clone()).child(glyph)
+    } else {
+        row().gap(px(6.)).child(glyph).child(label.clone())
+    };
+    button(label, primary, cx, action).child(inner)
 }
 fn button(
     id: impl Into<ElementId>,
@@ -226,8 +257,24 @@ impl Workspace {
         let entry = |placeholder: &'static str, cx: &mut Context<Self>| {
             cx.new(|cx| InputState::new(cx).placeholder(placeholder))
         };
-        let query = entry("Find a session or server…", cx);
-        cx.subscribe(&query, |_, _, _: &InputEvent, cx| cx.notify())
+        let query = cx.new(|cx| {
+            InputState::new(cx)
+                .placeholder("Search sessions, machines, or servers…")
+                .leading_icon(LucideIcon::Search)
+        });
+        cx.subscribe(&query, |s: &mut Self, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change(_)) {
+                s.picker_index = 0;
+            }
+            cx.notify()
+        })
+        .detach();
+        let find_query = cx.new(|cx| {
+            InputState::new(cx)
+                .placeholder("Find in terminal…")
+                .leading_icon(LucideIcon::Search)
+        });
+        cx.subscribe(&find_query, |_, _, _: &InputEvent, cx| cx.notify())
             .detach();
         let history_input = entry("Lines", cx);
         cx.subscribe(&history_input, |s: &mut Self, _, event: &InputEvent, cx| {
@@ -253,7 +300,7 @@ impl Workspace {
         cx.observe_window_activation(w, |s, w, cx| {
             if !w.is_window_active() {
                 s.set_new_tab_menu(false, cx);
-                if s.pane_menu.take().is_some() {
+                if s.pane_menu.take().is_some() || s.context_menu.take().is_some() {
                     cx.notify();
                 }
                 s.cancel_drag(cx);
@@ -280,6 +327,8 @@ impl Workspace {
             startup_local: local && !ready,
             new_tab_menu_open: false,
             pane_menu: None,
+            context_menu: None,
+            toast: None,
             close_pending: false,
             bridge,
             panes: Default::default(),
@@ -301,6 +350,7 @@ impl Workspace {
             },
             address: entry("https://outpost.example.com", cx),
             query,
+            find_query,
             history_input,
             directory: entry("Absolute working directory", cx),
             name: entry("Session name", cx),
@@ -315,6 +365,9 @@ impl Workspace {
             targets: Value::Null,
             options: Value::Null,
             creating: false,
+            picker_index: 0,
+            picker_scroll: ScrollHandle::new(),
+            refreshing_catalogue: false,
             files_menu: None,
             preview_id: None,
             preview: None,
@@ -330,7 +383,9 @@ impl Workspace {
         next_id()
     }
     fn fontsize(&self) -> f32 {
-        self.prefs["fontSize"].as_f64().unwrap_or(13.5) as f32
+        self.prefs["fontSize"]
+            .as_f64()
+            .unwrap_or(f64::from(settings::DEFAULT_FONT_SIZE)) as f32
     }
     fn bounded_history(&self) -> usize {
         self.prefs["scrollbackLines"]
@@ -379,6 +434,7 @@ impl Workspace {
         self.message.clear();
         self.new_tab_menu_open = false;
         self.pane_menu = None;
+        self.context_menu = None;
         self.files_menu = None;
         self.preview_id = None;
         self.preview = None;
@@ -392,7 +448,12 @@ impl Workspace {
                 self.sync_history_input(cx);
                 self.focus.focus(w, cx);
             }
-            Page::Find | Page::Choose | Page::Switch => {
+            Page::Find => {
+                self.find_query.update(cx, |s, cx| s.set_value_silent("", cx));
+                self.find_query.read(cx).focus_handle(cx).focus(w, cx)
+            }
+            Page::Choose | Page::Switch => {
+                self.picker_index = 0;
                 self.query.update(cx, |s, cx| s.set_value_silent("", cx));
                 self.query.read(cx).focus_handle(cx).focus(w, cx)
             }
@@ -436,12 +497,51 @@ impl Workspace {
         self.select(id, w, cx);
         id
     }
+    fn show_toast(
+        &mut self,
+        pane: Option<Id>,
+        message: String,
+        sticky: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let token = next_id() as u64;
+        self.toast = Some(ToastNotice {
+            token,
+            pane,
+            message,
+            sticky,
+        });
+        cx.notify();
+        if sticky {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(2))
+                .await;
+            let _ = this.update(cx, |s, cx| {
+                if s.toast.as_ref().is_some_and(|t| t.token == token) {
+                    s.toast = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+    fn clear_pane_sticky_toast(&mut self, pane: Id) {
+        if self
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.sticky && t.pane == Some(pane))
+        {
+            self.toast = None;
+        }
+    }
     fn watch(&mut self, id: Id, p: &Entity<Pane>, w: &mut Window, cx: &mut Context<Self>) {
         p.update(cx, |p, cx| p.bind_focus(w, cx));
-        let menu = cx.subscribe_in(p, w, move |s, _, _: &crate::terminal::PaneMenu, w, cx| {
+        let menu = cx.subscribe(p, move |s, _, e: &crate::terminal::PaneMenu, cx| {
             if s.panes.contains_key(&id) {
-                s.select(id, w, cx);
-                s.manage(w, cx)
+                s.open_context_menu(id, e.position, cx);
             }
         });
         let sub = cx.subscribe_in(p, w, move |s, p, _: &PaneChanged, w, cx| {
@@ -456,9 +556,15 @@ impl Workspace {
             }
             cx.notify()
         });
-        let paste_error = cx.subscribe(p, |s, _, e: &crate::terminal::PasteError, cx| {
+        let paste_error = cx.subscribe(p, move |s, _, e: &crate::terminal::PasteError, cx| {
+            s.clear_pane_sticky_toast(id);
             s.message = e.0.clone();
             cx.notify();
+        });
+        let notice = cx.subscribe(p, move |s, _, e: &crate::terminal::PaneNotice, cx| {
+            if s.tabs.get(s.current).is_some_and(|t| t.active == id) {
+                s.show_toast(Some(id), e.message.clone(), e.sticky, cx);
+            }
         });
         let ready = cx.subscribe(p, move |s, p, e: &files::PreviewReady, cx| {
             if s.active().as_ref() == Some(&p) && s.preview_id.as_deref() == Some(&e.file) {
@@ -466,8 +572,10 @@ impl Workspace {
                 cx.notify();
             }
         });
-        self.watches
-            .insert(id, ([sub, menu, paste_error, ready], SnapshotSource::new()));
+        self.watches.insert(
+            id,
+            ([sub, menu, paste_error, notice, ready], SnapshotSource::new()),
+        );
     }
     fn local_profile(&self, id: Option<&str>) -> Option<&Value> {
         let profiles = items(&self.prefs["profiles"]);
@@ -758,6 +866,12 @@ impl Workspace {
         if self.pane_menu == Some(id) {
             self.pane_menu = None;
         }
+        if self.context_menu.is_some_and(|(pane, _)| pane == id) {
+            self.context_menu = None;
+        }
+        if self.toast.as_ref().is_some_and(|t| t.pane == Some(id)) {
+            self.toast = None;
+        }
         if let Some(i) = self.tabs.iter().position(|t| t.layout.contains(id)) {
             if let Some(layout) = self.tabs[i].layout.clone().remove(id) {
                 let tab = &mut self.tabs[i];
@@ -795,6 +909,7 @@ impl Workspace {
             }
             "accounts" => {
                 self.accounts = e;
+                self.refreshing_catalogue = false;
                 if self.page == Page::Create
                     && !items(&self.accounts["accounts"]).iter().any(|a| {
                         a["origin"] == self.origin
@@ -831,6 +946,7 @@ impl Workspace {
                             cx,
                         );
                         pane.mark = AgentMark::get(e["tool"].as_str());
+                        pane.session_key = e["sessionKey"].as_str().map(str::to_owned);
                         pane
                     });
                     let id = self.insert(p, w, cx);
@@ -870,11 +986,25 @@ impl Workspace {
                 }
             }
             "fileSaved" => self.message = format!("Saved {}", strval(&e, "path")),
+            "notice" => {
+                let pane_id = self.remote.get(&n).copied();
+                if let Some(id) = pane_id {
+                    self.clear_pane_sticky_toast(id);
+                }
+                let active_pane = self.tabs.get(self.current).map(|t| t.active);
+                if pane_id.is_none() || pane_id == active_pane {
+                    self.show_toast(pane_id, strval(&e, "message"), false, cx);
+                }
+            }
             "error" => {
-                if let Some(p) = self.remote.get(&n).and_then(|id| self.panes.get(id)) {
-                    p.update(cx, |p, _| p.sending = false)
+                if let Some(&id) = self.remote.get(&n) {
+                    self.clear_pane_sticky_toast(id);
+                    if let Some(p) = self.panes.get(&id) {
+                        p.update(cx, |p, _| p.sending = false);
+                    }
                 }
                 self.creating = false;
+                self.refreshing_catalogue = false;
                 self.message = strval(&e, "message")
             }
             "targets" if self.origin == e["origin"] && self.account_id == e["accountId"] => {
@@ -1077,26 +1207,14 @@ impl Workspace {
                 self.show(Page::Terminal, w, cx)
             }
             Page::Switch | Page::Choose => {
-                let q = self.query.read(cx).value().to_lowercase();
-                if let Some((&id, _)) = self.panes.iter().find(|(_, p)| {
-                    let p = p.read(cx);
-                    (self.page == Page::Switch || p.server.is_some())
-                        && p.title.to_lowercase().contains(&q)
-                }) {
-                    self.select(id, w, cx)
-                } else if let Some(item) = items(&self.accounts["sessions"]).iter().find(|v| {
-                    format!("{} {}", strval(v, "title"), strval(v, "server"))
-                        .to_lowercase()
-                        .contains(&q)
-                }) {
-                    self.choose(strval(item, "id"))
-                }
+                let index = self.picker_index;
+                self.activate_picker_item(index, w, cx);
             }
             _ => {}
         }
     }
     fn find(&self, next: bool, cx: &mut Context<Self>) {
-        let query = self.query.read(cx).value().to_owned();
+        let query = self.find_query.read(cx).value().to_owned();
         if let Some(p) = self.active() {
             p.update(cx, |p, cx| p.find(&query, next, cx))
         }
@@ -1124,11 +1242,25 @@ impl Workspace {
         }
     }
     fn catalogue(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        self.refreshing_catalogue = true;
         self.call(json!({"op":"refresh"}));
         self.show(Page::Choose, w, cx)
     }
+    pub(super) fn dismiss_page(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        self.split_at = None;
+        let next = if self.tabs.is_empty() {
+            Page::Home
+        } else {
+            Page::Terminal
+        };
+        self.show(next, w, cx);
+    }
     fn shortcuts(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
-        if self.new_tab_menu_open || self.pane_menu.is_some() || self.file_key(e, w, cx) {
+        if self.new_tab_menu_open
+            || self.pane_menu.is_some()
+            || self.context_menu.is_some()
+            || self.file_key(e, w, cx)
+        {
             return;
         }
         if e.keystroke.key == "escape" && self.drag.gesture.is_some() {
@@ -1145,11 +1277,21 @@ impl Workspace {
             m.control && m.shift
         };
         let key = k.key.as_str();
-        if key == "escape" && self.page != Page::Terminal && !self.tabs.is_empty() {
-            self.split_at = None;
-            self.show(Page::Terminal, w, cx)
+        if matches!(self.page, Page::Choose | Page::Switch)
+            && !m.control
+            && !m.alt
+            && !m.platform
+            && !m.shift
+            && matches!(key, "down" | "up")
+        {
+            self.step_picker(if key == "down" { 1 } else { -1 }, cx);
+        } else if key == "escape"
+            && ((self.page != Page::Terminal && !self.tabs.is_empty())
+                || !matches!(self.page, Page::Terminal | Page::Home))
+        {
+            self.dismiss_page(w, cx)
         } else if key == "enter"
-            && self.page != Page::Terminal
+            && !matches!(self.page, Page::Terminal | Page::Settings)
             && (self.page != Page::Compose || !m.shift)
         {
             self.submit(w, cx)
@@ -1175,6 +1317,14 @@ impl Workspace {
             && m.alt
         {
             self.split(Axis::Down, w, cx)
+        } else if key == "enter"
+            && self.page == Page::Terminal
+            && self.active().is_some()
+            && !cfg!(target_os = "macos")
+            && m.control
+            && m.alt
+        {
+            self.toggle_zoom(self.tabs[self.current].active, w, cx)
         } else if cmd {
             match key {
                 "t" => {
@@ -1198,7 +1348,12 @@ impl Workspace {
                 "p" => self.show(Page::Switch, w, cx),
                 "," => self.show(Page::Settings, w, cx),
                 "f" if self.active().is_some() => self.show(Page::Find, w, cx),
-                "enter" if self.page == Page::Terminal && self.active().is_some() && m.shift => {
+                "enter"
+                    if self.page == Page::Terminal
+                        && self.active().is_some()
+                        && cfg!(target_os = "macos")
+                        && m.shift =>
+                {
                     self.toggle_zoom(self.tabs[self.current].active, w, cx)
                 }
                 "enter" if self.active().is_some() => self.show(Page::Compose, w, cx),
@@ -1225,6 +1380,7 @@ impl Workspace {
             self.new_tab_menu_open = open;
             if open {
                 self.pane_menu = None;
+                self.context_menu = None;
                 self.files_menu = None;
             }
             cx.notify();
@@ -1267,7 +1423,6 @@ impl Workspace {
         let mut menu = dropdown_menu("new-tab-menu", open)
             .trigger(trigger)
             .min_width(px(240.))
-            .bg(rgb(0x191919))
             .on_close(cx.listener(|s, _, _, cx| s.set_new_tab_menu(false, cx)));
         let profiles = items(&self.prefs["profiles"]);
         let shortcut = if cfg!(target_os = "macos") {
@@ -1725,7 +1880,7 @@ impl Workspace {
             }
         }
     }
-    fn panel(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn panel(&self, page: Page, cx: &mut Context<Self>) -> AnyElement {
         let mut content = col()
             .w_full()
             .max_w(px(680.))
@@ -1733,12 +1888,32 @@ impl Workspace {
             .gap(px(11.))
             .py(px(55.));
         if !self.tabs.is_empty() {
-            content = content.child(row().child(control(
-                "←  Back to terminal",
-                false,
-                cx,
-                |s, w, cx| s.show(Page::Terminal, w, cx),
-            )))
+            content = content.child(
+                row().child(
+                    div()
+                        .id("back-to-terminal")
+                        .role(gpui::accesskit::Role::Button)
+                        .focusable()
+                        .tab_stop(true)
+                        .focus_visible(|s| s.bg(rgb(0x242424)))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.))
+                        .py(px(4.))
+                        .px(px(6.))
+                        .ml(px(-6.))
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .text_size(px(13.))
+                        .text_color(rgb(MUTED))
+                        .hover(|s| s.bg(rgb(0x1a1a1a)).text_color(rgb(0xffffff)))
+                        .on_click(cx.listener(|s, _, w, cx| s.show(Page::Terminal, w, cx)))
+                        .child(lucide_icon(LucideIcon::ArrowLeft).size(px(14.)))
+                        .child("Back to terminal")
+                        .child(kbd("Esc").ml(px(4.)).bg(rgb(0x161616))),
+                ),
+            );
         }
         let title = |k: &str, t: &str| {
             col()
@@ -1746,7 +1921,7 @@ impl Workspace {
                 .child(text(k.to_owned(), 10., 0x8f8f8f).font_weight(FontWeight::SEMIBOLD))
                 .child(text(t.to_owned(), 28., 0xfafafa).font_weight(FontWeight::SEMIBOLD))
         };
-        match self.page {
+        match page {
             Page::Home => {
                 content = content
                     .child(
@@ -1766,13 +1941,33 @@ impl Workspace {
                     .child(section("Recent sessions"));
                 for item in items(&self.accounts["recent"]) {
                     let id = strval(item, "id");
-                    let label =
-                        format!("{}   ·   {}", strval(item, "title"), strval(item, "server"));
+                    let raw_title = strval(item, "title");
+                    let server = strval(item, "server");
+                    let (name, machine) = picker::split_session_title(&raw_title);
+                    let host = picker::display_server(&server);
+                    let subtitle = match machine {
+                        Some(m) => format!("{m} · {host}"),
+                        None => host.to_owned(),
+                    };
+                    let mark = AgentMark::get(item["tool"].as_str());
                     content = content.child(
                         button(SharedString::from(id.clone()), false, cx, move |s, _, _| {
                             s.choose(id.clone())
                         })
-                        .child(agent_label(AgentMark::get(item["tool"].as_str()), label)),
+                        .py(px(8.))
+                        .child(
+                            col()
+                                .gap(px(2.))
+                                .child(agent_label(mark, name.to_owned()))
+                                .child(
+                                    div()
+                                        .when(mark.is_some(), |d| d.pl(px(24.)))
+                                        .truncate()
+                                        .text_size(px(11.5))
+                                        .text_color(rgb(0x888888))
+                                        .child(subtitle),
+                                ),
+                        ),
                     )
                 }
                 if items(&self.accounts["recent"]).is_empty() {
@@ -1787,18 +1982,30 @@ impl Workspace {
                 }
                 content = content
                     .child(
-                        row().child(control("Open local terminal", true, cx, |s, w, cx| {
-                            s.split_at = None;
-                            s.local(None, w, cx)
-                        })),
+                        row().child(control_with_icon(
+                            "Open local terminal",
+                            LucideIcon::Terminal,
+                            false,
+                            true,
+                            cx,
+                            |s, w, cx| {
+                                s.split_at = None;
+                                s.local(None, w, cx)
+                            },
+                        )),
                     )
                     .child(
                         row()
                             .justify_between()
                             .child(section("Logged-in Outpost servers"))
-                            .child(control("Refresh", false, cx, |s, _, _| {
-                                s.call(json!({"op":"refresh"}))
-                            })),
+                            .child(control_with_icon(
+                                "Refresh",
+                                LucideIcon::RefreshCw,
+                                false,
+                                false,
+                                cx,
+                                |s, _, _| s.call(json!({"op":"refresh"})),
+                            )),
                     );
                 for acc in items(&self.accounts["accounts"]) {
                     let origin = strval(acc, "origin");
@@ -1815,13 +2022,25 @@ impl Workspace {
                                     .child(text(origin.clone(), 14., TEXT))
                                     .child(text(strval(acc, "status"), 12., MUTED)),
                             )
-                            .child(control("Machines ↗", false, cx, move |_, _, cx| {
-                                cx.open_url(&machines)
-                            }))
+                            .child(control_with_icon(
+                                "Machines",
+                                LucideIcon::ExternalLink,
+                                true,
+                                false,
+                                cx,
+                                move |_, _, cx| cx.open_url(&machines),
+                            ))
                             .when(acc["canCreate"] == true, |row| {
-                                row.child(control("New session", false, cx, move |s, w, cx| {
-                                    s.create_form(new.clone(), account.clone(), w, cx)
-                                }))
+                                row.child(control_with_icon(
+                                    "New session",
+                                    LucideIcon::Plus,
+                                    false,
+                                    false,
+                                    cx,
+                                    move |s, w, cx| {
+                                        s.create_form(new.clone(), account.clone(), w, cx)
+                                    },
+                                ))
                             })
                             .child(control("Sign out", false, cx, move |s, _, _| {
                                 s.call(json!({"op":"logout","origin":origin}))
@@ -1836,9 +2055,14 @@ impl Workspace {
                     .child(
                         row()
                             .child(col().flex_1().child(field(&self.address)))
-                            .child(control("Sign in with browser ↗", true, cx, |s, w, cx| {
-                                s.submit(w, cx)
-                            })),
+                            .child(control_with_icon(
+                                "Sign in with browser",
+                                LucideIcon::ExternalLink,
+                                true,
+                                true,
+                                cx,
+                                |s, w, cx| s.submit(w, cx),
+                            )),
                     )
                     .child(text(
                         "Sign-in happens in your browser. Server logins last 30 days.",
@@ -1861,112 +2085,35 @@ impl Workspace {
                 }
             }
             Page::Settings => {
-                content = content
-                    .child(title("MAKE IT YOURS", "Terminal settings"))
-                    .child(section("Default local shell"));
-                let profiles = items(&self.prefs["profiles"]);
-                for p in profiles {
-                    let id = strval(p, "id");
-                    let selected = self.prefs["localShell"]
-                        .as_str()
-                        .or_else(|| profiles.first()?.get("id")?.as_str())
-                        == Some(&id);
-                    content = content.child(row().child(control(
-                        strval(p, "name"),
-                        selected,
-                        cx,
-                        move |s, _, cx| {
-                            s.prefs["localShell"] = id.clone().into();
-                            s.settings(cx)
-                        },
-                    )))
-                }
-                let unlimited = self.prefs["unlimitedScrollback"] == true;
-                content = content.child(section("Scrollback"))
-                    .child(row()
-                        .child(control("Limit lines", !unlimited, cx, |s, _, cx| {
-                            s.prefs["unlimitedScrollback"] = json!(false);
-                            s.message.clear();
-                            s.settings(cx)
-                        }))
-                        .child(control("Unlimited", unlimited, cx, |s, _, cx| {
-                            s.prefs["unlimitedScrollback"] = json!(true);
-                            s.message.clear();
-                            s.settings(cx)
-                        })))
-                    .when(!unlimited, |content| content.child(row()
-                        .child(div().w(px(120.)).child(field(&self.history_input)))
-                        .child(text("lines", 13., MUTED))
-                        .child(control("Apply", false, cx, |s, _, cx| s.save_history_limit(cx)))))
-                    .when(unlimited, |content| content.child(text("History grows in memory. A remote terminal also keeps output while you’re disconnected.", 13., MUTED)));
-                content=content.child(section("Text size")).child(row().child(control("−",false,cx,|s,_,cx|{s.prefs["fontSize"]=json!((s.fontsize()-0.5).max(10.));s.settings(cx)})).child(text(format!("{} px",self.fontsize()),14.,TEXT)).child(control("+",false,cx,|s,_,cx|{s.prefs["fontSize"]=json!((s.fontsize()+0.5).min(28.));s.settings(cx)})))
-                .child(section("Bell sound")).child(row().child(control(if self.prefs["sound"]==true{"On"}else{"Off"},false,cx,|s,_,cx|{s.prefs["sound"]=json!(s.prefs["sound"]!=true);s.settings(cx)})))
-                .child(section("Keyboard shortcuts")).child(text(if cfg!(target_os="macos"){"⌘T   New terminal     ·     ⌘D   Split     ·     ⌘⇧D   Split vertically     ·     Ctrl+Tab   Next tab"}else{"Ctrl+Shift+T   New terminal     ·     Ctrl+Shift+D   Split     ·     Ctrl+Tab   Next tab"},13.,MUTED))
-                .child(row().child(control("Check for updates ↗",false,cx,|_,_,cx|cx.open_url("https://github.com/KevinWang15/outpost/releases"))));
+                content = content.child(self.settings_view(cx));
             }
-            Page::Choose | Page::Switch => {
-                let choose = self.page == Page::Choose;
-                content = content
-                    .child(if choose {
-                        title("MANAGED SESSIONS", "Open a session.")
-                    } else {
-                        title("OPEN SESSIONS", "Jump back in.")
-                    })
-                    .child(field(&self.query));
-                let q = self.query.read(cx).value().to_lowercase();
-                for (&id, p) in &self.panes {
-                    let p = p.read(cx);
-                    if (!choose || p.server.is_some()) && p.title.to_lowercase().contains(&q) {
-                        let label = format!(
-                            "{}    ·    {}",
-                            p.title,
-                            p.server.as_deref().unwrap_or("Local terminal")
-                        );
-                        content = content.child(
-                            button(("open-pane", id), false, cx, move |s, w, cx| {
-                                s.select(id, w, cx)
-                            })
-                            .child(agent_label(p.mark, label)),
-                        )
-                    }
-                }
-                for v in items(&self.accounts["sessions"]) {
-                    let label = format!("{}    ·    {}", strval(v, "title"), strval(v, "server"));
-                    let id = strval(v, "id");
-                    if label.to_lowercase().contains(&q) {
-                        content = content.child(
-                            button(SharedString::from(id.clone()), false, cx, move |s, _, _| {
-                                s.choose(id.clone())
-                            })
-                            .child(agent_label(AgentMark::get(v["tool"].as_str()), label)),
-                        )
-                    }
-                }
-                for a in items(&self.accounts["accounts"])
-                    .iter()
-                    .filter(|a| a["canCreate"] == true)
-                {
-                    let origin = strval(a, "origin");
-                    let account = strval(&a["account"], "id");
-                    content = content.child(control(
-                        format!("New session on {origin}"),
-                        false,
-                        cx,
-                        move |s, w, cx| s.create_form(origin.clone(), account.clone(), w, cx),
-                    ))
-                }
-                content = content.child(row().child(control(
-                    "Connect a server",
-                    false,
-                    cx,
-                    |s, w, cx| s.show(Page::Home, w, cx),
-                )));
-            }
+            Page::Choose | Page::Switch => {}
             Page::Create => {
-                content = content
-                    .child(title("MANAGED SESSIONS", "New session"))
-                    .child(text(self.origin.clone(), 13., MUTED))
-                    .child(section("Machine"));
+                let servers = self.creatable_accounts();
+                content = content.child(title("MANAGED SESSIONS", "New session"));
+                if servers.len() > 1 {
+                    let mut server_row = row().flex_wrap();
+                    for (origin, account_id) in servers {
+                        let selected = self.origin == origin && self.account_id == account_id;
+                        let label = picker::display_server(&origin).to_owned();
+                        server_row = server_row.child(control(
+                            label,
+                            selected,
+                            cx,
+                            move |s, w, cx| {
+                                s.create_form(origin.clone(), account_id.clone(), w, cx)
+                            },
+                        ));
+                    }
+                    content = content.child(section("Server")).child(server_row);
+                } else {
+                    content = content.child(text(
+                        picker::display_server(&self.origin).to_owned(),
+                        13.,
+                        MUTED,
+                    ));
+                }
+                content = content.child(section("Machine"));
                 for t in items(&self.targets) {
                     let id = strval(t, "id");
                     content = content.child(control(
@@ -1993,9 +2140,14 @@ impl Workspace {
                             13.,
                             MUTED,
                         ))
-                        .child(control("Add a machine ↗", false, cx, move |_, _, cx| {
-                            cx.open_url(&url)
-                        }));
+                        .child(control_with_icon(
+                            "Add a machine",
+                            LucideIcon::ExternalLink,
+                            true,
+                            false,
+                            cx,
+                            move |_, _, cx| cx.open_url(&url),
+                        ));
                 }
                 if !self.target.is_empty() {
                     content = content.child(section("Tool"));
@@ -2018,9 +2170,14 @@ impl Workspace {
                             13.,
                             TEXT,
                         ))
-                        .child(control("Open machine ↗", false, cx, move |_, _, cx| {
-                            cx.open_url(&url)
-                        }));
+                        .child(control_with_icon(
+                            "Open machine",
+                            LucideIcon::ExternalLink,
+                            true,
+                            false,
+                            cx,
+                            move |_, _, cx| cx.open_url(&url),
+                        ));
                 }
                 for t in items(&self.options["tools"]) {
                     let t = t.as_str().unwrap_or("").to_owned();
@@ -2086,8 +2243,11 @@ impl Workspace {
                 content = content.child(
                     row()
                         .child(control("Copy selection", false, cx, |s, w, cx| {
-                            if let Some(p) = s.active() {
-                                p.update(cx, |p, cx| p.copy(cx))
+                            if let Some(id) = s.tabs.get(s.current).map(|t| t.active)
+                                && let Some(p) = s.panes.get(&id).cloned()
+                                && p.update(cx, |p, cx| p.copy(cx))
+                            {
+                                s.show_toast(Some(id), "Copied to clipboard".into(), false, cx);
                             }
                             s.show(Page::Terminal, w, cx)
                         }))
@@ -2282,17 +2442,28 @@ impl Render for Workspace {
             .map(|slot| slot.map(|i| self.tabs[i].id))
             .collect();
         self.drag.rendered_anchor = self.drag.preview.as_ref().map(|p| p.destination);
-        let body = if matches!(self.page, Page::Terminal | Page::Find | Page::Compose)
-            && let Some(t) = self.tabs.get(self.current)
+        let body = if matches!(
+            self.page,
+            Page::Terminal | Page::Find | Page::Compose | Page::Choose | Page::Switch
+        ) && let Some(t) = self.tabs.get(self.current)
         {
             if t.zoom {
                 self.node(&Layout::Pane(t.active), true, cx)
             } else {
                 self.node(&t.layout, false, cx)
             }
+        } else if matches!(self.page, Page::Choose | Page::Switch) {
+            self.panel(Page::Home, cx)
         } else {
-            self.panel(cx)
+            self.panel(self.page, cx)
         };
+        let visible_toast = self.toast.as_ref().filter(|t| {
+            t.pane.is_none()
+                || self
+                    .tabs
+                    .get(self.current)
+                    .is_some_and(|tab| Some(tab.active) == t.pane)
+        });
         col()
             .relative()
             .child(self.drag_listener(cx))
@@ -2308,7 +2479,7 @@ impl Render for Workspace {
                         .justify_end()
                         .px(px(8.))
                         .bg(rgb(0x161616))
-                        .child(col().w(px(300.)).child(field(&self.query)))
+                        .child(col().w(px(300.)).child(field(&self.find_query)))
                         .child(icon("previous", LucideIcon::ChevronUp, cx, |s, _, cx| {
                             s.find(false, cx)
                         }))
@@ -2320,9 +2491,35 @@ impl Render for Workspace {
                         })),
                 )
             })
-            .child(col().flex_1().overflow_hidden().child(body))
+            .child(
+                col()
+                    .relative()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(body)
+                    .children(self.picker_overlay(cx)),
+            )
+            .child(self.context_menu_overlay(cx))
             .children(self.drag_overlay())
             .children(self.file_viewer(cx))
+            .when_some(visible_toast, |e, toast| {
+                e.child(
+                    div()
+                        .absolute()
+                        .bottom(px(14.))
+                        .right(px(14.))
+                        .px(px(10.))
+                        .py(px(5.))
+                        .rounded(px(6.))
+                        .bg(rgb(0x1f1f1f))
+                        .border_1()
+                        .border_color(rgb(0x363636))
+                        .shadow_md()
+                        .text_size(px(12.))
+                        .text_color(rgb(TEXT))
+                        .child(toast.message.clone()),
+                )
+            })
             .when(self.page == Page::Compose, |e| {
                 e.child(
                     row()
@@ -2364,6 +2561,39 @@ impl Render for Workspace {
                     && let Some(t) = s.tabs.get(s.current)
                 {
                     s.close(t.active, w, cx)
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::CopySelection, _, cx| {
+                if s.page == Page::Terminal
+                    && let Some(id) = s.tabs.get(s.current).map(|t| t.active)
+                    && let Some(p) = s.panes.get(&id).cloned()
+                    && p.update(cx, |p, cx| p.copy(cx))
+                {
+                    s.show_toast(Some(id), "Copied to clipboard".into(), false, cx);
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::PasteClipboard, _, cx| {
+                if s.page == Page::Terminal
+                    && let Some(p) = s.active()
+                {
+                    p.update(cx, |p, cx| p.paste_clipboard(cx));
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectAll, _, cx| {
+                if s.page == Page::Terminal {
+                    s.select_all(cx);
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::FindInTerminal, w, cx| {
+                if s.active().is_some() {
+                    s.show(Page::Find, w, cx);
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::ClearScreen, _, cx| {
+                if s.page == Page::Terminal
+                    && let Some(p) = s.active()
+                {
+                    p.update(cx, |p, cx| p.clear_screen(true, cx));
                 }
             }))
             .capture_key_down(cx.listener(|s, e, w, cx| s.shortcuts(e, w, cx)))
@@ -2535,6 +2765,7 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 .update(cx, |i, cx| i.set_value_silent("42", cx));
             s.save_history_limit(cx);
             assert_eq!(s.history(), 42);
+            assert!(s.has_custom_settings());
             pane.update(cx, |p, cx| {
                 p.feed(b"\x1b[?1049l", cx);
                 p.find("FIRST-RETAINED-ROW", true, cx);
@@ -2542,8 +2773,16 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 p.find("row", false, cx);
                 assert_eq!(p.selected_text().as_deref(), Some("row"));
             });
-            s.show(Page::Terminal, w, cx);
+            s.reset_terminal_settings(cx);
+            assert!(!s.has_custom_settings());
+            assert_eq!(s.history(), crate::terminal::DEFAULT_HISTORY);
         })
+    })?;
+    test.update_window(remote_window.into(), |root, w, cx| {
+        w.draw(cx).clear(cx);
+        root.downcast::<Workspace>()
+            .unwrap()
+            .update(cx, |s, cx| s.show(Page::Terminal, w, cx));
     })?;
     // A publication on a background tab must refresh that pane while Files is closed.
     test.update_window(remote_window.into(), |root, w, cx| {
@@ -2600,6 +2839,401 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         );
     }
     assert!(commands.try_recv().is_err());
+
+    // Exercise clipboard copy/paste shortcuts, bracketed paste normalization,
+    // left-to-right & right-to-left copy-on-select, and right-click context menu in mouse mode.
+    test.update_window(remote_window.into(), |root, w, cx| {
+        let pane = root
+            .downcast::<Workspace>()
+            .unwrap()
+            .read(cx)
+            .active()
+            .unwrap();
+        pane.update(cx, |p, cx| {
+            p.reset(40, 8);
+            p.grid_visible = true;
+            p.feed(b"\x1b[?2004hhello world\r\nsecond line", cx);
+        });
+        w.draw(cx).clear(cx);
+    })?;
+    test.run_until_parked();
+    // Drain any resize commands triggered by drawing remote_window.
+    while commands.try_recv().is_ok() {}
+    #[cfg(not(target_os = "macos"))]
+    {
+        test.update_window(remote_window.into(), |root, w, cx| {
+            let pane = root
+                .downcast::<Workspace>()
+                .unwrap()
+                .read(cx)
+                .active()
+                .unwrap();
+            // Ctrl+V with text pastes using bracketed paste and \r line endings.
+            cx.write_to_clipboard(ClipboardItem::new_string("line1\r\nline2\x1b[201~".into()));
+            pane.update(cx, |p, cx| {
+                p.key_for_test("ctrl-v", w, cx);
+                p.key_for_test("shift-insert", w, cx);
+            });
+            // Ctrl+V with image in remote terminal uploads an attachment.
+            let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, screenshot.to_vec());
+            cx.write_to_clipboard(ClipboardItem::new_image(&image));
+            pane.update(cx, |p, cx| p.key_for_test("ctrl-v", w, cx));
+        })?;
+        for _ in 0..2 {
+            let cmd = commands.try_recv()?;
+            assert_eq!(cmd["op"], "input");
+            assert_eq!(
+                STANDARD.decode(cmd["data"].as_str().unwrap())?,
+                b"\x1b[200~line1\rline2[201~\x1b[201~"
+            );
+        }
+        let img_cmd = commands.try_recv()?;
+        assert_eq!(img_cmd["op"], "image");
+        assert_eq!(img_cmd["mode"], "attachment");
+        assert!(commands.try_recv().is_err());
+
+        // Ctrl+C with selection copies and clears selection without sending \x03;
+        // a second Ctrl+C (with no selection) sends \x03.
+        test.update_window(remote_window.into(), |root, w, cx| {
+            let pane = root
+                .downcast::<Workspace>()
+                .unwrap()
+                .read(cx)
+                .active()
+                .unwrap();
+            pane.update(cx, |p, cx| {
+                p.find("hello", true, cx);
+                assert_eq!(p.selected_text().as_deref(), Some("hello"));
+                p.key_for_test("ctrl-c", w, cx);
+                assert!(!p.has_selection());
+                p.key_for_test("ctrl-c", w, cx);
+            });
+            assert_eq!(
+                cx.read_from_clipboard().and_then(|i| i.text()).as_deref(),
+                Some("hello")
+            );
+        })?;
+        let sigint = commands.try_recv()?;
+        assert_eq!(sigint["op"], "input");
+        assert_eq!(STANDARD.decode(sigint["data"].as_str().unwrap())?, b"\x03");
+        assert!(commands.try_recv().is_err());
+    }
+    // Mouse drag selection (left-to-right and right-to-left) auto-copies exact cells on release,
+    // and right-click opens the floating context menu even when MOUSE_MODE is enabled.
+    let (row0_col0_left, row0_col4_right, row0_col6_left, row0_col10_right) =
+        test.update_window(remote_window.into(), |root, _, cx| {
+            let pane = root
+                .downcast::<Workspace>()
+                .unwrap()
+                .read(cx)
+                .active()
+                .unwrap();
+            let p = pane.read(cx);
+            let origin = p.bounds_for_test().origin;
+            let cell = p.cell_for_test();
+            (
+                origin + point(cell.width * 0.1, cell.height * 0.5),
+                origin + point(cell.width * 4.9, cell.height * 0.5),
+                origin + point(cell.width * 6.1, cell.height * 0.5),
+                origin + point(cell.width * 10.9, cell.height * 0.5),
+            )
+        })?;
+    test.update_window(remote_window.into(), |_, w, cx| {
+        // Drag left-to-right across "hello" (cols 0..=4)
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: row0_col0_left,
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: row0_col4_right,
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Default::default(),
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                position: row0_col4_right,
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count: 1,
+            }),
+            cx,
+        );
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|i| i.text()).as_deref(),
+            Some("hello")
+        );
+        // Drag right-to-left across "world" (cols 10..=6) — must not drop start or end chars!
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: row0_col10_right,
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: row0_col6_left,
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Default::default(),
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                position: row0_col6_left,
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count: 1,
+            }),
+            cx,
+        );
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|i| i.text()).as_deref(),
+            Some("world")
+        );
+    })?;
+    // Enable SGR mouse mode; right-click must open the GPUI PopupMenu, preserve selection,
+    // and never send a mouse event to the remote application.
+    let draw_remote = |test: &mut HeadlessAppContext| {
+        test.run_until_parked();
+        test.update_window(remote_window.into(), |_, w, cx| {
+            w.draw(cx).clear(cx);
+        })
+        .unwrap();
+        test.run_until_parked();
+    };
+    test.update_window(remote_window.into(), |root, w, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        let pane = ws.read(cx).active().unwrap();
+        pane.update(cx, |p, cx| p.feed(b"\x1b[?1000h\x1b[?1006h", cx));
+        w.draw(cx).clear(cx);
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: row0_col6_left,
+                button: MouseButton::Right,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+    })?;
+    draw_remote(&mut test);
+    test.update_window(remote_window.into(), |root, w, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        let pane = ws.read(cx).active().unwrap();
+        assert!(ws.read(cx).context_menu.is_some());
+        assert!(ws.read(cx).page == Page::Terminal);
+        assert_eq!(pane.read(cx).selected_text().as_deref(), Some("world"));
+        w.dispatch_keystroke(Keystroke::parse("escape").unwrap(), cx);
+    })?;
+    draw_remote(&mut test);
+    test.update_window(remote_window.into(), |root, w, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        let pane = ws.read(cx).active().unwrap();
+        assert!(ws.read(cx).context_menu.is_none());
+        assert!(pane.read(cx).focus.is_focused(w));
+    })?;
+    let leaked_input: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+        .filter(|c| c["op"] == "input")
+        .collect();
+    assert!(
+        leaked_input.is_empty(),
+        "right-click in mouse mode must not send terminal input: {leaked_input:?}"
+    );
+
+    // Re-open the context menu, press Down + Enter to invoke Copy, and verify clipboard & focus.
+    test.update_window(remote_window.into(), |_, w, cx| {
+        cx.write_to_clipboard(ClipboardItem::new_string("stale".into()));
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: row0_col6_left,
+                button: MouseButton::Right,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+    })?;
+    draw_remote(&mut test);
+    test.update_window(remote_window.into(), |_, w, cx| {
+        w.dispatch_keystroke(Keystroke::parse("down").unwrap(), cx);
+        let enter = Keystroke::parse("enter").unwrap();
+        w.dispatch_keystroke(enter.clone(), cx);
+        w.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke: enter }), cx);
+    })?;
+    draw_remote(&mut test);
+    test.update_window(remote_window.into(), |root, w, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        let pane = ws.read(cx).active().unwrap();
+        assert!(ws.read(cx).context_menu.is_none());
+        assert!(pane.read(cx).focus.is_focused(w));
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|i| i.text()).as_deref(),
+            Some("world")
+        );
+    })?;
+
+    // OSC 52 from an inactive background pane must not clobber the clipboard; it queues
+    // pending_copy for explicit Copy. OSC 52 from the active pane copies immediately.
+    test.update_window(remote_window.into(), |root, w, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        ws.update(cx, |s, cx| {
+            let bg = s.panes[&s.remote[&1]].clone();
+            let fg = s.active().unwrap();
+            cx.write_to_clipboard(ClipboardItem::new_string("keep-me".into()));
+            bg.update(cx, |p, cx| {
+                p.restoring = false;
+                let osc52 = format!("\x1b]52;c;{}\x07", STANDARD.encode("from-bg"));
+                p.feed(osc52.as_bytes(), cx);
+                assert!(p.can_copy());
+            });
+            assert_eq!(
+                cx.read_from_clipboard().and_then(|i| i.text()).as_deref(),
+                Some("keep-me")
+            );
+            bg.update(cx, |p, cx| {
+                assert!(p.copy(cx));
+                assert!(!p.can_copy());
+            });
+            assert_eq!(
+                cx.read_from_clipboard().and_then(|i| i.text()).as_deref(),
+                Some("from-bg")
+            );
+            fg.update(cx, |p, cx| {
+                let osc52 = format!("\x1b]52;c;{}\x07", STANDARD.encode("from-fg"));
+                p.feed(osc52.as_bytes(), cx);
+            });
+            assert_eq!(
+                cx.read_from_clipboard().and_then(|i| i.text()).as_deref(),
+                Some("from-fg")
+            );
+
+            // Sticky upload toast stays until notice or error arrives for that pane.
+            let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, screenshot.to_vec());
+            cx.write_to_clipboard(ClipboardItem::new_image(&image));
+            fg.update(cx, |p, cx| p.paste_clipboard(cx));
+            s.event(json!({"event":"notice","pane":2,"message":"Image attached"}), w, cx);
+            let toast = s.toast.as_ref().expect("notice toast");
+            assert_eq!(toast.message, "Image attached");
+            assert!(!toast.sticky);
+
+            fg.update(cx, |p, cx| p.paste_clipboard(cx));
+            s.show_toast(Some(s.remote[&2]), "Uploading image…".into(), true, cx);
+            s.event(json!({"event":"error","pane":2,"message":"Upload failed"}), w, cx);
+            assert!(s.toast.is_none(), "error must clear sticky upload toast");
+            s.message.clear();
+
+            // Session picker (Choose & Switch) deduplicates open remote sessions, cleans up
+            // repeated "name · name" titles, supports Up/Down + Enter + Escape, and creates via
+            // a single New session action.
+            assert_eq!(
+                picker::split_session_title("gpui-enhancement · gpui-enhancement"),
+                ("gpui-enhancement", None)
+            );
+            assert_eq!(
+                picker::split_session_title("test · Main 114"),
+                ("test", Some("Main 114"))
+            );
+            assert_eq!(
+                picker::display_server("https://outpost.zoco.cc/"),
+                "outpost.zoco.cc"
+            );
+            fg.update(cx, |p, _| {
+                p.title = "test".into();
+                p.server = Some("https://outpost.zoco.cc".into());
+                p.session_key = Some("sess-open".into());
+            });
+            s.accounts = json!({
+                "accounts": [
+                    {"origin": "https://outpost.zoco.cc", "account": {"id": "a1"}, "canCreate": true},
+                    {"origin": "http://localhost:6620", "account": {"id": "a2"}, "canCreate": true}
+                ],
+                "sessions": [
+                    {"id": "sess-open", "title": "test · Main 114", "server": "https://outpost.zoco.cc", "detail": "claude · /work · running", "tool": "claude"},
+                    {"id": "sess-other", "title": "gpui-enhancement · gpui-enhancement", "server": "http://localhost:6620", "detail": "antigravity · /repo · running", "tool": "antigravity"}
+                ]
+            });
+            s.show(Page::Choose, w, cx);
+            // Open remote pane 2 ("sess-open") is deduplicated into the single catalogue row;
+            // open pane 1 ("test" on example.com, not in catalogue) stays reachable as fallback.
+            let choose_items = s.picker_items(cx);
+            assert_eq!(choose_items.len(), 3);
+            assert!(matches!(
+                &choose_items[0],
+                picker::PickerItem::RemoteSession { id, open_pane, name, machine, .. }
+                    if id == "sess-open" && open_pane.is_some() && name == "test" && machine.as_deref() == Some("Main 114")
+            ));
+            assert!(matches!(
+                &choose_items[1],
+                picker::PickerItem::RemoteSession { id, open_pane, name, machine, .. }
+                    if id == "sess-other" && open_pane.is_none() && name == "gpui-enhancement" && machine.is_none()
+            ));
+            s.step_picker(1, cx);
+            assert_eq!(s.picker_index, 1);
+            s.step_picker(-1, cx);
+            assert_eq!(s.picker_index, 0);
+        });
+    })?;
+    draw_remote(&mut test);
+    if let Some(dir) = std::env::var_os("OUTPOST_TEST_SCREENSHOTS") {
+        test.capture_screenshot(remote_window.into())?
+            .save(PathBuf::from(&dir).join("choose-session.png"))?;
+    }
+    test.update_window(remote_window.into(), |root, w, cx| {
+        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+            s.dismiss_page(w, cx);
+            assert!(s.page == Page::Terminal);
+
+            // Verify Find uses its own input state independent of the session picker query.
+            s.show(Page::Find, w, cx);
+            assert!(s.find_query.read(cx).focus_handle(cx).is_focused(w));
+            s.dismiss_page(w, cx);
+            assert!(s.page == Page::Terminal);
+
+            // Verify Write-a-message shortcut reaches Page::Compose on all platforms.
+            let compose_key = if cfg!(target_os = "macos") {
+                "cmd-enter"
+            } else {
+                "ctrl-shift-enter"
+            };
+            s.shortcuts(
+                &KeyDownEvent {
+                    keystroke: Keystroke::parse(compose_key).unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                w,
+                cx,
+            );
+            assert!(s.page == Page::Compose);
+            s.dismiss_page(w, cx);
+            assert!(s.page == Page::Terminal);
+
+            s.show(Page::Switch, w, cx);
+            // Switch lists 2 open panes + only the 1 non-open catalogue session (sess-other).
+            assert_eq!(s.picker_items(cx).len(), 3);
+            s.open_create_session(w, cx);
+            assert!(s.page == Page::Create);
+            assert_eq!(s.origin, "https://outpost.zoco.cc");
+            s.show(Page::Terminal, w, cx);
+        });
+    })?;
+    draw_remote(&mut test);
+    while commands.try_recv().is_ok() {}
 
     test.update_window(window.into(), |_, w, _| w.activate_window())?;
     test.run_until_parked();

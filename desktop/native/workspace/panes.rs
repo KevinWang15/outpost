@@ -57,6 +57,7 @@ impl Workspace {
     fn toggle_pane_menu(&mut self, id: Id, open: bool, w: &mut Window, cx: &mut Context<Self>) {
         if open {
             self.select(id, w, cx);
+            self.context_menu = None;
             self.pane_menu = Some(id);
         } else if self.pane_menu == Some(id) {
             self.pane_menu = None;
@@ -283,5 +284,163 @@ impl Workspace {
             ),
         ]);
         entries
+    }
+
+    pub(super) fn open_context_menu(
+        &mut self,
+        id: Id,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(i) = self.tabs.iter().position(|t| t.layout.contains(id)) {
+            self.current = i;
+            self.tabs[i].active = id;
+        }
+        self.new_tab_menu_open = false;
+        self.pane_menu = None;
+        self.files_menu = None;
+        self.context_menu = Some((id, position));
+        cx.notify();
+    }
+
+    pub(super) fn context_menu_overlay(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let active = self.context_menu.and_then(|(id, pos)| {
+            self.panes.get(&id).map(|pane| (id, pos, pane.read(cx)))
+        });
+        let position = active.map(|(_, pos, _)| pos);
+        let mut menu = popup_menu("terminal-context-menu", position)
+            .min_width(px(232.))
+            .on_close(cx.listener(|s, _, _, cx| {
+                if s.context_menu.take().is_some() {
+                    cx.notify();
+                }
+            }));
+
+        if let Some((id, _, pane)) = active {
+            let can_copy = pane.can_copy();
+            let managed = pane.server.is_some();
+            let mac = cfg!(target_os = "macos");
+
+            menu = menu
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Copy",
+                        LucideIcon::Copy,
+                        cx.listener(move |s, _, _, cx| {
+                            if let Some(p) = s.panes.get(&id).cloned()
+                                && p.update(cx, |p, cx| p.copy(cx))
+                            {
+                                s.show_toast(Some(id), "Copied to clipboard".into(), false, cx);
+                            }
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘C" } else { "Ctrl+C" })
+                    .with_disabled(!can_copy),
+                )
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Paste",
+                        LucideIcon::ClipboardPaste,
+                        cx.listener(move |s, _, _, cx| {
+                            if let Some(p) = s.panes.get(&id).cloned() {
+                                p.update(cx, |p, cx| p.paste_clipboard(cx));
+                            }
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘V" } else { "Ctrl+V" }),
+                );
+            if managed {
+                menu = menu.entry(MenuEntry::item_with_icon(
+                    "Paste image as file path",
+                    LucideIcon::ImagePlus,
+                    cx.listener(move |s, _, _, cx| {
+                        if let Some(p) = s.panes.get(&id).cloned() {
+                            p.update(cx, |p, cx| p.paste_image_path(cx));
+                        }
+                    }),
+                ));
+            }
+            menu = menu
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Select all",
+                        LucideIcon::ScanText,
+                        cx.listener(move |s, _, _, cx| {
+                            if let Some(p) = s.panes.get(&id).cloned() {
+                                p.update(cx, |p, cx| p.select_all(cx));
+                            }
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘A" } else { "Ctrl+Shift+A" }),
+                )
+                .entry(MenuEntry::Separator)
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Find…",
+                        LucideIcon::Search,
+                        cx.listener(move |s, _, w, cx| {
+                            s.select(id, w, cx);
+                            s.show(Page::Find, w, cx);
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘F" } else { "Ctrl+Shift+F" }),
+                )
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Write a message…",
+                        LucideIcon::MessageSquareText,
+                        cx.listener(move |s, _, w, cx| {
+                            s.select(id, w, cx);
+                            s.show(Page::Compose, w, cx);
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘↵" } else { "Ctrl+Shift+Enter" }),
+                )
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Clear screen",
+                        LucideIcon::Eraser,
+                        cx.listener(move |s, _, _, cx| {
+                            if let Some(p) = s.panes.get(&id).cloned() {
+                                p.update(cx, |p, cx| p.clear_screen(true, cx));
+                            }
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘K" } else { "Ctrl+Shift+K" }),
+                )
+                .entry(MenuEntry::Separator)
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Split side by side",
+                        LucideIcon::Columns2,
+                        cx.listener(move |s, _, w, cx| {
+                            s.select(id, w, cx);
+                            s.split(Axis::Across, w, cx);
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘D" } else { "Ctrl+Shift+D" }),
+                )
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Split top and bottom",
+                        LucideIcon::Rows2,
+                        cx.listener(move |s, _, w, cx| {
+                            s.select(id, w, cx);
+                            s.split(Axis::Down, w, cx);
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘⇧D" } else { "Ctrl+Alt+D" }),
+                )
+                .entry(MenuEntry::item_with_icon(
+                    "Terminal actions…",
+                    LucideIcon::Ellipsis,
+                    cx.listener(move |s, _, w, cx| {
+                        s.select(id, w, cx);
+                        s.manage(w, cx);
+                    }),
+                ));
+        }
+
+        menu
     }
 }

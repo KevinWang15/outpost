@@ -350,7 +350,7 @@ const attach = async (launch: DesktopLaunch, window?: number) => {
   }
   panes.set(pane, state)
   const known = catalogue.find(session => session.id === key) ?? recent.get(key)
-  emit('opened', { pane, window, title: launch.title, server: launch.server, tool: known?.tool })
+  emit('opened', { pane, window, title: launch.title, server: launch.server, tool: known?.tool, sessionKey: key })
   state.socket.setScrollback(prefs.scrollback)
   state.socket.open()
 }
@@ -491,8 +491,11 @@ async function handle(c: Cmd) {
       return p.socket.clear()
     case 'deliver':
       return p.socket.deliverNow()
-    case 'image':
-      return p.socket.pasteImage(new File([Buffer.from(c.data, 'base64')], 'clipboard', { type: c.mime }), c.mode)
+    case 'image': {
+      await p.socket.pasteImage(new File([Buffer.from(c.data, 'base64')], 'clipboard', { type: c.mime }), c.mode)
+      emit('notice', { pane: c.pane, message: c.mode === 'path' ? 'Image path pasted' : 'Image attached' })
+      return
+    }
     case 'files': {
       const files = await p.socket.listFiles(AbortSignal.timeout(20000))
       p.files.retain(files)

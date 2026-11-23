@@ -83,8 +83,22 @@ fn init(cx: &mut App) {
     init_components(cx);
     let mut theme = Theme::dark();
     theme.background = rgb(0x0c0c0c).into();
-    theme.surface = rgb(0x161616).into();
-    theme.border = rgb(0x2e2e2e).into();
+    theme.surface = rgb(0x1f1f1f).into();
+    theme.surface_muted = rgb(0x0f0f0f).into();
+    theme.surface_hover = rgb(0x262626).into();
+    theme.surface_active = rgb(0x303030).into();
+    theme.input_bg = rgb(0x0a0a0a).into();
+    theme.popover = rgb(0x191919).into();
+    theme.foreground = rgb(0xe6e6e6).into();
+    theme.popover_foreground = rgb(0xe6e6e6).into();
+    theme.muted_foreground = rgb(0x8c8c8c).into();
+    theme.border = rgb(0x2a2a2a).into();
+    theme.input_border = rgb(0x2e2e2e).into();
+    theme.input_border_hover = rgb(0x454545).into();
+    theme.toggle_track_off = rgb(0x2b2b2b).into();
+    theme.toggle_track_on = rgb(0x22c55e).into();
+    theme.toggle_thumb = rgb(0xffffff).into();
+    theme.mono_font_family = Some(crate::terminal::FAMILY.into());
     Theme::set_global(theme, cx);
 }
 #[cfg(feature = "ui-tests")]

@@ -269,7 +269,7 @@ while True:
         # Do not mistake an uploaded /.outpost/clipboard/... image path for this command.
         if received(b'copy-clipboard'):
             print('\x1b]52;c;T1VUUE9TVF9DTElQQk9BUkRfVEVTVA==\x07', end='', flush=True)
-        if received(b'ring-bell'):
+        if received(b'ring-bell\r') or received(b'ring-bell\n'):
             print('\x07', end='', flush=True)
         if received(b'OUTPOST_KEYS_END'):
             keyboard_probes += 1

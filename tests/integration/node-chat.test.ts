@@ -523,7 +523,7 @@ test(
   'an ACP session can be prompted and approved from a terminal while Chat stays open',
   { timeout: 90_000 },
   async t => {
-    const { context, sessions, create, open } = await machine(t)
+    const { home, context, sessions, create, open } = await machine(t)
     const session = await create()
     const chat = await open(session.id)
     const original = await chat.ready()
@@ -546,10 +546,17 @@ test(
       assert.ok(result.ok, result.message ?? 'Image paste failed')
       await terminal.text('[Image 1]')
     }
+    const directory = join(home, '.outpost', 'files', session.id)
+    const staged = () => readdirSync(directory).filter(name => name.startsWith('.storing-'))
+    await paste('cancel')
+    assert.equal(staged().length, 1)
+    terminal.input('\x03')
+    await waitFor(() => staged().length === 0, 'Ctrl+C did not discard the staged image')
     await paste('remove')
     terminal.input('\x7f')
     terminal.send({ type: 'ping', id: 'removed' })
     await waitFor(() => terminal.events.some(m => m.id === 'removed'), 'Backspace was not processed')
+    assert.deepEqual(readdirSync(directory), [])
     terminal.input('\x1b[20')
     terminal.input('0~first line\r\nsecond line\x1b[20')
     terminal.input('1~')
@@ -578,7 +585,11 @@ test(
     await terminal.text('Permission granted.')
     chat.send({ type: 'permission', id: 'late', request: ask.entry.id, optionId: 'allow' })
     assert.equal((await chat.result('late')).ok, false)
+    await paste('unsubmitted')
+    assert.equal(staged().length, 1)
     terminal.close()
+    await waitFor(() => staged().length === 0, 'Disconnect did not discard the staged image')
+    assert.equal(readdirSync(directory).length, 1, 'Only the submitted image is kept')
     const reconnect = await open(session.id, false)
     const same = await reconnect.ready()
     assert.equal(same.info.nativeId, original.info.nativeId)

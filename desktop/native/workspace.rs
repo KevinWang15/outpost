@@ -2468,6 +2468,39 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         .map(|c| c["pane"].as_u64().unwrap())
         .collect();
     assert_eq!(lists, [2, 1]);
+    let screenshot = include_bytes!("../../public/favicon-32x32.png");
+    test.update_window(remote_window.into(), |root, w, cx| {
+        let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, screenshot.to_vec());
+        cx.write_to_clipboard(ClipboardItem::new_image(&image));
+        let pane = root
+            .downcast::<Workspace>()
+            .unwrap()
+            .read(cx)
+            .active()
+            .unwrap();
+        pane.update(cx, |p, cx| {
+            let paste = if cfg!(target_os = "macos") {
+                "cmd-v"
+            } else {
+                "ctrl-shift-v"
+            };
+            p.key_for_test(paste, w, cx);
+            p.paste_image_path(cx);
+        });
+    })?;
+    for mode in ["attachment", "path"] {
+        let command = commands.try_recv()?;
+        assert_eq!(command["op"], "image");
+        assert_eq!(command["pane"], 2);
+        assert_eq!(command["mime"], "image/png");
+        assert_eq!(command["mode"], mode);
+        assert_eq!(
+            STANDARD.decode(command["data"].as_str().unwrap())?,
+            screenshot
+        );
+    }
+    assert!(commands.try_recv().is_err());
+
     test.update_window(window.into(), |_, w, _| w.activate_window())?;
     test.run_until_parked();
     assert_eq!(focused(), vec![(2, false)]);

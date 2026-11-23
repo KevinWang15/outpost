@@ -551,7 +551,7 @@ impl Pane {
     fn layout(&mut self, b: Bounds<Pixels>, cx: &mut Context<Self>) {
         self.bounds = b;
         let ts = cx.text_system();
-        let id = ts.resolve_font(&font(FAMILY));
+        let id = ts.resolve_font(&terminal_font(Flags::empty()));
         let cw = ts
             .advance(id, px(self.font_size), 'M')
             .map(|a| a.width)
@@ -702,83 +702,284 @@ impl Drop for Pane {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+fn terminal_font_features() -> FontFeatures {
+    static FEATURES: std::sync::LazyLock<FontFeatures> = std::sync::LazyLock::new(|| {
+        FontFeatures(std::sync::Arc::new(vec![
+            ("calt".into(), 0),
+            ("liga".into(), 0),
+            ("clig".into(), 0),
+        ]))
+    });
+    FEATURES.clone()
+}
+
+fn terminal_font(flags: Flags) -> Font {
+    let mut face = font(FAMILY);
+    face.features = terminal_font_features();
+    if flags.contains(Flags::BOLD) {
+        face.weight = FontWeight::BOLD;
+    }
+    if flags.contains(Flags::ITALIC) {
+        face.style = FontStyle::Italic;
+    }
+    face
+}
+
+fn is_batchable_ascii(c: char) -> bool {
+    matches!(c, ' '..='~')
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+struct BgRun {
+    line: i32,
+    col: usize,
+    width: usize,
+    color: u32,
+}
+impl BgRun {
+    fn paint(self, pane: &Pane, grid_origin: Point<Pixels>, w: &mut Window) {
+        let base = grid_origin
+            + point(
+                pane.cell.width * self.col as f32,
+                pane.cell.height * self.line as f32,
+            );
+        w.paint_quad(fill(
+            Bounds::new(
+                base,
+                size(pane.cell.width * self.width as f32, pane.cell.height),
+            ),
+            rgb(self.color),
+        ));
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 struct Ink {
     fg: u32,
-    bg: u32,
     flags: Flags,
 }
+#[derive(Debug, PartialEq, Eq)]
 struct GlyphRun {
     line: i32,
     col: usize,
     width: usize,
+    cells: usize,
+    isolated: bool,
     ink: Ink,
     text: String,
 }
 impl GlyphRun {
+    fn shape(&self, font_size: Pixels, cell_width: Pixels, ts: &WindowTextSystem) -> ShapedLine {
+        let face = terminal_font(self.ink.flags);
+        let run = TextRun {
+            len: self.text.len(),
+            font: face,
+            color: rgb(self.ink.fg).into(),
+            background_color: None,
+            underline: self.ink.flags.intersects(Flags::ALL_UNDERLINES).then_some(
+                UnderlineStyle {
+                    thickness: px(1.),
+                    ..Default::default()
+                },
+            ),
+            strikethrough: self.ink.flags.contains(Flags::STRIKEOUT).then_some(
+                StrikethroughStyle {
+                    thickness: px(1.),
+                    ..Default::default()
+                },
+            ),
+        };
+        let force_width = (!self.isolated && self.cells > 1).then_some(cell_width);
+        ts.shape_line(self.text.clone().into(), font_size, &[run], force_width)
+    }
     fn paint(self, pane: &Pane, grid_origin: Point<Pixels>, w: &mut Window, cx: &mut App) {
         let base = grid_origin
             + point(
                 pane.cell.width * self.col as f32,
                 pane.cell.height * self.line as f32,
             );
-        if self.ink.bg != colors::BG {
-            w.paint_quad(fill(
-                Bounds::new(
-                    base,
-                    size(pane.cell.width * self.width as f32, pane.cell.height),
-                ),
-                rgb(self.ink.bg),
-            ))
-        }
-        if self.text.trim().is_empty()
-            && !self
-                .ink
-                .flags
-                .intersects(Flags::ALL_UNDERLINES | Flags::STRIKEOUT)
-        {
-            return;
-        }
-        let mut face = font(FAMILY);
-        if self.ink.flags.contains(Flags::BOLD) {
-            face.weight = FontWeight::BOLD
-        }
-        if self.ink.flags.contains(Flags::ITALIC) {
-            face.style = FontStyle::Italic
-        }
-        let run =
-            TextRun {
-                len: self.text.len(),
-                font: face,
-                color: rgb(self.ink.fg).into(),
-                background_color: None,
-                underline: self.ink.flags.intersects(Flags::ALL_UNDERLINES).then_some(
-                    UnderlineStyle {
-                        thickness: px(1.),
-                        ..Default::default()
-                    },
-                ),
-                strikethrough: self.ink.flags.contains(Flags::STRIKEOUT).then_some(
-                    StrikethroughStyle {
-                        thickness: px(1.),
-                        ..Default::default()
-                    },
-                ),
-            };
-        let line = w
-            .text_system()
-            .shape_line(self.text.into(), px(pane.font_size), &[run], None);
+        let line = self.shape(px(pane.font_size), pane.cell.width, w.text_system());
         let _ = line.paint(base, pane.cell.height, TextAlign::Left, None, w, cx);
     }
 }
+
+fn plan_draw_runs(
+    view: alacritty_terminal::term::RenderableContent<'_>,
+    focused: bool,
+) -> (Vec<BgRun>, Vec<GlyphRun>) {
+    let cursor = view.cursor.point;
+    let block_cursor = focused && view.cursor.shape == CursorShape::Block;
+    let mut bgs = Vec::new();
+    let mut glyphs = Vec::new();
+    let mut pending_bg: Option<BgRun> = None;
+    let mut pending_glyph: Option<GlyphRun> = None;
+
+    let push_bg = |pending: &mut Option<BgRun>, out: &mut Vec<BgRun>, row, col, width, color| {
+        if color == colors::BG {
+            if let Some(r) = pending.take() {
+                out.push(r);
+            }
+            return;
+        }
+        if let Some(r) = pending.as_mut()
+            && r.line == row
+            && r.col + r.width == col
+            && r.color == color
+        {
+            r.width += width;
+            return;
+        }
+        if let Some(r) = pending.take() {
+            out.push(r);
+        }
+        *pending = Some(BgRun {
+            line: row,
+            col,
+            width,
+            color,
+        });
+    };
+
+    let flush_glyph = |pending: &mut Option<GlyphRun>, out: &mut Vec<GlyphRun>| {
+        let Some(mut run) = pending.take() else {
+            return;
+        };
+        if !run
+            .ink
+            .flags
+            .intersects(Flags::ALL_UNDERLINES | Flags::STRIKEOUT)
+        {
+            if !run.isolated {
+                let trimmed = run.text.trim_end_matches(' ').len();
+                if trimmed == 0 {
+                    return;
+                }
+                run.text.truncate(trimmed);
+                run.width = trimmed;
+                run.cells = trimmed;
+            } else if run.text.trim().is_empty() {
+                return;
+            }
+        }
+        out.push(run);
+    };
+
+    for item in view.display_iter {
+        let cell = item.cell;
+        let row = item.point.line.0 + view.display_offset as i32;
+        let col = item.point.column.0;
+        if cell
+            .flags
+            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            continue;
+        }
+        let mut fg = colors::resolve(cell.fg, view.colors);
+        let mut bg = colors::resolve(cell.bg, view.colors);
+        if cell.flags.contains(Flags::DIM) {
+            fg = colors::dim(fg)
+        }
+        if cell.flags.contains(Flags::INVERSE) {
+            std::mem::swap(&mut fg, &mut bg)
+        }
+        let selected = view.selection.is_some_and(|s| {
+            s.contains(item.point)
+                || (cell.flags.contains(Flags::WIDE_CHAR)
+                    && s.contains(CellPoint::new(item.point.line, item.point.column + 1)))
+        });
+        if selected {
+            bg = 0x2b4c7e;
+            if cell.flags.contains(Flags::INVERSE) {
+                fg = colors::FG;
+            }
+        }
+        if block_cursor && item.point == cursor {
+            fg = colors::BG;
+            bg = colors::FG;
+        }
+        let width = if cell.flags.contains(Flags::WIDE_CHAR) {
+            2
+        } else {
+            1
+        };
+        push_bg(&mut pending_bg, &mut bgs, row, col, width, bg);
+
+        let flags =
+            cell.flags & (Flags::BOLD | Flags::ITALIC | Flags::ALL_UNDERLINES | Flags::STRIKEOUT);
+        let ink = Ink { fg, flags };
+        let decorated = flags.intersects(Flags::ALL_UNDERLINES | Flags::STRIKEOUT);
+        let hidden = cell.flags.contains(Flags::HIDDEN);
+        let ch = if hidden { ' ' } else { cell.c };
+        let has_zerowidth = !hidden && cell.zerowidth().is_some();
+        // Fallback fonts, combining clusters, and wide glyphs have independent advances and
+        // must be anchored to their own grid cell so following columns never drift.
+        let isolated = width == 2 || has_zerowidth || !is_batchable_ascii(ch);
+        if isolated {
+            flush_glyph(&mut pending_glyph, &mut glyphs);
+            let mut text = String::new();
+            if hidden {
+                for _ in 0..width {
+                    text.push(' ');
+                }
+            } else {
+                text.push(ch);
+                if let Some(extra) = cell.zerowidth() {
+                    text.extend(extra.iter().copied());
+                }
+            }
+            if decorated || !text.trim().is_empty() {
+                glyphs.push(GlyphRun {
+                    line: row,
+                    col,
+                    width,
+                    cells: if hidden { width } else { 1 },
+                    isolated: !hidden,
+                    ink,
+                    text,
+                });
+            }
+            continue;
+        }
+        if let Some(r) = pending_glyph.as_mut()
+            && r.line == row
+            && r.col + r.width == col
+            && r.ink == ink
+        {
+            r.width += 1;
+            r.cells += 1;
+            r.text.push(ch);
+        } else {
+            flush_glyph(&mut pending_glyph, &mut glyphs);
+            if ch != ' ' || decorated {
+                let mut text = String::new();
+                text.push(ch);
+                pending_glyph = Some(GlyphRun {
+                    line: row,
+                    col,
+                    width: 1,
+                    cells: 1,
+                    isolated: false,
+                    ink,
+                    text,
+                });
+            }
+        }
+    }
+    if let Some(r) = pending_bg {
+        bgs.push(r);
+    }
+    flush_glyph(&mut pending_glyph, &mut glyphs);
+    (bgs, glyphs)
+}
+
 impl Pane {
     pub(super) fn draw_at(&self, grid_origin: Point<Pixels>, w: &mut Window, cx: &mut App) {
         if !self.grid_visible {
             return;
         }
         let view = self.term.renderable_content();
-        let mut pending: Option<GlyphRun> = None;
         let cursor = view.cursor.point;
+        let cursor_shape = view.cursor.shape;
         let cursor_row = cursor.line.0 + view.display_offset as i32;
         let cursor_origin = grid_origin
             + point(
@@ -786,112 +987,63 @@ impl Pane {
                 self.cell.height * cursor_row as f32,
             );
         let focused = self.focus.is_focused(w);
-        for item in view.display_iter {
-            let cell = item.cell;
-            let row = item.point.line.0 + view.display_offset as i32;
-            let col = item.point.column.0;
-            if cell
-                .flags
-                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-            {
-                continue;
-            }
-            let mut fg = colors::resolve(cell.fg, view.colors);
-            let mut bg = colors::resolve(cell.bg, view.colors);
-            if cell.flags.contains(Flags::DIM) {
-                fg = colors::dim(fg)
-            }
-            if cell.flags.contains(Flags::INVERSE) {
-                std::mem::swap(&mut fg, &mut bg)
-            }
-            let selected = view.selection.is_some_and(|s| {
-                s.contains(item.point)
-                    || (cell.flags.contains(Flags::WIDE_CHAR)
-                        && s.contains(CellPoint::new(item.point.line, item.point.column + 1)))
-            });
-            if selected {
-                bg = 0x2b4c7e;
-                if cell.flags.contains(Flags::INVERSE) {
-                    fg = colors::FG;
-                }
-            }
-            if focused && view.cursor.shape == CursorShape::Block && item.point == cursor {
-                fg = colors::BG;
-                bg = colors::FG;
-            }
-            let width = if cell.flags.contains(Flags::WIDE_CHAR) {
-                2
-            } else {
-                1
-            };
-            let ink = Ink {
-                fg,
-                bg,
-                flags: cell.flags
-                    & (Flags::BOLD | Flags::ITALIC | Flags::ALL_UNDERLINES | Flags::STRIKEOUT),
-            };
-            if !pending.as_ref().is_some_and(|r| {
-                r.line == row && r.col + r.width == col && r.ink == ink && width == 1
-            }) {
-                if let Some(r) = pending.take() {
-                    r.paint(self, grid_origin, w, cx)
-                }
-                pending = Some(GlyphRun {
-                    line: row,
-                    col,
-                    width: 0,
-                    ink,
-                    text: String::new(),
-                });
-            }
-            let r = pending.as_mut().unwrap();
-            r.width += width;
-            if cell.flags.contains(Flags::HIDDEN) {
-                r.text.push(' ')
-            } else {
-                r.text.push(cell.c);
-                if let Some(extra) = cell.zerowidth() {
-                    r.text.extend(extra.iter().copied())
-                }
-            }
-            // Fallback fonts and wide glyphs have independent advances.
-            if width == 2 || cell.zerowidth().is_some() {
-                pending.take().unwrap().paint(self, grid_origin, w, cx)
-            }
+        let (bgs, glyphs) = plan_draw_runs(view, focused);
+        for bg in bgs {
+            bg.paint(self, grid_origin, w);
         }
-        if let Some(r) = pending {
-            r.paint(self, grid_origin, w, cx)
+        for glyph in glyphs {
+            glyph.paint(self, grid_origin, w, cx);
         }
-        if cursor_row >= 0
-            && (cursor_row as usize) < self.term.screen_lines()
-            && view.cursor.shape != CursorShape::Hidden
-        {
-            let (origin, extent) = match view.cursor.shape {
-                CursorShape::Beam => (cursor_origin, size(px(2.), self.cell.height)),
-                CursorShape::Underline => (
-                    cursor_origin + point(px(0.), self.cell.height - px(2.)),
-                    size(self.cell.width, px(2.)),
-                ),
-                _ if !focused => (
-                    cursor_origin + point(px(0.), self.cell.height - px(1.)),
-                    size(self.cell.width, px(1.)),
-                ),
-                _ => (cursor_origin, Size::default()),
-            };
-            w.paint_quad(fill(Bounds::new(origin, extent), rgb(colors::FG)));
+        if cursor_row >= 0 && (cursor_row as usize) < self.term.screen_lines() {
+            if cursor_shape != CursorShape::Hidden {
+                let cursor_cells = if cursor.line.0 >= -(self.term.history_size() as i32)
+                    && cursor.line.0 < self.term.screen_lines() as i32
+                    && cursor.column.0 < self.term.columns()
+                    && self.term.grid()[cursor].flags.contains(Flags::WIDE_CHAR)
+                {
+                    2
+                } else {
+                    1
+                };
+                let cursor_span = self.cell.width * cursor_cells as f32;
+                let overlay = match cursor_shape {
+                    CursorShape::Beam => Some((cursor_origin, size(px(2.), self.cell.height))),
+                    CursorShape::Underline => Some((
+                        cursor_origin + point(px(0.), self.cell.height - px(2.)),
+                        size(cursor_span, px(2.)),
+                    )),
+                    _ if !focused => Some((
+                        cursor_origin + point(px(0.), self.cell.height - px(1.)),
+                        size(cursor_span, px(1.)),
+                    )),
+                    _ => None,
+                };
+                if let Some((origin, extent)) = overlay {
+                    w.paint_quad(fill(Bounds::new(origin, extent), rgb(colors::FG)));
+                }
+            }
             if !self.marked.is_empty() {
-                GlyphRun {
+                let marked_run = GlyphRun {
                     line: cursor_row,
                     col: cursor.column.0,
                     width: self.marked.chars().count(),
+                    cells: 1,
+                    isolated: true,
                     ink: Ink {
                         fg: colors::FG,
-                        bg: colors::BG,
                         flags: Flags::UNDERLINE,
                     },
                     text: self.marked.clone(),
-                }
-                .paint(self, grid_origin, w, cx);
+                };
+                let line = marked_run.shape(px(self.font_size), self.cell.width, w.text_system());
+                w.paint_quad(fill(
+                    Bounds::new(
+                        cursor_origin,
+                        size(line.width().max(self.cell.width), self.cell.height),
+                    ),
+                    rgb(colors::BG),
+                ));
+                let _ = line.paint(cursor_origin, self.cell.height, TextAlign::Left, None, w, cx);
             }
         }
     }
@@ -1475,5 +1627,143 @@ impl Pane {
             w,
             cx,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CellPoint, Column, Config, Events, Flags, Line, Processor, Selection, SelectionType, Side,
+        SizeHint, Term, colors, plan_draw_runs, terminal_font,
+    };
+    use gpui::{TextSystem, WindowTextSystem, px};
+    use std::sync::Arc;
+
+    fn term_with(bytes: &[u8], cols: u16, rows: u16) -> Term<Events> {
+        let mut term = Term::new(Config::default(), &SizeHint { cols, rows }, Events::default());
+        let mut parser: Processor = Default::default();
+        parser.advance(&mut term, bytes);
+        term
+    }
+
+    #[test]
+    fn non_ascii_fallback_and_combining_glyphs_stay_isolated_from_ascii_runs() {
+        let term = term_with(
+            "🖼 Image: Cute Cat → /root/.gemini".as_bytes(),
+            60,
+            4,
+        );
+        let (_, glyphs) = plan_draw_runs(term.renderable_content(), false);
+        let summary: Vec<(usize, usize, bool, &str)> = glyphs
+            .iter()
+            .map(|r| (r.col, r.width, r.isolated, r.text.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (0, 1, true, "🖼"),
+                (2, 15, false, "Image: Cute Cat"),
+                (18, 1, true, "→"),
+                (20, 13, false, "/root/.gemini"),
+            ]
+        );
+
+        // Combining marks / VS16 must break both before and after the cluster.
+        let term = term_with("ab⚠\u{fe0f}cd".as_bytes(), 20, 2);
+        let (_, glyphs) = plan_draw_runs(term.renderable_content(), false);
+        let summary: Vec<(usize, usize, bool, &str)> = glyphs
+            .iter()
+            .map(|r| (r.col, r.width, r.isolated, r.text.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (0, 2, false, "ab"),
+                (2, 1, true, "⚠\u{fe0f}"),
+                (3, 2, false, "cd"),
+            ]
+        );
+    }
+
+    #[test]
+    fn selection_merges_into_single_background_and_does_not_shift_adjacent_text() {
+        let mut term = term_with("🖼 Image: Cute Cat → /root".as_bytes(), 60, 4);
+        let mut sel = Selection::new(
+            SelectionType::Simple,
+            CellPoint::new(Line(0), Column(3)),
+            Side::Left,
+        );
+        sel.update(CellPoint::new(Line(0), Column(19)), Side::Right);
+        term.selection = Some(sel);
+
+        let (bgs, glyphs) = plan_draw_runs(term.renderable_content(), false);
+        assert_eq!(bgs.len(), 1);
+        assert_eq!(bgs[0].col, 3);
+        assert_eq!(bgs[0].width, 17);
+        assert_eq!(bgs[0].color, 0x2b4c7e);
+
+        // 'I' at col 2 stays anchored at col 2 instead of drifting under the selection at col 3.
+        assert_eq!(glyphs[0].col, 0);
+        assert_eq!(glyphs[0].text, "🖼");
+        assert_eq!(glyphs[1].col, 2);
+        assert_eq!(glyphs[1].text, "Image: Cute Cat");
+    }
+
+    #[test]
+    fn focused_block_cursor_on_wide_char_covers_both_columns() {
+        let mut term = term_with("中a".as_bytes(), 20, 2);
+        // Alacritty normalizes a cursor on a wide-char spacer back to the wide cell.
+        term.grid_mut().cursor.point = CellPoint::new(Line(0), Column(1));
+        let (bgs, glyphs) = plan_draw_runs(term.renderable_content(), true);
+        assert_eq!(bgs.len(), 1);
+        assert_eq!(bgs[0].col, 0);
+        assert_eq!(bgs[0].width, 2);
+        assert_eq!(bgs[0].color, colors::FG);
+        assert_eq!(glyphs[0].col, 0);
+        assert_eq!(glyphs[0].width, 2);
+        assert_eq!(glyphs[0].ink.fg, colors::BG);
+        assert_eq!(glyphs[1].col, 2);
+        assert_eq!(glyphs[1].text, "a");
+    }
+
+    #[test]
+    fn shaped_ascii_positions_align_with_cell_grid_after_fallback_glyphs() {
+        let platform = gpui_platform::current_platform(false);
+        let ts = WindowTextSystem::new(Arc::new(TextSystem::new(platform.text_system())));
+        let font_size = px(13.5);
+        let id = ts.resolve_font(&terminal_font(Flags::empty()));
+        let cw = ts.advance(id, font_size, 'M').unwrap().width;
+
+        for sample in [
+            "🖼 Image: Cute Cat → /root/.gemini",
+            "➜ hello world",
+            "❯\u{a0}hello world",
+            "⚠ warning text",
+            "⏺ agent output",
+            "❘ narrow symbol text",
+            "中文 hello",
+        ] {
+            let term = term_with(sample.as_bytes(), 80, 4);
+            let (_, glyphs) = plan_draw_runs(term.renderable_content(), false);
+            for run in &glyphs {
+                if run.isolated {
+                    continue;
+                }
+                let shaped = run.shape(font_size, cw, &ts);
+                for (i, ch) in run.text.char_indices() {
+                    if ch == ' ' {
+                        continue;
+                    }
+                    let rendered_x = f32::from(cw) * run.col as f32 + f32::from(shaped.x_for_index(i));
+                    let expected_x = f32::from(cw) * (run.col + i) as f32;
+                    assert!(
+                        (rendered_x - expected_x).abs() < 0.05,
+                        "sample={sample:?} run={:?} char={ch:?} at col {}: rendered={rendered_x:.3} expected={expected_x:.3}",
+                        run.text,
+                        run.col + i
+                    );
+                }
+            }
+        }
     }
 }

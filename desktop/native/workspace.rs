@@ -1,3 +1,4 @@
+mod create;
 mod drag;
 pub(crate) mod files;
 mod panes;
@@ -10,6 +11,7 @@ use crate::{
     terminal::{Pane, PaneChanged},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
+use create::CreateForm;
 use drag::{DragLabel, DragState};
 use gpui::components::InputEvent;
 use gpui::{
@@ -88,6 +90,7 @@ pub struct Workspace {
     targets: Value,
     options: Value,
     creating: bool,
+    create: CreateForm,
     picker_index: usize,
     picker_scroll: ScrollHandle,
     refreshing_catalogue: bool,
@@ -141,7 +144,7 @@ fn section(s: &str) -> Div {
 fn field(state: &Entity<InputState>) -> Input {
     input(state)
         .w_full()
-        .h(px(37.))
+        .h(px(38.))
         .text_size(px(13.))
         .bg(rgb(0x0a0a0a))
         .border_color(rgb(0x2e2e2e))
@@ -393,8 +396,8 @@ impl Workspace {
             query,
             find_query,
             history_input,
-            directory: entry("Absolute working directory", cx),
-            name: entry("Session name", cx),
+            directory: entry("~/dev/project or /path/to/project", cx),
+            name: entry("Refactor billing", cx),
             compose,
             split_at: None,
             bounds: Default::default(),
@@ -406,6 +409,7 @@ impl Workspace {
             targets: Value::Null,
             options: Value::Null,
             creating: false,
+            create: CreateForm::new(cx),
             picker_index: 0,
             picker_scroll: ScrollHandle::new(),
             refreshing_catalogue: false,
@@ -481,6 +485,7 @@ impl Workspace {
         self.files_menu = None;
         self.preview_id = None;
         self.preview = None;
+        self.create.close_all(cx);
         match self.page {
             Page::Terminal => {
                 if let Some(p) = self.active() {
@@ -953,16 +958,18 @@ impl Workspace {
             "accounts" => {
                 self.accounts = e;
                 self.refreshing_catalogue = false;
-                if self.page == Page::Create
-                    && !items(&self.accounts["accounts"]).iter().any(|a| {
+                if self.page == Page::Create {
+                    if !items(&self.accounts["accounts"]).iter().any(|a| {
                         a["origin"] == self.origin
                             && a["account"]["id"] == self.account_id
                             && a["canCreate"] == true
-                    })
-                {
-                    self.creating = false;
-                    self.show(Page::Home, w, cx);
-                    self.message = "Choose a signed-in account to create a session.".into();
+                    }) {
+                        self.creating = false;
+                        self.show(Page::Home, w, cx);
+                        self.message = "Choose a signed-in account to create a session.".into();
+                    } else {
+                        self.sync_server_select(cx);
+                    }
                 }
             }
             "paneRemoved" => {
@@ -1060,22 +1067,40 @@ impl Workspace {
                     self.startup_cloak = false;
                     self.startup_hint = false;
                 }
-                self.message = error_message
+                self.message = error_message;
+                if self.page == Page::Create {
+                    self.sync_machine_select(cx);
+                    self.sync_tool_select(cx);
+                }
             }
             "targets" if self.origin == e["origin"] && self.account_id == e["accountId"] => {
-                self.targets = e["targets"].clone()
+                self.targets = e["targets"].clone();
+                let first = items(&self.targets)
+                    .first()
+                    .map(|t| strval(t, "id"))
+                    .filter(|id| !id.is_empty());
+                if self.target.is_empty()
+                    && let Some(id) = first
+                {
+                    self.select_target(id, cx);
+                } else {
+                    self.sync_machine_select(cx);
+                }
             }
             "options"
                 if self.origin == e["origin"]
                     && self.account_id == e["accountId"]
                     && self.target == e["target"] =>
             {
-                self.tool = items(&e["tools"])
-                    .first()
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .into();
+                let tools: Vec<&str> = items(&e["tools"])
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect();
+                if self.tool.is_empty() || !tools.contains(&self.tool.as_str()) {
+                    self.tool = tools.first().copied().unwrap_or("").into();
+                }
                 self.options = e;
+                self.sync_tool_select(cx);
             }
             "submitted" => {
                 if let Some(id) = self.remote.get(&n)
@@ -1194,23 +1219,23 @@ impl Workspace {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.origin != origin || self.account_id != account_id {
-            self.name.update(cx, |s, cx| s.set_value_silent("", cx));
-            self.directory
-                .update(cx, |s, cx| s.set_value_silent("", cx));
-        }
-        self.origin = origin;
-        self.account_id = account_id;
-        self.target.clear();
-        self.tool.clear();
-        self.targets = Value::Null;
-        self.options = Value::Null;
-        self.creating = false;
-        self.call(json!({"op":"targets","origin":self.origin,"accountId":self.account_id}));
+        self.switch_create_server(origin, account_id, cx);
         self.show(Page::Create, w, cx)
     }
+    fn select_target(&mut self, id: String, cx: &mut Context<Self>) {
+        self.target = id.clone();
+        self.options = Value::Null;
+        self.tool.clear();
+        self.message.clear();
+        self.sync_machine_select(cx);
+        self.sync_tool_select(cx);
+        self.call(json!({"op":"options","origin":self.origin,"accountId":self.account_id,"target":id}));
+    }
     fn creation_ready(&self) -> bool {
-        !self.creating && !self.tool.is_empty() && items(&self.options["missing"]).is_empty()
+        !self.creating
+            && self.options.is_object()
+            && !self.tool.is_empty()
+            && items(&self.options["missing"]).is_empty()
     }
     fn submit(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         match self.page {
@@ -1332,6 +1357,14 @@ impl Workspace {
             m.control && m.shift
         };
         let key = k.key.as_str();
+        if self.page == Page::Create && self.create.any_open(cx) {
+            if key == "escape" {
+                self.create.close_all(cx);
+                w.prevent_default();
+                cx.stop_propagation();
+            }
+            return;
+        }
         if matches!(self.page, Page::Choose | Page::Switch)
             && !m.control
             && !m.alt
@@ -1348,6 +1381,7 @@ impl Workspace {
         } else if key == "enter"
             && !matches!(self.page, Page::Terminal | Page::Settings)
             && (self.page != Page::Compose || !m.shift)
+            && !(self.page == Page::Create && self.create.any_focused(w, cx))
         {
             self.submit(w, cx)
         } else if key == "tab" && m.control && !self.tabs.is_empty() {
@@ -2185,156 +2219,7 @@ impl Workspace {
             }
             Page::Choose | Page::Switch => {}
             Page::Create => {
-                let servers = self.creatable_accounts();
-                content = content.child(title("MANAGED SESSIONS", "New session"));
-                if servers.len() > 1 {
-                    let mut server_row = row().flex_wrap();
-                    for (origin, account_id) in servers {
-                        let selected = self.origin == origin && self.account_id == account_id;
-                        let label = picker::display_server(&origin).to_owned();
-                        server_row = server_row.child(control(
-                            label,
-                            selected,
-                            cx,
-                            move |s, w, cx| {
-                                s.create_form(origin.clone(), account_id.clone(), w, cx)
-                            },
-                        ));
-                    }
-                    content = content.child(section("Server")).child(server_row);
-                } else {
-                    content = content.child(text(
-                        picker::display_server(&self.origin).to_owned(),
-                        13.,
-                        MUTED,
-                    ));
-                }
-                content = content.child(section("Machine"));
-                for t in items(&self.targets) {
-                    let id = strval(t, "id");
-                    content = content.child(control(
-                        strval(t, "name"),
-                        self.target == id,
-                        cx,
-                        move |s, _, cx| {
-                            s.target = id.clone();
-                            s.options = Value::Null;
-                            s.tool.clear();
-                            s.message.clear();
-                            s.call(json!({"op":"options","origin":s.origin,"accountId":s.account_id,"target":id}));
-                            cx.notify()
-                        },
-                    ))
-                }
-                if self.targets.is_null() && self.message.is_empty() {
-                    content = content.child(text("Loading machines…", 13., MUTED));
-                } else if self.targets.is_array() && items(&self.targets).is_empty() {
-                    let url = format!("{}/?add=1", self.origin);
-                    content = content
-                        .child(text(
-                            "Add a machine to this account to create a session.",
-                            13.,
-                            MUTED,
-                        ))
-                        .child(control_with_icon(
-                            "Add a machine",
-                            LucideIcon::ExternalLink,
-                            true,
-                            false,
-                            cx,
-                            move |_, _, cx| cx.open_url(&url),
-                        ));
-                }
-                if !self.target.is_empty() {
-                    content = content.child(section("Tool"));
-                    if self.options.is_null() && self.message.is_empty() {
-                        content = content.child(text("Checking installed coding tools…", 13., MUTED));
-                    }
-                }
-                let missing = items(&self.options["missing"])
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>();
-                let available_tools = items(&self.options["tools"]);
-                if !missing.is_empty() {
-                    let url = format!("{}/?target={}", self.origin, self.target);
-                    content = content
-                        .child(text(
-                            format!(
-                                "Set up {} on this machine to create a session.",
-                                missing.join(", ")
-                            ),
-                            13.,
-                            TEXT,
-                        ))
-                        .child(control_with_icon(
-                            "Open machine",
-                            LucideIcon::ExternalLink,
-                            true,
-                            false,
-                            cx,
-                            move |_, _, cx| cx.open_url(&url),
-                        ));
-                } else if self.options.is_object() && available_tools.is_empty() {
-                    let url = format!("{}/?target={}", self.origin, self.target);
-                    content = content
-                        .child(text(
-                            "No coding tools are installed on this machine. Set one up from its machine page.",
-                            13.,
-                            TEXT,
-                        ))
-                        .child(control_with_icon(
-                            "Open machine",
-                            LucideIcon::ExternalLink,
-                            true,
-                            false,
-                            cx,
-                            move |_, _, cx| cx.open_url(&url),
-                        ));
-                }
-                for t in available_tools {
-                    let t = t.as_str().unwrap_or("").to_owned();
-                    let label = agent_label(AgentMark::get(Some(&t)), t.clone());
-                    content = content.child(
-                        row().child(
-                            button(
-                                SharedString::from(t.clone()),
-                                self.tool == t,
-                                cx,
-                                move |s, _, cx| {
-                                    s.tool = t.clone();
-                                    cx.notify()
-                                },
-                            )
-                            .child(label),
-                        ),
-                    )
-                }
-                if self.options.is_object() && missing.is_empty() && !available_tools.is_empty() && available_tools.len() < 5 {
-                    let url = format!("{}/?target={}", self.origin, self.target);
-                    content = content.child(control_with_icon(
-                        "Set up another tool",
-                        LucideIcon::ExternalLink,
-                        false,
-                        false,
-                        cx,
-                        move |_, _, cx| cx.open_url(&url),
-                    ));
-                }
-                content = content
-                    .child(section("Session name"))
-                    .child(field(&self.name))
-                    .child(section("Working directory"))
-                    .child(field(&self.directory))
-                    .child(
-                        row().child(
-                            Button::new("create-session")
-                                .label("Create and open")
-                                .primary()
-                                .disabled(!self.creation_ready())
-                                .on_click(cx.listener(|s, _, w, cx| s.submit(w, cx))),
-                        ),
-                    );
+                content = content.child(self.create_view(cx));
             }
             Page::Manage => {
                 content = content
@@ -2807,6 +2692,55 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         test.capture_screenshot(window.into())?
             .save(PathBuf::from(&dir).join("scrollback-settings.png"))?;
         test.update_window(window.into(), |root, w, cx| {
+            root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+                let origin = "https://outpost.ke.wang";
+                s.accounts = json!({
+                    "accounts": [{
+                        "origin": origin,
+                        "account": {"id": "acct-1"},
+                        "canCreate": true
+                    }]
+                });
+                s.create_form(origin.into(), "acct-1".into(), w, cx);
+                s.event(
+                    json!({
+                        "event": "targets",
+                        "origin": origin,
+                        "accountId": "acct-1",
+                        "targets": [
+                            {"id": "m1", "name": "gpui-enhancement"},
+                            {"id": "m2", "name": "linux-build-box"}
+                        ]
+                    }),
+                    w,
+                    cx,
+                );
+                s.event(
+                    json!({
+                        "event": "options",
+                        "origin": origin,
+                        "accountId": "acct-1",
+                        "target": "m1",
+                        "tools": ["claude", "codex"],
+                        "missing": []
+                    }),
+                    w,
+                    cx,
+                );
+            });
+        })?;
+        draw(&mut test);
+        test.capture_screenshot(window.into())?
+            .save(PathBuf::from(&dir).join("create-session.png"))?;
+        test.update_window(window.into(), |root, w, cx| {
+            root.downcast::<Workspace>()
+                .unwrap()
+                .update(cx, |s, cx| s.create.open_tool_menu(w, cx));
+        })?;
+        draw(&mut test);
+        test.capture_screenshot(window.into())?
+            .save(PathBuf::from(&dir).join("create-session-open.png"))?;
+        test.update_window(window.into(), |root, w, cx| {
             root.downcast::<Workspace>()
                 .unwrap()
                 .update(cx, |s, cx| s.show(Page::Home, w, cx));
@@ -2843,10 +2777,24 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             let origin = "https://example.com";
             s.create_form(origin.into(), "first".into(), w, cx);
             assert_eq!(commands.try_recv().unwrap()["accountId"], "first");
-            s.target = "machine".into();
+            // Receiving targets auto-selects the first machine and probes its coding tools.
+            s.event(
+                json!({
+                    "event":"targets",
+                    "origin":origin,
+                    "accountId":"first",
+                    "targets":[{"id":"machine","name":"dev-box"},{"id":"other","name":"gpu-box"}]
+                }),
+                w,
+                cx,
+            );
+            assert_eq!(s.target, "machine");
+            let probe = commands.try_recv().unwrap();
+            assert_eq!(probe["op"], "options");
+            assert_eq!(probe["target"], "machine");
             s.name.update(cx, |name, cx| name.set_value_silent("Review", cx));
             s.directory.update(cx, |dir, cx| dir.set_value_silent("/work", cx));
-            let mut options = json!({"event":"options","origin":origin,"accountId":"first","target":"machine","tools":["codex"],"missing":["bash"]});
+            let mut options = json!({"event":"options","origin":origin,"accountId":"first","target":"machine","tools":["codex","claude"],"missing":["bash"]});
             s.event(options.clone(), w, cx);
             s.submit(w, cx);
             assert!(!s.creation_ready());
@@ -2857,10 +2805,22 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             options["missing"] = json!([]);
             s.event(options, w, cx);
             assert!(s.creation_ready());
+            assert_eq!(s.tool, "codex");
+            // Switching coding tool through the searchable ComboBox updates the selected tool.
+            s.create.select_tool("claude", cx);
+        });
+        w.draw(cx).clear(cx);
+    })?;
+    test.run_until_parked();
+    test.update_window(remote_window.into(), |root, w, cx| {
+        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+            let origin = "https://example.com";
+            assert_eq!(s.tool, "claude");
             s.submit(w, cx);
             let created = commands.try_recv().unwrap();
             assert_eq!(created["op"], "create");
             assert_eq!(created["accountId"], "first");
+            assert_eq!(created["input"]["tool"], "claude");
             s.event(json!({"event":"accounts","accounts":[{"origin":origin,"account":{"id":"second"},"canCreate":true}]}), w, cx);
             assert!(s.page == Page::Home);
         });

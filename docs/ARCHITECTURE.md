@@ -1037,6 +1037,11 @@ A local shell starts after its pane measures the grid. Browser and Desktop
 use the measured grid for the first managed attachment and retain it for
 reconnects. Desktop reveals the restored screen once the checkpoint is complete.
 
+A split pane's title is a drag handle. The zoom, actions and close buttons
+have separate hit targets. Dragging transfers the existing terminal and its
+draft when the pointer is released. Closing a pane, tab or window confirms
+the affected terminals and keeps any sessions on their machines running.
+
 The UI preserves the black title bar, shell tabs, splits and server launcher.
 On Windows, the tab strip supplies the native caption hit targets for dragging,
 snapping and window controls. The executable and installer share the Outpost icon.

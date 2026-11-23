@@ -1,5 +1,6 @@
 mod drag;
 pub(crate) mod files;
+mod panes;
 use crate::{
     agent_mark::AgentMark,
     bridge::Bridge,
@@ -50,6 +51,7 @@ pub struct Workspace {
     current: usize,
     startup_local: bool,
     new_tab_menu_open: bool,
+    pane_menu: Option<Id>,
     close_pending: bool,
     page: Page,
     focus: FocusHandle,
@@ -251,6 +253,9 @@ impl Workspace {
         cx.observe_window_activation(w, |s, w, cx| {
             if !w.is_window_active() {
                 s.set_new_tab_menu(false, cx);
+                if s.pane_menu.take().is_some() {
+                    cx.notify();
+                }
                 s.cancel_drag(cx);
             }
             if w.is_window_active() {
@@ -274,6 +279,7 @@ impl Workspace {
             id: next_id() as u64,
             startup_local: local && !ready,
             new_tab_menu_open: false,
+            pane_menu: None,
             close_pending: false,
             bridge,
             panes: Default::default(),
@@ -372,6 +378,7 @@ impl Workspace {
         };
         self.message.clear();
         self.new_tab_menu_open = false;
+        self.pane_menu = None;
         self.files_menu = None;
         self.preview_id = None;
         self.preview = None;
@@ -546,16 +553,38 @@ impl Workspace {
         if captured.is_empty() {
             return;
         }
-        let title = match scope {
-            CloseScope::Window => "Close this workspace?",
-            CloseScope::Tab(_) => "Close this tab?",
-            CloseScope::Pane(_) => "Close this terminal?",
+        let count = captured.len();
+        let noun = if count == 1 { "pane" } else { "panes" };
+        let (title, action) = match scope {
+            CloseScope::Pane(id) => (
+                format!("Close “{}”?", self.panes[&id].read(cx).title),
+                "Close pane",
+            ),
+            CloseScope::Tab(_) => (
+                format!("Close this tab and its {count} {noun}?"),
+                "Close tab",
+            ),
+            CloseScope::Window => (
+                format!("Close this window and its {count} {noun}?"),
+                "Close window",
+            ),
         };
+        let panes = || captured.iter().map(|id| self.panes[id].read(cx));
+        let mut detail = Vec::new();
+        if panes().any(|p| p.server.is_none()) {
+            detail.push("Local shells and their processes will end.");
+        }
+        if panes().any(|p| p.server.is_some()) {
+            detail.push("Managed sessions will keep running on their machines.");
+        }
+        if panes().any(|p| !p.draft.is_empty()) {
+            detail.push("Unsent message drafts will be discarded.");
+        }
         let response = w.prompt(
             PromptLevel::Warning,
-            title,
-            Some("Local shells will end. Managed sessions will keep running."),
-            &["Cancel", "Continue"],
+            &title,
+            Some(&detail.join(" ")),
+            &["Cancel", action],
             cx,
         );
         self.close_pending = true;
@@ -726,6 +755,9 @@ impl Workspace {
         self.remote.retain(|_, pane_id| *pane_id != id);
     }
     fn remove_leaf(&mut self, id: Id) {
+        if self.pane_menu == Some(id) {
+            self.pane_menu = None;
+        }
         if let Some(i) = self.tabs.iter().position(|t| t.layout.contains(id)) {
             if let Some(layout) = self.tabs[i].layout.clone().remove(id) {
                 let tab = &mut self.tabs[i];
@@ -1096,7 +1128,7 @@ impl Workspace {
         self.show(Page::Choose, w, cx)
     }
     fn shortcuts(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
-        if self.new_tab_menu_open || self.file_key(e, w, cx) {
+        if self.new_tab_menu_open || self.pane_menu.is_some() || self.file_key(e, w, cx) {
             return;
         }
         if e.keystroke.key == "escape" && self.drag.gesture.is_some() {
@@ -1167,9 +1199,7 @@ impl Workspace {
                 "," => self.show(Page::Settings, w, cx),
                 "f" if self.active().is_some() => self.show(Page::Find, w, cx),
                 "enter" if self.page == Page::Terminal && self.active().is_some() && m.shift => {
-                    let t = &mut self.tabs[self.current];
-                    t.zoom = !t.zoom;
-                    self.show(Page::Terminal, w, cx)
+                    self.toggle_zoom(self.tabs[self.current].active, w, cx)
                 }
                 "enter" if self.active().is_some() => self.show(Page::Compose, w, cx),
                 "n" => {
@@ -1194,6 +1224,7 @@ impl Workspace {
         if self.new_tab_menu_open != open {
             self.new_tab_menu_open = open;
             if open {
+                self.pane_menu = None;
                 self.files_menu = None;
             }
             cx.notify();
@@ -1318,8 +1349,53 @@ impl Workspace {
             } else {
                 tab.name.clone()
             };
+            let handle = row()
+                .id(("tab-handle", tab.id))
+                .role(gpui::accesskit::Role::Tab)
+                .aria_selected(i == self.current && self.page == Page::Terminal)
+                .focusable()
+                .tab_stop(i == self.current)
+                .on_click(cx.listener(move |s, e: &ClickEvent, w, cx| {
+                    if !matches!(e, ClickEvent::Mouse(_)) {
+                        s.select(id, w, cx);
+                    }
+                }))
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .pl(px(9.))
+                .gap(px(6.))
+                .cursor_pointer()
+                .aria_label(format!("Select or drag tab {title}"))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |s, e: &MouseDownEvent, w, cx| {
+                        if e.click_count == 2 {
+                            s.cancel_drag(cx);
+                            s.select(id, w, cx);
+                            s.manage(w, cx);
+                            s.name.read(cx).focus_handle(cx).focus(w, cx);
+                        } else {
+                            s.arm(id, true, e.position, w, cx);
+                        }
+                    }),
+                )
+                .child(panes::status_dot(self.panes[&id].read(cx)))
+                .children(self.panes[&id].read(cx).mark.map(|m| m.icon(14.)))
+                .child(div().flex_1().truncate().child(title.clone()))
+                .when(!matches!(tab.layout, Layout::Pane(_)), |e| {
+                    e.child(text(
+                        self.panes
+                            .keys()
+                            .filter(|id| tab.layout.contains(**id))
+                            .count()
+                            .to_string(),
+                        10.,
+                        MUTED,
+                    ))
+                });
             let tab = row()
-                .id(("tab", id))
+                .id(("tab", tab.id))
                 .relative()
                 .mt(px(3.))
                 .h(px(37.))
@@ -1329,7 +1405,7 @@ impl Workspace {
                 .border_1()
                 .border_color(gpui::transparent_black())
                 .border_b_2()
-                .px(px(9.))
+                .pr(px(3.))
                 .gap(px(6.))
                 .rounded_t(px(6.))
                 .cursor_pointer()
@@ -1345,46 +1421,18 @@ impl Workspace {
                     )
                 })
                 .hover(|e| e.bg(rgb(0x222222)))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |s, e: &MouseDownEvent, w, cx| {
-                        s.arm(id, true, e.position, w, cx);
-                    }),
+                .child(handle)
+                .child(panes::header_button(
+                    ("tab-close", tab.id),
+                    LucideIcon::X,
+                    "Close tab",
+                    true,
+                    cx.listener(move |s, _, w, cx| s.close_tab(id, w, cx)),
+                ))
+                .on_mouse_up(
+                    MouseButton::Middle,
+                    cx.listener(move |s, _, w, cx| s.close_tab(id, w, cx)),
                 )
-                .child(div().size(px(6.)).rounded_full().bg(rgb({
-                    let pane = self.panes[&id].read(cx);
-                    if pane.bell || pane.activity == "waiting" {
-                        0xfbbf24
-                    } else if !pane.status.is_empty() || pane.activity == "error" {
-                        0xf87171
-                    } else {
-                        0x4ade80
-                    }
-                })))
-                .children(self.panes[&id].read(cx).mark.map(|m| m.icon(14.)))
-                .child(div().flex_1().truncate().child(title))
-                .when(!matches!(tab.layout, Layout::Pane(_)), |e| {
-                    e.child(text(
-                        self.panes
-                            .keys()
-                            .filter(|id| tab.layout.contains(**id))
-                            .count()
-                            .to_string(),
-                        10.,
-                        MUTED,
-                    ))
-                })
-                .child(
-                    div()
-                        .id(("tab-close", id))
-                        .text_color(rgb(MUTED))
-                        .child(lucide_icon(LucideIcon::X).size(px(12.)))
-                        .on_click(cx.listener(move |s, _, w, cx| {
-                            s.close_tab(id, w, cx);
-                            cx.stop_propagation()
-                        })),
-                )
-                .on_click(cx.listener(move |s, _, w, cx| s.select(id, w, cx)))
                 .on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |s, _, w, cx| {
@@ -1520,37 +1568,7 @@ impl Workspace {
                 let active = self.tabs[self.current].active == id;
                 let mut body = col().size_full().bg(rgb(BG));
                 if headers {
-                    body = body.child(
-                        row()
-                            .id(("header", id))
-                            .h(px(26.))
-                            .px(px(8.))
-                            .flex_none()
-                            .bg(rgb(if active { 0x191919 } else { 0x111111 }))
-                            .children(pane.mark.map(|m| m.icon(14.)))
-                            .child(text(pane.title.clone(), 12., MUTED))
-                            .child(div().flex_1())
-                            .child(icon(
-                                ("options", id),
-                                LucideIcon::Ellipsis,
-                                cx,
-                                move |s, w, cx| {
-                                    s.select(id, w, cx);
-                                    s.manage(w, cx)
-                                },
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |s, e: &MouseDownEvent, w, cx| {
-                                    s.arm(id, false, e.position, w, cx);
-                                    if e.click_count == 2 {
-                                        let t = &mut s.tabs[s.current];
-                                        t.zoom = !t.zoom;
-                                        cx.notify()
-                                    }
-                                }),
-                            ),
-                    )
+                    body = body.child(self.pane_header(id, pane, active, cx));
                 }
                 let status = (!pane.status.is_empty()).then(|| {
                     row()
@@ -1582,6 +1600,9 @@ impl Workspace {
                     .flex_1()
                     .overflow_hidden()
                     .child(p)
+                    .when(!active, |e| {
+                        e.child(div().absolute().inset_0().bg(rgba(0x00000052)))
+                    })
                     .children(status)
                     .children(
                         badge.map(|badge| div().absolute().top(px(6.)).right(px(8.)).child(badge)),
@@ -1618,8 +1639,20 @@ impl Workspace {
                 )
                 .absolute()
                 .size_full();
+                let ratio = *ratio;
                 let bar = div()
                     .id(("divider", id))
+                    .role(gpui::accesskit::Role::Splitter)
+                    .aria_label("Resize terminal panes")
+                    .aria_orientation(if axis == Axis::Across {
+                        gpui::accesskit::Orientation::Vertical
+                    } else {
+                        gpui::accesskit::Orientation::Horizontal
+                    })
+                    .aria_value(format!("{:.0}%", ratio * 100.))
+                    .focusable()
+                    .tab_stop(true)
+                    .focus_visible(|s| s.bg(rgb(0x707070)))
                     .flex_none()
                     .bg(rgb(0x292929))
                     .hover(|e| e.bg(rgb(0x707070)))
@@ -1633,9 +1666,33 @@ impl Workspace {
                             .w_full()
                             .cursor(CursorStyle::ResizeUpDown)
                     })
+                    .on_key_down(cx.listener(move |s, e: &KeyDownEvent, w, cx| {
+                        if e.keystroke.modifiers != Modifiers::default() {
+                            return;
+                        }
+                        let value = match (axis, e.keystroke.key.as_str()) {
+                            (Axis::Across, "left") | (Axis::Down, "up") => ratio - 0.05,
+                            (Axis::Across, "right") | (Axis::Down, "down") => ratio + 0.05,
+                            (_, "home") => 0.5,
+                            _ => return,
+                        };
+                        s.tabs[s.current].layout.resize(id, value);
+                        w.prevent_default();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |s, _, _, _| s.resizing = Some((id, axis))),
+                        cx.listener(move |s, e: &MouseDownEvent, _, cx| {
+                            if e.click_count == 2 {
+                                s.resizing = None;
+                                let tab = &mut s.tabs[s.current];
+                                tab.layout.resize(id, 0.5);
+                                cx.notify();
+                            } else {
+                                s.resizing = Some((id, axis));
+                            }
+                        }),
                     );
                 div()
                     .relative()
@@ -1650,13 +1707,13 @@ impl Workspace {
                             .when(axis == Axis::Across, |e| {
                                 e.w(extent
                                     .map(DefiniteLength::from)
-                                    .unwrap_or_else(|| relative(*ratio)))
+                                    .unwrap_or_else(|| relative(ratio)))
                                     .h_full()
                             })
                             .when(axis == Axis::Down, |e| {
                                 e.h(extent
                                     .map(DefiniteLength::from)
-                                    .unwrap_or_else(|| relative(*ratio)))
+                                    .unwrap_or_else(|| relative(ratio)))
                                     .w_full()
                             })
                             .child(self.node(first, true, cx)),
@@ -2119,11 +2176,7 @@ impl Workspace {
                                     },
                                     false,
                                     cx,
-                                    |s, w, cx| {
-                                        let tab = &mut s.tabs[s.current];
-                                        tab.zoom = !tab.zoom;
-                                        s.show(Page::Terminal, w, cx)
-                                    },
+                                    |s, w, cx| s.toggle_zoom(s.tabs[s.current].active, w, cx),
                                 )),
                         );
                     }
@@ -2939,8 +2992,56 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     );
     prompts.update(init_test);
     let mut workspace = prompts.open_window(|w, cx| Workspace::new(false, w, cx));
-    workspace.update(|s, w, cx| {
+    let (left, right) = workspace.update(|s, w, cx| {
         s.local(None, w, cx);
+        let left = s.tabs[s.current].active;
+        s.split(Axis::Across, w, cx);
+        (left, s.tabs[s.current].active)
+    });
+    let header_control =
+        |workspace: &mut gpui::TestAppWindow<Workspace>, pane: Id, from_right: f32| {
+            workspace.draw();
+            workspace.read(|s, _| {
+                let bounds = s.watches[&pane].1.bounds().unwrap();
+                point(bounds.right() - px(from_right), bounds.top() + px(14.))
+            })
+        };
+    let zoom = header_control(&mut workspace, left, 65.);
+    workspace.simulate_click(zoom, MouseButton::Left);
+    workspace.read(|s, _| {
+        assert!(s.tabs[0].zoom);
+        assert_eq!(s.tabs[0].active, left);
+        assert!(s.drag.gesture.is_none());
+    });
+    let restore = header_control(&mut workspace, left, 65.);
+    workspace.simulate_click(restore, MouseButton::Left);
+    assert!(!workspace.read(|s, _| s.tabs[0].zoom));
+    let options = header_control(&mut workspace, right, 40.);
+    workspace.simulate_click(options, MouseButton::Left);
+    assert_eq!(workspace.read(|s, _| s.pane_menu), Some(right));
+    workspace.draw();
+    workspace.simulate_keystroke("escape");
+    assert_eq!(workspace.read(|s, _| s.pane_menu), None);
+
+    // Closing an inactive pane must neither arm a drag nor close the selected sibling.
+    let close = header_control(&mut workspace, left, 15.);
+    workspace.simulate_mouse_down(close, MouseButton::Left);
+    workspace.read(|s, _| {
+        assert!(s.drag.gesture.is_none());
+        assert_eq!(s.tabs[0].active, right);
+    });
+    workspace.simulate_mouse_up(close, MouseButton::Left);
+    assert!(prompts.has_pending_prompt());
+    prompts.simulate_prompt_answer("Cancel");
+    prompts.run_until_parked();
+    assert_eq!(workspace.read(|s, _| s.panes.len()), 2);
+    workspace.draw();
+    workspace.simulate_click(close, MouseButton::Left);
+    prompts.simulate_prompt_answer("Close pane");
+    prompts.run_until_parked();
+    workspace.update(|s, w, cx| {
+        assert!(matches!(s.tabs[0].layout, Layout::Pane(id) if id == right));
+        assert_eq!(s.tabs[0].active, right);
         assert!(!s.request_window_close(w, cx));
     });
     prompts.simulate_prompt_answer("Cancel");
@@ -2953,14 +3054,14 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         assert!(!s.request_window_close(w, cx));
         s.tabs[s.current].active
     });
-    prompts.simulate_prompt_answer("Continue");
+    prompts.simulate_prompt_answer("Close window");
     prompts.run_until_parked();
     assert!(!prompts.has_pending_prompt());
     workspace.update(|s, w, cx| {
         assert_eq!(s.panes.keys().copied().collect::<Vec<_>>(), vec![arrival]);
         s.close(arrival, w, cx);
     });
-    prompts.simulate_prompt_answer("Continue");
+    prompts.simulate_prompt_answer("Close pane");
     prompts.run_until_parked();
     assert!(prompts.read(|cx| cx.windows().is_empty()));
     Ok(())

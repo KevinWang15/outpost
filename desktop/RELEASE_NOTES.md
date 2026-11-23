@@ -1,7 +1,8 @@
-# Outpost Desktop 1.3.6 preview
+# Outpost Desktop 1.3.7 preview
 
 Outpost Desktop connects to sessions on your machines and opens local shells alongside them in tabs and split panes.
 
+- Each split pane has a drag handle, a zoom or restore button, an actions menu and a close button. The menu can move a live pane to a tab or another window. Double-click a divider to make its panes equal again.
 - Windows uses a single title bar with native minimize, maximize, restore and close controls. The installed application and shortcuts use the Outpost icon. The Windows package includes its C runtime.
 - Local shells and managed terminals open at their pane's measured size, including in split panes.
 - Managed terminals attach screenshots to the current draft. Local shells use the system clipboard shortcut of the foreground program. On macOS, ⌘V pastes text and Ctrl+V reaches the program.
@@ -21,8 +22,8 @@ Outpost Desktop connects to sessions on your machines and opens local shells alo
 
 ## Install
 
-- **Apple silicon Mac:** download `Outpost-1.3.6-mac-arm64.dmg`.
-- **Intel Mac:** download `Outpost-1.3.6-mac-x64.dmg`.
-- **Windows x64:** download `Outpost-1.3.6-windows-x64.exe`.
+- **Apple silicon Mac:** download `Outpost-1.3.7-mac-arm64.dmg`.
+- **Intel Mac:** download `Outpost-1.3.7-mac-x64.dmg`.
+- **Windows x64:** download `Outpost-1.3.7-windows-x64.exe`.
 
 On macOS, drag Outpost to Applications and open it once. These previews have no Developer ID signature or notarization; after the first launch attempt, use **System Settings → Privacy & Security → Open Anyway** if macOS blocks the app. Windows may show **SmartScreen → More info → Run anyway**. `SHA256SUMS` lists the artifact checksums.

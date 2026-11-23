@@ -506,11 +506,15 @@ to open or create a managed session. When you’re signed out, choose
 reopen recent sessions, or create a session on a machine. Choose **Machines ↗** next to a signed-in server to open its machine workspace in the system browser.
 
 Use the split button to place a shell beside the focused terminal. Right-click
-it to split top and bottom. Drag the divider to resize, or double-click a pane
-header to zoom. Drag a tab or pane header onto another terminal to split at
-the nearest edge. Drop it on the tab strip to reorder or create a tab. The tab
-context menu also moves a tab or pane into its own window. Moving a pane keeps
-its output, shell or managed connection, and message draft.
+it to split top and bottom. Each split pane has its own header. Drag its grip
+or title onto the edge of another pane, onto the tab strip, or outside the
+window. Dragging a tab moves all its panes together. Escape cancels a drag.
+The terminal process, output and message draft follow the pane.
+
+Double-click a pane title or click its zoom button to zoom and restore it. Drag
+a divider to resize, or double-click it to restore equal sizes. Use the pane’s
+**…** menu to move it to a tab or window. The **×** in the pane header closes
+that pane. The **×** in the tab strip closes the whole tab.
 
 Right-click a tab or the terminal to open terminal actions. You can search
 scrollback, change its limit in **Terminal Settings**, compose a multiline message, clear the screen, copy a selection or

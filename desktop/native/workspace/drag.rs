@@ -20,6 +20,14 @@ pub(super) struct DragState {
     pub(super) empty_bar: SnapshotSource,
     pub(super) preview: Option<Preview>,
 }
+impl DragState {
+    pub(super) fn dragged_pane(&self) -> Option<Id> {
+        self.gesture
+            .as_ref()
+            .filter(|g| g.active && !g.item.whole)
+            .map(|g| g.item.pane)
+    }
+}
 pub(super) struct Preview {
     pub(super) destination: Destination,
     moving_tab: Option<Id>,

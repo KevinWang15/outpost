@@ -2,7 +2,7 @@
 
 Outpost Desktop connects to sessions on your machines and opens local shells alongside them in tabs and split panes.
 
-- Windows uses a single title bar with native minimize, maximize, restore and close controls. The installed application and shortcuts use the Outpost icon.
+- Windows uses a single title bar with native minimize, maximize, restore and close controls. The installed application and shortcuts use the Outpost icon. The Windows package includes its C runtime.
 - Local shells and managed terminals open at their pane's measured size, including in split panes.
 - Managed terminals attach screenshots to the current draft. Local shells use the system clipboard shortcut of the foreground program. On macOS, ⌘V pastes text and Ctrl+V reaches the program.
 - Terminal Settings offers a line limit or unlimited scrollback for local shells and machine terminals. Running machine terminals keep recording while Desktop is disconnected.

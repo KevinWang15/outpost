@@ -86,6 +86,11 @@ fn init(cx: &mut App) {
     init_components(cx);
     let mut theme = Theme::dark();
     theme.background = rgb(0x0c0c0c).into();
+    theme.sidebar_bg = rgb(0x111111).into();
+    theme.sidebar_border = rgb(0x242424).into();
+    theme.sidebar_active_bg = rgb(0x242424).into();
+    theme.sidebar_active_foreground = rgb(0xffffff).into();
+    theme.sidebar_active_icon = rgb(0xe6e6e6).into();
     theme.surface = rgb(0x1f1f1f).into();
     theme.surface_muted = rgb(0x0f0f0f).into();
     theme.surface_hover = rgb(0x262626).into();
@@ -95,12 +100,25 @@ fn init(cx: &mut App) {
     theme.foreground = rgb(0xe6e6e6).into();
     theme.popover_foreground = rgb(0xe6e6e6).into();
     theme.muted_foreground = rgb(0x8c8c8c).into();
+    theme.primary = rgb(0xe6e6e6).into();
+    theme.primary_hover = rgb(0xffffff).into();
+    theme.primary_foreground = rgb(0x0c0c0c).into();
+    theme.primary_soft = rgb(0x262626).into();
+    theme.primary_soft_foreground = rgb(0xffffff).into();
+    theme.secondary = rgb(0x161616).into();
+    theme.secondary_hover = rgb(0x242424).into();
+    theme.secondary_foreground = rgb(0xe6e6e6).into();
     theme.border = rgb(0x2a2a2a).into();
     theme.input_border = rgb(0x2e2e2e).into();
     theme.input_border_hover = rgb(0x454545).into();
+    theme.ring = rgb(0x666666).into();
+    theme.selection = rgba(0xffffff38).into();
+    theme.slider_fill = rgb(0xe6e6e6).into();
     theme.toggle_track_off = rgb(0x2b2b2b).into();
     theme.toggle_track_on = rgb(0x22c55e).into();
     theme.toggle_thumb = rgb(0xffffff).into();
+    theme.focus_ring_width = px(2.);
+    theme.radius_md = px(7.);
     theme.mono_font_family = Some(crate::terminal::FAMILY.into());
     Theme::set_global(theme, cx);
 }

@@ -246,6 +246,7 @@ interface Attachment {
   size?: { cols: number; rows: number }
 }
 const creations = new Map<number, { key: string; id: string }>()
+const directoryLookups = new Map<number, AbortController>()
 const panes = new Map<number, Attachment>()
 function closePane(id: number, pane: Attachment) {
   panes.delete(id)
@@ -440,6 +441,29 @@ async function handle(c: Cmd) {
       }
       return
     }
+    case 'directories': {
+      directoryLookups.get(c.window)?.abort()
+      const controller = new AbortController()
+      directoryLookups.set(c.window, controller)
+      const context = {
+        window: c.window,
+        id: c.id,
+        origin: c.origin,
+        accountId: c.accountId,
+        target: c.target,
+        path: c.path,
+      }
+      try {
+        const server = accounts.creationServer(c.origin, c.accountId)
+        const result = await server.directories(c.target, c.path ?? '', controller.signal)
+        if (!controller.signal.aborted) emit('directories', { ...context, ...result })
+      } catch (error) {
+        if (!controller.signal.aborted) emit('directories', { ...context, error: message(error) })
+      } finally {
+        if (directoryLookups.get(c.window) === controller) directoryLookups.delete(c.window)
+      }
+      return
+    }
     case 'create': {
       const s = accounts.creationServer(c.origin, c.accountId)
       const key = JSON.stringify([c.origin, c.accountId, c.target, c.input])
@@ -556,6 +580,8 @@ async function main() {
     closing = true
     for (const answer of prompts.values()) answer(false)
     prompts.clear()
+    for (const controller of directoryLookups.values()) controller.abort()
+    directoryLookups.clear()
     accounts.dispose()
     for (const [id, pane] of panes) closePane(id, pane)
     // Every command preceding EOF was dispatched. Wait for its local writes before

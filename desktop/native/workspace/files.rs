@@ -441,6 +441,7 @@ impl Workspace {
                 .description(reason.clone())
                 .action(
                     Button::new("retry-preview")
+                        .secondary()
                         .label("Retry preview")
                         .on_click(cx.listener(move |s, _, _, cx| s.view_file(id, &file, cx))),
                 )

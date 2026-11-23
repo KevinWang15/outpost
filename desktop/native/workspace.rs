@@ -77,7 +77,6 @@ pub struct Workspace {
     query: Entity<InputState>,
     find_query: Entity<InputState>,
     history_input: Entity<InputState>,
-    directory: Entity<InputState>,
     name: Entity<InputState>,
     compose: Entity<TextBoxState>,
     split_at: Option<(Id, Axis)>,
@@ -184,6 +183,10 @@ fn button(
 ) -> Stateful<Div> {
     div()
         .id(id)
+        .role(gpui::accesskit::Role::Button)
+        .focusable()
+        .tab_stop(true)
+        .focus_visible(|s| s.border_color(rgb(0x888888)))
         .flex_none()
         .py(px(7.))
         .px(px(12.))
@@ -194,7 +197,10 @@ fn button(
         .text_color(rgb(if primary { BG } else { TEXT }))
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
-        .hover(move |e| e.bg(rgb(if primary { 0xffffff } else { 0x242424 })))
+        .hover(move |e| {
+            e.bg(rgb(if primary { 0xffffff } else { 0x242424 }))
+                .border_color(rgb(if primary { 0xffffff } else { 0x454545 }))
+        })
         .on_click(cx.listener(move |s, _, w, cx| action(s, w, cx)))
 }
 fn agent_label(mark: Option<&'static AgentMark>, title: impl Into<SharedString>) -> Div {
@@ -396,7 +402,6 @@ impl Workspace {
             query,
             find_query,
             history_input,
-            directory: entry("~/dev/project or /path/to/project", cx),
             name: entry("Refactor billing", cx),
             compose,
             split_at: None,
@@ -1102,6 +1107,10 @@ impl Workspace {
                 self.options = e;
                 self.sync_tool_select(cx);
             }
+            "directories" => {
+                self.handle_directory_suggestions(e);
+                return;
+            }
             "submitted" => {
                 if let Some(id) = self.remote.get(&n)
                     && let Some(p) = self.panes.get(id)
@@ -1227,6 +1236,8 @@ impl Workspace {
         self.options = Value::Null;
         self.tool.clear();
         self.message.clear();
+        self.create
+            .cancel_directory_lookups(self.target.is_empty(), cx);
         self.sync_machine_select(cx);
         self.sync_tool_select(cx);
         self.call(json!({"op":"options","origin":self.origin,"accountId":self.account_id,"target":id}));
@@ -1265,21 +1276,7 @@ impl Workspace {
                     }
                 }
             }
-            Page::Create => {
-                if !self.creation_ready() {
-                    return;
-                }
-                let name = self.name.read(cx).value().trim();
-                let dir = self.directory.read(cx).value().trim();
-                if name.is_empty() || dir.is_empty() {
-                    self.message = "Enter a session name and working directory.".into()
-                } else {
-                    self.creating = true;
-                    self.message = "Creating session…".into();
-                    self.call(json!({"op":"create","origin":self.origin,"accountId":self.account_id,"target":self.target,"input":{"name":name,"rootDir":dir,"tool":self.tool}}))
-                }
-                cx.notify()
-            }
+            Page::Create => self.submit_create(cx),
             Page::Manage => {
                 if let Some(t) = self.tabs.get_mut(self.current) {
                     t.name = self.name.read(cx).value().chars().take(120).collect()
@@ -2793,7 +2790,9 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             assert_eq!(probe["op"], "options");
             assert_eq!(probe["target"], "machine");
             s.name.update(cx, |name, cx| name.set_value_silent("Review", cx));
-            s.directory.update(cx, |dir, cx| dir.set_value_silent("/work", cx));
+            s.create.set_directory_silent("/work", cx);
+            // Remote directory suggestions round-trip through PathInputState.
+            s.create.open_directory_suggestions(cx);
             let mut options = json!({"event":"options","origin":origin,"accountId":"first","target":"machine","tools":["codex","claude"],"missing":["bash"]});
             s.event(options.clone(), w, cx);
             s.submit(w, cx);
@@ -2808,19 +2807,78 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             assert_eq!(s.tool, "codex");
             // Switching coding tool through the searchable ComboBox updates the selected tool.
             s.create.select_tool("claude", cx);
+            // Custom program args, createDirectory, and env vars are validated and submitted.
+            s.create.set_create_directory(true);
+            s.create.set_args_silent("--verbose --model opus", cx);
+            s.create.push_env("API_MODE", "fast", cx);
+            s.create.push_env("API_MODE", "dup", cx);
+            s.submit(w, cx);
+            assert!(s.message.contains("Duplicate"));
+            assert!(!s.creating);
         });
         w.draw(cx).clear(cx);
     })?;
     test.run_until_parked();
+    // Drain the debounced directory lookup command if it fired and resolve it.
+    std::thread::sleep(Duration::from_millis(260));
+    test.run_until_parked();
+    if let Ok(dir_cmd) = commands.try_recv() {
+        assert_eq!(dir_cmd["op"], "directories");
+        assert_eq!(dir_cmd["target"], "machine");
+        assert_eq!(dir_cmd["path"], "/work");
+        let req_id = dir_cmd["id"].as_u64().unwrap();
+        test.update_window(remote_window.into(), |root, w, cx| {
+            root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+                s.event(
+                    json!({
+                        "event": "directories",
+                        "id": req_id,
+                        "origin": "https://example.com",
+                        "accountId": "first",
+                        "target": "machine",
+                        "path": "/work",
+                        "directories": ["/work/outpost/", "/work/gpui/"],
+                        "truncated": false
+                    }),
+                    w,
+                    cx,
+                );
+            });
+        })?;
+        test.run_until_parked();
+        test.update_window(remote_window.into(), |root, _, cx| {
+            let entries = root
+                .downcast::<Workspace>()
+                .unwrap()
+                .read(cx)
+                .create
+                .directory_entries(cx);
+            assert_eq!(entries, vec!["/work/outpost/", "/work/gpui/"]);
+        })?;
+    }
     test.update_window(remote_window.into(), |root, w, cx| {
         root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
             let origin = "https://example.com";
             assert_eq!(s.tool, "claude");
+            // Replace duplicate env with a valid unique variable and submit.
+            s.create.set_directory_silent("/work/outpost/", cx);
+            s.create = CreateForm::new(cx);
+            s.create.cancel_directory_lookups(false, cx);
+            s.create.set_directory_silent("/work/outpost/", cx);
+            s.create.set_create_directory(true);
+            s.create.set_args_silent("--verbose --model opus", cx);
+            s.create.push_env("API_MODE", "fast", cx);
+            s.create.push_env("EXTRA_FLAG", "1", cx);
             s.submit(w, cx);
             let created = commands.try_recv().unwrap();
             assert_eq!(created["op"], "create");
             assert_eq!(created["accountId"], "first");
             assert_eq!(created["input"]["tool"], "claude");
+            assert_eq!(created["input"]["rootDir"], "/work/outpost/");
+            assert_eq!(created["input"]["createDirectory"], true);
+            assert_eq!(created["input"]["args"], "--verbose --model opus");
+            assert_eq!(created["input"]["env"]["API_MODE"], "fast");
+            assert_eq!(created["input"]["env"]["EXTRA_FLAG"], "1");
             s.event(json!({"event":"accounts","accounts":[{"origin":origin,"account":{"id":"second"},"canCreate":true}]}), w, cx);
             assert!(s.page == Page::Home);
         });

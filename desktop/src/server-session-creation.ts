@@ -5,7 +5,7 @@ import {
   type DesktopSessionChoice,
   type DesktopAccount,
 } from '../../shared/desktopAuth'
-import type { SessionInput } from '../../shared/model'
+import type { DirectorySuggestions, SessionInput } from '../../shared/model'
 import { harnessIds } from '../../shared/harnesses'
 import { softwareIds } from '../../shared/schemas'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
@@ -38,6 +38,20 @@ export function sessionCreationServer(summary: { origin: string; account: Deskto
       )
         throw new Error('Invalid session creation options.')
       return { tools: result.tools, missing: result.missing }
+    },
+    async directories(targetId: string, prefix: string, signal: AbortSignal): Promise<DirectorySuggestions> {
+      const result = (await request(`${path(targetId)}/directories?path=${encodeURIComponent(prefix)}`, {
+        signal,
+      })) as DirectorySuggestions
+      if (
+        !result ||
+        !Array.isArray(result.directories) ||
+        result.directories.length > 200 ||
+        !result.directories.every(item => typeof item === 'string' && item.length > 0 && item.length <= 4096) ||
+        typeof result.truncated !== 'boolean'
+      )
+        throw new Error('Invalid directory suggestions.')
+      return { directories: result.directories, truncated: result.truncated }
     },
     async create(targetId: string, input: SessionInput, requestId: string): Promise<DesktopSessionChoice> {
       try {

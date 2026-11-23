@@ -105,3 +105,17 @@ test('creation capability sends the request identity and validates display metad
   })
   await assert.rejects(expired.create('target', input, 'request-id'), /Expired/)
 })
+
+test('creation capability fetches and validates remote directory suggestions', async () => {
+  const summary = { origin: 'https://example.com', account: { id: 'account', name: 'Account', email: null } }
+  const seen: string[] = []
+  const server = sessionCreationServer(summary, async path => {
+    seen.push(path)
+    return { directories: ['~/dev/', '~/projects/'], truncated: true }
+  })
+  const result = await server.directories('target', '~/', new AbortController().signal)
+  assert.deepEqual(seen, ['/targets/target/directories?path=~%2F'])
+  assert.deepEqual(result, { directories: ['~/dev/', '~/projects/'], truncated: true })
+  const malformed = sessionCreationServer(summary, async () => ({ directories: [''], truncated: false }))
+  await assert.rejects(malformed.directories('target', '~/', new AbortController().signal), /Invalid directory/)
+})

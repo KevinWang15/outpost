@@ -58,6 +58,8 @@ pub struct Workspace {
     tabs: Vec<Tab>,
     current: usize,
     startup_local: bool,
+    startup_cloak: bool,
+    startup_hint: bool,
     new_tab_menu_open: bool,
     pane_menu: Option<Id>,
     context_menu: Option<(Id, Point<Pixels>)>,
@@ -251,8 +253,46 @@ impl Workspace {
         let prefs = hub.prefs.clone();
         let accounts = hub.accounts.clone();
         let ready = !prefs.is_null() || bridge.is_none();
+        let startup_local = local && !ready;
+        let startup_cloak = local || (bridge.is_some() && prefs.is_null());
         if local && ready {
             cx.defer_in(w, |s, w, cx| s.local(None, w, cx))
+        }
+        if startup_cloak {
+            cx.spawn_in(w, async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(250))
+                    .await;
+                let still_cloaked = this
+                    .update(cx, |s, cx| {
+                        if s.startup_cloak {
+                            s.startup_hint = true;
+                            cx.notify();
+                        }
+                        s.startup_cloak
+                    })
+                    .unwrap_or(false);
+                if !still_cloaked {
+                    return;
+                }
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(2250))
+                    .await;
+                let _ = this.update_in(cx, |s, w, cx| {
+                    if !s.startup_cloak {
+                        return;
+                    }
+                    s.startup_cloak = false;
+                    s.startup_hint = false;
+                    if s.startup_local && s.panes.is_empty() {
+                        s.startup_local = false;
+                        s.local(None, w, cx);
+                    } else {
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
         }
         let entry = |placeholder: &'static str, cx: &mut Context<Self>| {
             cx.new(|cx| InputState::new(cx).placeholder(placeholder))
@@ -324,7 +364,9 @@ impl Workspace {
             active_order: next_id(),
             handle: w.window_handle(),
             id: next_id() as u64,
-            startup_local: local && !ready,
+            startup_local,
+            startup_cloak,
+            startup_hint: false,
             new_tab_menu_open: false,
             pane_menu: None,
             context_menu: None,
@@ -426,6 +468,8 @@ impl Workspace {
             .cloned()
     }
     fn show(&mut self, page: Page, w: &mut Window, cx: &mut Context<Self>) {
+        self.startup_cloak = false;
+        self.startup_hint = false;
         self.page = if page == Page::Terminal && self.tabs.is_empty() {
             Page::Home
         } else {
@@ -962,6 +1006,8 @@ impl Workspace {
                 }
             }
             "trust" => {
+                self.startup_cloak = false;
+                self.startup_hint = false;
                 let answer = w.prompt(
                     PromptLevel::Warning,
                     "Trust this Outpost server?",
@@ -1005,7 +1051,17 @@ impl Workspace {
                 }
                 self.creating = false;
                 self.refreshing_catalogue = false;
-                self.message = strval(&e, "message")
+                let error_message = strval(&e, "message");
+                if self.startup_local && self.panes.is_empty() {
+                    self.startup_local = false;
+                    self.startup_cloak = false;
+                    self.startup_hint = false;
+                    self.local(None, w, cx);
+                } else {
+                    self.startup_cloak = false;
+                    self.startup_hint = false;
+                }
+                self.message = error_message
             }
             "targets" if self.origin == e["origin"] && self.account_id == e["accountId"] => {
                 self.targets = e["targets"].clone()
@@ -1622,8 +1678,9 @@ impl Workspace {
                         s.show(Page::Home, w, cx)
                     })),
             )
-            .child(strip)
-            .child(self.new_tab_menu(cx))
+            .when(!self.startup_cloak, |bar| {
+                bar.child(strip).child(self.new_tab_menu(cx))
+            })
             .child(snapshot_source(
                 &self.drag.empty_bar,
                 div()
@@ -1641,32 +1698,34 @@ impl Workspace {
                         })
                     }),
             ))
-            .child(icon("switch", LucideIcon::Search, cx, |s, w, cx| {
-                s.show(Page::Switch, w, cx)
-            }))
-            .child(if self.page == Page::Terminal {
-                icon("split", LucideIcon::Columns2, cx, |s, w, cx| {
-                    s.split(Axis::Across, w, cx)
-                })
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(|s, _, w, cx| s.split(Axis::Down, w, cx)),
-                )
-                .into_any_element()
-            } else {
-                div()
-                    .size(px(30.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .opacity(0.35)
-                    .child(lucide_icon(LucideIcon::Columns2).size(px(17.)))
+            .when(!self.startup_cloak, |bar| {
+                bar.child(icon("switch", LucideIcon::Search, cx, |s, w, cx| {
+                    s.show(Page::Switch, w, cx)
+                }))
+                .child(if self.page == Page::Terminal {
+                    icon("split", LucideIcon::Columns2, cx, |s, w, cx| {
+                        s.split(Axis::Across, w, cx)
+                    })
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|s, _, w, cx| s.split(Axis::Down, w, cx)),
+                    )
                     .into_any_element()
+                } else {
+                    div()
+                        .size(px(30.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .opacity(0.35)
+                        .child(lucide_icon(LucideIcon::Columns2).size(px(17.)))
+                        .into_any_element()
+                })
+                .child(icon("settings", LucideIcon::Settings, cx, |s, w, cx| {
+                    s.show(Page::Settings, w, cx)
+                }))
             })
-            .child(icon("settings", LucideIcon::Settings, cx, |s, w, cx| {
-                s.show(Page::Settings, w, cx)
-            }))
             .when(cfg!(windows), |bar| {
                 // Win32 handles clicks, Snap Layouts, and the normal close request through these hitboxes.
                 let caption = |id: &'static str, area: WindowControlArea, glyph: &'static str| {
@@ -2432,6 +2491,19 @@ impl Workspace {
             .child(content)
             .into_any_element()
     }
+    fn startup_cloak_view(&self) -> AnyElement {
+        col()
+            .size_full()
+            .bg(rgb(BG))
+            .items_center()
+            .justify_center()
+            .when(self.startup_hint, |c| {
+                c.gap(px(10.))
+                    .child(img(self.logo.clone()).size(px(28.)).opacity(0.4))
+                    .child(text("Starting…", 12., 0x6e6e6e))
+            })
+            .into_any_element()
+    }
 }
 impl Render for Workspace {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2442,7 +2514,9 @@ impl Render for Workspace {
             .map(|slot| slot.map(|i| self.tabs[i].id))
             .collect();
         self.drag.rendered_anchor = self.drag.preview.as_ref().map(|p| p.destination);
-        let body = if matches!(
+        let body = if self.startup_cloak {
+            self.startup_cloak_view()
+        } else if matches!(
             self.page,
             Page::Terminal | Page::Find | Page::Compose | Page::Choose | Page::Switch
         ) && let Some(t) = self.tabs.get(self.current)
@@ -3243,6 +3317,65 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     assert_eq!(focused(), vec![(2, true)], "a hidden tab must stay unread");
     test.update_window(remote_window.into(), |_, w, _| w.remove_window())?;
     test.run_until_parked();
+
+    // Verify startup cloak prevents Page::Home from flashing while waiting for helper prefs,
+    // and lifts cleanly on either "prefs" or a helper startup "error".
+    {
+        let saved_prefs = test.update(|cx| cx.global::<crate::hub::Hub>().prefs.clone());
+        let (cloak_bridge, _) = Bridge::recording();
+        test.update(|cx| {
+            let hub = cx.global_mut::<crate::hub::Hub>();
+            hub.bridge = Some(cloak_bridge);
+            hub.prefs = Value::Null;
+        });
+        let cloak_win = test.open_window(size(px(700.), px(500.)), |w, cx| {
+            cx.new(|cx| Workspace::new(true, w, cx))
+        })?;
+        test.update_window(cloak_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            assert!(ws.read(cx).startup_cloak);
+            assert!(ws.read(cx).startup_local);
+            assert!(ws.read(cx).tabs.is_empty());
+            w.draw(cx).clear(cx);
+            let mut prefs_event = saved_prefs.clone();
+            prefs_event["event"] = json!("prefs");
+            ws.update(cx, |s, cx| s.event(prefs_event, w, cx));
+            assert!(!ws.read(cx).startup_cloak);
+            assert!(!ws.read(cx).startup_local);
+            assert!(ws.read(cx).page == Page::Terminal);
+            assert_eq!(ws.read(cx).tabs.len(), 1);
+        })?;
+        test.update_window(cloak_win.into(), |_, w, _| w.remove_window())?;
+        test.run_until_parked();
+
+        // If the helper errors before sending prefs, the cloak lifts, the fallback shell opens,
+        // and the error banner stays visible.
+        let err_win = test.open_window(size(px(700.), px(500.)), |w, cx| {
+            cx.new(|cx| Workspace::new(true, w, cx))
+        })?;
+        test.update_window(err_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            assert!(ws.read(cx).startup_cloak);
+            ws.update(cx, |s, cx| {
+                s.event(
+                    json!({"event":"error","message":"helper crashed"}),
+                    w,
+                    cx,
+                )
+            });
+            assert!(!ws.read(cx).startup_cloak);
+            assert!(ws.read(cx).page == Page::Terminal);
+            assert_eq!(ws.read(cx).tabs.len(), 1);
+            assert_eq!(ws.read(cx).message, "helper crashed");
+        })?;
+        test.update_window(err_win.into(), |_, w, _| w.remove_window())?;
+        test.update(|cx| {
+            let hub = cx.global_mut::<crate::hub::Hub>();
+            hub.bridge = None;
+            hub.prefs = saved_prefs;
+        });
+        test.run_until_parked();
+    }
     // Open the menu from the real + target. Dismissing it must leave the workspace alone.
     let x = if cfg!(target_os = "macos") { 132. } else { 62. };
     let menu_open = |test: &mut HeadlessAppContext| {

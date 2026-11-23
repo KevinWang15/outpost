@@ -1370,6 +1370,7 @@ impl Workspace {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |s, e: &MouseDownEvent, w, cx| {
+                        w.prevent_default();
                         if e.click_count == 2 {
                             s.cancel_drag(cx);
                             s.select(id, w, cx);
@@ -3006,6 +3007,12 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 point(bounds.right() - px(from_right), bounds.top() + px(14.))
             })
         };
+    let title = header_control(&mut workspace, left, 130.);
+    workspace.simulate_click(title, MouseButton::Left);
+    workspace.update(|s, w, cx| assert!(s.panes[&left].read(cx).focus.is_focused(w)));
+    let tab = workspace.read(|s, _| s.drag.strip.bounds_for_item(0).unwrap().center());
+    workspace.simulate_click(tab, MouseButton::Left);
+    workspace.update(|s, w, cx| assert!(s.panes[&left].read(cx).focus.is_focused(w)));
     let zoom = header_control(&mut workspace, left, 65.);
     workspace.simulate_click(zoom, MouseButton::Left);
     workspace.read(|s, _| {
@@ -3035,6 +3042,7 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     prompts.simulate_prompt_answer("Cancel");
     prompts.run_until_parked();
     assert_eq!(workspace.read(|s, _| s.panes.len()), 2);
+    workspace.update(|s, w, cx| assert!(s.panes[&right].read(cx).focus.is_focused(w)));
     workspace.draw();
     workspace.simulate_click(close, MouseButton::Left);
     prompts.simulate_prompt_answer("Close pane");

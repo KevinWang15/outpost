@@ -36,6 +36,8 @@ pub(super) fn header_button(
         .when(show_hint, |e| {
             e.tooltip(move |w, cx| Tooltip::text(label, w, cx))
         })
+        // A pointer action should leave typing in the terminal. Keyboard users can still focus the button.
+        .on_mouse_down(MouseButton::Left, |_, w, _| w.prevent_default())
         .child(lucide_icon(glyph).size(px(14.)))
         .on_click(click)
 }
@@ -118,6 +120,7 @@ impl Workspace {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |s, e: &MouseDownEvent, w, cx| {
+                    w.prevent_default();
                     if e.click_count == 2 {
                         s.cancel_drag(cx);
                         s.toggle_zoom(id, w, cx);

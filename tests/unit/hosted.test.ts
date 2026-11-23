@@ -29,7 +29,7 @@ test('hosted session requests explain machine connectivity failures and redact i
   const verified = deployment.store.consumeToken(deployment.store.issueToken(user.id, 'verify', 60_000), 'verify')
   const login = deployment.store.issueSession(verified)
   const workspace = deployment.workspace({ userId: user.id, loginId: login.id })
-  const metadata = { name: 'Machine', tools: ['codex'] as ['codex'], createdAt: new Date().toISOString() }
+  const metadata = { name: 'Machine', createdAt: new Date().toISOString() }
   const offline = await workspace.add({ ...metadata, kind: 'outbound', id: randomUUID() })
   const ssh = await workspace.add({
     ...metadata,
@@ -71,7 +71,7 @@ test('hosted workspaces apply the same deployment policy to persisted machines',
   const workspace = deployment.workspace({ userId: user.id, loginId: 'background' })
   await mkdir(workspace.directory, { recursive: true })
   const path = join(workspace.directory, 'workspace.json')
-  const metadata = { id: 'machine', name: 'Machine', tools: ['codex'], createdAt: new Date().toISOString() }
+  const metadata = { id: 'machine', name: 'Machine', createdAt: new Date().toISOString() }
   for (const settings of [
     { kind: 'local' },
     { kind: 'ssh', host: 'work.test', user: 'dev', identityFile: '~/.ssh/key' },
@@ -134,25 +134,20 @@ test(
       bob = await account('bob@example.com')
 
     assert.match((await call('GET', '/account/ssh-key', undefined, alice)).body.publicKey, /^ssh-ed25519 /)
-    assert.equal((await call('POST', '/targets', { kind: 'local', name: 'x', tools: ['claude'] }, alice)).status, 400)
+    assert.equal((await call('POST', '/targets', { kind: 'local', name: 'x' }, alice)).status, 400)
     assert.equal(
       (
         await call(
           'POST',
           '/targets',
-          { kind: 'ssh', name: 'x', host: 'dev', user: 'dev', identityFile: '~/.ssh/id', tools: ['claude'] },
+          { kind: 'ssh', name: 'x', host: 'dev', user: 'dev', identityFile: '~/.ssh/id' },
           alice,
         )
       ).status,
       400,
     )
     const target = (
-      await call(
-        'POST',
-        '/targets',
-        { kind: 'ssh', name: 'dev', host: 'dev.example.com', user: 'dev', tools: ['claude'] },
-        alice,
-      )
+      await call('POST', '/targets', { kind: 'ssh', name: 'dev', host: 'dev.example.com', user: 'dev' }, alice)
     ).body as Target
     assert.deepEqual((await call('GET', '/targets', undefined, bob)).body, [])
     assert.equal((await call('GET', `/targets/${target.id}/sessions`, undefined, bob)).status, 404)

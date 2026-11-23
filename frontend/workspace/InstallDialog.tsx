@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Installation, InstallationEvent } from '../../shared/model'
+import { coreSoftware, softwareLabel, type Installation, type InstallationEvent } from '../../shared/model'
 import { streamInstallation } from '../api'
 import { Dialog } from '../ui/Dialog'
 
 const logLimit = 256 * 1024
+function jobSubject(job: Installation) {
+  const items = job.software.filter(id => !(id === 'claude-agent-acp' && job.software.includes('claude')))
+  if (!items.length || items.every(id => coreSoftware.includes(id))) return 'The machine service'
+  return items.map(softwareLabel).join(', ')
+}
 export default function InstallDialog({
   targetId,
   installation,
@@ -63,9 +68,9 @@ export default function InstallDialog({
     >
       <p className={`installation-status ${job.status}`} role="status">
         {job.status === 'running'
-          ? 'Installing…'
+          ? `Setting up ${jobSubject(job)}…`
           : job.status === 'succeeded'
-            ? 'The machine service and selected tools are ready.'
+            ? `${jobSubject(job)} is ready.`
             : `The installation failed. ${job.error ?? ''}`}
       </p>
       <pre className="log" aria-label="Installation output" ref={output}>

@@ -438,10 +438,11 @@ executable for one Linux execution account. A private record in
 owner. Session data belongs to the execution account under `~/.outpost`.
 
 - **Connect over SSH** is the default. On first connection Outpost checks the platform and
-  installed versions, transfers the matching service and release checksum over SSH, and
-  verifies the service before atomic installation. It provisions any missing selected tools
-  and required ACP adapters. A restricted machine can receive approved artifacts over this
-  SSH connection. Interrupted setup can be run again. Subsequent connections run
+  installed software, transfers the matching service and release checksum over SSH, and
+  verifies the service before atomic installation. Installed coding tools are detected
+  automatically, and unavailable coding tools or required ACP adapters can be set up on demand.
+  A restricted machine can receive approved artifacts over this SSH connection. Interrupted setup
+  can be run again. Subsequent connections run
   `outpost-terminal node` for the enrolled socket with `ssh -T` and exchange protocol bytes
   on stdin and stdout. A bastion can carry this connection. The node needs no SSH PTY,
   application port forward or machine-side HTTPS endpoint. The machine initiates no

@@ -233,13 +233,13 @@ export class Claude extends Harness {
   }
 
   chat(executable: string) {
-    // The official adapter, installed by Required software. Its bundled CLI is
+    // The official adapter, installed from Software on the machine page. Its bundled CLI is
     // not used: chat runs the machine's own claude, like terminals.
     const adapter = statePath('bin', 'claude-agent-acp')
     try {
       accessSync(adapter, constants.X_OK)
     } catch {
-      throw new Error('The Claude Code ACP adapter is missing. Open Required software to install it.')
+      throw new Error('The Claude Code ACP adapter is missing. Open Software on the machine page to install it.')
     }
     return { command: [adapter], env: { CLAUDE_CODE_EXECUTABLE: executable, CLAUDE_AGENT_ACP_PROTOCOL: 'v1' } }
   }

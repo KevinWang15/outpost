@@ -9,7 +9,6 @@ import { relativeTime } from './labels'
 interface FinderMachine {
   id: string
   name: string
-  tools: HarnessId[]
 }
 interface Found extends ConversationMatch {
   machine: FinderMachine
@@ -162,7 +161,7 @@ export default function FinderDialog({
           <ul className="matches">
             {results.found.map(match => {
               const managed = match.managedSessionIds[0]
-              const linkable = match.machine.tools.includes(match.tool) && match.rootDir.startsWith('/')
+              const linkable = match.rootDir.startsWith('/')
               return (
                 <li key={`${match.machine.id}:${match.tool}:${match.conversation}:${JSON.stringify(match.storage)}`}>
                   <div className="match-text">
@@ -190,9 +189,7 @@ export default function FinderDialog({
                     <button
                       className="button small"
                       disabled={!linkable}
-                      title={
-                        linkable ? undefined : `Add ${harnessLabel(match.tool)} to ${match.machine.name} to link it`
-                      }
+                      title={linkable ? undefined : 'Project directory is unknown'}
                       onClick={() => onLink(match.machine.id, match)}
                     >
                       <Link size={14} />

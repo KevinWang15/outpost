@@ -42,7 +42,6 @@ async function setup(t: test.TestContext) {
       name: 'dev',
       host: 'dev.example.com',
       user: 'dev',
-      tools: ['claude'],
     })) as { body: Target }
     const { body: session } = (await call('POST', `/targets/${target.id}/sessions`, {
       name: 'Build',
@@ -84,7 +83,6 @@ test('targets and sessions are validated strictly', async t => {
           kind: 'ssh',
           name: 'x',
           host: 'dev',
-          tools: ['claude'],
           ...(user === undefined ? {} : { user }),
         })
       ).status,
@@ -98,7 +96,6 @@ test('targets and sessions are validated strictly', async t => {
         name: 'x',
         host: '-oProxyCommand=evil',
         user: 'dev',
-        tools: ['claude'],
       })
     ).status,
     400,
@@ -111,32 +108,47 @@ test('targets and sessions are validated strictly', async t => {
         host: 'dev',
         user: 'dev',
         tools: ['claude'],
+      })
+    ).status,
+    400,
+    'legacy tools field is rejected',
+  )
+  assert.equal(
+    (
+      await call('POST', '/targets', {
+        kind: 'ssh',
+        name: 'x',
+        host: 'dev',
+        user: 'dev',
         unknown: true,
       })
     ).status,
     400,
   )
-  assert.equal(
-    (await call('POST', '/targets', { kind: 'local', name: 'x', host: 'dev', tools: ['claude'] })).status,
-    400,
-  )
+  assert.equal((await call('POST', '/targets', { kind: 'local', name: 'x', host: 'dev' })).status, 400)
   const { body: target } = (await call('POST', '/targets', {
     kind: 'ssh',
     name: ' dev ',
     host: 'dev.example.com',
     user: 'dev',
     port: 2222,
-    tools: ['claude', 'codex'],
   })) as { body: Target }
   assert.equal(target.name, 'dev')
-  assert.equal((await call('PATCH', `/targets/${target.id}`, { tools: ['kimi'] })).body.tools[0], 'kimi')
+  assert.equal((await call('PATCH', `/targets/${target.id}`, { name: ' dev-box ' })).body.name, 'dev-box')
+  assert.equal((await call('PATCH', `/targets/${target.id}`, { tools: ['kimi'] })).status, 400)
   assert.equal((await call('PATCH', `/targets/${target.id}`, { host: 'other' })).status, 400)
+  // On-demand software setup accepts empty body (core software) or specific software IDs, and validates strictly.
+  const coreInstall = await call('POST', `/targets/${target.id}/installations`)
+  assert.equal(coreInstall.status, 202)
+  assert.deepEqual(coreInstall.body.software, ['bash', 'outpost-terminal'])
+  const toolInstall = await call('POST', `/targets/${target.id}/installations`, {
+    software: ['claude', 'claude-agent-acp'],
+  })
+  assert.equal(toolInstall.status, 202)
+  assert.deepEqual(toolInstall.body.software, ['claude', 'claude-agent-acp'])
+  for (const invalid of [{ software: [] }, { software: ['unknown'] }, { software: ['codex', 'codex'] }, { extra: 1 }])
+    assert.equal((await call('POST', `/targets/${target.id}/installations`, invalid)).status, 400)
   const base = `/targets/${target.id}/sessions`
-  assert.equal(
-    (await call('POST', base, { name: 'a', rootDir: '~/p', tool: 'claude' })).status,
-    400,
-    'tool not on target',
-  )
   assert.equal((await call('POST', base, { name: 'a', rootDir: 'relative', tool: 'kimi' })).status, 400)
   assert.equal(
     (await call('POST', base, { name: 'a', rootDir: '~/p', tool: 'kimi', conversation: 'not-a-kimi-id' })).status,
@@ -182,7 +194,6 @@ test('fork validates input, resolves the source on its target, and inherits laun
     host: 'forks.example',
     user: 'dev',
     name: 'Forks',
-    tools: ['claude'],
   })
   const base = `/targets/${target.id}/sessions`
   const { body: source } = await call('POST', base, {
@@ -208,7 +219,6 @@ test('fork validates input, resolves the source on its target, and inherits laun
     host: 'other.example',
     user: 'dev',
     name: 'Other',
-    tools: ['claude'],
   })
   assert.equal((await call('POST', `/targets/${other.id}/sessions/${source.id}/fork`, input)).status, 404)
   const fork = await call('POST', path, input)
@@ -217,8 +227,6 @@ test('fork validates input, resolves the source on its target, and inherits laun
   assert.deepEqual(fork.body.config.env, source.config.env)
   assert.equal(fork.body.config.args, source.config.args)
   assert.notEqual(fork.body.conversations[0].id, source.conversations[0].id)
-  await call('PATCH', `/targets/${target.id}`, { tools: ['codex'] })
-  assert.equal((await call('POST', path, input)).status, 400)
 })
 
 test('the broker sends the machine and session identity and reports SSH attachment failures', async t => {
@@ -318,7 +326,7 @@ test('the production server serves the terminal page on direct navigation and re
 
 test('outbound enrollment binds one machine, recovers a lost reply and invalidates codes on release', async t => {
   const { call, deployment } = await setup(t)
-  const target = (await call('POST', '/targets', { kind: 'outbound', name: 'Enrolled machine', tools: ['codex'] })).body
+  const target = (await call('POST', '/targets', { kind: 'outbound', name: 'Enrolled machine' })).body
   const targetId: string = target.id
   const setupPath = '/targets/' + targetId + '/enrollment'
   const issue = async () => (await call('POST', setupPath)).body.code as string
@@ -388,7 +396,7 @@ test('outbound enrollment binds one machine, recovers a lost reply and invalidat
 
 test('an invalid enrollment record is reported without changing its contents', async t => {
   const { call, deployment } = await setup(t)
-  const { body: target } = await call('POST', '/targets', { kind: 'outbound', name: 'Dev', tools: ['codex'] })
+  const { body: target } = await call('POST', '/targets', { kind: 'outbound', name: 'Dev' })
   const path = join(deployment.directory, 'machine-enrollments', target.id + '.json')
   for (const contents of [
     '{',

@@ -10,7 +10,6 @@ const absolutePath = Type.String({ minLength: 1, maxLength: 4096, pattern: '^/[^
 
 export const name = Type.String({ minLength: 1, maxLength: 80, pattern: '^(?=.*\\S)[^\\u0000-\\u001f\\u007f]+$' })
 export const harnessId = Type.Enum(harnessIds)
-const tools = Type.Array(harnessId, { minItems: 1, maxItems: harnessIds.length, uniqueItems: true })
 
 // Targets ---------------------------------------------------------------------
 const sshAddress = {
@@ -22,15 +21,14 @@ const sshAddress = {
 const ssh = {
   kind: Type.Literal('ssh'),
   name,
-  tools,
   ...sshAddress,
   jump: Type.Optional(Type.Object(sshAddress, strict)),
   identityFile: Type.Optional(
     Type.String({ minLength: 1, maxLength: 1024, pattern: '^(~/|/)[^\\u0000-\\u001f\\u007f]+$' }),
   ),
 }
-const local = { kind: Type.Literal('local'), name, tools }
-const outbound = { kind: Type.Literal('outbound'), name, tools }
+const local = { kind: Type.Literal('local'), name }
+const outbound = { kind: Type.Literal('outbound'), name }
 export const environment = Type.Object(
   { home: absolutePath, username: text(256), uid: Type.Integer({ minimum: 0 }), shell: absolutePath },
   strict,
@@ -55,13 +53,7 @@ export const targetRecord = Type.Union([
   Type.Object({ ...local, ...metadata }, strict),
   Type.Object({ ...outbound, ...metadata }, strict),
 ])
-export const targetUpdate = Type.Object(
-  {
-    name: Type.Optional(name),
-    tools: Type.Optional(tools),
-  },
-  { ...strict, minProperties: 1 },
-)
+export const targetUpdate = Type.Object({ name }, strict)
 
 // Sessions --------------------------------------------------------------------
 const rootDir = Type.String({ minLength: 1, maxLength: 4096, pattern: '^(~/|/)[^\\u0000-\\u001f\\u007f]*$' })
@@ -202,3 +194,10 @@ export const directoryQuery = Type.Object(
 
 // Software ----------------------------------------------------------------------
 export const softwareIds = ['bash', 'outpost-terminal', ...harnessIds, 'claude-agent-acp'] as const
+export const softwareId = Type.Enum(softwareIds)
+export const installationInput = Type.Object(
+  {
+    software: Type.Optional(Type.Array(softwareId, { minItems: 1, maxItems: softwareIds.length, uniqueItems: true })),
+  },
+  strict,
+)

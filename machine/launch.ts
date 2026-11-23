@@ -94,7 +94,7 @@ export function prepare(session: SessionRecord, driver: Driver) {
   const executable = which(adapter.command, environment.PATH)
   if (!executable)
     throw new RegistryError(
-      `${adapter.command} is not on the login PATH. Check Required software and your shell startup files.`,
+      `${adapter.command} is not on the login PATH. Check Software on the machine page and your shell startup files.`,
     )
   installHelpers()
   const launch: Launch = {
@@ -174,7 +174,7 @@ async function daemon(
   }
   child.kill()
   throw new RegistryError(
-    `${failure}: it did not become ready. Open Required software to reinstall Outpost machine service.`,
+    `${failure}: it did not become ready. Open Software on the machine page to reinstall Outpost machine service.`,
   )
 }
 
@@ -183,7 +183,8 @@ export async function startTerminal(session: SessionRecord, cols: number, rows: 
   if (!adapter.terminal)
     throw new RegistryError('This coding tool has no terminal interface. Open this session in Outpost Chat.')
   const bash = which('bash', launch.environment.PATH)
-  if (!bash) throw new RegistryError('Bash is missing on this machine. Open Required software to install it.')
+  if (!bash)
+    throw new RegistryError('Bash is missing on this machine. Open Software on the machine page to install it.')
   // The PTY child needs its own session and the PTY as controlling terminal.
   const setsid = which('setsid', launch.environment.PATH)
   if (!setsid) throw new RegistryError('setsid (util-linux) is missing on this machine. Install it first.')

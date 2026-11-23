@@ -12,7 +12,7 @@ async function openSession(page: Page) {
   const id = randomUUID()
   const targetResponse = await page.request.post('/api/targets', {
     headers,
-    data: { kind: 'local', name: `Image target ${id}`, tools: ['claude'] },
+    data: { kind: 'local', name: `Image target ${id}` },
   })
   expect(targetResponse.status()).toBe(201)
   const target: Target = await targetResponse.json()

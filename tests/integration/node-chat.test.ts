@@ -19,7 +19,6 @@ const settings: Target = {
   kind: 'local',
   id: 'chat-machine',
   name: 'Chat machine',
-  tools: ['claude', 'codex', 'kimi', 'deepseek', 'antigravity'],
   createdAt: '2026-11-01T00:00:00Z',
 }
 

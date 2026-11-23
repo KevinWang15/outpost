@@ -2248,19 +2248,20 @@ impl Workspace {
                 if !self.target.is_empty() {
                     content = content.child(section("Tool"));
                     if self.options.is_null() && self.message.is_empty() {
-                        content = content.child(text("Checking required software…", 13., MUTED));
+                        content = content.child(text("Checking installed coding tools…", 13., MUTED));
                     }
                 }
                 let missing = items(&self.options["missing"])
                     .iter()
                     .filter_map(Value::as_str)
                     .collect::<Vec<_>>();
+                let available_tools = items(&self.options["tools"]);
                 if !missing.is_empty() {
                     let url = format!("{}/?target={}", self.origin, self.target);
                     content = content
                         .child(text(
                             format!(
-                                "Install {} on this machine to create a session.",
+                                "Set up {} on this machine to create a session.",
                                 missing.join(", ")
                             ),
                             13.,
@@ -2274,8 +2275,24 @@ impl Workspace {
                             cx,
                             move |_, _, cx| cx.open_url(&url),
                         ));
+                } else if self.options.is_object() && available_tools.is_empty() {
+                    let url = format!("{}/?target={}", self.origin, self.target);
+                    content = content
+                        .child(text(
+                            "No coding tools are installed on this machine. Set one up from its machine page.",
+                            13.,
+                            TEXT,
+                        ))
+                        .child(control_with_icon(
+                            "Open machine",
+                            LucideIcon::ExternalLink,
+                            true,
+                            false,
+                            cx,
+                            move |_, _, cx| cx.open_url(&url),
+                        ));
                 }
-                for t in items(&self.options["tools"]) {
+                for t in available_tools {
                     let t = t.as_str().unwrap_or("").to_owned();
                     let label = agent_label(AgentMark::get(Some(&t)), t.clone());
                     content = content.child(
@@ -2292,6 +2309,17 @@ impl Workspace {
                             .child(label),
                         ),
                     )
+                }
+                if self.options.is_object() && missing.is_empty() && !available_tools.is_empty() && available_tools.len() < 5 {
+                    let url = format!("{}/?target={}", self.origin, self.target);
+                    content = content.child(control_with_icon(
+                        "Set up another tool",
+                        LucideIcon::ExternalLink,
+                        false,
+                        false,
+                        cx,
+                        move |_, _, cx| cx.open_url(&url),
+                    ));
                 }
                 content = content
                     .child(section("Session name"))
@@ -2823,6 +2851,9 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             s.submit(w, cx);
             assert!(!s.creation_ready());
             assert!(commands.try_recv().is_err());
+            // Core software ready, but no coding tools installed yet.
+            s.event(json!({"event":"options","origin":origin,"accountId":"first","target":"machine","tools":[],"missing":[]}), w, cx);
+            assert!(!s.creation_ready());
             options["missing"] = json!([]);
             s.event(options, w, cx);
             assert!(s.creation_ready());

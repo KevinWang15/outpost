@@ -19,10 +19,9 @@ async function addMachine(page: Page, name: string) {
   await dialog.getByRole('button', { name: 'Back' }).click()
   await dialog.getByRole('button', { name: 'Run sessions on this computer' }).click()
   await dialog.getByLabel('Name').fill(name)
-  await dialog.getByText('Codex').click()
   await dialog.getByRole('button', { name: 'Add machine' }).click()
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Required software' })).toContainText('Ready')
+  await expect(page.getByRole('region', { name: 'Software' })).toContainText('Ready')
 }
 
 async function createSession(page: Page, name: string, directory: string) {
@@ -35,7 +34,7 @@ async function createSession(page: Page, name: string, directory: string) {
   await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible()
 }
 
-test('remote setup offers SSH with a bastion or one outbound install command and the same coding tools', async ({
+test('remote setup offers SSH with a bastion or one outbound install command without preselecting tools', async ({
   page,
 }) => {
   await page.goto('/')
@@ -51,7 +50,7 @@ test('remote setup offers SSH with a bastion or one outbound install command and
   await dialog.getByRole('tab', { name: 'Run setup on the machine' }).click()
   await next.click()
   await dialog.getByLabel('Name', { exact: true }).fill('Outbound installer')
-  await dialog.getByRole('checkbox', { name: 'DeepSeek Harness' }).check()
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Add machine' }).click()
   const panel = page.getByRole('region', { name: 'Machine installation' })
   await panel.getByRole('button', { name: 'Get install command' }).click()
@@ -62,24 +61,60 @@ test('remote setup offers SSH with a bastion or one outbound install command and
   await expect(command).not.toHaveText(first)
 })
 
-test('Machines offers a terminal for an ACP-only session and stops offering creation when its machine disconnects', async ({
+test('Machines detects installed coding tools, offers auto-setup for unavailable ones, and stops offering creation when disconnected', async ({
   page,
   request,
 }) => {
   const response = await request.post('/api/targets', {
     headers: { 'x-outpost-request': '1' },
-    data: { kind: 'outbound', name: 'Build host', tools: ['deepseek'] },
+    data: { kind: 'outbound', name: 'Build host' },
   })
   expect(response.status()).toBe(201)
   const target: Target = await response.json()
   const api = '**/api/targets/' + target.id
   let connected = true
+  const installed = new Set(['bash', 'outpost-terminal', 'deepseek'])
+  const installRequests: unknown[] = []
   await page.route(api + '/enrollment', route => route.fulfill({ json: { enrolled: true, connected } }))
-  await page.route(api + '/installations', route => route.fulfill({ json: { installation: null } }))
+  await page.route(api + '/installations', async route => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { software?: string[] }
+      installRequests.push(body)
+      for (const id of body.software ?? []) installed.add(id)
+      return route.fulfill({
+        status: 202,
+        json: {
+          id: crypto.randomUUID(),
+          software: body.software ?? ['bash', 'outpost-terminal'],
+          status: 'succeeded',
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          exitCode: 0,
+          error: null,
+        },
+      })
+    }
+    return route.fulfill({ json: { installation: null } })
+  })
   await page.route(api + '/software', route =>
     route.fulfill({
       json: {
-        software: ['bash', 'outpost-terminal', 'deepseek'].map(id => ({ id, status: 'installed', version: 'fixture' })),
+        software: [
+          'bash',
+          'outpost-terminal',
+          'claude',
+          'codex',
+          'kimi',
+          'deepseek',
+          'antigravity',
+          'claude-agent-acp',
+        ].map(id => ({
+          id,
+          status: installed.has(id) ? 'installed' : 'missing',
+          path: installed.has(id) ? `/usr/bin/${id}` : null,
+          version: installed.has(id) ? 'fixture' : null,
+          detail: installed.has(id) ? null : 'Not found on the interactive login PATH.',
+        })),
       },
     }),
   )
@@ -104,6 +139,13 @@ test('Machines offers a terminal for an ACP-only session and stops offering crea
   await page.route(api + '/sessions', route => route.fulfill({ json: { sessions: [session] } }))
   await page.clock.install()
   await page.goto('/')
+  const softwarePanel = page.getByRole('region', { name: 'Software' })
+  await expect(softwarePanel).toContainText('1 of 5 coding tools available')
+  await softwarePanel.getByRole('button', { name: /Software/ }).click()
+  await softwarePanel.getByRole('button', { name: 'Set up Codex' }).click()
+  await expect.poll(() => installRequests.length).toBe(1)
+  expect(installRequests[0]).toEqual({ software: ['codex'] })
+  await expect(softwarePanel).toContainText('2 of 5 coding tools available')
   const row = page.getByRole('row').filter({ hasText: session.name })
   await expect(row.getByRole('link', { name: 'Open in chat' })).toBeVisible()
   await row.getByRole('button', { name: 'More actions for ' + session.name }).click()

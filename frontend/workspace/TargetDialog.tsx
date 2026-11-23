@@ -8,36 +8,12 @@ import {
   type TargetInput,
   type TargetUpdate,
 } from '../../shared/model'
-import { harnesses, type HarnessId } from '../../shared/harnesses'
 import { api } from '../api'
 import { useAuth } from '../auth/useAuth'
 import { Dialog } from '../ui/Dialog'
 import AccountKey from '../auth/AccountKey'
 
-function ToolChoice({ value, onChange }: { value: HarnessId[]; onChange: (tools: HarnessId[]) => void }) {
-  return (
-    <fieldset className="field">
-      <legend className="label">Coding tools</legend>
-      <div className="toggle-group">
-        {harnesses.map(harness => (
-          <label key={harness.id} className="toggle">
-            <input
-              type="checkbox"
-              checked={value.includes(harness.id)}
-              onChange={event =>
-                onChange(event.target.checked ? [...value, harness.id] : value.filter(tool => tool !== harness.id))
-              }
-            />
-            {harness.label}
-          </label>
-        ))}
-      </div>
-      <small>Sessions on this machine can use these tools. You can change this later.</small>
-    </fieldset>
-  )
-}
-
-/** Add a target, or edit an existing one's name and tools. */
+/** Add a target, or rename an existing one. */
 export default function TargetDialog({
   target,
   onSave,
@@ -50,7 +26,6 @@ export default function TargetDialog({
   const hosted = useAuth().mode === 'hosted'
   const [environment, setEnvironment] = useState<Environment | null>(null)
   const [kind, setKind] = useState<Target['kind']>(target?.kind ?? 'ssh')
-  const [tools, setTools] = useState<HarnessId[]>(target?.tools ?? ['claude'])
   const [choosing, setChoosing] = useState(!target)
   const [draft, setDraft] = useState<Record<string, string>>({})
   const form = useRef<HTMLFormElement>(null)
@@ -88,15 +63,14 @@ export default function TargetDialog({
     setBusy(true)
     setError('')
     try {
-      if (target) await onSave({ name: text('name'), tools })
-      else if (kind !== 'ssh') await onSave({ kind, name: text('name'), tools })
+      if (target) await onSave({ name: text('name') })
+      else if (kind !== 'ssh') await onSave({ kind, name: text('name') })
       else
         await onSave({
           kind,
           name: text('name'),
           host: text('host'),
           user: text('user'),
-          tools,
           ...(text('port') ? { port: Number(text('port')) } : {}),
           ...(text('jumpHost') && {
             jump: {
@@ -149,13 +123,7 @@ export default function TargetDialog({
               Continue <ArrowRight size={15} />
             </button>
           ) : (
-            <button
-              key="save"
-              className="button primary"
-              type="submit"
-              form="target-form"
-              disabled={busy || !tools.length}
-            >
+            <button key="save" className="button primary" type="submit" form="target-form" disabled={busy}>
               {busy ? 'Saving…' : target ? 'Save' : 'Add machine'}
             </button>
           )}
@@ -269,7 +237,6 @@ export default function TargetDialog({
               After adding the machine, copy the install command from its machine page and run it on the machine.
             </p>
           )}
-          <ToolChoice value={tools} onChange={setTools} />
           {error && (
             <p className="error" role="alert">
               {error}

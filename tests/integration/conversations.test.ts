@@ -13,7 +13,6 @@ const settings: Target = {
   kind: 'local',
   id: 'coding',
   name: 'Coding',
-  tools: ['codex', 'kimi', 'claude', 'antigravity'],
   createdAt: '2026-09-30T00:00:00Z',
 }
 const jsonl = (records: unknown[]) => records.map(record => JSON.stringify(record)).join('\n') + '\n'
@@ -186,7 +185,7 @@ test(
   { skip: process.platform !== 'linux' },
   async t => {
     const { home, root, env, service, put, target } = await fixture(t)
-    for (const tool of settings.tools) {
+    for (const tool of ['codex', 'kimi', 'claude', 'antigravity'] as const) {
       const created = await service.create(target, { name: tool, tool, rootDir: root })
       assert.notEqual(currentConversation(created), created.id)
       assert.equal(created.status, 'ready')

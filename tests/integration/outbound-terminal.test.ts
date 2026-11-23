@@ -116,12 +116,7 @@ test(
     const origin = await app.listen({ host: '127.0.0.1', port: 0 })
     cleanup.push(() => app.close())
     const call = api(origin)
-    const { id } = await call<{ id: string }>(
-      'POST',
-      '/targets',
-      { kind: 'outbound', name: 'Workstation', tools: ['codex', 'claude'] },
-      201,
-    )
+    const { id } = await call<{ id: string }>('POST', '/targets', { kind: 'outbound', name: 'Workstation' }, 201)
     const base = '/targets/' + id
     const { code } = await call<{ code: string }>('POST', base + '/enrollment')
     const enroll = async (target: string, code: string) => {
@@ -239,7 +234,7 @@ test(
     const abandoned = await call<{ id: string }>(
       'POST',
       '/targets',
-      { kind: 'outbound', name: 'Interrupted setup', tools: ['codex'] },
+      { kind: 'outbound', name: 'Interrupted setup' },
       201,
     )
     const enrollment = '/targets/' + abandoned.id + '/enrollment'

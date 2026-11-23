@@ -1020,7 +1020,7 @@ textarea.code,
 }
 .software-details {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   padding: 4px 16px 16px;
   ul {
     display: grid;
@@ -1032,7 +1032,7 @@ textarea.code,
   }
   li {
     display: grid;
-    grid-template-columns: 18px 110px minmax(0, 1fr) minmax(0, 1.2fr) auto;
+    grid-template-columns: 18px 168px minmax(0, 1fr) minmax(0, 1.2fr) auto;
     align-items: center;
     gap: 10px;
     min-height: 44px;
@@ -1041,13 +1041,15 @@ textarea.code,
     & + li {
       border-top: 1px solid var(--border);
     }
-    > svg {
+    &.installed > svg {
       color: var(--success);
     }
-    &:not(.installed) > svg {
-      color: var(--warning);
+    &.missing > svg,
+    &.missing > span {
+      color: var(--muted);
     }
-    &:not(.installed) > span {
+    &.broken > svg,
+    &.broken > span {
       color: var(--warning);
     }
     code {
@@ -1057,6 +1059,82 @@ textarea.code,
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+  }
+}
+.software-group {
+  display: grid;
+  gap: 6px;
+}
+.software-heading {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.software-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.software-row-action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.software-status {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  &.available {
+    color: var(--success);
+  }
+}
+.software-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  font-size: 13px;
+  .link {
+    margin-left: auto;
+  }
+}
+.software-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.unavailable-tools {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+.unavailable-tools-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.unavailable-tools-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.unavailable-tool {
+  gap: 6px;
+  color: var(--muted);
+  .unavailable-tool-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--accent);
+    font-weight: 500;
   }
 }
 .installation-status {
@@ -2426,12 +2504,16 @@ textarea.code,
     }
   }
   .software-details li {
-    grid-template-columns: 18px 1fr auto;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
     code {
       display: none;
     }
     > span {
       grid-column: 2;
+    }
+    .software-row-action {
+      grid-column: 3;
+      grid-row: 1;
     }
   }
   .steps {

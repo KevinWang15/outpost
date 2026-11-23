@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Installation, SoftwareReport } from '../../shared/model'
+import type { Installation, SoftwareId, SoftwareReport } from '../../shared/model'
 import { api } from '../api'
 
-export function useSoftware(targetId: string, requirementsKey: string, enabled = true) {
+export function useSoftware(targetId: string, enabled = true) {
   const [report, setReport] = useState<SoftwareReport | null>(null)
   const [job, setJob] = useState<Installation | null>(null)
   const [checking, setChecking] = useState(true)
@@ -40,15 +40,16 @@ export function useSoftware(targetId: string, requirementsKey: string, enabled =
       clearTimeout(timer)
       pending.current?.abort()
     }
-  }, [refresh, requirementsKey])
+  }, [refresh])
   useEffect(() => {
     if (job?.status !== 'running') return
     const timer = setInterval(() => void refresh(), 2000)
     return () => clearInterval(timer)
   }, [job?.status, refresh])
-  async function setup() {
+  async function setup(software?: readonly SoftwareId[]) {
+    setError('')
     try {
-      setJob(await api<Installation>(base + '/installations', 'POST'))
+      setJob(await api<Installation>(base + '/installations', 'POST', software?.length ? { software } : {}))
       void refresh()
     } catch (problem) {
       setError((problem as Error).message)

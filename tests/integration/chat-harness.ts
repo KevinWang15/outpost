@@ -160,7 +160,6 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
     host: 'workstation.test',
     user: 'test',
     name: 'Workstation',
-    tools: ['claude'],
     createdAt: new Date().toISOString(),
   })
   // Contexts carry a machine connection; nothing here opens it.

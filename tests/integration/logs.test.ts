@@ -48,12 +48,7 @@ test(
       assert.fail(`The log did not show “${text}”: ${JSON.stringify(await messages())}`)
     }
 
-    const target = await request<Target>(
-      'POST',
-      '/targets',
-      { kind: 'local', name: 'Workstation', tools: ['claude'] },
-      201,
-    )
+    const target = await request<Target>('POST', '/targets', { kind: 'local', name: 'Workstation' }, 201)
     provisionMachine(home, machineSocket(deployment.secret, deployment.owner(), target.id))
     await request('GET', `/targets/${target.id}/software`)
     const session = await request<Session>(

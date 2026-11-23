@@ -251,7 +251,7 @@ class Connection implements ChatClient {
       case 'session-options': {
         const context = await this.server.services.resolve(this.owner, message.targetId)
         const report = await inspectTargetSoftware(this.server.services, context, AbortSignal.timeout(60_000))
-        return { ok: true, data: sessionCreationOptions(context.target, report.software) }
+        return { ok: true, data: sessionCreationOptions(report.software) }
       }
       case 'directories': {
         const context = await this.server.services.resolve(this.owner, message.targetId)

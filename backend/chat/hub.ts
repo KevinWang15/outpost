@@ -23,7 +23,6 @@ import { replyText, turnFiles } from '../../shared/chatTranscript'
 import type { SessionFile } from '../../shared/sessionFiles'
 import { handles, mentions } from '../../shared/chatMentions'
 import { cronMatches, parseCron, validTimeZone, zonedParts } from '../../shared/cron'
-import type { HarnessId } from '../../shared/harnesses'
 import type { Session } from '../../shared/model'
 import type { TerminalDelivery } from '../../shared/machine'
 import type { Deployment, Owner } from '../deployment'
@@ -51,7 +50,7 @@ interface Account {
   clients: Set<ChatClient>
   sessions: Map<string, Session[]>
   errors: Map<string, string>
-  machines: Map<string, { name: string; tools: HarnessId[] }>
+  machines: Map<string, { name: string }>
   view: ChatSession[]
   targets: ChatTarget[]
   refreshedAt: number
@@ -227,7 +226,7 @@ export class ChatHub {
       try {
         const targets = await this.dependencies.deployment.workspace(account.owner).list()
         const enrolled = new Set(targets.map(machine => machine.id))
-        account.machines = new Map(targets.map(target => [target.id, { name: target.name, tools: target.tools }]))
+        account.machines = new Map(targets.map(target => [target.id, { name: target.name }]))
         await Promise.all(
           targets.map(async target => {
             try {

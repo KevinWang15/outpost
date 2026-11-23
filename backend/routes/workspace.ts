@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
+import { Ajv } from 'ajv'
 import type { FastifyInstance } from 'fastify'
-import type { Environment, Target, TargetInput, TargetUpdate } from '../../shared/model'
+import type { Environment, InstallationInput, Target, TargetInput, TargetUpdate } from '../../shared/model'
 import { machineSetupLabels } from '../../shared/model'
+import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
-import { targetInput, targetUpdate } from '../../shared/schemas'
+import { installationInput, targetInput, targetUpdate } from '../../shared/schemas'
 import { inspectTargetSoftware } from '../session-actions'
 
+const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false })
+const validInstallationInput = ajv.compile<InstallationInput>(installationInput)
 type Params = { targetId: string }
 
 export function workspaceRoutes(
@@ -51,17 +55,13 @@ export function workspaceRoutes(
     { schema: { body: targetUpdate } },
     async request => {
       const { owner, workspace, target } = await services.context(request, request.params.targetId)
-      const edited = await workspace.edit(target.id, {
-        ...request.body,
-        ...(request.body.name ? { name: request.body.name.trim() } : {}),
-      })
+      const edited = await workspace.edit(target.id, { name: request.body.name.trim() })
       log.record(owner, {
         kind: 'machine',
         type: 'edited',
         message: `${edited.name} was edited`,
         machine: { id: edited.id, name: edited.name },
       })
-      if (request.body.tools) await installations.start(await services.resolve(owner, edited.id))
       return edited
     },
   )
@@ -85,10 +85,15 @@ export function workspaceRoutes(
       return inspectTargetSoftware(services, context, signal)
     }),
   )
-  app.post<{ Params: Params }>('/api/targets/:targetId/installations', async (request, reply) => {
-    const context = await services.context(request, request.params.targetId)
-    return reply.code(202).send(await installations.start(context))
-  })
+  app.post<{ Params: Params; Body: InstallationInput | undefined }>(
+    '/api/targets/:targetId/installations',
+    async (request, reply) => {
+      if (request.body !== undefined && !validInstallationInput(request.body))
+        throw new AppError('Invalid software installation request.', 400)
+      const context = await services.context(request, request.params.targetId)
+      return reply.code(202).send(await installations.start(context, request.body?.software))
+    },
+  )
   app.get<{ Params: Params }>('/api/targets/:targetId/installations', async request => {
     const { owner, target } = await services.context(request, request.params.targetId)
     return { installation: installations.latest(owner, target.id) }

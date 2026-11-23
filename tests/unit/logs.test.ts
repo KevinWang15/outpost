@@ -110,7 +110,6 @@ test('changes are recorded in the account’s log, which only Outpost writes', a
       name: 'dev',
       host: 'dev.example.com',
       user: 'dev',
-      tools: ['claude'],
     })
   ).body
   const session = (
@@ -207,12 +206,7 @@ test('hosted accounts each read only their own log', async t => {
   }
   const alice = await account('alice@example.com'),
     bob = await account('bob@example.com')
-  await call(
-    'POST',
-    '/api/targets',
-    { kind: 'ssh', name: 'alice-box', host: 'a.example.com', user: 'a', tools: ['claude'] },
-    alice,
-  )
+  await call('POST', '/api/targets', { kind: 'ssh', name: 'alice-box', host: 'a.example.com', user: 'a' }, alice)
   const aliceView = (await call<LogView>('GET', '/api/logs', undefined, alice)).body
   const bobView = (await call<LogView>('GET', '/api/logs', undefined, bob)).body
   assert.notEqual(aliceView.channel, bobView.channel)

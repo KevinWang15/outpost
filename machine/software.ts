@@ -6,7 +6,7 @@ import type { SoftwareId } from '../shared/model'
 import { inspectionScript } from '../shared/node/softwareInspection'
 
 /** Inspect the current machine from its execution account's interactive login shell. */
-export function inspectSoftware(ids: SoftwareId[], marker: string) {
+export function inspectSoftware(ids: readonly SoftwareId[], marker: string) {
   return runCommand(
     { executable: 'sh', args: ['-c', loginShell('interactive')], label: 'Software inspection' },
     inspectionScript(ids, marker),

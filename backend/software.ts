@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { requiredSoftware, softwareLabel, type SoftwareReport } from '../shared/model'
+import { harnessIds } from '../shared/harnesses'
+import {
+  allSoftware,
+  coreSoftware,
+  setupTargets,
+  softwareLabel,
+  type SoftwareId,
+  type SoftwareReport,
+} from '../shared/model'
 import { inspectionScript, softwareReport } from '../shared/node/softwareInspection'
 import { toolInstaller } from '../shared/node/toolInstaller'
 import { AppError } from './errors'
@@ -11,7 +19,12 @@ import type { TargetContext } from './sessions'
 
 export interface SoftwareService {
   inspect(context: TargetContext, signal?: AbortSignal): Promise<SoftwareReport>
-  setup(context: TargetContext, output: (text: string) => void, signal: AbortSignal): Promise<void>
+  setup(
+    context: TargetContext,
+    output: (text: string) => void,
+    signal: AbortSignal,
+    requested?: readonly SoftwareId[],
+  ): Promise<void>
 }
 
 export class SoftwareClient implements SoftwareService {
@@ -20,9 +33,9 @@ export class SoftwareClient implements SoftwareService {
     private env: NodeJS.ProcessEnv = process.env,
   ) {}
 
-  private async report({ target, transport, machine }: TargetContext, signal?: AbortSignal, bootstrap = false) {
+  private async report({ transport, machine }: TargetContext, signal?: AbortSignal, bootstrap = false) {
     const marker = 'OUTPOST_SOFTWARE_' + randomUUID()
-    const ids = requiredSoftware(target)
+    const ids = allSoftware
     const result =
       bootstrap && transport
         ? await runCommand(transport.management('interactive'), inspectionScript(ids, marker, machine.socket), {
@@ -33,7 +46,8 @@ export class SoftwareClient implements SoftwareService {
           })
         : await machine.call<CommandResult>(
             'software.inspect',
-            { tools: target.tools, marker },
+            // Include harnessIds so released terminal-v3.0.5 nodes also inspect every registered harness.
+            { tools: harnessIds, marker },
             { signal, timeoutMs: 50_000 },
           )
     try {
@@ -47,11 +61,17 @@ export class SoftwareClient implements SoftwareService {
     return this.report(context, signal)
   }
 
-  async setup(context: TargetContext, output: (text: string) => void, signal: AbortSignal) {
+  async setup(
+    context: TargetContext,
+    output: (text: string) => void,
+    signal: AbortSignal,
+    requested?: readonly SoftwareId[],
+  ) {
     const { machine, transport } = context
-    output('Checking the execution account and selected tools…\n')
+    const targets = setupTargets(requested)
+    output('Checking the machine and installed software…\n')
     const initial = await this.report(context, signal, true)
-    const missing = initial.software.filter(item => item.status !== 'installed')
+    const missing = initial.software.filter(item => targets.includes(item.id) && item.status !== 'installed')
     const options = { env: this.env, signal, timeoutMs: 15 * 60_000, onOutput: output }
     let platform = ''
     if (transport && missing.length) {
@@ -93,10 +113,17 @@ export class SoftwareClient implements SoftwareService {
         throw new Error('Installation failed for ' + softwareLabel(id) + '. Review the setup log and retry.')
     }
     const verified = await this.inspect(context, signal)
-    const remaining = verified.software.filter(item => item.status !== 'installed')
+    const remaining = verified.software.filter(item => targets.includes(item.id) && item.status !== 'installed')
     if (remaining.length)
       throw new Error('Check the installation of ' + remaining.map(item => softwareLabel(item.id)).join(', ') + '.')
     await context.workspace.setEnvironment(context.target.id, verified.environment)
-    output('The machine service and selected software are ready.\n')
+    const done = (requested?.length ? requested : coreSoftware).filter(
+      (id, _, list) => !(id === 'claude-agent-acp' && list.includes('claude')),
+    )
+    output(
+      requested?.length
+        ? `${done.map(softwareLabel).join(', ')} ${done.length === 1 ? 'is' : 'are'} ready.\n`
+        : 'The machine service is ready.\n',
+    )
   }
 }

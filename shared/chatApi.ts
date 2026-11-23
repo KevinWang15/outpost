@@ -3,7 +3,6 @@
 // these schemas; server messages are typed below. See docs/CHAT.md.
 import Type, { type Static } from 'typebox'
 import { chatHost, chatOrigin, type ChatEntry, type ChatInfo, type ChatJournalSnapshot } from './chatHost'
-import type { HarnessId } from './harnesses'
 import type { Session } from './model'
 import { conversationSearch, sessionForkInput, sessionInput, sessionUpdate } from './schemas'
 import { sessionFileSchema } from './sessionFiles'
@@ -122,7 +121,6 @@ export interface ChatSession extends Session {
 export interface ChatTarget {
   id: string
   name: string
-  tools: HarnessId[]
   error: string | null
 }
 export interface ChannelView extends Channel {

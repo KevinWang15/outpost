@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
-import type { ConversationMatch, Session, SessionInput, Target } from '../../shared/model'
+import { Download, LoaderCircle } from 'lucide-react'
+import type { ConversationMatch, Session, SessionInput, SoftwareId, Target } from '../../shared/model'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import { Dialog } from '../ui/Dialog'
@@ -18,6 +19,10 @@ export interface SettingsSource {
 export default function SessionDialog({
   target,
   tools,
+  unavailableTools = [],
+  settingUpTools = [],
+  setupError = null,
+  onSetupTool,
   conversation,
   directories,
   beforeFields,
@@ -28,6 +33,10 @@ export default function SessionDialog({
 }: {
   target: Pick<Target, 'name'> | null
   tools: HarnessId[]
+  unavailableTools?: HarnessId[]
+  settingUpTools?: SoftwareId[]
+  setupError?: string | null
+  onSetupTool?: (tool: HarnessId) => void
   conversation: ConversationMatch | null
   directories: DirectorySource
   beforeFields?: ReactNode
@@ -45,6 +54,14 @@ export default function SessionDialog({
   const [copied, setCopied] = useState('')
   const copyId = useId()
   const available = target && (conversation ? tools.includes(conversation.tool) : Boolean(tool))
+  const setupRunning = settingUpTools.length > 0
+  const installable = conversation
+    ? !tools.includes(conversation.tool) && onSetupTool
+      ? [conversation.tool]
+      : []
+    : onSetupTool
+      ? unavailableTools
+      : []
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -158,10 +175,54 @@ export default function SessionDialog({
                     </label>
                   ))}
                 </div>
-                {!available && (
+                {!available && !installable.length && (
                   <small className="error">
                     Install {conversation ? harnessLabel(conversation.tool) : 'a coding tool'} on this machine first.
                   </small>
+                )}
+                {installable.length > 0 && onSetupTool && (
+                  <div className="unavailable-tools">
+                    <span className="unavailable-tools-label">Not installed on {target.name}</span>
+                    <div className="unavailable-tools-list">
+                      {installable.map(id => {
+                        const installing = settingUpTools.includes(id)
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className="button small unavailable-tool"
+                            disabled={setupRunning}
+                            onClick={() => {
+                              setTool(id)
+                              onSetupTool(id)
+                            }}
+                          >
+                            {installing ? (
+                              <LoaderCircle size={13} className="spin" />
+                            ) : (
+                              <ToolIcon tool={id} size={13} />
+                            )}
+                            <span>{harnessLabel(id)}</span>
+                            <span className="unavailable-tool-action">
+                              {installing ? (
+                                'Setting up…'
+                              ) : (
+                                <>
+                                  <Download size={12} />
+                                  Set up
+                                </>
+                              )}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {setupError && (
+                      <small className="error" role="alert">
+                        {setupError}
+                      </small>
+                    )}
+                  </div>
                 )}
               </fieldset>
               {conversation ? (

@@ -5,7 +5,7 @@ import { openSessionView } from './sessionView'
 import type { Duplex } from 'node:stream'
 import { authorizeNode, validNodeSocket, watchInstallation, nodeLock, installation } from './installation'
 import { inspectSoftware, installTool } from './software'
-import { requiredSoftware } from '../shared/model'
+import { allSoftware } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, mkdirSync, renameSync, rmSync, statSync, watch } from 'node:fs'
@@ -266,15 +266,9 @@ export async function serveNode(socketName: string) {
         return installTool(id)
       },
       'software.inspect': args => {
-        if (
-          !Array.isArray(args.tools) ||
-          args.tools.length > 16 ||
-          !args.tools.every(isHarnessId) ||
-          typeof args.marker !== 'string' ||
-          !/^OUTPOST_SOFTWARE_[0-9a-f-]{36}$/.test(args.marker)
-        )
+        if (typeof args.marker !== 'string' || !/^OUTPOST_SOFTWARE_[0-9a-f-]{36}$/.test(args.marker))
           throw new RegistryError('Invalid software inspection request.', 400)
-        return inspectSoftware(requiredSoftware({ tools: args.tools }), args.marker)
+        return inspectSoftware(allSoftware, args.marker)
       },
       'sessions.list': async () => ({ sessions: await listSessions() }),
       'sessions.get': args => getSession(args.id),

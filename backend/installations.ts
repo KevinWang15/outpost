@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import type { Installation, InstallationEvent } from '../shared/model'
+import {
+  coreSoftware,
+  softwareLabel,
+  type Installation,
+  type InstallationEvent,
+  type SoftwareId,
+} from '../shared/model'
 import type { Owner } from './deployment'
 import type { LogInput } from './logs/activity'
 import { AppError } from './errors'
@@ -17,6 +23,12 @@ interface Job {
   completion: Promise<void>
 }
 const key = (owner: Owner, targetId: string) => JSON.stringify([owner.userId, targetId])
+const sameSoftware = (a: readonly SoftwareId[], b: readonly SoftwareId[]) =>
+  a.length === b.length && a.every(id => b.includes(id))
+function describeSoftware(ids: readonly SoftwareId[]) {
+  const visible = ids.filter(id => !(id === 'claude-agent-acp' && ids.includes('claude')))
+  return visible.map(softwareLabel).join(', ')
+}
 
 /** A job belongs to the server process, not to an HTTP stream or dialog. Only
  * the latest bounded log per target is kept; software status is never cached.
@@ -57,15 +69,22 @@ export class Installations {
       this.jobs.delete(id)
     })
   }
-  start(context: TargetContext) {
+  start(context: TargetContext, requested?: readonly SoftwareId[]) {
     const id = key(context.owner, context.target.id)
+    const software: SoftwareId[] = requested?.length ? [...new Set(requested)] : [...coreSoftware]
+    const specific = Boolean(requested?.length)
+    const subject = specific ? describeSoftware(software) : null
     return this.serialize(id, async () => {
       if (this.closed) throw new AppError('Outpost is shutting down. No new installations can start.', 503)
       const target = await context.workspace.get(context.target.id)
       const running = this.jobs.get(id)?.installation
-      if (running?.status === 'running') return running
+      if (running?.status === 'running') {
+        if (sameSoftware(running.software, software)) return running
+        throw new AppError('Another setup is already running on this machine. Wait for it to finish first.', 409)
+      }
       const installation: Installation = {
         id: randomUUID(),
+        software,
         status: 'running',
         startedAt: new Date().toISOString(),
         finishedAt: null,
@@ -85,7 +104,7 @@ export class Installations {
       this.log(context.owner, {
         kind: 'machine',
         type: 'installing',
-        message: `Setting up ${machine.name}`,
+        message: subject ? `Setting up ${subject} on ${machine.name}` : `Setting up ${machine.name}`,
         machine,
       })
       const emit = (event: InstallationEvent) => {
@@ -99,13 +118,7 @@ export class Installations {
       }
       job.completion = Promise.resolve().then(async () => {
         try {
-          let selected = target
-          for (;;) {
-            await this.software.setup({ ...context, target: selected }, output, job.controller.signal)
-            const latest = await context.workspace.get(target.id)
-            if (latest.tools.join() === selected.tools.join()) break
-            selected = latest
-          }
+          await this.software.setup({ ...context, target }, output, job.controller.signal, requested)
           installation.status = 'succeeded'
           installation.exitCode = 0
         } catch (error) {
@@ -120,10 +133,14 @@ export class Installations {
             type: installation.status === 'succeeded' ? 'installed' : 'install-failed',
             message:
               installation.status === 'succeeded'
-                ? `${machine.name} is ready`
-                : `Could not set up ${machine.name}: ${installation.error}`,
+                ? subject
+                  ? `${subject} ready on ${machine.name}`
+                  : `${machine.name} is ready`
+                : subject
+                  ? `Could not set up ${subject} on ${machine.name}: ${installation.error}`
+                  : `Could not set up ${machine.name}: ${installation.error}`,
             machine,
-            details: { exitCode: installation.exitCode, error: installation.error },
+            details: { exitCode: installation.exitCode, error: installation.error, software: software.join(',') },
           })
           emit({ type: 'complete', installation })
           for (const stream of job.subscribers) stream.end()

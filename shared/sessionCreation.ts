@@ -1,21 +1,18 @@
-import type { HarnessId } from './harnesses'
-import type { SoftwareId, SoftwareStatus } from './model'
+import { harnessIds, type HarnessId } from './harnesses'
+import { coreSoftware, type SoftwareId, type SoftwareStatus } from './model'
 
 export interface SessionCreationOptions {
+  /** Coding harnesses detected as installed on the machine. */
   tools: HarnessId[]
+  /** Core machine requirements that are missing or broken. */
   missing: SoftwareId[]
 }
 
-/** The web workspace and desktop creator use the same readiness criteria. */
-export function sessionCreationOptions(
-  target: { tools: HarnessId[] },
-  software: SoftwareStatus[],
-): SessionCreationOptions {
+/** The web workspace, chat and desktop creator use the same readiness criteria. */
+export function sessionCreationOptions(software: SoftwareStatus[]): SessionCreationOptions {
   const installed = new Set(software.filter(item => item.status === 'installed').map(item => item.id))
-  const tools = target.tools.filter(tool => installed.has(tool))
-  const required: SoftwareId[] = ['bash', 'outpost-terminal']
   return {
-    tools,
-    missing: [...required.filter(id => !installed.has(id)), ...(tools.length ? [] : target.tools)],
+    tools: harnessIds.filter(tool => installed.has(tool)),
+    missing: coreSoftware.filter(id => !installed.has(id)),
   }
 }

@@ -88,7 +88,7 @@ export function desktopRoutes(app: FastifyInstance, services: Services, access: 
       const owner = access.authorize(request)
       const context = await services.resolve(owner, request.params.targetId)
       const report = await inspectTargetSoftware(services, context, signal)
-      return sessionCreationOptions(context.target, report.software)
+      return sessionCreationOptions(report.software)
     }),
   )
   app.post<{ Params: TargetParams; Body: SessionCreationRequest }>(

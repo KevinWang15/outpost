@@ -98,7 +98,6 @@ async function fixture(
       name: 'Fixture',
       host: 'unused',
       user: 'dev',
-      tools: ['claude'],
       createdAt: '',
     },
     machine: { socket: 'run/node-' + '0'.repeat(32) + '.sock' },

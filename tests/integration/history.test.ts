@@ -50,7 +50,6 @@ test(
         host: id + '.test',
         user: 'fixture',
         name: id === 'alpha' ? 'Build machine' : 'Development laptop',
-        tools: ['claude', 'codex', 'kimi', 'deepseek', 'antigravity'],
         createdAt: new Date().toISOString(),
       })
       const codex = randomUUID(),
@@ -284,7 +283,6 @@ test('history: hosted owners have separate indexes and cursors; offline machines
         ? { kind: 'ssh' as const, host: `${name}.example`, user: 'dev' }
         : { kind: 'outbound' as const }),
       name,
-      tools: ['codex'],
       createdAt: new Date().toISOString(),
     })
   }

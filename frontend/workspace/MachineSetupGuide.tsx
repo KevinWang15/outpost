@@ -32,7 +32,7 @@ export default function MachineSetupGuide({
             ? 'The hosted server opens SSH with your account key. A bastion must be reachable from that server.'
             : 'This computer opens SSH with your OpenSSH configuration, keys and jump hosts.',
           needs: 'The Linux execution account, host and SSH port. This machine never connects back to Outpost.',
-          next: 'Outpost checks installed versions and sets up the machine service and selected tools over SSH. Use the same connection to create or reattach to a session.',
+          next: 'Outpost checks installed software and sets up the machine service over SSH. Coding tools already on the machine are detected automatically, and you can set up more from the machine page.',
         }
       : {
           title: 'The machine can reach Outpost',

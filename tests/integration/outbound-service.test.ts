@@ -55,12 +55,7 @@ test(
       await app.close()
       await rm(directory, { recursive: true, force: true })
     })
-    const { id } = await call<{ id: string }>(
-      'POST',
-      '/targets',
-      { kind: 'outbound', name: 'Boot', tools: ['codex'] },
-      201,
-    )
+    const { id } = await call<{ id: string }>('POST', '/targets', { kind: 'outbound', name: 'Boot' }, 201)
     const base = '/targets/' + id
     const installed = '/root/.outpost/bin/outpost-terminal'
     const inside = (...args: string[]) => exec('docker', ['exec', container, ...args], { timeout: 20_000 })

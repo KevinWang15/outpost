@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 import { Monitor, Pencil, Plus, Search, Server, Trash2 } from 'lucide-react'
-import type { ConversationMatch, Session, SessionInput, SessionUpdate, Target, TargetUpdate } from '../../shared/model'
-import { harnessLabel, supportsTerminal } from '../../shared/harnesses'
+import {
+  harnessSoftware,
+  type ConversationMatch,
+  type DirectorySuggestions,
+  type Session,
+  type SessionInput,
+  type SessionUpdate,
+  type Target,
+  type TargetUpdate,
+} from '../../shared/model'
+import { harnesses, harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import { api } from '../api'
 import ConnectDialog from '../connect/ConnectDialog'
@@ -22,7 +31,6 @@ import { useSessions } from './useSessions'
 import { useSoftware } from './useSoftware'
 import { address, chatHref } from './labels'
 import { sessionCreationOptions } from '../../shared/sessionCreation'
-import type { DirectorySuggestions } from '../../shared/model'
 
 type Panel =
   | { kind: 'session'; conversation: ConversationMatch | null }
@@ -50,15 +58,23 @@ export default function TargetView({
   const [available, setAvailable] = useState(target.kind !== 'outbound')
   const { sessions, error, refreshing, refresh } = useSessions(target.id, available)
   const connectFlow = useConnect(target, refresh)
-  const software = useSoftware(target.id, target.tools.join(','), available)
+  const software = useSoftware(target.id, available)
   const [panel, setPanel] = useState<Panel | null>(() =>
     request?.kind === 'link' ? { kind: 'session', conversation: request.match } : null,
   )
   const [checking, setChecking] = useState<string[]>([])
-  const options = sessionCreationOptions(target, software.report?.software ?? [])
+  const options = sessionCreationOptions(software.report?.software ?? [])
   const tools = options.tools
   const missing = options.missing
+  const unavailableTools = harnesses.map(h => h.id).filter(id => !tools.includes(id))
   const ready = available && missing.length === 0 && tools.length > 0
+  const createDisabledTitle = !available
+    ? 'Connect the machine first'
+    : missing.length > 0
+      ? 'Set up machine software first'
+      : tools.length === 0
+        ? 'Set up a coding tool first'
+        : undefined
   const directories = useCallback(
     (path: string, signal: AbortSignal) =>
       api<DirectorySuggestions>(
@@ -136,7 +152,7 @@ export default function TargetView({
             <h1>{target.name}</h1>
             <p>
               <code>{address(target)}</code>
-              {target.tools.map(tool => (
+              {tools.map(tool => (
                 <span key={tool} className="chip">
                   <ToolIcon tool={tool} size={11} />
                   {harnessLabel(tool)}
@@ -153,7 +169,7 @@ export default function TargetView({
           <button
             className="button primary"
             disabled={!ready}
-            title={!available ? 'Connect the machine first' : ready ? undefined : 'Install the required software first'}
+            title={createDisabledTitle}
             onClick={() => setPanel({ kind: 'session', conversation: null })}
           >
             <Plus size={15} />
@@ -211,6 +227,10 @@ export default function TargetView({
         <SessionDialog
           target={target}
           tools={ready ? tools : []}
+          unavailableTools={available && missing.length === 0 ? unavailableTools : []}
+          settingUpTools={software.job?.status === 'running' ? software.job.software : []}
+          setupError={software.job?.status === 'failed' ? software.job.error : software.error || null}
+          onSetupTool={tool => void software.setup(harnessSoftware(tool))}
           beforeFields={!available && <p className="warning">Reconnect this machine to create a session.</p>}
           conversation={panel.conversation}
           directories={directories}

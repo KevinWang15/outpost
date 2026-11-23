@@ -1,6 +1,6 @@
 import type { Static } from 'typebox'
 import type { SessionActivity } from './activity'
-import { harnesses, type HarnessId } from './harnesses'
+import { harnesses, harnessIds, type HarnessId } from './harnesses'
 import type * as schemas from './schemas'
 
 // Inputs and stored records are derived from their validation schemas.
@@ -21,6 +21,7 @@ export type SessionInput = Static<typeof schemas.sessionInput>
 export type SessionForkInput = Static<typeof schemas.sessionForkInput>
 export type ConversationSearch = Static<typeof schemas.conversationSearch>
 export type SoftwareId = (typeof schemas.softwareIds)[number]
+export type InstallationInput = Static<typeof schemas.installationInput>
 export interface Environment {
   mode: 'local' | 'hosted'
   localTargets: boolean
@@ -77,15 +78,23 @@ export interface DirectorySuggestions {
   truncated: boolean
 }
 
-/** Outpost Chat runs Claude Code through its official ACP adapter; Codex's is
- * bundled in Outpost machine service; Kimi Code, DeepSeek Harness and Antigravity CLI
- * serve ACP themselves. */
-export const requiredSoftware = (target: { tools: HarnessId[] }): SoftwareId[] => [
-  'bash',
-  'outpost-terminal',
-  ...target.tools,
-  ...(target.tools.includes('claude') ? (['claude-agent-acp'] as const) : []),
+/** Core components required before a machine can run sessions. */
+export const coreSoftware: readonly SoftwareId[] = ['bash', 'outpost-terminal']
+
+/** Every software component Outpost inspects on a machine. */
+export const allSoftware: readonly SoftwareId[] = ['bash', 'outpost-terminal', ...harnessIds, 'claude-agent-acp']
+
+/** Components installed when setting up a coding harness. Outpost Chat runs
+ * Claude Code through its official ACP adapter; Codex's is bundled in Outpost
+ * machine service; Kimi Code, DeepSeek Harness and Antigravity CLI serve ACP themselves. */
+export const harnessSoftware = (id: HarnessId): SoftwareId[] =>
+  id === 'claude' ? ['claude', 'claude-agent-acp'] : [id]
+
+/** Deduplicated software IDs ensured by a setup run: always core requirements, plus any requested items. */
+export const setupTargets = (requested?: readonly SoftwareId[]): SoftwareId[] => [
+  ...new Set<SoftwareId>([...coreSoftware, ...(requested ?? [])]),
 ]
+
 const systemLabels: Record<string, string> = {
   bash: 'Bash',
   'outpost-terminal': 'Outpost machine service',
@@ -102,6 +111,7 @@ export interface SoftwareStatus {
 }
 export interface Installation {
   id: string
+  software: SoftwareId[]
   status: 'running' | 'succeeded' | 'failed'
   startedAt: string
   finishedAt: string | null

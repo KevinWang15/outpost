@@ -13,7 +13,7 @@ test(`Web terminal: a blackholed connection recovers the same process, offline o
   const target = await (
     await page.request.post('/api/targets', {
       headers,
-      data: { kind: 'local', name, tools: ['claude'] },
+      data: { kind: 'local', name },
     })
   ).json()
   const session = await (

@@ -36,12 +36,7 @@ test(
   async t => {
     const { provision, home, env, port, request, clients } = await localApp(t)
 
-    const target = await request<Target>(
-      'POST',
-      '/targets',
-      { kind: 'local', name: 'This computer', tools: ['claude', 'codex', 'kimi', 'deepseek', 'antigravity'] },
-      201,
-    )
+    const target = await request<Target>('POST', '/targets', { kind: 'local', name: 'This computer' }, 201)
     provision(target.id)
     const report = await request<SoftwareReport>('GET', `/targets/${target.id}/software`)
     assert.deepEqual(
@@ -257,7 +252,7 @@ test(
   { timeout: 60_000, skip: process.platform !== 'linux' },
   async t => {
     const { provision, port, request, clients } = await localApp(t)
-    const target = await request<Target>('POST', '/targets', { kind: 'local', name: 'Fresh', tools: ['codex'] }, 201)
+    const target = await request<Target>('POST', '/targets', { kind: 'local', name: 'Fresh' }, 201)
     provision(target.id)
     assert.equal(target.environment, undefined)
     const session = await request<Session>(

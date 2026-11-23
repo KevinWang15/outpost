@@ -22,7 +22,6 @@ test('channels keep offline members and remove deleted sessions once across chan
     id: 'machine',
     kind: 'outbound',
     name: 'Workstation',
-    tools: ['codex'],
     createdAt: new Date().toISOString(),
   })
   const context = await resolve(owner, target.id)

@@ -58,7 +58,7 @@ computer running Outpost can SSH to the Linux account that will run the coding a
 
 | Choose | When to use it | What happens |
 | --- | --- | --- |
-| **Connect over SSH** (default) | Outpost can log in to that account, directly or through an SSH bastion. | Outpost installs the machine service and provisions the selected coding tools over SSH. It uses SSH again when you start or reattach to a session. The machine service opens no connection back to Outpost. |
+| **Connect over SSH** (default) | Outpost can log in to that account, directly or through an SSH bastion. | Outpost installs the machine service over SSH and detects installed coding tools automatically. It uses SSH again when you start or reattach to a session. The machine service opens no connection back to Outpost. |
 | **Run setup on the machine** | Outpost cannot SSH to the machine, and the machine is allowed to connect out to Outpost. | Run the wizard’s one-time `curl` command in a shell on the machine. It installs the service and enables a persistent, authenticated outbound connection to that Outpost instance. |
 
 In local mode SSH starts on your computer, with your OpenSSH config, keys and jump hosts.
@@ -76,7 +76,7 @@ Reconnecting uses the method you chose. [V3 connectivity design](docs/V3.md)
 
 ### Machine setup and removal
 
-On the machine page, **Required software → View setup log** shows what Outpost installed. **Set up required software** retries the checks and installs missing components. For initial SSH setup the execution account needs to own `/var/lib/outpost-machine` with mode 700 or have permission to create it using noninteractive sudo. Outbound setup also needs permission to install a systemd or OpenRC service. Run `sudo -v` first if your account uses sudo interactively.
+On the machine page, **Software** detects which coding tools are installed and marks them as available. Unavailable coding tools can be installed with **Set up**, and **View setup log** shows what Outpost installed. **Set up machine software** retries the checks and installs missing core components. For initial SSH setup the execution account needs to own `/var/lib/outpost-machine` with mode 700 or have permission to create it using noninteractive sudo. Outbound setup also needs permission to install a systemd or OpenRC service. Run `sudo -v` first if your account uses sudo interactively.
 
 For a machine without internet access, set `OUTPOST_TERMINAL_ASSET_DIR` on the Outpost server to a directory containing the matching Linux releases and `SHA256SUMS`. Put approved tool packages under `OUTPOST_TOOL_ASSET_DIR/<arch>-<libc>/`. Supply a `SHA256SUMS` and one `<software-id>.tar.gz` for each missing requirement. Each archive contains an `install.sh` at its root and its offline dependencies. Outpost transfers and verifies these files over SSH and runs the installer as the execution account. With this directory configured, a missing package is reported in the setup log. Without it, missing coding tools use their official installers.
 
@@ -568,7 +568,7 @@ When Chat starts the agent using the [Agent Client Protocol](https://agentclient
 
 ### DeepSeek Harness
 
-Enable **DeepSeek Harness** on the machine that runs the session. It uses
+Install **DeepSeek Harness** on the machine (manually or via **Software → Set up** on the machine page). It uses
 the official `dsh` CLI (`@deepseek-ai/dsh@0.2.2-rc.1`), which requires Node.js 24.9+
 and npm on that machine. Configure its normal DeepSeek credentials, or provide
 `DEEPSEEK_API_KEY` in the session environment, then choose **New session** on that machine. Open the session in Chat. Outpost uses `dsh --profile acp`, preserves its native session ID and

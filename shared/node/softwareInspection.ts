@@ -6,7 +6,7 @@ import chatAgents from '../chatAgents.json' with { type: 'json' }
 import type { CommandResult } from '../../backend/process'
 
 // Read-only, POSIX sh: it must work before Bash is installed.
-export function inspectionScript(ids: SoftwareId[], marker: string, machineSocket?: string) {
+export function inspectionScript(ids: readonly SoftwareId[], marker: string, machineSocket?: string) {
   return `set -eu
 ${supportingPath}
 [ "$(uname -s)" = Linux ] || { echo "Outpost machines must run Linux." >&2; exit 1; }
@@ -94,7 +94,7 @@ function status(id: SoftwareId, path: string, code: number, output: string): Sof
   return { id, status: detail ? 'broken' : 'installed', path, version, detail }
 }
 
-export function softwareReport(ids: SoftwareId[], marker: string, { code, stdout, stderr }: CommandResult) {
+export function softwareReport(ids: readonly SoftwareId[], marker: string, { code, stdout, stderr }: CommandResult) {
   const start = stdout.indexOf(`\0${marker}\0`)
   if (code !== 0 || start < 0)
     throw new Error(`Software check failed. ${stderr.trim() || 'Check access to the machine.'}`)

@@ -8,7 +8,7 @@ export async function addClaudeTarget(page: Page, name: string) {
   await dialog.getByRole('button', { name: 'Run sessions on this computer' }).click()
   await dialog.getByLabel('Name').fill(name)
   await dialog.getByRole('button', { name: 'Add machine' }).click()
-  await expect(page.getByRole('region', { name: 'Required software' })).toContainText('Ready')
+  await expect(page.getByRole('region', { name: 'Software' })).toContainText('Ready')
 }
 
 /** Create a session from chat's New session dialog. */

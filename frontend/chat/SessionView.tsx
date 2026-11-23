@@ -349,7 +349,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                   <CircleAlert size={18} />
                   <div>
                     <strong>The chat could not open.</strong>
-                    <p>{conversation?.message ?? 'Check Required software on the machine’s page in Machines.'}</p>
+                    <p>{conversation?.message ?? 'Check Software on the machine’s page in Machines.'}</p>
                   </div>
                   <button className="button small" onClick={() => client.restart(target)}>
                     Try again

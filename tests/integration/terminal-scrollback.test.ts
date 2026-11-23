@@ -19,7 +19,6 @@ test(
       kind: 'local',
       id: 'scrollback',
       name: 'Scrollback',
-      tools: ['claude'],
       createdAt: new Date().toISOString(),
     })
     const client = new SessionClient()

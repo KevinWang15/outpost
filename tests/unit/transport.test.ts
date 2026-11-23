@@ -13,7 +13,6 @@ const target: SshTarget = {
   host: 'dev.example.com',
   user: 'dev',
   port: 2222,
-  tools: ['claude'],
   identityFile: '~/.ssh/key',
 }
 const option = (args: string[], name: string) =>

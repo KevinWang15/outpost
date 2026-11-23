@@ -17,7 +17,6 @@ const settings: Target = {
   kind: 'local',
   id: 'delivery-machine',
   name: 'Delivery machine',
-  tools: ['claude'],
   createdAt: '2026-11-01T00:00:00Z',
 }
 const until = async (check: () => Promise<boolean> | boolean, label: string, timeout = 20_000) => {

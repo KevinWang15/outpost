@@ -3,7 +3,7 @@ import { LoaderCircle, Play, Trash2 } from 'lucide-react'
 import type { ConversationMatch, ConversationResults, DirectorySuggestions, SessionInput } from '../../shared/model'
 import { softwareLabel } from '../../shared/model'
 import { describeCron, nextRun, parseCron } from '../../shared/cron'
-import { harnessLabel } from '../../shared/harnesses'
+import { harnesses, harnessLabel } from '../../shared/harnesses'
 import { pagePaths } from '../../shared/pages'
 import { chatLimits, sessionKey, type ChannelMember, type ChannelView, type SessionRef } from '../../shared/chatApi'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
@@ -116,10 +116,26 @@ export function NewSessionDialog({
           {problem && <p className="error">{problem}</p>}
           {options && options.missing.length > 0 && (
             <p className="warning">
-              Install {options.missing.map(softwareLabel).join(', ')} on {target?.name} first, from{' '}
+              Set up {options.missing.map(softwareLabel).join(', ')} on {target?.name} first, from{' '}
               <MachineLink targetId={targetId}>its page in Machines</MachineLink>.
             </p>
           )}
+          {options && options.missing.length === 0 && options.tools.length === 0 && (
+            <p className="warning">
+              No coding tools are installed on {target?.name}. Set one up from{' '}
+              <MachineLink targetId={targetId}>its page in Machines</MachineLink>.
+            </p>
+          )}
+          {options &&
+            options.missing.length === 0 &&
+            options.tools.length > 0 &&
+            options.tools.length < harnesses.length &&
+            !conversation && (
+              <p className="hint">
+                Need another coding tool? Set it up on{' '}
+                <MachineLink targetId={targetId}>{target?.name}’s machine page</MachineLink>.
+              </p>
+            )}
         </>
       }
       onSave={async (input: SessionInput) => {

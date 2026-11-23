@@ -227,7 +227,8 @@ export class MachineConnection {
             !this.started &&
             (code === 127 || code === 126 || /outpost-terminal: (not found|No such file)/.test(stderr))
           ) {
-            const missing = 'Outpost machine service is missing on this machine. Open Required software to install it.'
+            const missing =
+              'Outpost machine service is missing on this machine. Open Software on the machine page to install it.'
             return this.lost(missing, 502, missing)
           }
           this.lost(
@@ -274,7 +275,7 @@ export class MachineConnection {
         if (this.started) return this.lost('Duplicate machine handshake.')
         clearTimeout(timer)
         if (message.version !== terminalService.version || message.protocol !== machineProtocol) {
-          const problem = `This machine runs Outpost machine service ${message.version}; ${terminalService.version} is required. Open Required software to install it.`
+          const problem = `This machine runs Outpost machine service ${message.version}; ${terminalService.version} is required. Open Software on the machine page to install it.`
           this.lost(problem, 409)
           return
         }

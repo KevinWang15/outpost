@@ -65,37 +65,44 @@ async function lifecycle(
     return (response.body ? JSON.parse(response.body) : undefined) as T
   }
   const added = await call<Target>('POST', '/targets', target)
-  const start = Date.now()
-  while (true) {
-    const { installation } = await call<{ installation: { status: string; error: string | null } }>(
-      'GET',
-      `/targets/${added.id}/installations`,
-    )
-    if (installation.status === 'succeeded') break
-    if (installation.status === 'failed') {
-      const log = await app.inject({
-        url: `/api/targets/${added.id}/installations`,
-        headers: { host: `127.0.0.1:${port}`, ...headers },
-      })
-      const { installation: job } = JSON.parse(log.body)
-      const result = await app.inject({
-        url: `/api/targets/${added.id}/installations/${job.id}/events`,
-        headers: { host: `127.0.0.1:${port}`, ...headers },
-      })
-      assert.fail(job.error + '\n' + result.body)
+  const waitInstallation = async () => {
+    const start = Date.now()
+    while (true) {
+      const { installation } = await call<{ installation: { status: string; error: string | null } }>(
+        'GET',
+        `/targets/${added.id}/installations`,
+      )
+      if (installation.status === 'succeeded') break
+      if (installation.status === 'failed') {
+        const log = await app.inject({
+          url: `/api/targets/${added.id}/installations`,
+          headers: { host: `127.0.0.1:${port}`, ...headers },
+        })
+        const { installation: job } = JSON.parse(log.body)
+        const result = await app.inject({
+          url: `/api/targets/${added.id}/installations/${job.id}/events`,
+          headers: { host: `127.0.0.1:${port}`, ...headers },
+        })
+        assert.fail(job.error + '\n' + result.body)
+      }
+      assert.ok(Date.now() - start < 120000, 'Timed out waiting for SSH setup')
+      await delay(200)
     }
-    assert.ok(Date.now() - start < 120000, 'Timed out waiting for SSH setup')
-    await delay(200)
   }
-  const report = await call<SoftwareReport>('GET', `/targets/${added.id}/software`)
-  assert.deepEqual(
-    report.software.filter(item => item.status !== 'installed'),
-    [],
-  )
+  await waitInstallation()
+  const initialReport = await call<SoftwareReport>('GET', `/targets/${added.id}/software`)
+  assert.equal(initialReport.software.find(item => item.id === 'bash')!.status, 'installed')
   assert.equal(
-    report.software.find(item => item.id === 'outpost-terminal')!.version,
+    initialReport.software.find(item => item.id === 'outpost-terminal')!.version,
     `outpost-terminal ${terminalService.version} protocol ${terminalService.protocol}`,
   )
+  assert.equal(initialReport.software.find(item => item.id === 'claude')!.status, 'missing')
+  // Set up an unavailable coding harness on demand from the server's offline approved tool assets.
+  await call('POST', `/targets/${added.id}/installations`, { software: ['claude', 'claude-agent-acp'] })
+  await waitInstallation()
+  const report = await call<SoftwareReport>('GET', `/targets/${added.id}/software`)
+  for (const id of ['bash', 'outpost-terminal', 'claude', 'claude-agent-acp'] as const)
+    assert.equal(report.software.find(item => item.id === id)!.status, 'installed', id)
   assert.equal(report.environment.home, '/home/dev')
   assert.equal(report.environment.username, 'dev')
   const session = await call<Session>('POST', `/targets/${added.id}/sessions`, {
@@ -200,7 +207,6 @@ test(
           host: 'coding-host',
           user: 'dev',
           jump: { user: 'dev', host: '127.0.0.1', port },
-          tools: ['claude'],
         }
         const env = {
           ...process.env,

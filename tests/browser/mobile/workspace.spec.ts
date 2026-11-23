@@ -12,7 +12,6 @@ test('long machine and session lists stay within the viewport and Connect remain
       data: {
         kind: index === 9 ? 'local' : 'outbound',
         name: `Layout ${info.project.name} machine ${index}`,
-        tools: ['claude'],
       } satisfies TargetInput,
     })
     expect(response.status()).toBe(201)
@@ -61,7 +60,6 @@ test('create and connect on a phone, send to the real process, resize, and resum
   const add = page.getByRole('dialog', { name: 'Add a machine' })
   await add.getByRole('button', { name: 'Run sessions on this computer' }).tap()
   await add.getByLabel('Name', { exact: true }).fill(`Mobile ${suffix}`)
-  await add.getByText('Codex', { exact: true }).tap()
   await add.getByRole('button', { name: 'Add machine', exact: true }).tap()
   await expect(page.getByRole('heading', { name: `Mobile ${suffix}`, level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'New session', exact: true }).first().tap()
@@ -152,7 +150,7 @@ test('Home Screen mode connects in its own window and closing returns to the wor
   const headers = { 'x-outpost-request': '1' }
   const targetResponse = await page.request.post('/api/targets', {
     headers,
-    data: { kind: 'local', name: `Standalone ${info.project.name}`, tools: ['claude'] },
+    data: { kind: 'local', name: `Standalone ${info.project.name}` },
   })
   expect(targetResponse.status()).toBe(201)
   const target: Target = await targetResponse.json()

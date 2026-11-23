@@ -14,7 +14,7 @@ test('Ctrl+/ reaches the coding process once, from the keyboard and the on-scree
   const headers = { 'x-outpost-request': '1' }
   const targetResponse = await page.request.post('/api/targets', {
     headers,
-    data: { kind: 'local', name: 'Keyboard box', tools: ['claude'] },
+    data: { kind: 'local', name: 'Keyboard box' },
   })
   expect(targetResponse.status()).toBe(201)
   const target = await targetResponse.json()

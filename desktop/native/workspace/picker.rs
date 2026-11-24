@@ -739,6 +739,7 @@ impl Workspace {
         Some(
             div()
                 .id("session-picker-backdrop")
+                .occlude()
                 .absolute()
                 .inset_0()
                 .flex()

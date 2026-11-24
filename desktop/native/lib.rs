@@ -77,6 +77,7 @@ fn open_workspace_at(
         backdrop_blur_radius: Some(px(22.)),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(480.), px(320.))),
+        inactive_frame_interval: Some(std::time::Duration::from_micros(16_667)),
         ..Default::default()
     };
     cx.open_window(opts, |w, cx| cx.new(|cx| Workspace::new(local, w, cx)))

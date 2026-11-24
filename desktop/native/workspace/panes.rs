@@ -1,14 +1,149 @@
 use super::*;
 
-pub(super) fn status_dot(pane: &Pane) -> Div {
-    let color = if pane.bell || pane.activity == "waiting" {
-        0xfbbf24
-    } else if !pane.status.is_empty() || pane.activity == "error" {
-        0xf87171
-    } else {
-        0x4ade80
+pub(super) fn pane_activity_state(pane: &Pane) -> Option<ActivityState> {
+    if pane.server.is_none() {
+        return if pane.bell {
+            Some(ActivityState::Attention)
+        } else if !pane.status.is_empty() {
+            Some(ActivityState::Disconnected)
+        } else {
+            None
+        };
+    }
+    match pane.connection {
+        ConnectionState::Connecting | ConnectionState::Reconnecting => Some(ActivityState::Pending),
+        ConnectionState::Closed => Some(ActivityState::Disconnected),
+        ConnectionState::Connected => {
+            if pane.bell {
+                return Some(ActivityState::Attention);
+            }
+            Some(match pane.activity.as_str() {
+                "working" => ActivityState::Working,
+                "waiting" | "finished" => ActivityState::Attention,
+                "error" => ActivityState::Error,
+                "idle" => ActivityState::Idle,
+                "unknown" => ActivityState::Unknown,
+                "" => ActivityState::Ready,
+                _ => ActivityState::Unknown,
+            })
+        }
+    }
+}
+
+pub(super) fn pane_status_label(pane: &Pane) -> String {
+    if pane.server.is_none() {
+        return if pane.bell {
+            "Bell rang — needs attention".into()
+        } else if !pane.status.is_empty() {
+            pane.status.clone()
+        } else {
+            "Local terminal".into()
+        };
+    }
+    let conn = match pane.connection {
+        ConnectionState::Connected => "Connected",
+        ConnectionState::Connecting => "Connecting…",
+        ConnectionState::Reconnecting => "Reconnecting…",
+        ConnectionState::Closed => "Disconnected",
     };
-    div().size(px(6.)).flex_none().rounded_full().bg(rgb(color))
+    let mut parts = vec![conn.to_owned()];
+    if pane.connection == ConnectionState::Connected {
+        let activity = match pane.activity.as_str() {
+            "working" => Some("Working"),
+            "waiting" => Some("Waiting for you"),
+            "idle" => Some("Idle"),
+            "finished" => Some("Needs you"),
+            "error" => Some("Error"),
+            "unknown" => Some("Unknown"),
+            _ => None,
+        };
+        if let Some(label) = activity {
+            parts.push(label.to_owned());
+        }
+        if let Some(detail) = pane.activity_detail.as_deref()
+            && !detail.is_empty()
+        {
+            parts.push(detail.to_owned());
+        }
+    } else if !pane.status.is_empty() && pane.status != conn {
+        parts.push(pane.status.clone());
+    }
+    if pane.bell {
+        parts.push("Bell rang — needs attention".into());
+    }
+    parts.join(" · ")
+}
+
+fn status_color(state: ActivityState) -> Rgba {
+    match state {
+        ActivityState::Ready => rgb(0x4ade80),
+        ActivityState::Working => rgb(0xe6e6e6),
+        ActivityState::Attention => rgb(0xfbbf24),
+        ActivityState::Error => rgb(0xf87171),
+        ActivityState::Pending
+        | ActivityState::Idle
+        | ActivityState::Disconnected
+        | ActivityState::Unknown => rgb(0x8f8f8f),
+    }
+}
+
+pub(super) fn status_badge(pane: &Pane, size: Pixels) -> Option<AnyElement> {
+    let state = pane_activity_state(pane)?;
+    Some(
+        activity_badge(state)
+            .size(size)
+            .color(status_color(state))
+            .into_any_element(),
+    )
+}
+
+fn needs_attention(pane: &Pane) -> bool {
+    pane.bell || matches!(pane.activity.as_str(), "waiting" | "finished" | "error")
+}
+
+/// Summarize a tab's split panes by priority (disconnected > attention > working > active).
+pub(super) fn tab_representative<'a>(
+    tab: &Tab,
+    panes: &'a BTreeMap<Id, Entity<Pane>>,
+    cx: &'a App,
+) -> &'a Pane {
+    let mut ids = Vec::new();
+    tab.layout.pane_order(&mut ids);
+    let members: Vec<&Pane> = ids
+        .iter()
+        .filter_map(|id| panes.get(id).map(|p| p.read(cx)))
+        .collect();
+    let active = panes[&tab.active].read(cx);
+    members
+        .iter()
+        .copied()
+        .find(|p| p.server.is_some() && p.connection != ConnectionState::Connected)
+        .or_else(|| {
+            members
+                .iter()
+                .copied()
+                .find(|p| p.server.is_some() && needs_attention(p))
+        })
+        .or_else(|| {
+            members
+                .iter()
+                .copied()
+                .find(|p| p.server.is_some() && p.activity == "working")
+        })
+        .or_else(|| {
+            if active.server.is_some() {
+                Some(active)
+            } else {
+                members.iter().copied().find(|p| p.server.is_some())
+            }
+        })
+        .or_else(|| {
+            members
+                .iter()
+                .copied()
+                .find(|p| p.bell || !p.status.is_empty())
+        })
+        .unwrap_or(active)
 }
 
 pub(super) fn header_button(
@@ -109,7 +244,7 @@ impl Workspace {
                     .size(px(12.))
                     .text_color(rgb(MUTED)),
             )
-            .child(status_dot(pane))
+            .children(status_badge(pane, px(14.)))
             .children(pane.mark.map(|m| m.icon(14.)))
             .child(
                 div()

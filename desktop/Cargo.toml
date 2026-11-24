@@ -24,8 +24,8 @@ path = "native/main.rs"
 embed-resource = "3"
 
 [dependencies]
-gpui = { git = "https://github.com/KevinWang15/gpui", rev = "cf9bcefb3433f3c1e3d29800fd62ac6e77843784", default-features = false, features = ["components", "lucide"] }
-gpui_platform = { git = "https://github.com/KevinWang15/gpui", rev = "cf9bcefb3433f3c1e3d29800fd62ac6e77843784", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui = { git = "https://github.com/KevinWang15/gpui", rev = "84c9e19530b87bd49b23b313bb085be54fa04abe", default-features = false, features = ["components", "lucide"] }
+gpui_platform = { git = "https://github.com/KevinWang15/gpui", rev = "84c9e19530b87bd49b23b313bb085be54fa04abe", default-features = false, features = ["font-kit", "wayland", "x11"] }
 alacritty_terminal = { version = "0.26", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "tiff", "bmp"] }
 portable-pty = "0.9"

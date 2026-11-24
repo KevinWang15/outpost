@@ -8,7 +8,7 @@ use crate::{
     agent_mark::AgentMark,
     bridge::Bridge,
     layout::{Axis, Id, Layout, Tab, next_id},
-    terminal::{Pane, PaneChanged},
+    terminal::{ConnectionState, Pane, PaneChanged},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use create::CreateForm;
@@ -1177,19 +1177,26 @@ impl Workspace {
                             }
                             "connection" => {
                                 let state = &e["state"];
-                                p.restoring = state["kind"] != "connected";
-                                if !p.restoring {
+                                let conn_kind = state["kind"].as_str().unwrap_or("");
+                                p.connection = match conn_kind {
+                                    "connected" => ConnectionState::Connected,
+                                    "reconnecting" => ConnectionState::Reconnecting,
+                                    "closed" => ConnectionState::Closed,
+                                    _ => ConnectionState::Connecting,
+                                };
+                                p.restoring = p.connection != ConnectionState::Connected;
+                                if p.connection == ConnectionState::Connected {
                                     p.grid_visible = true;
                                     p.command("files", json!({}));
-                                }
-                                p.status = if state["kind"] == "connected" {
-                                    String::new()
+                                    p.status.clear();
                                 } else {
-                                    state["message"]
+                                    p.activity.clear();
+                                    p.activity_detail = None;
+                                    p.status = state["message"]
                                         .as_str()
                                         .or(state["kind"].as_str())
                                         .unwrap_or("")
-                                        .into()
+                                        .into();
                                 }
                             }
                             "session" => {
@@ -1199,6 +1206,10 @@ impl Workspace {
                             "deliveries" => p.waiting = e["waiting"].as_u64().unwrap_or(0),
                             "activity" => {
                                 p.activity = strval(&e["activity"], "state");
+                                p.activity_detail = e["activity"]["detail"]
+                                    .as_str()
+                                    .filter(|s| !s.is_empty())
+                                    .map(str::to_owned);
                                 if let Some(seq) = e["seq"].as_u64() {
                                     p.command("ack", json!({"seq":seq}));
                                 }
@@ -1601,6 +1612,15 @@ impl Workspace {
             } else {
                 tab.name.clone()
             };
+            let rep = panes::tab_representative(tab, &self.panes, cx);
+            let status_tip = panes::pane_status_label(rep);
+            let tab_status = panes::status_badge(rep, px(16.)).map(|badge| {
+                div()
+                    .id(("tab-status", tab.id))
+                    .flex_none()
+                    .tooltip(move |w, cx| Tooltip::text(status_tip.clone(), w, cx))
+                    .child(badge)
+            });
             let handle = row()
                 .id(("tab-handle", tab.id))
                 .role(gpui::accesskit::Role::Tab)
@@ -1633,7 +1653,7 @@ impl Workspace {
                         }
                     }),
                 )
-                .child(panes::status_dot(self.panes[&id].read(cx)))
+                .children(tab_status)
                 .children(self.panes[&id].read(cx).mark.map(|m| m.icon(14.)))
                 .child(div().flex_1().truncate().child(title.clone()))
                 .when(!matches!(tab.layout, Layout::Pane(_)), |e| {
@@ -2961,13 +2981,100 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             );
             assert_eq!(items(&s.panes[&s.remote[&1]].read(cx).files).len(), 1);
             assert!(s.active().unwrap().read(cx).files.is_null());
+
+            // Verify animated tab activity badge states and status labels across lifecycle events.
+            let p1 = s.remote[&1];
+            let p2 = s.remote[&2];
+            assert_eq!(
+                panes::pane_activity_state(s.panes[&p1].read(cx)),
+                Some(ActivityState::Pending)
+            );
+            assert_eq!(
+                panes::pane_status_label(s.panes[&p1].read(cx)),
+                "Connecting…"
+            );
+            assert_eq!(
+                panes::pane_activity_state(s.panes[&p2].read(cx)),
+                Some(ActivityState::Ready)
+            );
+            assert_eq!(
+                panes::pane_status_label(s.panes[&p2].read(cx)),
+                "Connected"
+            );
+            for (state, detail, expected, label) in [
+                ("working", None, ActivityState::Working, "Connected · Working"),
+                (
+                    "waiting",
+                    Some("Approval requested"),
+                    ActivityState::Attention,
+                    "Connected · Waiting for you · Approval requested",
+                ),
+                ("finished", None, ActivityState::Attention, "Connected · Needs you"),
+                ("error", None, ActivityState::Error, "Connected · Error"),
+                ("idle", None, ActivityState::Idle, "Connected · Idle"),
+                ("unknown", None, ActivityState::Unknown, "Connected · Unknown"),
+            ] {
+                s.event(
+                    json!({"event":"activity","pane":2,"activity":{"state":state,"detail":detail}}),
+                    w,
+                    cx,
+                );
+                assert_eq!(
+                    panes::pane_activity_state(s.panes[&p2].read(cx)),
+                    Some(expected)
+                );
+                assert_eq!(panes::pane_status_label(s.panes[&p2].read(cx)), label);
+            }
+            // Terminal bell elevates an idle pane to Attention until cleared.
+            s.panes[&p2].update(cx, |p, _| p.bell = true);
+            assert_eq!(
+                panes::pane_activity_state(s.panes[&p2].read(cx)),
+                Some(ActivityState::Attention)
+            );
+            assert!(panes::pane_status_label(s.panes[&p2].read(cx)).contains("Bell rang"));
+            s.panes[&p2].update(cx, |p, _| p.bell = false);
+            // Disconnecting clears stale activity metadata.
+            s.event(
+                json!({"event":"connection","pane":2,"state":{"kind":"reconnecting","message":"Retrying"}}),
+                w,
+                cx,
+            );
+            assert_eq!(
+                panes::pane_activity_state(s.panes[&p2].read(cx)),
+                Some(ActivityState::Pending)
+            );
+            assert_eq!(
+                panes::pane_status_label(s.panes[&p2].read(cx)),
+                "Reconnecting… · Retrying"
+            );
+            s.event(
+                json!({"event":"connection","pane":2,"state":{"kind":"closed","message":"Session ended"}}),
+                w,
+                cx,
+            );
+            assert_eq!(
+                panes::pane_activity_state(s.panes[&p2].read(cx)),
+                Some(ActivityState::Disconnected)
+            );
+            // Restore pane 2 to connected + working for the remaining workspace assertions.
+            s.event(
+                json!({"event":"connection","pane":2,"state":{"kind":"connected"}}),
+                w,
+                cx,
+            );
+            s.event(
+                json!({"event":"activity","pane":2,"activity":{"state":"working"}}),
+                w,
+                cx,
+            );
         });
+        w.draw(cx).clear(cx);
     })?;
     let lists: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
         .filter(|c| c["op"] == "files")
         .map(|c| c["pane"].as_u64().unwrap())
         .collect();
-    assert_eq!(lists, [2, 1]);
+    assert_eq!(lists, [2, 1, 2]);
     let screenshot = include_bytes!("../../public/favicon-32x32.png");
     test.update_window(remote_window.into(), |root, w, cx| {
         let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, screenshot.to_vec());

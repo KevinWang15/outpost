@@ -70,6 +70,14 @@ struct LocalProfile {
     args: Vec<String>,
     home: std::path::PathBuf,
 }
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum ConnectionState {
+    Connecting,
+    #[default]
+    Connected,
+    Reconnecting,
+    Closed,
+}
 pub struct Pane {
     term: Term<Events>,
     parser: Processor,
@@ -78,11 +86,13 @@ pub struct Pane {
     pub focus: FocusHandle,
     pub title: String,
     pub mark: Option<&'static crate::agent_mark::AgentMark>,
+    pub connection: ConnectionState,
     pub status: String,
     pub font_size: f32,
     scrollback: usize,
     pub bell: bool,
     pub activity: String,
+    pub activity_detail: Option<String>,
     pub waiting: u64,
     pub draft: String,
     pub sending: bool,
@@ -184,6 +194,7 @@ impl Pane {
     ) -> Self {
         let mut pane = Self::new(Transport::Remote(b, id), title, fs, w, cx);
         pane.server = Some(server);
+        pane.connection = ConnectionState::Connecting;
         pane.restoring = true;
         pane.status = "Connecting…".into();
         pane
@@ -209,11 +220,13 @@ impl Pane {
             focus,
             title,
             mark: None,
+            connection: ConnectionState::Connected,
             status: String::new(),
             font_size,
             scrollback: DEFAULT_HISTORY,
             bell: false,
             activity: String::new(),
+            activity_detail: None,
             waiting: 0,
             draft: String::new(),
             sending: false,

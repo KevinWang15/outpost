@@ -111,7 +111,7 @@ fn picker_row(
     idx: usize,
     is_selected: bool,
     leading: AnyElement,
-    status: Option<Div>,
+    status: Option<AnyElement>,
     title: String,
     subtitle: String,
     subtitle_indent: Pixels,
@@ -538,14 +538,16 @@ impl Workspace {
                             .child("Active")
                             .into_any_element()
                     });
+                    let status = panes::status_badge(pane, px(15.));
+                    let indent = if status.is_some() { px(45.) } else { px(22.) };
                     list = list.child(picker_row(
                         idx,
                         is_selected,
                         leading,
-                        Some(panes::status_dot(pane)),
+                        status,
                         pane.title.clone(),
                         subtitle,
-                        px(22.),
+                        indent,
                         badge,
                         cx.listener(move |s, _, w, cx| s.select(id, w, cx)),
                     ));

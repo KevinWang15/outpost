@@ -8,11 +8,13 @@ import { chatHost, type ChatEntry, type ChatHostMessage, type ChatHostRequest } 
 import { imageExtensions } from '../shared/images'
 import { FrameDecoder, terminalControl } from '../shared/node/terminalFrames'
 import { checkpoint } from '../shared/terminalCheckpoint'
+import type { ImagePasteMode } from '../shared/terminalFiles'
 import { terminalSize } from '../shared/terminalService'
 import { removeFile, saveImage, StoredFile } from './files'
 import { chatSocket } from './launch'
 import { socketAddress } from './state'
 import { TerminalFileRequests } from './terminalFileRequests'
+import type { TerminalImage } from './terminalImages'
 import { ViewStream } from './viewStream'
 
 /** Agent-provided text can be printed, but must never execute a terminal escape sequence. */
@@ -25,6 +27,26 @@ const contentText = (block: acp.ContentBlock) =>
 const pasteStart = Buffer.from('\x1b[200~')
 const pasteEnd = Buffer.from('\x1b[201~')
 type Permission = Extract<ChatEntry, { kind: 'permission' }>
+
+/** Prefer inline ACP image attachment when the agent and size allow it; fall back to a file path otherwise. */
+export function pasteChatImage(
+  image: TerminalImage,
+  mode: ImagePasteMode,
+  options: {
+    imagesEnabled: boolean
+    draftCount: number
+    attach: (image: TerminalImage) => void
+    pastePath: (image: TerminalImage) => void
+  },
+): ImagePasteMode {
+  if (mode === 'path' || !options.imagesEnabled || image.bytes.length > chatHost.maxImageBytes) {
+    options.pastePath(image)
+    return 'path'
+  }
+  if (options.draftCount >= chatHost.maxFiles) throw Error(`Attach at most ${chatHost.maxFiles} images per prompt.`)
+  options.attach(image)
+  return 'attachment'
+}
 
 /** An interactive terminal client of the existing ACP host. Each viewer owns its draft. */
 export class ChatTerminal extends ViewStream {
@@ -69,23 +91,23 @@ export class ChatTerminal extends ViewStream {
       session,
       msg => this.control(msg),
       () => this.control({ type: 'files' }),
-      (image, mode) => {
-        if (mode === 'path') return this.insertPaste(saveImage(session, imageExtensions[image.mime], image.bytes))
-        if (!this.imagesEnabled) throw Error('This agent does not accept images. Use “Paste image as file path”.')
-        if (image.bytes.length > chatHost.maxImageBytes)
-          throw Error('Inline images must fit within 5 MiB. Use “Paste image as file path” for larger images.')
-        if (this.draftImages.length >= chatHost.maxFiles)
-          throw Error(`Attach at most ${chatHost.maxFiles} images per prompt.`)
-        const stored = new StoredFile(session, 'clipboard.' + imageExtensions[image.mime], 'received')
-        try {
-          stored.write(image.bytes)
-          this.draftImages.push(stored)
-        } catch (error) {
-          stored.abort()
-          throw error
-        }
-        this.refreshPrompt()
-      },
+      (image, mode) =>
+        pasteChatImage(image, mode, {
+          imagesEnabled: this.imagesEnabled,
+          draftCount: this.draftImages.length,
+          attach: item => {
+            const stored = new StoredFile(session, 'clipboard.' + imageExtensions[item.mime], 'received')
+            try {
+              stored.write(item.bytes)
+              this.draftImages.push(stored)
+            } catch (error) {
+              stored.abort()
+              throw error
+            }
+            this.refreshPrompt()
+          },
+          pastePath: item => this.insertPaste(saveImage(session, imageExtensions[item.mime], item.bytes)),
+        }),
     )
     this.editorOutput.columns = cols
     this.editor.on('line', line => {

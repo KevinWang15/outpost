@@ -529,7 +529,7 @@ export class TerminalSocket {
   }
 
   /** Upload independently of interactive input, then paste into this attachment only. */
-  async pasteImage(file: File, mode: ImagePasteMode = 'attachment') {
+  async pasteImage(file: File, mode: ImagePasteMode = 'attachment'): Promise<ImagePasteMode> {
     if (!this.connected) throw new Error('Connect the terminal before attaching an image.')
     if (this.upload) throw new Error('Wait for the previous image to finish.')
     const socket = this.socket
@@ -539,13 +539,32 @@ export class TerminalSocket {
       () => controller.abort(new Error('Image upload timed out. Try attaching it again.')),
       150_000,
     )
-    try {
+    const send = async (requested: ImagePasteMode): Promise<ImagePasteMode> => {
       const transfer = await this.uploadOnSocket(file, controller.signal)
       controller.signal.throwIfAborted()
       if (!this.connected || this.socket !== socket)
         throw new Error('The terminal changed before the image was pasted. Attach it again.')
-      const result = await this.request({ type: 'image-paste', id: crypto.randomUUID(), transfer, mode })
+      const result = await this.request({ type: 'image-paste', id: crypto.randomUUID(), transfer, mode: requested })
       if (!result.ok) throw new Error(result.message)
+      return result.mode === 'attachment' || result.mode === 'path' ? result.mode : requested
+    }
+    try {
+      try {
+        return await send(mode)
+      } catch (error) {
+        // Older machine binaries reject unsupported attachment modes instead of
+        // falling back internally; retry once as a file path on the same socket.
+        if (
+          mode === 'attachment' &&
+          error instanceof Error &&
+          /Use [“"]Paste image as file path[”"]/.test(error.message) &&
+          !controller.signal.aborted &&
+          this.connected &&
+          this.socket === socket
+        )
+          return await send('path')
+        throw error
+      }
     } finally {
       clearTimeout(timeout)
       if (this.upload === controller) this.upload = null

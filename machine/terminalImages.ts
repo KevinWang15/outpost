@@ -56,7 +56,7 @@ export class TerminalImages {
     upload.timer.refresh()
   }
 
-  async paste(transfer: unknown, consume: (image: TerminalImage) => void | Promise<void>) {
+  async paste<T>(transfer: unknown, consume: (image: TerminalImage) => T | Promise<T>): Promise<T> {
     const upload = this.upload
     if (this.pasting || !upload || upload.transfer !== transfer || upload.offset !== upload.bytes.length)
       throw new Error('This image is incomplete or expired. Paste it again.')
@@ -68,7 +68,7 @@ export class TerminalImages {
       const mime = sniffMediaType(upload.bytes)
       if (mime === 'application/octet-stream' || mime !== upload.mime)
         throw new Error('The image contents do not match its format.')
-      await consume({ mime, bytes: upload.bytes })
+      return await consume({ mime, bytes: upload.bytes })
     } finally {
       this.pasting = false
       reserved -= upload.bytes.length

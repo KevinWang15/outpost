@@ -198,6 +198,9 @@ export class Connection {
         message.chunk.length <= 4 * Math.ceil(terminalFileChunk / 3)
           ? { chunk: message.chunk }
           : {}),
+        ...(transfer === 'image-paste' && (message.mode === 'attachment' || message.mode === 'path')
+          ? { mode: message.mode }
+          : {}),
       })
     } else if (message.type === 'signal' && typeof message.id === 'string') {
       const reply = (ok: boolean, text?: string) =>

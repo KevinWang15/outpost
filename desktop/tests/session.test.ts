@@ -184,6 +184,9 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
             })
         }
         if (m.type === 'resize') send({ type: 'geometry', cols: m.cols, rows: m.rows })
+        if (m.type === 'image-write') send({ type: 'result', id: m.id, ok: true })
+        if (m.type === 'image-paste')
+          send({ type: 'result', id: m.id, ok: true, mode: m.mode === 'attachment' ? 'path' : m.mode })
       }
     })
   })
@@ -291,6 +294,9 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
   await wait(e => e.event === 'fileSaved')
   assert.deepEqual(await readFile(path), png)
   assert.equal(reads, completedReads, 'Save uses the bytes already fetched for preview')
+  cmd({ op: 'image', pane, mime: 'image/png', data: png.toString('base64'), mode: 'attachment' })
+  const imageNotice = await wait(e => e.event === 'notice')
+  assert.equal(imageNotice.message, 'Image path pasted')
   assert.match(restored, /restored history/)
   assert.match(restored, /wide 界/)
   assert.match(restored, /alt screen/)

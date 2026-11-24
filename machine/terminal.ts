@@ -20,8 +20,8 @@ import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/ter
 import { isUserInput, TerminalActivity } from './activity'
 import { imageExtensions } from '../shared/images'
 import { saveImage } from './files'
-import { openTerminalClipboard, unavailableClipboard } from './terminalClipboard'
-import { TerminalFileRequests } from './terminalFileRequests'
+import { openTerminalClipboard } from './terminalClipboard'
+import { pasteTerminalImage, TerminalFileRequests } from './terminalFileRequests'
 import { TerminalAttachment } from './attachment'
 import { Deliveries } from './delivery'
 import { endTree } from './drivers'
@@ -302,26 +302,23 @@ export async function serveTerminal() {
       record.id,
       message => clients.get(socket)?.attachment.output(terminalControl(message)),
       () => broadcast(terminalControl({ type: 'files' })),
-      async (image, mode, signal) => {
-        if (childExited || ended) throw new Error('The coding tool exited.')
-        if (mode === 'path') {
-          const path = saveImage(record.id, imageExtensions[image.mime], image.bytes)
-          write(term.modes.bracketedPasteMode ? `\x1b[200~${path}\x1b[201~` : path)
-          deliveries.input(path)
-          activity.input()
-          return
-        }
-        if (!supportsClipboard)
-          throw new Error('This tool has no supported clipboard shortcut. Use “Paste image as file path”.')
-        if (!clipboard) throw new Error(unavailableClipboard)
-        await clipboard.paste(image, signal, () => {
-          if (childExited || ended) throw new Error('The coding tool exited.')
-          if (held) throw new Error('The agent is receiving a message. Paste again in a moment.')
-          write('\x16')
-          activity.input()
-          deliveries.input('image')
-        })
-      },
+      (image, mode, signal) =>
+        pasteTerminalImage(image, mode, signal, {
+          exited: () => childExited || ended,
+          held: () => Boolean(held),
+          clipboard,
+          sendKey: () => {
+            write('\x16')
+            activity.input()
+            deliveries.input('image')
+          },
+          pastePath: item => {
+            const path = saveImage(record.id, imageExtensions[item.mime], item.bytes)
+            write(term.modes.bracketedPasteMode ? `\x1b[200~${path}\x1b[201~` : path)
+            deliveries.input(path)
+            activity.input()
+          },
+        }),
     )
     socket.once('close', () => files.close())
     socket.setTimeout(10_000, () => socket.destroy())

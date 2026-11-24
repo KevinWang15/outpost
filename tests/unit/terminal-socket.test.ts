@@ -390,7 +390,59 @@ test('image bytes, their acknowledgement and a single paste use the same termina
   assert.equal(insertions[0].mode, 'attachment')
   assert.equal(insertions[0].transfer, socket.requests().find(m => m.type === 'image-write').transfer)
   socket.message({ type: 'result', id: insertions[0].id, ok: true })
-  await pasted
+  assert.equal(await pasted, 'attachment')
+})
+
+test('image paste returns the effective mode reported by the machine', async t => {
+  const { client, socket } = setup(t)
+  readyForImages(socket)
+  const pasted = client.pasteImage(screenshot())
+  await new Promise<void>(resolve => setImmediate(resolve))
+  const write = socket.requests().find(m => m.type === 'image-write')
+  socket.message({ type: 'result', id: write.id, ok: true })
+  await settle()
+  const paste = socket.requests().find(m => m.type === 'image-paste')
+  assert.equal(paste.mode, 'attachment')
+  socket.message({ type: 'result', id: paste.id, ok: true, mode: 'path' })
+  assert.equal(await pasted, 'path')
+})
+
+test('image paste falls back to file path when an older machine rejects attachment mode', async t => {
+  const { client, socket } = setup(t)
+  readyForImages(socket)
+  const pasted = client.pasteImage(screenshot())
+  await new Promise<void>(resolve => setImmediate(resolve))
+  const firstWrite = socket.requests().filter(m => m.type === 'image-write')[0]
+  socket.message({ type: 'result', id: firstWrite.id, ok: true })
+  await settle()
+  const firstPaste = socket.requests().filter(m => m.type === 'image-paste')[0]
+  assert.equal(firstPaste.mode, 'attachment')
+  socket.message({
+    type: 'result',
+    id: firstPaste.id,
+    ok: false,
+    message: 'This tool has no supported clipboard shortcut. Use “Paste image as file path”.',
+  })
+  await new Promise<void>(resolve => setImmediate(resolve))
+  const secondWrite = socket.requests().filter(m => m.type === 'image-write')[1]
+  assert.ok(secondWrite)
+  socket.message({ type: 'result', id: secondWrite.id, ok: true })
+  await settle()
+  const secondPaste = socket.requests().filter(m => m.type === 'image-paste')[1]
+  assert.equal(secondPaste.mode, 'path')
+  socket.message({ type: 'result', id: secondPaste.id, ok: true })
+  assert.equal(await pasted, 'path')
+
+  // Operational errors do not silently retry as a file path.
+  const failed = client.pasteImage(screenshot())
+  await new Promise<void>(resolve => setImmediate(resolve))
+  const thirdWrite = socket.requests().filter(m => m.type === 'image-write')[2]
+  socket.message({ type: 'result', id: thirdWrite.id, ok: true })
+  await settle()
+  const thirdPaste = socket.requests().filter(m => m.type === 'image-paste')[2]
+  socket.message({ type: 'result', id: thirdPaste.id, ok: false, message: 'The coding tool exited.' })
+  await assert.rejects(failed, /coding tool exited/)
+  assert.equal(socket.requests().filter(m => m.type === 'image-paste').length, 3)
 })
 
 test('a disconnected image upload cannot paste into a replacement attachment', async t => {

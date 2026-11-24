@@ -275,13 +275,19 @@ Xvfb display with TCP disabled. A GTK selection owner offers the image on that
 display and the worker sends Ctrl+V to the agent. Success requires a request for
 pixels. Listing clipboard formats alone does not acknowledge delivery. The owner
 serves repeat reads briefly, releases expired data, and exits when the worker
-closes its pipe. Missing clipboard software leaves the terminal usable. The
-explicit file-path action stores a machine-local image and inserts its path.
+closes its pipe. Missing clipboard software leaves the terminal usable: when the
+tool or machine cannot accept a native clipboard paste, `image-paste`
+automatically falls back to storing a machine-local image and inserting its
+path. The explicit file-path action always stores a machine-local image and
+inserts its path.
 
 An ACP terminal stages image files privately in the viewer's draft. Backspace on an
 empty line removes an image. Cancelling or disconnecting discards the draft's
 files. Enter commits the files and submits their IDs with the text through the same prompt path as Chat.
-The chat host sends image content when the agent advertises that capability.
+The chat host sends image content when the agent advertises that capability;
+when the agent does not accept inline images or an image exceeds 5 MiB,
+`image-paste` automatically falls back to storing a machine-local image and
+inserting its path.
 Local Desktop panes use normal text paste and forward the application's own
 clipboard key.
 
@@ -1138,7 +1144,7 @@ current conversation.
 | Activity | `~/.outpost/activity/<session>.json` |
 | Messages waiting for a terminal | `~/.outpost/deliveries/<session>.json` |
 | Event log (activity changes, driver starts and exits) | `~/.outpost/events/events.ndjson`, rotated once at 4 MiB to `events.1.ndjson` |
-| Explicit image file-path pastes | `~/.outpost/clipboard/<session>/` (newest 20) |
+| Image file-path pastes (explicit and fallback) | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Session files | `~/.outpost/files/<session>/<file-id>/` (`metadata.json`, `content/<name>`) |
 | Kimi Code plugin | `~/.outpost/integrations/kimi/` |
 | Antigravity CLI plugin | `~/.outpost/integrations/antigravity/` |

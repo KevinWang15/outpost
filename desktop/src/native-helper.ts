@@ -516,8 +516,11 @@ async function handle(c: Cmd) {
     case 'deliver':
       return p.socket.deliverNow()
     case 'image': {
-      await p.socket.pasteImage(new File([Buffer.from(c.data, 'base64')], 'clipboard', { type: c.mime }), c.mode)
-      emit('notice', { pane: c.pane, message: c.mode === 'path' ? 'Image path pasted' : 'Image attached' })
+      const pasted = await p.socket.pasteImage(
+        new File([Buffer.from(c.data, 'base64')], 'clipboard', { type: c.mime }),
+        c.mode,
+      )
+      emit('notice', { pane: c.pane, message: pasted === 'path' ? 'Image path pasted' : 'Image attached' })
       return
     }
     case 'files': {

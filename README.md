@@ -308,9 +308,11 @@ type your question and press Enter when you are ready.
 
 On Debian or Ubuntu, install the optional native clipboard dependencies with
 `sudo apt install xvfb xauth xclip python3-gi gir1.2-gtk-3.0` and restart the
-agent session. The virtual display accepts local connections only. For tools or
-machines without clipboard support, choose **Paste image as file path** in
-terminal actions. This explicitly saves a file on the machine and inserts its path.
+agent session. The virtual display accepts local connections only. When a tool
+or machine does not support direct image paste (or an inline chat image exceeds
+5 MiB), pasting an image automatically falls back to saving it on the machine
+and inserting its file path. You can also choose **Paste image as file path**
+in terminal actions to always insert a file path.
 
 In a **local terminal** on macOS, ⌘V pastes text and Ctrl+V goes to the foreground
 program. A local coding tool can read the same system clipboard as other Mac

@@ -3,6 +3,39 @@ import { validFileRead, validImagePaste, type ImagePaste, type ImagePasteMode } 
 import { listFiles, readFileChunk, removeFile } from './files'
 import { TerminalImages, type TerminalImage } from './terminalImages'
 
+export interface TerminalClipboard {
+  paste(image: TerminalImage, signal: AbortSignal, sendKey: () => void): Promise<boolean>
+}
+
+/** Prefer the tool's dedicated clipboard paste when available; fall back to a file path otherwise. */
+export async function pasteTerminalImage(
+  image: TerminalImage,
+  mode: ImagePasteMode,
+  signal: AbortSignal,
+  options: {
+    exited: () => boolean
+    held: () => boolean
+    clipboard: TerminalClipboard | null
+    sendKey: () => void
+    pastePath: (image: TerminalImage) => void
+  },
+): Promise<ImagePasteMode> {
+  if (options.exited()) throw new Error('The coding tool exited.')
+  const fallbackToPath = (): ImagePasteMode => {
+    signal.throwIfAborted()
+    if (options.exited()) throw new Error('The coding tool exited.')
+    options.pastePath(image)
+    return 'path'
+  }
+  if (mode === 'path' || !options.clipboard) return fallbackToPath()
+  const delivered = await options.clipboard.paste(image, signal, () => {
+    if (options.exited()) throw new Error('The coding tool exited.')
+    if (options.held()) throw new Error('The agent is receiving a message. Paste again in a moment.')
+    options.sendKey()
+  })
+  return delivered ? 'attachment' : fallbackToPath()
+}
+
 /** File and clipboard requests have the same limits on every terminal attachment. */
 export class TerminalFileRequests {
   private images = new TerminalImages()
@@ -12,7 +45,11 @@ export class TerminalFileRequests {
     private session: string,
     private send: (message: object) => void,
     private changed: () => void,
-    private paste: (image: TerminalImage, mode: ImagePasteMode, signal: AbortSignal) => void | Promise<void>,
+    private paste: (
+      image: TerminalImage,
+      mode: ImagePasteMode,
+      signal: AbortSignal,
+    ) => ImagePasteMode | void | Promise<ImagePasteMode | void>,
   ) {}
 
   close() {
@@ -42,7 +79,7 @@ export class TerminalFileRequests {
         void this.images
           .paste(request.transfer, image => this.paste(image, request.mode, this.lifetime.signal))
           .then(
-            () => ok(),
+            mode => ok({ mode: mode ?? request.mode }),
             error => fail((error as Error).message),
           )
         break

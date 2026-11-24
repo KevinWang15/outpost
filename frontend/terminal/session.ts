@@ -223,8 +223,8 @@ export class TerminalSession {
     this.imageBusy = true
     this.notice('Uploading image…', true)
     try {
-      await this.connection.pasteImage(file, mode)
-      this.notice(mode === 'path' ? 'Image path pasted' : 'Image attached')
+      const pasted = await this.connection.pasteImage(file, mode)
+      this.notice(pasted === 'path' ? 'Image path pasted' : 'Image attached')
     } catch (error) {
       this.notice((error as Error).message)
     } finally {

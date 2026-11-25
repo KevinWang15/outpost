@@ -16,11 +16,156 @@ use anyhow::Result;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use gpui::{prelude::*, *};
 use serde_json::json;
-use std::{cell::RefCell, ops::Range, path::Path, rc::Rc};
+use std::{
+    cell::RefCell,
+    ops::{Range, RangeInclusive},
+    path::Path,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 pub(super) const DEFAULT_HISTORY: usize = 10_000;
 // Alacritty indexes lines with i32 and adds the viewport height when reflowing.
 pub(super) const MAX_HISTORY: usize = i32::MAX as usize - 200;
+pub const MAX_SEARCH_MATCHES: usize = 10_000;
+const SEARCH_CHUNK_LINES: i32 = 4_096;
+const SEARCH_MATCH_BG: u32 = 0x5c4616;
+const SEARCH_ACTIVE_BG: u32 = 0xe09f1f;
+const SEARCH_ACTIVE_FG: u32 = 0x0c0c0c;
+
+const PANE_RIGHT_MARGIN: f32 = 5.0;
+const SCROLLBAR_HIT_REST_W: f32 = 12.0;
+const SCROLLBAR_HIT_HOVER_W: f32 = 14.0;
+const SCROLLBAR_TRACK_W: f32 = 14.0;
+const SCROLLBAR_THUMB_IDLE_W: f32 = 4.0;
+const SCROLLBAR_THUMB_ACTIVE_W: f32 = 6.0;
+const SCROLLBAR_THUMB_HOVER_W: f32 = 8.0;
+const SCROLLBAR_THUMB_RIGHT_PAD: f32 = 3.0;
+const SCROLLBAR_PAD_Y: f32 = 2.0;
+const SCROLLBAR_MIN_THUMB_H: f32 = 28.0;
+const SCROLLBAR_HOLD_MS: u64 = 1_000;
+const SCROLLBAR_FADE_MS: f32 = 260.0;
+const SCROLLBAR_HOVER_MS: f32 = 110.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ScrollbarGeometry {
+    track_top: f32,
+    track_h: f32,
+    thumb_top: f32,
+    thumb_h: f32,
+    max_travel: f32,
+    history: usize,
+    screen_lines: usize,
+    display_offset: usize,
+}
+
+impl ScrollbarGeometry {
+    fn compute(
+        bounds_top: f32,
+        bounds_h: f32,
+        history: usize,
+        screen_lines: usize,
+        display_offset: usize,
+    ) -> Option<Self> {
+        if history == 0 || screen_lines == 0 || bounds_h < 16.0 {
+            return None;
+        }
+        let track_top = bounds_top + SCROLLBAR_PAD_Y;
+        let track_h = (bounds_h - 2.0 * SCROLLBAR_PAD_Y).max(1.0);
+        let total_lines = (history + screen_lines) as f32;
+        let raw_thumb_h = (screen_lines as f32 / total_lines) * track_h;
+        let thumb_h = raw_thumb_h.clamp(SCROLLBAR_MIN_THUMB_H.min(track_h), track_h);
+        let max_travel = (track_h - thumb_h).max(0.0);
+        let clamped_offset = display_offset.min(history);
+        let top_frac = 1.0 - (clamped_offset as f32 / history as f32);
+        let thumb_top = track_top + top_frac * max_travel;
+        Some(Self {
+            track_top,
+            track_h,
+            thumb_top,
+            thumb_h,
+            max_travel,
+            history,
+            screen_lines,
+            display_offset: clamped_offset,
+        })
+    }
+
+    fn offset_for_thumb_top(&self, thumb_top: f32) -> usize {
+        if self.max_travel <= 0.0 || self.history == 0 {
+            return 0;
+        }
+        let frac = ((thumb_top - self.track_top) / self.max_travel).clamp(0.0, 1.0);
+        ((1.0 - frac) * self.history as f32).round() as usize
+    }
+
+    fn contains_thumb_y(&self, y: f32) -> bool {
+        y >= self.thumb_top && y <= self.thumb_top + self.thumb_h
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScrollbarDrag {
+    grab_offset: f32,
+}
+
+#[derive(Default)]
+struct ScrollbarState {
+    hovered: bool,
+    hover_t: f32,
+    hover_anim_from: f32,
+    hover_anim_at: Option<Instant>,
+    drag: Option<ScrollbarDrag>,
+    activity_at: Option<Instant>,
+    fade_token: u64,
+}
+
+fn ease_out_cubic(t: f32) -> f32 {
+    let u = 1.0 - t.clamp(0.0, 1.0);
+    1.0 - u * u * u
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t.clamp(0.0, 1.0)
+}
+
+fn white_alpha(alpha: f32) -> Rgba {
+    let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+    rgba(0xffffff00 | a)
+}
+
+fn black_alpha(alpha: f32) -> Rgba {
+    let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+    rgba(a)
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SearchOptions {
+    pub case_sensitive: bool,
+    pub regex: bool,
+    pub whole_word: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchStatus {
+    pub total: usize,
+    pub active: Option<usize>,
+    pub truncated: bool,
+    pub invalid_regex: bool,
+}
+
+#[derive(Default)]
+struct SearchState {
+    active: bool,
+    query: String,
+    options: SearchOptions,
+    matches: Vec<RangeInclusive<CellPoint>>,
+    current: Option<usize>,
+    truncated: bool,
+    invalid_regex: bool,
+    dirty: bool,
+    anchor: Option<CellPoint>,
+}
 
 pub const FAMILY: &str = if cfg!(target_os = "macos") {
     "Menlo"
@@ -115,6 +260,8 @@ pub struct Pane {
     scroll_remainder: f32,
     pending_copy: Option<String>,
     marked: String,
+    search: SearchState,
+    scrollbar: ScrollbarState,
 }
 pub struct PasteError(pub String);
 impl EventEmitter<PasteError> for Pane {}
@@ -251,6 +398,8 @@ impl Pane {
             scroll_remainder: 0.0,
             pending_copy: None,
             marked: String::new(),
+            search: SearchState::default(),
+            scrollbar: ScrollbarState::default(),
         }
     }
     pub fn bind_focus(&mut self, w: &mut Window, cx: &mut Context<Self>) {
@@ -273,6 +422,9 @@ impl Pane {
     }
     pub fn feed(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         self.parser.advance(&mut self.term, bytes);
+        if self.search.active {
+            self.search.dirty = true;
+        }
         let events = std::mem::take(&mut *self.events.0.borrow_mut());
         let local = matches!(self.transport, Transport::Local { .. });
         for e in events {
@@ -335,7 +487,10 @@ impl Pane {
         self.term.resize(SizeHint {
             cols: cols.clamp(2, 400),
             rows: rows.clamp(2, 200),
-        })
+        });
+        if self.search.active {
+            self.search.dirty = true;
+        }
     }
     pub fn set_scrollback(&mut self, lines: usize) {
         if self.scrollback == lines {
@@ -349,12 +504,16 @@ impl Pane {
             scrolling_history: lines,
             ..Config::default()
         });
+        if self.search.active {
+            self.search.dirty = true;
+        }
     }
     pub fn reset(&mut self, cols: u16, rows: u16) {
         self.grid_visible = false;
         self.pending_copy = None;
         self.last_mouse_motion = None;
         self.scroll_remainder = 0.0;
+        self.scrollbar = ScrollbarState::default();
         self.term = Term::new(
             Config {
                 scrolling_history: self.scrollback,
@@ -363,7 +522,13 @@ impl Pane {
             &SizeHint { cols, rows },
             self.events.clone(),
         );
-        self.parser = Default::default()
+        self.parser = Default::default();
+        if self.search.active {
+            self.search.matches.clear();
+            self.search.current = None;
+            self.search.truncated = false;
+            self.search.dirty = true;
+        }
     }
     pub fn clear_screen(&mut self, remote: bool, cx: &mut Context<Self>) {
         if remote && matches!(self.transport, Transport::Remote(..)) {
@@ -377,6 +542,9 @@ impl Pane {
         self.term.grid_mut()[Line(0)] = line;
         self.term.grid_mut().cursor.point.column = saved.point.column;
         self.term.selection = None;
+        if self.search.active {
+            self.search.dirty = true;
+        }
     }
     pub fn focus_terminal(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(w, cx);
@@ -435,7 +603,11 @@ impl Pane {
         }
     }
     fn user_write(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
+        let was_scrolled = self.term.grid().display_offset() > 0;
         self.term.scroll_display(Scroll::Bottom);
+        if was_scrolled {
+            self.note_scroll_activity(cx);
+        }
         self.term.selection = None;
         self.write(bytes, cx);
         cx.notify()
@@ -516,56 +688,309 @@ impl Pane {
             .collect::<Vec<_>>()
             .join("\n")
     }
-    pub fn find(&mut self, query: &str, next: bool, cx: &mut Context<Self>) {
-        use alacritty_terminal::{index::Direction, term::search::RegexSearch};
-        if query.is_empty() {
+    pub fn selected_string(&self) -> Option<String> {
+        self.term.selection_to_string().filter(|s| !s.is_empty())
+    }
+    pub fn search_status(&self) -> SearchStatus {
+        SearchStatus {
+            total: self.search.matches.len(),
+            active: self.search.current,
+            truncated: self.search.truncated,
+            invalid_regex: self.search.invalid_regex,
+        }
+    }
+    pub fn set_search(
+        &mut self,
+        query: &str,
+        options: SearchOptions,
+        reset_anchor: bool,
+        cx: &mut Context<Self>,
+    ) -> SearchStatus {
+        self.search.active = true;
+        self.search.query = query.to_owned();
+        self.search.options = options;
+        if reset_anchor || self.search.anchor.is_none() {
+            self.search.anchor = Some(self.viewport_bottom_point());
+        }
+        if self.recompute_search(true) {
+            self.note_scroll_activity(cx);
+        }
+        cx.notify();
+        self.search_status()
+    }
+    pub fn clear_search(&mut self, cx: &mut Context<Self>) {
+        if !self.search.active && self.search.matches.is_empty() && !self.search.invalid_regex {
             return;
         }
-        let pattern = query
-            .chars()
-            .map(|c| {
-                if ".+*?()[]{}^$|\\".contains(c) {
-                    format!("\\{c}")
+        self.search = SearchState::default();
+        cx.notify();
+    }
+    pub fn refresh_search_if_dirty(&mut self) -> bool {
+        if !self.search.active || !self.search.dirty {
+            return false;
+        }
+        self.recompute_search(false);
+        true
+    }
+    pub fn step_search(&mut self, next: bool, cx: &mut Context<Self>) -> bool {
+        if !self.search.active {
+            return false;
+        }
+        self.refresh_search_if_dirty();
+        let len = self.search.matches.len();
+        if len == 0 {
+            return false;
+        }
+        let next_idx = match self.search.current {
+            Some(i) if next => (i + 1) % len,
+            Some(i) => {
+                if i == 0 {
+                    len - 1
                 } else {
-                    c.to_string()
+                    i - 1
                 }
-            })
-            .collect::<String>();
-        let Ok(mut search) = RegexSearch::new(&pattern) else {
-            return;
+            }
+            None if next => 0,
+            None => len - 1,
         };
-        let direction = if next {
-            Direction::Right
-        } else {
-            Direction::Left
-        };
-        let origin = self
+        self.search.current = Some(next_idx);
+        let m = self.search.matches[next_idx].clone();
+        self.search.anchor = Some(*m.start());
+        if self.scroll_to_match(&m) {
+            self.note_scroll_activity(cx);
+        }
+        cx.notify();
+        true
+    }
+    /// Select the active search match into the terminal selection and copy it.
+    #[cfg(feature = "ui-tests")]
+    pub fn select_active_match(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        self.refresh_search_if_dirty();
+        let idx = self.search.current?;
+        let m = self.search.matches.get(idx)?.clone();
+        let mut sel = Selection::new(SelectionType::Simple, *m.start(), Side::Left);
+        sel.update(*m.end(), Side::Right);
+        self.term.selection = Some(sel);
+        let text = self.term.selection_to_string().filter(|s| !s.is_empty())?;
+        self.pending_copy = None;
+        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+        cx.notify();
+        Some(text)
+    }
+    /// iTerm2-style Tab / Shift+Tab: select the active match, or extend the selection
+    /// by one word forward (`forward = true`) or backward (`forward = false`), copying it.
+    pub fn extend_search_selection(
+        &mut self,
+        forward: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        self.refresh_search_if_dirty();
+        let idx = self.search.current?;
+        let m = self.search.matches.get(idx)?.clone();
+        let (mut start, mut end) = self
             .term
             .selection
             .as_ref()
             .and_then(|s| s.to_range(&self.term))
-            .map(|r| {
-                if next {
-                    r.end
-                        .add(&self.term, alacritty_terminal::index::Boundary::Grid, 1)
-                } else {
-                    r.start
-                        .sub(&self.term, alacritty_terminal::index::Boundary::Grid, 1)
-                }
-            })
-            .unwrap_or(CellPoint::new(
-                Line(-(self.term.grid().display_offset() as i32)),
-                Column(0),
-            ));
-        if let Some(found) = self
+            .filter(|r| r.start <= *m.start() && r.end >= *m.end())
+            .map(|r| (r.start, r.end))
+            .unwrap_or((*m.start(), *m.end()));
+
+        let already_selected = self
             .term
-            .search_next(&mut search, origin, direction, Side::Left, None)
-        {
-            let mut sel = Selection::new(SelectionType::Simple, *found.start(), Side::Left);
-            sel.update(*found.end(), Side::Right);
-            self.term.scroll_to_point(*found.start());
-            self.term.selection = Some(sel);
-            cx.notify()
+            .selection
+            .as_ref()
+            .and_then(|s| s.to_range(&self.term))
+            .is_some_and(|r| r.start <= *m.start() && r.end >= *m.end());
+
+        if already_selected {
+            if forward {
+                end = next_word_end(&self.term, end);
+            } else {
+                start = prev_word_start(&self.term, start);
+            }
+        }
+        let mut sel = Selection::new(SelectionType::Simple, start, Side::Left);
+        sel.update(end, Side::Right);
+        self.term.selection = Some(sel);
+        let text = self.term.selection_to_string().filter(|s| !s.is_empty())?;
+        self.pending_copy = None;
+        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+        cx.notify();
+        Some(text)
+    }
+    #[cfg(feature = "ui-tests")]
+    pub fn active_match_text(&mut self) -> Option<String> {
+        self.refresh_search_if_dirty();
+        let idx = self.search.current?;
+        let m = self.search.matches.get(idx)?;
+        let mut sel = Selection::new(SelectionType::Simple, *m.start(), Side::Left);
+        sel.update(*m.end(), Side::Right);
+        let saved = self.term.selection.take();
+        self.term.selection = Some(sel);
+        let text = self.term.selection_to_string();
+        self.term.selection = saved;
+        text
+    }
+    fn viewport_bottom_point(&self) -> CellPoint {
+        let bottom_line = Line(
+            self.term.screen_lines() as i32 - 1 - self.term.grid().display_offset() as i32,
+        );
+        CellPoint::new(bottom_line.max(self.term.topmost_line()), self.term.last_column())
+    }
+    fn recompute_search(&mut self, scroll_to_result: bool) -> bool {
+        self.search.dirty = false;
+        let prev_active_start = self
+            .search
+            .current
+            .and_then(|i| self.search.matches.get(i))
+            .map(|m| *m.start());
+        let Some(pattern) = build_search_pattern(&self.search.query, self.search.options) else {
+            self.search.matches.clear();
+            self.search.current = None;
+            self.search.truncated = false;
+            self.search.invalid_regex = false;
+            return false;
+        };
+        let Ok(mut regex) = alacritty_terminal::term::search::RegexSearch::new(&pattern) else {
+            self.search.matches.clear();
+            self.search.current = None;
+            self.search.truncated = false;
+            self.search.invalid_regex = true;
+            return false;
+        };
+        self.search.invalid_regex = false;
+        let (matches, truncated) =
+            collect_search_matches(&self.term, &mut regex, self.search.options.whole_word);
+        self.search.matches = matches;
+        self.search.truncated = truncated;
+        if self.search.matches.is_empty() {
+            self.search.current = None;
+            return false;
+        }
+        let target = if scroll_to_result {
+            let anchor = self
+                .search
+                .anchor
+                .unwrap_or_else(|| self.viewport_bottom_point());
+            pick_nearest_match_upward(&self.search.matches, anchor)
+        } else if let Some(prev) = prev_active_start {
+            pick_nearest_match_upward(&self.search.matches, prev)
+        } else {
+            self.search.matches.len() - 1
+        };
+        self.search.current = Some(target);
+        if scroll_to_result {
+            let m = self.search.matches[target].clone();
+            return self.scroll_to_match(&m);
+        }
+        false
+    }
+    fn scroll_to_match(&mut self, m: &RangeInclusive<CellPoint>) -> bool {
+        let screen_lines = self.term.screen_lines() as i32;
+        if screen_lines <= 0 {
+            return false;
+        }
+        let history = self.term.history_size() as i32;
+        let offset = self.term.grid().display_offset() as i32;
+        let line = m.start().line.0;
+        let row = line + offset;
+        let top_pad = 2.min(screen_lines / 3);
+        let bot_pad = 1.min(screen_lines / 4);
+        if row < top_pad || row >= screen_lines - bot_pad {
+            let center = (screen_lines / 2).max(top_pad);
+            let target_offset = (center - line).clamp(0, history);
+            let delta = target_offset - offset;
+            if delta != 0 {
+                self.term.scroll_display(Scroll::Delta(delta));
+                return true;
+            }
+        }
+        false
+    }
+    fn scrollbar_visible(&self) -> bool {
+        !self.term.mode().contains(TermMode::ALT_SCREEN) && self.term.history_size() > 0
+    }
+    fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {
+        if !self.scrollbar_visible() {
+            return None;
+        }
+        ScrollbarGeometry::compute(
+            f32::from(self.bounds.top()),
+            f32::from(self.bounds.size.height),
+            self.term.history_size(),
+            self.term.screen_lines(),
+            self.term.grid().display_offset(),
+        )
+    }
+    fn scrollbar_hit_contains(&self, pos: Point<Pixels>) -> bool {
+        if !self.scrollbar_visible() || f32::from(self.bounds.size.height) < 16.0 {
+            return false;
+        }
+        let hit_w = if self.scrollbar.hovered || self.scrollbar.drag.is_some() {
+            SCROLLBAR_HIT_HOVER_W
+        } else {
+            SCROLLBAR_HIT_REST_W
+        };
+        pos.x >= self.bounds.right() - px(hit_w)
+            && pos.x <= self.bounds.right()
+            && pos.y >= self.bounds.top()
+            && pos.y <= self.bounds.bottom()
+    }
+    fn set_display_offset(&mut self, target_offset: usize) -> bool {
+        let clamped = target_offset.min(self.term.history_size()) as i32;
+        let current = self.term.grid().display_offset() as i32;
+        let delta = clamped - current;
+        if delta != 0 {
+            self.term.scroll_display(Scroll::Delta(delta));
+            return true;
+        }
+        false
+    }
+    fn scroll_display_and_notify(&mut self, scroll: Scroll, cx: &mut Context<Self>) {
+        self.term.scroll_display(scroll);
+        self.note_scroll_activity(cx);
+        cx.notify();
+    }
+    fn set_scrollbar_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        let next = hovered && self.scrollbar_visible();
+        if self.scrollbar.hovered == next {
+            return;
+        }
+        self.scrollbar.hover_anim_from = self.scrollbar.hover_t;
+        self.scrollbar.hover_anim_at = Some(Instant::now());
+        self.scrollbar.hovered = next;
+        cx.notify();
+    }
+    fn note_scroll_activity(&mut self, cx: &mut Context<Self>) {
+        if !self.scrollbar_visible() {
+            return;
+        }
+        self.scrollbar.activity_at = Some(Instant::now());
+        self.scrollbar.fade_token = self.scrollbar.fade_token.wrapping_add(1);
+        let token = self.scrollbar.fade_token;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(SCROLLBAR_HOLD_MS))
+                .await;
+            let _ = this.update(cx, |s, cx| {
+                if s.scrollbar.fade_token == token {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+    #[cfg(feature = "ui-tests")]
+    pub fn find(&mut self, query: &str, next: bool, cx: &mut Context<Self>) {
+        if query.is_empty() {
+            self.clear_search(cx);
+            return;
+        }
+        if !self.search.active || self.search.query != query {
+            self.set_search(query, self.search.options, true, cx);
+        } else {
+            self.step_search(next, cx);
         }
     }
     fn layout(&mut self, b: Bounds<Pixels>, cx: &mut Context<Self>) {
@@ -577,7 +1002,8 @@ impl Pane {
             .map(|a| a.width)
             .unwrap_or(px(self.font_size * 0.61));
         self.cell = size(cw, px((self.font_size * 1.24).ceil()));
-        let cols = (b.size.width / cw).floor();
+        let usable_w = (b.size.width - px(PANE_RIGHT_MARGIN)).max(px(0.));
+        let cols = (usable_w / cw).floor();
         let rows = (b.size.height / self.cell.height).floor();
         if !cols.is_finite() || !rows.is_finite() || cols < 2. || rows < 2. {
             return;
@@ -929,9 +1355,247 @@ impl GlyphRun {
     }
 }
 
+fn escape_regex_literal(query: &str) -> String {
+    let mut out = String::with_capacity(query.len());
+    for c in query.chars() {
+        if "\\.+*?()|[]{}^$".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn build_search_pattern(query: &str, options: SearchOptions) -> Option<String> {
+    if query.is_empty() {
+        return None;
+    }
+    let core = if options.regex {
+        query.to_owned()
+    } else {
+        escape_regex_literal(query)
+    };
+    Some(if options.case_sensitive {
+        format!("(?-i:{core})")
+    } else {
+        format!("(?i:{core})")
+    })
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+fn primary_cell_char<T>(term: &Term<T>, point: CellPoint) -> char {
+    let cell = &term.grid()[point];
+    if cell.flags.contains(Flags::WIDE_CHAR_SPACER) && point.column > Column(0) {
+        term.grid()[CellPoint::new(point.line, point.column - 1)].c
+    } else {
+        cell.c
+    }
+}
+
+fn matches_whole_word<T>(term: &Term<T>, m: &RangeInclusive<CellPoint>) -> bool {
+    use alacritty_terminal::index::Direction;
+    let start = *m.start();
+    let end = *m.end();
+    let last_col = term.last_column();
+    let top_line = term.topmost_line();
+    let bottom_line = Line(term.screen_lines() as i32 - 1);
+
+    if is_word_char(primary_cell_char(term, start)) {
+        let prev = if start.column > Column(0) {
+            Some(CellPoint::new(start.line, start.column - 1))
+        } else if start.line > top_line
+            && term.grid()[start.line - 1i32][last_col]
+                .flags
+                .contains(Flags::WRAPLINE)
+        {
+            Some(CellPoint::new(start.line - 1i32, last_col))
+        } else {
+            None
+        };
+        if let Some(prev) = prev
+            && is_word_char(primary_cell_char(term, prev))
+        {
+            return false;
+        }
+    }
+
+    if is_word_char(primary_cell_char(term, end)) {
+        let right_edge = term.expand_wide(end, Direction::Right);
+        let next = if right_edge.column < last_col {
+            Some(CellPoint::new(right_edge.line, right_edge.column + 1))
+        } else if right_edge.line < bottom_line
+            && term.grid()[right_edge.line][last_col]
+                .flags
+                .contains(Flags::WRAPLINE)
+        {
+            Some(CellPoint::new(right_edge.line + 1i32, Column(0)))
+        } else {
+            None
+        };
+        if let Some(mut next) = next {
+            if term.grid()[next]
+                .flags
+                .contains(Flags::LEADING_WIDE_CHAR_SPACER)
+                && next.line < bottom_line
+            {
+                next = CellPoint::new(next.line + 1i32, Column(0));
+            }
+            if is_word_char(primary_cell_char(term, next)) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn collect_search_matches<T>(
+    term: &Term<T>,
+    regex: &mut alacritty_terminal::term::search::RegexSearch,
+    whole_word: bool,
+) -> (Vec<RangeInclusive<CellPoint>>, bool) {
+    use alacritty_terminal::{
+        index::{Boundary, Direction},
+        term::search::RegexIter,
+    };
+
+    let top_line = term.topmost_line();
+    let bottom_line = Line(term.screen_lines() as i32 - 1);
+    let last_col = term.last_column();
+    if bottom_line < top_line {
+        return (Vec::new(), false);
+    }
+
+    let mut chunk_end = CellPoint::new(bottom_line, last_col);
+    let mut chunks: Vec<Vec<RangeInclusive<CellPoint>>> = Vec::new();
+    let mut total = 0usize;
+    let mut truncated = false;
+
+    loop {
+        let raw_top = Line((chunk_end.line.0 - SEARCH_CHUNK_LINES + 1).max(top_line.0));
+        let chunk_start = term.line_search_left(CellPoint::new(raw_top, Column(0)));
+        let mut chunk_matches = Vec::new();
+        let mut last_end: Option<CellPoint> = None;
+
+        for m in RegexIter::new(chunk_start, chunk_end, Direction::Right, term, regex) {
+            if *m.start() > *m.end() || last_end.is_some_and(|prev| *m.start() <= prev) {
+                break;
+            }
+            last_end = Some(*m.end());
+            if !whole_word || matches_whole_word(term, &m) {
+                chunk_matches.push(m);
+            }
+        }
+
+        if total + chunk_matches.len() > MAX_SEARCH_MATCHES {
+            let keep = MAX_SEARCH_MATCHES.saturating_sub(total);
+            let drop_prefix = chunk_matches.len().saturating_sub(keep);
+            chunk_matches.drain(..drop_prefix);
+            total += chunk_matches.len();
+            if !chunk_matches.is_empty() {
+                chunks.push(chunk_matches);
+            }
+            truncated = true;
+            break;
+        }
+
+        total += chunk_matches.len();
+        if !chunk_matches.is_empty() {
+            chunks.push(chunk_matches);
+        }
+
+        if chunk_start.line <= top_line {
+            break;
+        }
+        chunk_end = chunk_start.sub(term, Boundary::Grid, 1);
+        if chunk_end >= chunk_start {
+            break;
+        }
+    }
+
+    let mut all = Vec::with_capacity(total);
+    for mut chunk in chunks.into_iter().rev() {
+        all.append(&mut chunk);
+    }
+    (all, truncated)
+}
+
+fn pick_nearest_match_upward(matches: &[RangeInclusive<CellPoint>], anchor: CellPoint) -> usize {
+    let idx = matches.partition_point(|m| *m.start() <= anchor);
+    if idx > 0 { idx - 1 } else { 0 }
+}
+
+fn next_word_end<T>(term: &Term<T>, current_end: CellPoint) -> CellPoint {
+    use alacritty_terminal::index::{Boundary, Direction};
+    let mut pt = term.expand_wide(current_end, Direction::Right);
+    let bottom = CellPoint::new(Line(term.screen_lines() as i32 - 1), term.last_column());
+    while pt < bottom {
+        let next = pt.add(term, Boundary::Grid, 1);
+        if next.line != pt.line
+            && !term.grid()[pt.line][term.last_column()]
+                .flags
+                .contains(Flags::WRAPLINE)
+        {
+            break;
+        }
+        let c = primary_cell_char(term, next);
+        if c.is_whitespace() {
+            pt = next;
+        } else {
+            pt = next;
+            // Extend through the contiguous non-whitespace token.
+            let right = term.semantic_search_right(pt);
+            if right >= pt {
+                pt = right;
+            }
+            break;
+        }
+    }
+    pt
+}
+
+fn prev_word_start<T>(term: &Term<T>, current_start: CellPoint) -> CellPoint {
+    use alacritty_terminal::index::Boundary;
+    let mut pt = current_start;
+    let top = CellPoint::new(term.topmost_line(), Column(0));
+    while pt > top {
+        let prev = pt.sub(term, Boundary::Grid, 1);
+        if prev.line != pt.line
+            && !term.grid()[prev.line][term.last_column()]
+                .flags
+                .contains(Flags::WRAPLINE)
+        {
+            break;
+        }
+        let c = primary_cell_char(term, prev);
+        if c.is_whitespace() {
+            pt = prev;
+        } else {
+            pt = prev;
+            let left = term.semantic_search_left(pt);
+            if left <= pt {
+                pt = left;
+            }
+            break;
+        }
+    }
+    pt
+}
+
+fn match_contains_cell(m: &RangeInclusive<CellPoint>, point: CellPoint, wide: bool) -> bool {
+    let contains = |p: CellPoint| p >= *m.start() && p <= *m.end();
+    contains(point) || (wide && contains(CellPoint::new(point.line, point.column + 1)))
+}
+
 fn plan_draw_runs(
     view: alacritty_terminal::term::RenderableContent<'_>,
     focused: bool,
+    search_matches: &[RangeInclusive<CellPoint>],
+    active_match: Option<&RangeInclusive<CellPoint>>,
+    screen_lines: usize,
 ) -> (Vec<BgRun>, Vec<GlyphRun>) {
     let cursor = view.cursor.point;
     let block_cursor = focused && view.cursor.shape == CursorShape::Block;
@@ -939,6 +1603,17 @@ fn plan_draw_runs(
     let mut glyphs = Vec::new();
     let mut pending_bg: Option<BgRun> = None;
     let mut pending_glyph: Option<GlyphRun> = None;
+
+    let visible_top = Line(-(view.display_offset as i32));
+    let visible_bottom = Line(screen_lines as i32 - 1 - view.display_offset as i32);
+    let visible_matches = if search_matches.is_empty() {
+        &[][..]
+    } else {
+        let lo = search_matches.partition_point(|m| m.end().line < visible_top);
+        let hi = search_matches.partition_point(|m| m.start().line <= visible_bottom);
+        &search_matches[lo.min(hi)..hi]
+    };
+    let mut match_cursor = 0usize;
 
     let push_bg = |pending: &mut Option<BgRun>, out: &mut Vec<BgRun>, row, col, width, color| {
         if color == colors::BG {
@@ -1008,14 +1683,35 @@ fn plan_draw_runs(
         if cell.flags.contains(Flags::INVERSE) {
             std::mem::swap(&mut fg, &mut bg)
         }
+        let wide = cell.flags.contains(Flags::WIDE_CHAR);
         let selected = view.selection.is_some_and(|s| {
             s.contains(item.point)
-                || (cell.flags.contains(Flags::WIDE_CHAR)
-                    && s.contains(CellPoint::new(item.point.line, item.point.column + 1)))
+                || (wide && s.contains(CellPoint::new(item.point.line, item.point.column + 1)))
         });
+        while match_cursor < visible_matches.len()
+            && *visible_matches[match_cursor].end() < item.point
+        {
+            match_cursor += 1;
+        }
+        let in_search_match = visible_matches
+            .get(match_cursor)
+            .is_some_and(|m| match_contains_cell(m, item.point, wide))
+            || (wide
+                && visible_matches
+                    .get(match_cursor + 1)
+                    .is_some_and(|m| match_contains_cell(m, item.point, wide)));
+        let in_active_match = active_match.is_some_and(|m| match_contains_cell(m, item.point, wide));
         if selected {
             bg = 0x2b4c7e;
             if cell.flags.contains(Flags::INVERSE) {
+                fg = colors::FG;
+            }
+        } else if in_active_match {
+            bg = SEARCH_ACTIVE_BG;
+            fg = SEARCH_ACTIVE_FG;
+        } else if in_search_match {
+            bg = SEARCH_MATCH_BG;
+            if cell.flags.contains(Flags::INVERSE) || fg == bg {
                 fg = colors::FG;
             }
         }
@@ -1023,11 +1719,7 @@ fn plan_draw_runs(
             fg = colors::BG;
             bg = colors::FG;
         }
-        let width = if cell.flags.contains(Flags::WIDE_CHAR) {
-            2
-        } else {
-            1
-        };
+        let width = if wide { 2 } else { 1 };
         push_bg(&mut pending_bg, &mut bgs, row, col, width, bg);
 
         let flags =
@@ -1099,10 +1791,12 @@ fn plan_draw_runs(
 }
 
 impl Pane {
-    pub(super) fn draw_at(&self, grid_origin: Point<Pixels>, w: &mut Window, cx: &mut App) {
+    pub(super) fn draw_at(&mut self, grid_origin: Point<Pixels>, w: &mut Window, cx: &mut App) {
         if !self.grid_visible {
             return;
         }
+        self.refresh_search_if_dirty();
+        let screen_lines = self.term.screen_lines();
         let view = self.term.renderable_content();
         let cursor = view.cursor.point;
         let cursor_shape = view.cursor.shape;
@@ -1113,7 +1807,17 @@ impl Pane {
                 self.cell.height * cursor_row as f32,
             );
         let focused = self.focus.is_focused(w);
-        let (bgs, glyphs) = plan_draw_runs(view, focused);
+        let active_match = self
+            .search
+            .current
+            .and_then(|i| self.search.matches.get(i));
+        let (bgs, glyphs) = plan_draw_runs(
+            view,
+            focused,
+            &self.search.matches,
+            active_match,
+            screen_lines,
+        );
         for bg in bgs {
             bg.paint(self, grid_origin, w);
         }
@@ -1181,6 +1885,170 @@ impl Pane {
                 ));
                 let _ = line.paint(cursor_origin, self.cell.height, TextAlign::Left, None, w, cx);
             }
+        }
+        self.paint_scrollbar(w);
+    }
+    fn paint_scrollbar(&mut self, w: &mut Window) {
+        let h = f32::from(self.bounds.size.height);
+        if h < 16. {
+            return;
+        }
+        let show_bar = self.scrollbar_visible();
+        let show_marks = self.search.active && !self.search.matches.is_empty();
+        if !show_bar {
+            self.scrollbar.hovered = false;
+            self.scrollbar.drag = None;
+            self.scrollbar.hover_t = 0.0;
+            self.scrollbar.hover_anim_at = None;
+            self.scrollbar.activity_at = None;
+        }
+        if !show_bar && !show_marks {
+            return;
+        }
+
+        let now = Instant::now();
+        let hover_target = if show_bar && (self.scrollbar.hovered || self.scrollbar.drag.is_some())
+        {
+            1.0
+        } else {
+            0.0
+        };
+        if let Some(started) = self.scrollbar.hover_anim_at {
+            let t = (now.saturating_duration_since(started).as_secs_f32() * 1000.0
+                / SCROLLBAR_HOVER_MS)
+                .clamp(0.0, 1.0);
+            self.scrollbar.hover_t = lerp(
+                self.scrollbar.hover_anim_from,
+                hover_target,
+                ease_out_cubic(t),
+            );
+            if t < 1.0 {
+                w.request_animation_frame();
+            } else {
+                self.scrollbar.hover_t = hover_target;
+                self.scrollbar.hover_anim_at = None;
+            }
+        } else {
+            self.scrollbar.hover_t = hover_target;
+        }
+        let hover_t = self.scrollbar.hover_t;
+
+        let activity_t = if let Some(at) = self.scrollbar.activity_at {
+            let elapsed_ms = now.saturating_duration_since(at).as_secs_f32() * 1000.0;
+            let hold_ms = SCROLLBAR_HOLD_MS as f32;
+            if elapsed_ms < hold_ms {
+                1.0
+            } else {
+                let fade_t = ((elapsed_ms - hold_ms) / SCROLLBAR_FADE_MS).clamp(0.0, 1.0);
+                if fade_t < 1.0 {
+                    w.request_animation_frame();
+                    1.0 - ease_out_cubic(fade_t)
+                } else {
+                    self.scrollbar.activity_at = None;
+                    0.0
+                }
+            }
+        } else {
+            0.0
+        };
+
+        let bounds_top = f32::from(self.bounds.top());
+        let bounds_right = f32::from(self.bounds.right());
+        let track_top = bounds_top + SCROLLBAR_PAD_Y;
+        let track_h = (h - 2.0 * SCROLLBAR_PAD_Y).max(1.0);
+        let track_x = bounds_right - SCROLLBAR_TRACK_W;
+
+        // Subtle macOS / iTerm2 overlay track that softly fades in on hover or search marks.
+        let track_alpha = (if show_bar { hover_t * 0.065 } else { 0.0 })
+            .max(if show_marks { 0.04 } else { 0.0 });
+        if track_alpha > 0.004 {
+            w.paint_quad(fill(
+                Bounds::new(
+                    point(px(track_x), px(bounds_top)),
+                    size(px(SCROLLBAR_TRACK_W), px(h)),
+                ),
+                white_alpha(track_alpha),
+            ));
+        }
+        if show_bar && hover_t > 0.02 {
+            w.paint_quad(fill(
+                Bounds::new(point(px(track_x), px(bounds_top)), size(px(1.), px(h))),
+                white_alpha(hover_t * 0.11),
+            ));
+        }
+
+        let history = self.term.history_size();
+        let screen_lines = self.term.screen_lines().max(1);
+        let total_lines = (history + screen_lines) as f32;
+
+        // Paint search match tick marks inside the scrollbar lane (behind the thumb).
+        if show_marks {
+            let mark_w = lerp(4.0, 10.0, hover_t);
+            let mark_x = bounds_right - SCROLLBAR_THUMB_RIGHT_PAD - mark_w.min(SCROLLBAR_TRACK_W - 4.0);
+            let mut last_y = i32::MIN;
+            for m in &self.search.matches {
+                let line_idx = (m.start().line.0 + history as i32).max(0) as f32;
+                let frac = (line_idx / total_lines).clamp(0.0, 1.0);
+                let y = (track_top + frac * (track_h - 2.0).max(0.0)).round() as i32;
+                if y - last_y < 2 {
+                    continue;
+                }
+                last_y = y;
+                w.paint_quad(fill(
+                    Bounds::new(point(px(mark_x), px(y as f32)), size(px(mark_w), px(2.))),
+                    rgba(0xe09f1fc4),
+                ));
+            }
+        }
+
+        // Paint capsule overlay thumb pill.
+        if let Some(geom) = self.scrollbar_geometry() {
+            let scrolled_up = geom.display_offset > 0;
+            let active_factor = activity_t.max(if scrolled_up { 0.45 } else { 0.0 });
+            let rest_w = lerp(SCROLLBAR_THUMB_IDLE_W, SCROLLBAR_THUMB_ACTIVE_W, active_factor);
+            let thumb_w = lerp(rest_w, SCROLLBAR_THUMB_HOVER_W, hover_t);
+            let thumb_x = bounds_right - SCROLLBAR_THUMB_RIGHT_PAD - thumb_w;
+            let base_alpha = if scrolled_up {
+                lerp(0.30, 0.42, activity_t)
+            } else {
+                lerp(0.18, 0.38, activity_t)
+            };
+            let thumb_alpha = if self.scrollbar.drag.is_some() {
+                0.66
+            } else {
+                lerp(base_alpha, 0.50, hover_t)
+            };
+            let radius = px(thumb_w * 0.5);
+            w.paint_quad(quad(
+                Bounds::new(
+                    point(px(thumb_x), px(geom.thumb_top)),
+                    size(px(thumb_w), px(geom.thumb_h)),
+                ),
+                Corners::all(radius),
+                white_alpha(thumb_alpha),
+                Edges::all(px(1.0)),
+                black_alpha(thumb_alpha * 0.45),
+                BorderStyle::Solid,
+            ));
+        }
+
+        // Paint the active search match marker on top so it always stays unmistakable.
+        if show_marks
+            && let Some(active) = self.search.current.and_then(|i| self.search.matches.get(i))
+        {
+            let line_idx = (active.start().line.0 + history as i32).max(0) as f32;
+            let frac = (line_idx / total_lines).clamp(0.0, 1.0);
+            let y = (track_top + frac * (track_h - 3.0).max(0.0)).round();
+            let mark_w = lerp(6.0, 11.0, hover_t);
+            let mark_x = bounds_right - 2.0 - mark_w;
+            w.paint_quad(quad(
+                Bounds::new(point(px(mark_x), px(y)), size(px(mark_w), px(3.))),
+                Corners::all(px(1.5)),
+                rgb(0xfacc15),
+                Edges::default(),
+                transparent_black(),
+                BorderStyle::Solid,
+            ));
         }
     }
     pub fn restore_links(&mut self, cells: &[serde_json::Value]) {
@@ -1291,6 +2159,23 @@ impl Pane {
                 });
             }
             return true;
+        }
+
+        // Keyboard scrollback navigation (disabled in alt-screen apps like vim/less/tmux).
+        if !self.term.mode().contains(TermMode::ALT_SCREEN) {
+            if m == Modifiers::shift() || (cfg!(target_os = "macos") && m == Modifiers::command()) {
+                let scroll = match key {
+                    "pageup" => Some(Scroll::PageUp),
+                    "pagedown" => Some(Scroll::PageDown),
+                    "home" => Some(Scroll::Top),
+                    "end" => Some(Scroll::Bottom),
+                    _ => None,
+                };
+                if let Some(scroll) = scroll {
+                    self.scroll_display_and_notify(scroll, cx);
+                    return true;
+                }
+            }
         }
 
         // Clipboard & terminal shortcuts never use Alt (so they cannot conflict with AltGr).
@@ -1432,6 +2317,35 @@ impl Pane {
             MouseButton::Middle => 1,
             _ => return,
         };
+        if e.button == MouseButton::Left && self.scrollbar_hit_contains(e.position) {
+            if let Some(geom) = self.scrollbar_geometry() {
+                let y = f32::from(e.position.y);
+                self.set_scrollbar_hovered(true, cx);
+                if geom.contains_thumb_y(y) {
+                    self.scrollbar.drag = Some(ScrollbarDrag {
+                        grab_offset: y - geom.thumb_top,
+                    });
+                } else if e.modifiers.alt || e.modifiers.shift {
+                    let scroll = if y < geom.thumb_top {
+                        Scroll::PageUp
+                    } else {
+                        Scroll::PageDown
+                    };
+                    self.term.scroll_display(scroll);
+                } else {
+                    let desired_top = y - geom.thumb_h * 0.5;
+                    let target = geom.offset_for_thumb_top(desired_top);
+                    self.set_display_offset(target);
+                    self.scrollbar.drag = Some(ScrollbarDrag {
+                        grab_offset: geom.thumb_h * 0.5,
+                    });
+                }
+                self.note_scroll_activity(cx);
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
+        }
         if e.button == MouseButton::Left && (e.modifiers.platform || e.modifiers.control) {
             let point = self.point(e.position);
             if let Some(url) = self.hyperlink_at(point) {
@@ -1472,6 +2386,24 @@ impl Pane {
         cx.notify()
     }
     fn update_drag(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if let Some(drag) = self.scrollbar.drag {
+            if e.pressed_button != Some(MouseButton::Left) {
+                self.scrollbar.drag = None;
+                let still_over = self.scrollbar_hit_contains(e.position);
+                self.set_scrollbar_hovered(still_over, cx);
+                self.note_scroll_activity(cx);
+                cx.notify();
+                return;
+            }
+            if let Some(geom) = self.scrollbar_geometry() {
+                let desired_top = f32::from(e.position.y) - drag.grab_offset;
+                let target = geom.offset_for_thumb_top(desired_top);
+                self.set_display_offset(target);
+                self.note_scroll_activity(cx);
+                cx.notify();
+            }
+            return;
+        }
         if self.dragging {
             if e.pressed_button != Some(MouseButton::Left) {
                 self.finish_drag(cx);
@@ -1484,11 +2416,13 @@ impl Pane {
                         as i32)
                         .clamp(1, 5);
                     self.term.scroll_display(Scroll::Delta(delta));
+                    self.note_scroll_activity(cx);
                 } else if e.position.y > self.bounds.bottom() {
                     let delta = ((f32::from(e.position.y - self.bounds.bottom()) / cell_h).ceil()
                         as i32)
                         .clamp(1, 5);
                     self.term.scroll_display(Scroll::Delta(-delta));
+                    self.note_scroll_activity(cx);
                 }
             }
             let (point, side) = self.point_and_side(e.position);
@@ -1499,10 +2433,13 @@ impl Pane {
             cx.notify();
             return;
         }
-        let mouse = self.term.mode().contains(TermMode::MOUSE_MOTION)
-            || (e.pressed_button.is_some()
-                && self.mouse_reported_button == e.pressed_button
-                && self.term.mode().contains(TermMode::MOUSE_DRAG));
+        let over_bar = self.scrollbar_hit_contains(e.position);
+        self.set_scrollbar_hovered(over_bar, cx);
+        let mouse = !over_bar
+            && (self.term.mode().contains(TermMode::MOUSE_MOTION)
+                || (e.pressed_button.is_some()
+                    && self.mouse_reported_button == e.pressed_button
+                    && self.term.mode().contains(TermMode::MOUSE_DRAG)));
         if mouse {
             let force = self.mouse_reported_button.is_some();
             self.mouse_report(
@@ -1539,6 +2476,14 @@ impl Pane {
         }
     }
     fn up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
+        if e.button == MouseButton::Left && self.scrollbar.drag.is_some() {
+            self.scrollbar.drag = None;
+            let still_over = self.scrollbar_hit_contains(e.position);
+            self.set_scrollbar_hovered(still_over, cx);
+            self.note_scroll_activity(cx);
+            cx.notify();
+            return;
+        }
         if e.button == MouseButton::Left && self.dragging {
             self.finish_drag(cx);
             return;
@@ -1564,8 +2509,17 @@ impl Render for Pane {
             .track_focus(&self.focus)
             .size_full()
             .overflow_hidden()
-            .cursor(CursorStyle::IBeam)
+            .cursor(if self.scrollbar.hovered || self.scrollbar.drag.is_some() {
+                CursorStyle::Arrow
+            } else {
+                CursorStyle::IBeam
+            })
             .bg(rgb(colors::BG))
+            .on_hover(cx.listener(|s, &hovered: &bool, _, cx| {
+                if !hovered && s.scrollbar.drag.is_none() {
+                    s.set_scrollbar_hovered(false, cx);
+                }
+            }))
             .on_key_down(cx.listener(|s, e, w, cx| s.key(e, w, cx)))
             .on_scroll(cx.listener(|s, e: &ScrollEvent, _, cx| {
                 let (n, up) =
@@ -1589,14 +2543,15 @@ impl Render for Pane {
                     s.write(batch, cx);
                 } else {
                     let delta = n as i32;
-                    s.term
-                        .scroll_display(Scroll::Delta(if up { delta } else { -delta }));
-                    cx.notify()
+                    s.scroll_display_and_notify(
+                        Scroll::Delta(if up { delta } else { -delta }),
+                        cx,
+                    );
                 }
                 cx.stop_propagation()
             }))
             .on_mouse_move(cx.listener(|s, e: &MouseMoveEvent, _, cx| {
-                if !s.dragging && s.mouse_reported_button.is_none() {
+                if !s.dragging && s.scrollbar.drag.is_none() && s.mouse_reported_button.is_none() {
                     s.update_drag(e, cx);
                 }
             }));
@@ -1612,7 +2567,10 @@ impl Render for Pane {
                     w.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
                         if phase == DispatchPhase::Capture {
                             let _ = move_target.update(cx, |s, cx| {
-                                if s.dragging || s.mouse_reported_button.is_some() {
+                                if s.dragging
+                                    || s.scrollbar.drag.is_some()
+                                    || s.mouse_reported_button.is_some()
+                                {
                                     s.update_drag(e, cx);
                                 }
                             });
@@ -1622,7 +2580,8 @@ impl Render for Pane {
                     w.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
                         if phase == DispatchPhase::Capture {
                             let _ = up_target.update(cx, |s, cx| {
-                                if (e.button == MouseButton::Left && s.dragging)
+                                if (e.button == MouseButton::Left
+                                    && (s.dragging || s.scrollbar.drag.is_some()))
                                     || s.mouse_reported_button == Some(e.button)
                                 {
                                     s.up(e, cx);
@@ -1749,6 +2708,15 @@ impl Pane {
     pub(super) fn cell_for_test(&self) -> Size<Pixels> {
         self.cell
     }
+    pub(super) fn display_offset_for_test(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+    pub(super) fn history_size_for_test(&self) -> usize {
+        self.term.history_size()
+    }
+    pub(super) fn scrollbar_hovered_for_test(&self) -> bool {
+        self.scrollbar.hovered
+    }
     pub fn key_for_test(&mut self, key: &'static str, w: &mut Window, cx: &mut Context<Self>) {
         self.key(
             &KeyDownEvent {
@@ -1785,7 +2753,7 @@ mod tests {
             60,
             4,
         );
-        let (_, glyphs) = plan_draw_runs(term.renderable_content(), false);
+        let (_, glyphs) = plan_draw_runs(term.renderable_content(), false, &[], None, 4);
         let summary: Vec<(usize, usize, bool, &str)> = glyphs
             .iter()
             .map(|r| (r.col, r.width, r.isolated, r.text.as_str()))
@@ -1802,7 +2770,7 @@ mod tests {
 
         // Combining marks / VS16 must break both before and after the cluster.
         let term = term_with("ab⚠\u{fe0f}cd".as_bytes(), 20, 2);
-        let (_, glyphs) = plan_draw_runs(term.renderable_content(), false);
+        let (_, glyphs) = plan_draw_runs(term.renderable_content(), false, &[], None, 2);
         let summary: Vec<(usize, usize, bool, &str)> = glyphs
             .iter()
             .map(|r| (r.col, r.width, r.isolated, r.text.as_str()))
@@ -1828,7 +2796,7 @@ mod tests {
         sel.update(CellPoint::new(Line(0), Column(19)), Side::Right);
         term.selection = Some(sel);
 
-        let (bgs, glyphs) = plan_draw_runs(term.renderable_content(), false);
+        let (bgs, glyphs) = plan_draw_runs(term.renderable_content(), false, &[], None, 4);
         assert_eq!(bgs.len(), 1);
         assert_eq!(bgs[0].col, 3);
         assert_eq!(bgs[0].width, 17);
@@ -1846,7 +2814,7 @@ mod tests {
         let mut term = term_with("中a".as_bytes(), 20, 2);
         // Alacritty normalizes a cursor on a wide-char spacer back to the wide cell.
         term.grid_mut().cursor.point = CellPoint::new(Line(0), Column(1));
-        let (bgs, glyphs) = plan_draw_runs(term.renderable_content(), true);
+        let (bgs, glyphs) = plan_draw_runs(term.renderable_content(), true, &[], None, 2);
         assert_eq!(bgs.len(), 1);
         assert_eq!(bgs[0].col, 0);
         assert_eq!(bgs[0].width, 2);
@@ -1876,7 +2844,7 @@ mod tests {
             "中文 hello",
         ] {
             let term = term_with(sample.as_bytes(), 80, 4);
-            let (_, glyphs) = plan_draw_runs(term.renderable_content(), false);
+            let (_, glyphs) = plan_draw_runs(term.renderable_content(), false, &[], None, 4);
             for run in &glyphs {
                 if run.isolated {
                     continue;
@@ -1946,5 +2914,141 @@ mod tests {
             encode_mouse_sequence(TermMode::MOUSE_MODE, 64, 224, 5, false, 0),
             None
         );
+    }
+
+    #[test]
+    fn search_collects_case_word_regex_wrapped_and_highlights_active_vs_other() {
+        use super::{
+            MAX_SEARCH_MATCHES, SEARCH_ACTIVE_BG, SEARCH_ACTIVE_FG, SEARCH_MATCH_BG, SearchOptions,
+            build_search_pattern, collect_search_matches,
+        };
+        use alacritty_terminal::{grid::Dimensions, term::search::RegexSearch};
+
+        let term = term_with(
+            b"Error error ERROR\r\nerr_code error-msg myerror\r\nwrapped_token_across_edge\r\n",
+            20,
+            6,
+        );
+
+        // Case-insensitive matches all case variations even when query contains uppercase.
+        let pat = build_search_pattern("ERROR", SearchOptions::default()).unwrap();
+        let mut rx = RegexSearch::new(&pat).unwrap();
+        let (all, truncated) = collect_search_matches(&term, &mut rx, false);
+        assert!(!truncated);
+        assert_eq!(all.len(), 5);
+
+        // Explicit case-sensitive with lowercase query excludes "Error" and "ERROR".
+        let pat = build_search_pattern(
+            "error",
+            SearchOptions {
+                case_sensitive: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut rx = RegexSearch::new(&pat).unwrap();
+        let (cs, _) = collect_search_matches(&term, &mut rx, false);
+        assert_eq!(cs.len(), 3);
+
+        // Whole word matches standalone "error" and "error-msg" (hyphen is non-word), excludes "myerror".
+        let (ww, _) = collect_search_matches(&term, &mut rx, true);
+        assert_eq!(ww.len(), 2);
+
+        // Wrapped line match spans across row boundary.
+        let pat = build_search_pattern("wrapped_token_across_edge", SearchOptions::default()).unwrap();
+        let mut rx = RegexSearch::new(&pat).unwrap();
+        let (wrapped, _) = collect_search_matches(&term, &mut rx, true);
+        assert_eq!(wrapped.len(), 1);
+        assert_ne!(wrapped[0].start().line, wrapped[0].end().line);
+
+        // Regex search with alternation and invalid regex rejection.
+        let pat = build_search_pattern(
+            "err_[a-z]+|ERROR",
+            SearchOptions {
+                case_sensitive: true,
+                regex: true,
+                whole_word: false,
+            },
+        )
+        .unwrap();
+        let mut rx = RegexSearch::new(&pat).unwrap();
+        let (rx_matches, _) = collect_search_matches(&term, &mut rx, false);
+        assert_eq!(rx_matches.len(), 2);
+        let bad = build_search_pattern(
+            "(unclosed",
+            SearchOptions {
+                regex: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(RegexSearch::new(&bad).is_err());
+
+        // Highlighting distinguishes active match (gold + dark ink) from other matches (amber).
+        let (bgs, glyphs) = plan_draw_runs(
+            term.renderable_content(),
+            false,
+            &all,
+            all.get(1),
+            term.screen_lines(),
+        );
+        assert!(bgs.iter().any(|bg| bg.color == SEARCH_ACTIVE_BG));
+        assert!(bgs.iter().any(|bg| bg.color == SEARCH_MATCH_BG));
+        assert!(glyphs.iter().any(|g| g.ink.fg == SEARCH_ACTIVE_FG));
+
+        // Capping on large scrollback preserves the MAX_SEARCH_MATCHES most recent matches.
+        let mut big = Term::new(
+            Config {
+                scrolling_history: 15_000,
+                ..Default::default()
+            },
+            &SizeHint { cols: 10, rows: 4 },
+            Events::default(),
+        );
+        let mut parser: Processor = Default::default();
+        parser.advance(&mut big, &b"x\r\n".repeat(12_000));
+        let pat = build_search_pattern("x", SearchOptions::default()).unwrap();
+        let mut rx = RegexSearch::new(&pat).unwrap();
+        let (capped, truncated) = collect_search_matches(&big, &mut rx, false);
+        assert!(truncated);
+        assert_eq!(capped.len(), MAX_SEARCH_MATCHES);
+        // The newest match on the visible screen must be retained.
+        assert!(capped.last().unwrap().start().line >= Line(0));
+    }
+
+    #[test]
+    fn scrollbar_geometry_maps_top_bottom_clamped_thumb_and_drag_bijectively() {
+        use super::{SCROLLBAR_MIN_THUMB_H, SCROLLBAR_PAD_Y, ScrollbarGeometry};
+
+        // Hidden when there is no scrollback or collapsed viewport.
+        assert_eq!(ScrollbarGeometry::compute(0.0, 400.0, 0, 24, 0), None);
+        assert_eq!(ScrollbarGeometry::compute(0.0, 10.0, 100, 24, 0), None);
+
+        // Live bottom (offset = 0) aligns flush with bottom of track; top (offset = history) aligns with top.
+        let bottom = ScrollbarGeometry::compute(10.0, 400.0, 500, 25, 0).unwrap();
+        let track_bottom = bottom.track_top + bottom.track_h;
+        assert!((bottom.track_top - (10.0 + SCROLLBAR_PAD_Y)).abs() < 1e-4);
+        assert!(((bottom.thumb_top + bottom.thumb_h) - track_bottom).abs() < 1e-4);
+        assert_eq!(bottom.offset_for_thumb_top(bottom.thumb_top), 0);
+
+        let top = ScrollbarGeometry::compute(10.0, 400.0, 500, 25, 500).unwrap();
+        assert!((top.thumb_top - top.track_top).abs() < 1e-4);
+        assert_eq!(top.offset_for_thumb_top(top.thumb_top), 500);
+
+        // Huge 100,000-line scrollback clamps thumb to SCROLLBAR_MIN_THUMB_H while preserving exact top/mid/bottom mapping.
+        let huge = ScrollbarGeometry::compute(0.0, 500.0, 100_000, 30, 0).unwrap();
+        assert!((huge.thumb_h - SCROLLBAR_MIN_THUMB_H).abs() < 1e-4);
+        assert_eq!(huge.offset_for_thumb_top(huge.track_top), 100_000);
+        assert_eq!(
+            huge.offset_for_thumb_top(huge.track_top + huge.max_travel),
+            0
+        );
+        assert_eq!(
+            huge.offset_for_thumb_top(huge.track_top + huge.max_travel * 0.5),
+            50_000
+        );
+        // Overshooting beyond track clamps cleanly to history / 0.
+        assert_eq!(huge.offset_for_thumb_top(huge.track_top - 200.0), 100_000);
+        assert_eq!(huge.offset_for_thumb_top(huge.track_top + 2_000.0), 0);
     }
 }

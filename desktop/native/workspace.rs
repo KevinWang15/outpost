@@ -1,6 +1,7 @@
 mod create;
 mod drag;
 pub(crate) mod files;
+mod find;
 mod panes;
 mod picker;
 mod settings;
@@ -8,7 +9,7 @@ use crate::{
     agent_mark::AgentMark,
     bridge::Bridge,
     layout::{Axis, Id, Layout, Tab, next_id},
-    terminal::{ConnectionState, Pane, PaneChanged},
+    terminal::{ConnectionState, Pane, PaneChanged, SearchOptions},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use create::CreateForm;
@@ -88,6 +89,19 @@ fn compute_chrome_layout(
         est_max_scroll_x,
     }
 }
+
+fn show_tab_divider(
+    current_id: Id,
+    next_id: Option<Id>,
+    active_tab_id: Option<Id>,
+    hovered_tab_id: Option<Id>,
+) -> bool {
+    let Some(next_id) = next_id else {
+        return false;
+    };
+    let is_highlighted = |id| active_tab_id == Some(id) || hovered_tab_id == Some(id);
+    !is_highlighted(current_id) && !is_highlighted(next_id)
+}
 #[derive(Clone, Copy, PartialEq)]
 enum Page {
     Terminal,
@@ -96,7 +110,6 @@ enum Page {
     Choose,
     Settings,
     Create,
-    Find,
     Compose,
 }
 struct ToastNotice {
@@ -126,6 +139,11 @@ pub struct Workspace {
     context_menu: Option<(Id, Point<Pixels>)>,
     tab_menu: Option<(Id, Point<Pixels>)>,
     tab_rename: Option<Id>,
+    hovered_tab: Option<Id>,
+    find_open: bool,
+    find_pane: Option<Id>,
+    find_options: SearchOptions,
+    find_focus: FocusHandle,
     toast: Option<ToastNotice>,
     close_pending: bool,
     page: Page,
@@ -384,11 +402,27 @@ impl Workspace {
         .detach();
         let find_query = cx.new(|cx| {
             InputState::new(cx)
-                .placeholder("Find in terminal…")
+                .size(ComponentSize::Sm)
+                .placeholder("Find…")
                 .leading_icon(LucideIcon::Search)
+                .clearable(true)
         });
-        cx.subscribe(&find_query, |_, _, _: &InputEvent, cx| cx.notify())
-            .detach();
+        cx.subscribe(&find_query, |s: &mut Self, _, event: &InputEvent, cx| {
+            match event {
+                InputEvent::CommittedChange(_) => {
+                    if s.find_open {
+                        s.sync_find(false, cx);
+                    }
+                }
+                InputEvent::Submit(_) => {
+                    if s.find_open {
+                        s.step_find(true, cx);
+                    }
+                }
+                _ => cx.notify(),
+            }
+        })
+        .detach();
         let history_input = entry("Lines", cx);
         cx.subscribe(&history_input, |s: &mut Self, _, event: &InputEvent, cx| {
             if let InputEvent::Submit(_) = event {
@@ -428,6 +462,7 @@ impl Workspace {
                 s.pane_menu = None;
                 s.context_menu = None;
                 s.tab_menu = None;
+                s.hovered_tab = None;
                 s.cancel_drag(cx);
             } else {
                 s.active_order = next_id();
@@ -444,6 +479,7 @@ impl Workspace {
                 .unwrap_or(true)
         });
         let focus = cx.focus_handle();
+        let find_focus = cx.focus_handle();
         focus.focus(w, cx);
         cx.on_focus_lost(w, |s, w, cx| s.restore_focus(w, cx))
             .detach();
@@ -463,6 +499,11 @@ impl Workspace {
             context_menu: None,
             tab_menu: None,
             tab_rename: None,
+            hovered_tab: None,
+            find_open: false,
+            find_pane: None,
+            find_options: SearchOptions::default(),
+            find_focus,
             toast: None,
             close_pending: false,
             bridge,
@@ -580,8 +621,17 @@ impl Workspace {
         self.preview_id = None;
         self.preview = None;
         self.create.close_all(cx);
+        if self.page != Page::Terminal && self.find_open {
+            self.find_open = false;
+            self.clear_find_highlights(cx);
+            self.find_query
+                .update(cx, |input, cx| input.set_invalid(false, cx));
+        }
         match self.page {
             Page::Terminal => {
+                if self.find_open {
+                    self.sync_find(true, cx);
+                }
                 if let Some(p) = self.active() {
                     p.update(cx, |p, cx| p.focus_terminal(w, cx))
                 }
@@ -589,10 +639,6 @@ impl Workspace {
             Page::Settings => {
                 self.sync_history_input(cx);
                 self.focus.focus(w, cx);
-            }
-            Page::Find => {
-                self.find_query.update(cx, |s, cx| s.set_value_silent("", cx));
-                self.find_query.read(cx).focus_handle(cx).focus(w, cx)
             }
             Page::Choose | Page::Switch => {
                 self.picker_index = 0;
@@ -696,7 +742,11 @@ impl Workspace {
                 && let Some(t) = s.tabs.get_mut(s.current)
                 && t.layout.contains(id)
             {
-                t.active = id
+                let changed = t.active != id;
+                t.active = id;
+                if changed && s.find_open && s.page == Page::Terminal {
+                    s.sync_find(true, cx);
+                }
             }
             cx.notify()
         });
@@ -919,6 +969,15 @@ impl Workspace {
             .position(|t| t.layout.contains(item.pane))?;
         let tab = if item.whole {
             let tab = self.tabs.remove(i);
+            if self.tab_menu.is_some_and(|(t, _)| t == tab.id) {
+                self.tab_menu = None;
+            }
+            if self.tab_rename == Some(tab.id) {
+                self.tab_rename = None;
+            }
+            if self.hovered_tab == Some(tab.id) {
+                self.hovered_tab = None;
+            }
             if self.current > i {
                 self.current -= 1
             }
@@ -1060,6 +1119,9 @@ impl Workspace {
         if self.context_menu.is_some_and(|(pane, _)| pane == id) {
             self.context_menu = None;
         }
+        if self.find_pane == Some(id) {
+            self.find_pane = None;
+        }
         if self.toast.as_ref().is_some_and(|t| t.pane == Some(id)) {
             self.toast = None;
         }
@@ -1078,6 +1140,9 @@ impl Workspace {
                 }
                 if self.tab_rename == Some(removed_tab) {
                     self.tab_rename = None;
+                }
+                if self.hovered_tab == Some(removed_tab) {
+                    self.hovered_tab = None;
                 }
                 if i < self.current {
                     self.current -= 1
@@ -1413,7 +1478,6 @@ impl Workspace {
             Page::Home => {
                 self.call(json!({"op":"login","origin":self.address.read(cx).value().trim()}))
             }
-            Page::Find => self.find(true, cx),
             Page::Compose => {
                 let msg = self.compose.read(cx).value().to_string();
                 if !msg.is_empty()
@@ -1442,12 +1506,6 @@ impl Workspace {
                 self.activate_picker_item(index, w, cx);
             }
             _ => {}
-        }
-    }
-    fn find(&self, next: bool, cx: &mut Context<Self>) {
-        let query = self.find_query.read(cx).value().to_owned();
-        if let Some(p) = self.active() {
-            p.update(cx, |p, cx| p.find(&query, next, cx))
         }
     }
     fn settings(&mut self, cx: &mut Context<Self>) {
@@ -1490,7 +1548,9 @@ impl Workspace {
             || self.preview_id.is_some()
     }
     fn restore_focus(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        if self.page == Page::Terminal
+        if self.page == Page::Terminal && self.find_open && !self.any_popup_open() {
+            self.find_query.read(cx).focus_handle(cx).focus(w, cx);
+        } else if self.page == Page::Terminal
             && !self.any_popup_open()
             && let Some(p) = self.active()
         {
@@ -1576,14 +1636,14 @@ impl Workspace {
         }
     }
     fn close_focused_pane(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.page, Page::Terminal | Page::Find | Page::Compose)
+        if matches!(self.page, Page::Terminal | Page::Compose)
             && let Some(t) = self.tabs.get(self.current)
         {
             self.close(t.active, w, cx);
         }
     }
     fn close_current_tab(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.page, Page::Terminal | Page::Find | Page::Compose)
+        if matches!(self.page, Page::Terminal | Page::Compose)
             && let Some(t) = self.tabs.get(self.current)
         {
             self.close_tab(t.active, w, cx);
@@ -1668,22 +1728,49 @@ impl Workspace {
         };
         let pane_alt = if mac { cmd_alt } else { ctrl_alt };
         let split_down_mod = if mac { cmd_shift } else { ctrl_alt };
-        let on_terminal = matches!(self.page, Page::Terminal | Page::Find | Page::Compose);
+        let on_terminal = matches!(self.page, Page::Terminal | Page::Compose);
+        let find_active = self.find_open && self.page == Page::Terminal;
+        let find_focused = find_active && self.find_is_focused(w, cx);
+        let find_opt_mod = if mac { cmd_alt } else { alt };
 
         if matches!(self.page, Page::Choose | Page::Switch)
             && no_mod
             && matches!(key, "down" | "up")
         {
             self.step_picker(if key == "down" { 1 } else { -1 }, cx);
-        } else if self.page == Page::Find
-            && ((shift_only && matches!(key, "enter" | "f3"))
+        } else if find_active
+            && ((find_focused && shift_only && key == "enter")
+                || (shift_only && key == "f3")
                 || ((if mac { cmd_shift } else { ctrl_shift }) && key == "g"))
         {
-            self.find(false, cx);
-        } else if self.page == Page::Find
-            && ((no_mod && key == "f3") || (accel && key == "g"))
+            self.step_find(false, cx);
+        } else if find_active && ((no_mod && key == "f3") || (accel && key == "g")) {
+            self.step_find(true, cx);
+        } else if !find_active
+            && mac
+            && self.page == Page::Terminal
+            && (cmd || cmd_shift)
+            && key == "g"
+            && !self.find_query.read(cx).committed_value().is_empty()
         {
-            self.find(true, cx);
+            self.step_find(!m.shift, cx);
+        } else if find_active && find_opt_mod && key == "c" {
+            self.toggle_find_case(w, cx);
+        } else if find_active && find_opt_mod && key == "w" {
+            self.toggle_find_whole_word(w, cx);
+        } else if find_active && find_opt_mod && key == "r" {
+            self.toggle_find_regex(w, cx);
+        } else if find_focused && (no_mod || shift_only) && key == "tab" {
+            self.extend_find_selection(!m.shift, cx);
+        } else if find_active
+            && no_mod
+            && key == "escape"
+            && (find_focused
+                || !self
+                    .active()
+                    .is_some_and(|p| p.read(cx).focus.is_focused(w)))
+        {
+            self.close_find(w, cx);
         } else if key == "escape"
             && no_mod
             && ((self.page != Page::Terminal && !self.tabs.is_empty())
@@ -1809,7 +1896,12 @@ impl Workspace {
                 }
                 "f" if self.active().is_some() => {
                     if !e.is_held {
-                        self.show(Page::Find, w, cx);
+                        self.open_find(w, cx);
+                    }
+                }
+                "e" if self.page == Page::Terminal && self.active().is_some() => {
+                    if !e.is_held {
+                        self.use_selection_for_find(w, cx);
                     }
                 }
                 "enter" if self.active().is_some() => {
@@ -2123,6 +2215,9 @@ impl Workspace {
     fn chrome(&self, w: &Window, cx: &mut Context<Self>) -> Div {
         let slots = self.strip_slots();
         let active_tab_idx = (self.page == Page::Terminal).then_some(self.current);
+        let active_tab_id = active_tab_idx
+            .and_then(|idx| self.tabs.get(idx))
+            .map(|t| t.id);
         let hairline = rgba(0xffffff1a);
         let layout = compute_chrome_layout(
             f32::from(w.viewport_size().width),
@@ -2156,6 +2251,7 @@ impl Workspace {
                 strip = strip.child(
                     row()
                         .h(px(36.))
+                        .pb(px(1.))
                         .min_w(px(TAB_MIN_W))
                         .w(px(TAB_IDEAL_W))
                         .max_w(px(TAB_MAX_W))
@@ -2178,10 +2274,13 @@ impl Workspace {
             let tab_id = tab.id;
             let id = tab.active;
             let active = active_tab_idx == Some(i);
-            let next_inactive = slots
+            let hovered = !active && self.hovered_tab == Some(tab_id);
+            let next_tab_id = slots
                 .get(pos + 1)
                 .and_then(|next| *next)
-                .is_some_and(|next_i| active_tab_idx != Some(next_i));
+                .map(|next_i| self.tabs[next_i].id);
+            let show_divider =
+                show_tab_divider(tab_id, next_tab_id, active_tab_id, self.hovered_tab);
             let title = if tab.name.is_empty() {
                 self.panes[&id].read(cx).title.clone()
             } else {
@@ -2244,12 +2343,9 @@ impl Workspace {
                         if active { MUTED } else { 0x6a6a6a },
                     ))
                 });
-            let tab_group: SharedString = format!("tab-grp-{}", tab.id).into();
             let tab = row()
                 .id(("tab", tab.id))
-                .group(tab_group.clone())
                 .relative()
-                .h(px(36.))
                 .min_w(px(TAB_MIN_W))
                 .w(px(TAB_IDEAL_W))
                 .max_w(px(TAB_MAX_W))
@@ -2260,21 +2356,41 @@ impl Workspace {
                 .border_l_1()
                 .border_r_1()
                 .cursor_pointer()
+                .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+                .on_hover(cx.listener(move |s, &is_hovered, _, cx| {
+                    if is_hovered {
+                        if s.hovered_tab != Some(tab_id) {
+                            s.hovered_tab = Some(tab_id);
+                            cx.notify();
+                        }
+                    } else if s.hovered_tab == Some(tab_id) {
+                        s.hovered_tab = None;
+                        cx.notify();
+                    }
+                }))
                 .when(active, |e| {
-                    e.bg(rgb(BG))
+                    // Span the bottom 1px hairline with opaque BG while matching inactive content height (34px).
+                    e.h(px(36.))
+                        .pb(px(1.))
+                        .bg(rgb(BG))
                         .border_color(rgba(0xffffff22))
                         .text_color(rgb(0xf0f0f0))
                         .font_weight(FontWeight::MEDIUM)
                 })
                 .when(!active, |e| {
-                    e.border_color(rgba(0x00000000))
-                        .text_color(rgba(0xffffff80))
-                        .hover(|s| {
+                    // Stop cleanly above the 1px titlebar hairline so translucent hover fill/borders never double-paint it.
+                    e.h(px(35.))
+                        .mb(px(1.))
+                        .when(hovered, |s| {
                             s.bg(rgba(0xffffff16))
                                 .border_color(rgba(0xffffff10))
                                 .text_color(rgba(0xffffffcc))
                         })
-                        .when(next_inactive, |s| {
+                        .when(!hovered, |s| {
+                            s.border_color(rgba(0x00000000))
+                                .text_color(rgba(0xffffff80))
+                        })
+                        .when(show_divider, |s| {
                             s.child(
                                 div()
                                     .absolute()
@@ -2282,8 +2398,7 @@ impl Workspace {
                                     .top(px(9.))
                                     .bottom(px(9.))
                                     .w(px(1.))
-                                    .bg(rgba(0xffffff18))
-                                    .group_hover(tab_group, |s| s.opacity(0.)),
+                                    .bg(rgba(0xffffff18)),
                             )
                         })
                 })
@@ -2737,9 +2852,13 @@ impl Workspace {
                 }
                 let badge = (self.files_menu == Some(id) || !items(&pane.files).is_empty())
                     .then(|| self.files_dropdown(id, pane, cx));
+                let find_bar = active.then(|| self.find_overlay(id, pane, cx)).flatten();
+                let badge_top = if find_bar.is_some() { px(50.) } else { px(6.) };
                 let surface = col()
                     .relative()
-                    .p(px(5.))
+                    .pt(px(5.))
+                    .pb(px(5.))
+                    .pl(px(5.))
                     .flex_1()
                     .overflow_hidden()
                     .child(p)
@@ -2748,8 +2867,11 @@ impl Workspace {
                     })
                     .children(status)
                     .children(
-                        badge.map(|badge| div().absolute().top(px(6.)).right(px(8.)).child(badge)),
-                    );
+                        badge.map(|badge| {
+                            div().absolute().top(badge_top).right(px(16.)).child(badge)
+                        }),
+                    )
+                    .children(find_bar);
                 let pane_body = body.child(surface);
                 snapshot_source(&self.watches[&id].1, pane_body).into_any_element()
             }
@@ -3078,7 +3200,7 @@ impl Workspace {
             Page::Create => {
                 content = content.child(self.create_view(cx));
             }
-            Page::Find | Page::Compose => {}
+            Page::Compose => {}
             Page::Terminal => {}
         }
         div()
@@ -3107,6 +3229,16 @@ impl Workspace {
 impl Render for Workspace {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.prefetch_thumbnail(cx);
+        if self.find_open && self.page == Page::Terminal {
+            if let Some(p) = self.active() {
+                p.update(cx, |p, _| {
+                    p.refresh_search_if_dirty();
+                });
+            } else {
+                self.find_open = false;
+                self.find_pane = None;
+            }
+        }
         self.drag.rendered_tabs = self
             .strip_slots()
             .into_iter()
@@ -3116,7 +3248,7 @@ impl Render for Workspace {
             self.startup_cloak_view()
         } else if matches!(
             self.page,
-            Page::Terminal | Page::Find | Page::Compose | Page::Choose | Page::Switch
+            Page::Terminal | Page::Compose | Page::Choose | Page::Switch
         ) && let Some(t) = self.tabs.get(self.current)
         {
             if t.zoom {
@@ -3144,24 +3276,6 @@ impl Render for Workspace {
             .text_color(rgb(TEXT))
             .text_size(px(13.))
             .child(self.chrome(w, cx))
-            .when(self.page == Page::Find, |e| {
-                e.child(
-                    row()
-                        .justify_end()
-                        .px(px(8.))
-                        .bg(rgb(0x161616))
-                        .child(col().w(px(300.)).child(field(&self.find_query)))
-                        .child(icon("previous", LucideIcon::ChevronUp, cx, |s, _, cx| {
-                            s.find(false, cx)
-                        }))
-                        .child(icon("next", LucideIcon::ChevronDown, cx, |s, _, cx| {
-                            s.find(true, cx)
-                        }))
-                        .child(icon("close-find", LucideIcon::X, cx, |s, w, cx| {
-                            s.show(Page::Terminal, w, cx)
-                        })),
-                )
-            })
             .child(
                 col()
                     .relative()
@@ -3268,7 +3382,7 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|s, _: &crate::menu::FindInTerminal, w, cx| {
                 if s.active().is_some() {
-                    s.show(Page::Find, w, cx);
+                    s.open_find(w, cx);
                 }
             }))
             .on_action(cx.listener(|s, _: &crate::menu::ComposeMessage, w, cx| {
@@ -3320,7 +3434,7 @@ impl Render for Workspace {
                 s.adjust_font_size(None, cx);
             }))
             .on_action(cx.listener(|s, _: &crate::menu::ReloadTerminal, w, cx| {
-                if matches!(s.page, Page::Terminal | Page::Find | Page::Compose)
+                if matches!(s.page, Page::Terminal | Page::Compose)
                     && !s.tabs.is_empty()
                 {
                     s.reload_selected(w, cx);
@@ -3671,7 +3785,7 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 p.feed(&b"row\r\n".repeat(25_000), cx);
                 p.geometry(25, 6);
                 p.find("FIRST-RETAINED-ROW", true, cx);
-                assert_eq!(p.selected_text().as_deref(), Some("FIRST-RETAINED-ROW"));
+                assert_eq!(p.active_match_text().as_deref(), Some("FIRST-RETAINED-ROW"));
                 p.feed(b"\x1b[?1049hALT", cx);
             });
             s.prefs["unlimitedScrollback"] = json!(false);
@@ -3683,9 +3797,10 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             pane.update(cx, |p, cx| {
                 p.feed(b"\x1b[?1049l", cx);
                 p.find("FIRST-RETAINED-ROW", true, cx);
-                assert!(p.selected_text().is_none());
+                assert!(p.active_match_text().is_none());
                 p.find("row", false, cx);
-                assert_eq!(p.selected_text().as_deref(), Some("row"));
+                assert_eq!(p.active_match_text().as_deref(), Some("row"));
+                p.clear_search(cx);
             });
             s.reset_terminal_settings(cx);
             assert!(!s.has_custom_settings());
@@ -3915,6 +4030,8 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 .unwrap();
             pane.update(cx, |p, cx| {
                 p.find("hello", true, cx);
+                assert_eq!(p.select_active_match(cx).as_deref(), Some("hello"));
+                p.clear_search(cx);
                 assert_eq!(p.selected_text().as_deref(), Some("hello"));
                 p.key_for_test("ctrl-c", w, cx);
                 assert!(!p.has_selection());
@@ -4211,10 +4328,93 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             s.dismiss_page(w, cx);
             assert!(s.page == Page::Terminal);
 
-            // Verify Find uses its own input state independent of the session picker query.
-            s.show(Page::Find, w, cx);
+            // Verify iTerm2-style floating Find overlay: live search, modes, navigation, Tab selection, and Esc dismiss.
+            let find_pane = s.active().unwrap();
+            find_pane.update(cx, |p, cx| {
+                p.reset(60, 12);
+                p.feed(b"alpha beta Alpha\r\nalphabet https://example.com/path done\r\n", cx);
+                p.grid_visible = true;
+            });
+            s.open_find(w, cx);
+            assert!(s.page == Page::Terminal);
+            assert!(s.find_open);
             assert!(s.find_query.read(cx).focus_handle(cx).is_focused(w));
-            s.dismiss_page(w, cx);
+
+            // Incremental live search defaults to case-insensitive and anchors on the most recent match.
+            s.find_query
+                .update(cx, |input, cx| input.set_value("alpha", cx));
+            s.sync_find(false, cx);
+            let status = find_pane.read(cx).search_status();
+            assert_eq!(status.total, 3);
+            assert_eq!(status.active, Some(2));
+            assert_eq!(
+                find_pane.update(cx, |p, _| p.active_match_text()).as_deref(),
+                Some("alpha")
+            );
+
+            // Stepping next wraps 3 -> 1, stepping previous returns to 3.
+            s.step_find(true, cx);
+            assert_eq!(find_pane.read(cx).search_status().active, Some(0));
+            s.step_find(false, cx);
+            assert_eq!(find_pane.read(cx).search_status().active, Some(2));
+
+            // Toggle Match case: excludes "Alpha" (matches only lowercase "alpha" in "alpha" and "alphabet").
+            s.toggle_find_case(w, cx);
+            assert!(s.find_options.case_sensitive);
+            assert_eq!(find_pane.read(cx).search_status().total, 2);
+
+            // Toggle Whole word: excludes "alphabet" (matches only standalone lowercase "alpha").
+            s.toggle_find_whole_word(w, cx);
+            assert!(s.find_options.whole_word);
+            assert_eq!(find_pane.read(cx).search_status().total, 1);
+
+            // Reset case & whole word, enable regex and verify both invalid and valid patterns.
+            s.toggle_find_case(w, cx);
+            s.toggle_find_whole_word(w, cx);
+            s.toggle_find_regex(w, cx);
+            assert!(s.find_options.regex);
+            s.find_query
+                .update(cx, |input, cx| input.set_value("[unterminated", cx));
+            s.sync_find(false, cx);
+            assert!(find_pane.read(cx).search_status().invalid_regex);
+            assert_eq!(find_pane.read(cx).search_status().total, 0);
+
+            s.find_query
+                .update(cx, |input, cx| input.set_value("https://[^ ]+", cx));
+            s.sync_find(false, cx);
+            assert!(!find_pane.read(cx).search_status().invalid_regex);
+            assert_eq!(find_pane.read(cx).search_status().total, 1);
+
+            // Tab while searching selects & copies the active match, and a second Tab extends to the next word.
+            s.extend_find_selection(true, cx);
+            assert_eq!(
+                find_pane.read(cx).selected_text().as_deref(),
+                Some("https://example.com/path")
+            );
+            s.extend_find_selection(true, cx);
+            assert_eq!(
+                find_pane.read(cx).selected_text().as_deref(),
+                Some("https://example.com/path done")
+            );
+
+            // Live PTY output marks search dirty and refreshes match count cleanly.
+            s.toggle_find_regex(w, cx);
+            s.find_query
+                .update(cx, |input, cx| input.set_value("beta", cx));
+            s.sync_find(false, cx);
+            assert_eq!(find_pane.read(cx).search_status().total, 1);
+            find_pane.update(cx, |p, cx| {
+                p.feed(b"another beta line\r\n", cx);
+                assert!(p.refresh_search_if_dirty());
+            });
+            assert_eq!(find_pane.read(cx).search_status().total, 2);
+
+            // Closing Find clears highlights, restores terminal focus, and remembers the last query.
+            s.close_find(w, cx);
+            assert!(!s.find_open);
+            assert_eq!(find_pane.read(cx).search_status().total, 0);
+            assert!(find_pane.read(cx).focus.is_focused(w));
+            assert_eq!(s.find_query.read(cx).value(), "beta");
             assert!(s.page == Page::Terminal);
 
             // Verify Write-a-message shortcut reaches Page::Compose on all platforms.
@@ -4260,6 +4460,123 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             assert_eq!(s.origin, "https://outpost.zoco.cc");
             s.show(Page::Terminal, w, cx);
         });
+        // Verify iTerm2-style overlay scrollbar: hover reveal, track jump, off-lane thumb drag,
+        // Alt+click page scroll, keyboard scrollback shortcuts, and auto-hide in alt-screen.
+        let scroll_pane = ws.read(cx).active().unwrap();
+        scroll_pane.update(cx, |p, cx| {
+            p.reset(60, 12);
+            for i in 0..200 {
+                p.feed(format!("scrollback line {i}\r\n").as_bytes(), cx);
+            }
+            p.grid_visible = true;
+        });
+        w.draw(cx).clear(cx);
+        let hist = scroll_pane.read(cx).history_size_for_test();
+        assert!(hist >= 180);
+        assert_eq!(scroll_pane.read(cx).display_offset_for_test(), 0);
+        let pb = scroll_pane.read(cx).bounds_for_test();
+        let bar_x = pb.right() - px(4.);
+        let mid_y = pb.top() + pb.size.height * 0.5;
+        let top_y = pb.top() + px(8.);
+        let bot_y = pb.bottom() - px(8.);
+
+        // Hovering the right-edge lane expands the scrollbar; moving into text collapses it.
+        w.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: point(bar_x, mid_y),
+                pressed_button: None,
+                modifiers: Default::default(),
+            }),
+            cx,
+        );
+        assert!(scroll_pane.read(cx).scrollbar_hovered_for_test());
+        w.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: point(pb.left() + px(20.), mid_y),
+                pressed_button: None,
+                modifiers: Default::default(),
+            }),
+            cx,
+        );
+        assert!(!scroll_pane.read(cx).scrollbar_hovered_for_test());
+
+        // Clicking top of track jumps straight to top of scrollback, then dragging horizontally
+        // off-lane down to middle and bottom scrubs continuously without selecting terminal text.
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: point(bar_x, top_y),
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        assert_eq!(scroll_pane.read(cx).display_offset_for_test(), hist);
+        assert!(!scroll_pane.read(cx).has_selection());
+        w.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: point(pb.left() + px(10.), mid_y),
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Default::default(),
+            }),
+            cx,
+        );
+        let mid_offset = scroll_pane.read(cx).display_offset_for_test();
+        assert!(
+            mid_offset > hist / 4 && mid_offset < hist * 3 / 4,
+            "dragging thumb to middle must scrub mid-scrollback, got {mid_offset}/{hist}"
+        );
+        w.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: point(pb.left() + px(10.), bot_y),
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Default::default(),
+            }),
+            cx,
+        );
+        assert_eq!(scroll_pane.read(cx).display_offset_for_test(), 0);
+        w.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                position: point(pb.left() + px(10.), bot_y),
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count: 1,
+            }),
+            cx,
+        );
+        assert!(!scroll_pane.read(cx).has_selection());
+
+        // Alt+click above thumb pages up cleanly.
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: point(bar_x, top_y),
+                button: MouseButton::Left,
+                modifiers: Modifiers::alt(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        let paged = scroll_pane.read(cx).display_offset_for_test();
+        assert!(paged > 0 && paged < hist);
+
+        // Keyboard scrollback shortcuts: Shift+Home -> top, Shift+End -> bottom, Shift+PageUp -> page up.
+        scroll_pane.update(cx, |p, cx| {
+            p.key_for_test("shift-home", w, cx);
+            assert_eq!(p.display_offset_for_test(), hist);
+            p.key_for_test("shift-end", w, cx);
+            assert_eq!(p.display_offset_for_test(), 0);
+            p.key_for_test("shift-pageup", w, cx);
+            assert!(p.display_offset_for_test() > 0);
+            p.key_for_test("shift-pagedown", w, cx);
+            assert_eq!(p.display_offset_for_test(), 0);
+            // Entering alt-screen hides the scrollbar cleanly.
+            p.feed(b"\x1b[?1049h", cx);
+        });
+        w.draw(cx).clear(cx);
+        assert!(!scroll_pane.read(cx).scrollbar_hovered_for_test());
+        scroll_pane.update(cx, |p, cx| p.feed(b"\x1b[?1049l", cx));
     })?;
     draw_remote(&mut test);
     let mut saw_reconnect = false;
@@ -4564,6 +4881,27 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             let first_tab_id = ws.read(cx).tabs[0].id;
             let active_tab_id = ws.read(cx).tabs[2].id;
             let first_tab_x = if mac { 160. } else { 90. };
+            // Hovering an inactive tab tracks hovered_tab so dividers hide on both sides.
+            w.dispatch_event(
+                PlatformInput::MouseMove(MouseMoveEvent {
+                    position: point(px(first_tab_x), px(20.)),
+                    pressed_button: None,
+                    modifiers: Default::default(),
+                }),
+                cx,
+            );
+            w.draw(cx).clear(cx);
+            assert_eq!(ws.read(cx).hovered_tab, Some(first_tab_id));
+            w.dispatch_event(
+                PlatformInput::MouseMove(MouseMoveEvent {
+                    position: point(px(first_tab_x), px(200.)),
+                    pressed_button: None,
+                    modifiers: Default::default(),
+                }),
+                cx,
+            );
+            w.draw(cx).clear(cx);
+            assert_eq!(ws.read(cx).hovered_tab, None);
             w.dispatch_event(
                 PlatformInput::MouseDown(MouseDownEvent {
                     position: point(px(first_tab_x), px(20.)),
@@ -5122,7 +5460,67 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod chrome_tests {
-    use super::compute_chrome_layout;
+    use super::{compute_chrome_layout, find::format_find_counter, show_tab_divider};
+    use crate::terminal::SearchStatus;
+
+    #[::core::prelude::v1::test]
+    fn find_counter_formats_empty_error_zero_normal_and_truncated() {
+        assert_eq!(format_find_counter("", &SearchStatus::default()), None);
+        assert_eq!(
+            format_find_counter(
+                "[bad",
+                &SearchStatus {
+                    invalid_regex: true,
+                    ..Default::default()
+                }
+            ),
+            Some(("Invalid regex".into(), true))
+        );
+        assert_eq!(
+            format_find_counter("missing", &SearchStatus::default()),
+            Some(("No results".into(), true))
+        );
+        assert_eq!(
+            format_find_counter(
+                "err",
+                &SearchStatus {
+                    total: 17,
+                    active: Some(2),
+                    ..Default::default()
+                }
+            ),
+            Some(("3/17".into(), false))
+        );
+        assert_eq!(
+            format_find_counter(
+                "e",
+                &SearchStatus {
+                    total: 10_000,
+                    active: Some(9_999),
+                    truncated: true,
+                    invalid_regex: false,
+                }
+            ),
+            Some(("10000/10,000+".into(), false))
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn tab_divider_hidden_around_active_hovered_and_preview_tabs() {
+        // Two plain inactive neighbors show a divider.
+        assert!(show_tab_divider(1, Some(2), Some(3), None));
+
+        // Hidden on both sides of the active tab.
+        assert!(!show_tab_divider(1, Some(2), Some(2), None));
+        assert!(!show_tab_divider(2, Some(3), Some(2), None));
+
+        // Hidden on both sides of a hovered inactive tab.
+        assert!(!show_tab_divider(1, Some(2), Some(3), Some(2)));
+        assert!(!show_tab_divider(2, Some(3), Some(4), Some(2)));
+
+        // Hidden before a drag preview slot or after the final tab.
+        assert!(!show_tab_divider(1, None, Some(3), None));
+    }
 
     #[::core::prelude::v1::test]
     fn chrome_layout_adapts_cleanly_from_wide_to_crowded() {

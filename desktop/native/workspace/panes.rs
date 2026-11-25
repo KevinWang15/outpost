@@ -431,6 +431,10 @@ impl Workspace {
         }
         entries.extend([
             MenuEntry::Separator,
+            item("Find in terminal…", LucideIcon::Search, |s, _, w, cx| {
+                s.open_find(w, cx)
+            })
+            .with_shortcut(if mac { "⌘F" } else { "Ctrl+Shift+F" }),
             item("Reload terminal", LucideIcon::RotateCw, |s, _, w, cx| {
                 s.reload_selected(w, cx)
             })
@@ -845,7 +849,7 @@ impl Workspace {
                         LucideIcon::Search,
                         cx.listener(move |s, _, w, cx| {
                             s.select(id, w, cx);
-                            s.show(Page::Find, w, cx);
+                            s.open_find(w, cx);
                         }),
                     )
                     .with_shortcut(if mac { "⌘F" } else { "Ctrl+Shift+F" }),

@@ -138,6 +138,16 @@ export class FakeSessions implements SessionService {
   async switch(context: TargetContext, id: string) {
     return this.find(context, id)
   }
+  async newConversation(context: TargetContext, id: string) {
+    const session = this.find(context, id)
+    session.conversations.push({
+      id: crypto.randomUUID(),
+      title: '',
+      startedAt: new Date().toISOString(),
+      movedTo: null,
+    })
+    return session
+  }
   /** Messages typed into a terminal session, by key. */
   delivered: { id: string; key: string; text: string }[] = []
   async deliver(context: TargetContext, id: string, key: string, text: string) {

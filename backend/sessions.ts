@@ -59,8 +59,11 @@ export class SessionClient {
     launchSize(update)
     return machine.call<Session>('sessions.update', { id, update })
   }
-  switch({ machine }: TargetContext, id: string, conversation: string) {
-    return machine.call<Session>('sessions.switch', { id, conversation })
+  switch({ machine }: TargetContext, id: string, conversation: string, reclaim = false) {
+    return machine.call<Session>('sessions.switch', { id, conversation, ...(reclaim ? { reclaim: true } : {}) })
+  }
+  newConversation({ machine }: TargetContext, id: string) {
+    return machine.call<Session>('sessions.newConversation', { id }, { timeoutMs: 120_000 })
   }
   acknowledge({ machine }: TargetContext, id: string, completionId: string) {
     return machine.call<Session>('sessions.acknowledge', { id, completionId })

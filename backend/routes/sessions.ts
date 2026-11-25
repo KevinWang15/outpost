@@ -47,13 +47,16 @@ export function sessionRoutes(app: FastifyInstance, services: Services, hub: Cha
     async request =>
       sessions.update(await services.context(request, request.params.targetId), request.params.sessionId, request.body),
   )
-  // Make an earlier conversation of the session current again.
-  app.post<{ Params: Params; Body: { conversation: string } }>(
+  // Make an earlier conversation of the session current again (or reclaim a moved one).
+  app.post<{ Params: Params; Body: { conversation: string; reclaim?: boolean } }>(
     `${base}/:sessionId/switch`,
     {
       schema: {
         body: Type.Object(
-          { conversation: Type.String({ minLength: 1, maxLength: 128 }) },
+          {
+            conversation: Type.String({ minLength: 1, maxLength: 128 }),
+            reclaim: Type.Optional(Type.Boolean()),
+          },
           { additionalProperties: false },
         ),
       },
@@ -63,7 +66,17 @@ export function sessionRoutes(app: FastifyInstance, services: Services, hub: Cha
         await services.context(request, request.params.targetId),
         request.params.sessionId,
         request.body.conversation,
+        request.body.reclaim === true,
       ),
+  )
+  // Allocate a brand-new conversation for a stopped session.
+  app.post<{ Params: Params }>(
+    `${base}/:sessionId/conversations`,
+    {
+      schema: { body: { type: 'object', additionalProperties: false } },
+    },
+    async request =>
+      sessions.newConversation(await services.context(request, request.params.targetId), request.params.sessionId),
   )
   app.delete<{ Params: Params }>(`${base}/:sessionId`, async (request, reply) => {
     const context = await services.context(request, request.params.targetId)

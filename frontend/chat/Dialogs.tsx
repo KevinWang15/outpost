@@ -182,9 +182,19 @@ export function ConversationsChatDialog({ target: selected, onClose }: { target:
       session={session}
       whileRunning="Resuming another conversation restarts the coding tool in it."
       onClose={onClose}
-      onSwitch={async conversation => {
+      onSwitch={async (conversation, options) => {
         if (session.driver) await client.call({ type: 'stop', ...target })
-        await client.call({ type: 'session-switch', ...target, conversation })
+        await client.call({
+          type: 'session-switch',
+          ...target,
+          conversation,
+          ...(options?.reclaim ? { reclaim: true } : {}),
+        })
+        client.restart(target)
+      }}
+      onNewConversation={async () => {
+        if (session.driver) await client.call({ type: 'stop', ...target })
+        await client.call({ type: 'new-conversation', ...target })
         client.restart(target)
       }}
     />

@@ -200,7 +200,12 @@ class Connection implements ChatClient {
       }
       case 'session-switch': {
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
-        const session = await this.server.services.sessions.switch(context, ref!.sessionId, message.conversation)
+        const session = await this.server.services.sessions.switch(
+          context,
+          ref!.sessionId,
+          message.conversation,
+          message.reclaim === true,
+        )
         await hub.refreshFor(this.owner)
         return { ok: true, data: session }
       }
@@ -218,9 +223,16 @@ class Connection implements ChatClient {
         return { ok: true }
       }
       case 'new-conversation': {
-        const result = await (await this.existing(ref!)).request({ type: 'new' }, 60_000)
+        const link = await hub.link(this.owner, ref!)
+        if (link.state === 'live') {
+          const result = await link.request({ type: 'new' }, 60_000)
+          await hub.refreshFor(this.owner)
+          return result
+        }
+        const context = await this.server.services.resolve(this.owner, ref!.targetId)
+        const session = await this.server.services.sessions.newConversation(context, ref!.sessionId)
         await hub.refreshFor(this.owner)
-        return result
+        return { ok: true, data: session }
       }
       case 'channel-save':
         return { ok: true, data: await hub.saveChannel(this.owner, message.channel) }

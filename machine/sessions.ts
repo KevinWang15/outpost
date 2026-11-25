@@ -285,20 +285,65 @@ function pick<T extends object, K extends keyof T>(value: T, keys: readonly K[])
   return Object.fromEntries(keys.filter(key => value[key] !== undefined).map(key => [key, value[key]])) as Pick<T, K>
 }
 
-/** Make an earlier conversation current; it is resumed at the next start. */
-export async function switchSession(id: unknown, conversation: unknown) {
+/** Make an earlier conversation current; it is resumed at the next start.
+ * With `reclaim: true`, a conversation that moved to another stopped session
+ * can be moved back here. */
+export async function switchSession(id: unknown, conversation: unknown, options: { reclaim?: boolean } = {}) {
   return withSessionLock(id, async () => {
     const { terminal, chat } = await driverStatus(String(id))
     if (terminal || chat) throw new RegistryError('Stop the session before switching its conversation.')
+    if (options.reclaim) {
+      const snapshot = readRegistry()
+      const currentRecord = findSession(snapshot, id)
+      const storageValue = Object.values(currentRecord.storage)[0]
+      const holder = snapshot.sessions.find(
+        other =>
+          other.id !== currentRecord.id &&
+          other.tool === currentRecord.tool &&
+          Object.values(other.storage)[0] === storageValue &&
+          other.conversations.some(item => item.id === conversation && !item.movedTo),
+      )
+      if (holder) {
+        const holderDriver = await driverStatus(holder.id)
+        if (holderDriver.terminal || holderDriver.chat)
+          throw new RegistryError(`Stop "${holder.name}" before moving this conversation back here.`, 409)
+      }
+    }
     const record = await changeRegistry(registry => {
       const record = findSession(registry, id)
       const entry = record.conversations.find(item => item.id === conversation)
       if (!entry) throw new RegistryError('This conversation is not in the session.', 404)
-      if (entry.movedTo) throw new RegistryError('This conversation moved to another session.')
+      if (entry.movedTo && !options.reclaim) throw new RegistryError('This conversation moved to another session.')
       switchConversation(registry, record.id, entry.id)
       return record
     })
     return describe(record, readRegistry())
+  })
+}
+
+/** Allocate and select a brand-new conversation for a stopped session. */
+export async function newSessionConversation(id: unknown) {
+  return withSessionLock(id, async record => {
+    const { terminal, chat } = await driverStatus(record.id)
+    if (terminal || chat) throw new RegistryError('Stop the session before starting a new conversation.')
+    const adapter = harness(record.tool)
+    const environment = {
+      ...(process.env as Record<string, string>),
+      ...record.config.env,
+      ...record.storage,
+    }
+    const executable = which(adapter.command, environment.PATH)
+    if (!executable)
+      throw new RegistryError(
+        `${adapter.command} is missing on this machine. Check Software on the machine page and your login PATH.`,
+      )
+    const conversation = await adapter.create(record.rootDir, environment, executable)
+    const updated = await changeRegistry(registry => {
+      const latest = findSession(registry, record.id)
+      switchConversation(registry, latest.id, conversation)
+      return latest
+    })
+    return describe(updated, readRegistry())
   })
 }
 
@@ -309,6 +354,44 @@ export async function deleteSession(id: unknown) {
     const record = await changeRegistry(registry => {
       const record = findSession(registry, id)
       registry.sessions = registry.sessions.filter(item => item !== record)
+      // Reconcile any conversations in surviving sessions that pointed to the deleted session.
+      const orphaned = new Map<
+        string,
+        Array<{ session: SessionRecord; entry: SessionRecord['conversations'][number]; isCurrent: boolean }>
+      >()
+      for (const other of registry.sessions) {
+        const storage = Object.values(other.storage)[0]
+        const last = other.conversations.at(-1)
+        for (const entry of other.conversations) {
+          if (entry.movedTo !== record.id) continue
+          const k = JSON.stringify([other.tool, storage, entry.id])
+          const list = orphaned.get(k) ?? []
+          list.push({ session: other, entry, isCurrent: entry === last })
+          orphaned.set(k, list)
+        }
+      }
+      for (const refs of orphaned.values()) {
+        const sample = refs[0]!
+        const sampleStorage = Object.values(sample.session.storage)[0]
+        const activeHolder = registry.sessions.find(
+          candidate =>
+            candidate.tool === sample.session.tool &&
+            Object.values(candidate.storage)[0] === sampleStorage &&
+            candidate.conversations.some(c => c.id === sample.entry.id && !c.movedTo),
+        )
+        if (activeHolder) {
+          for (const ref of refs) ref.entry.movedTo = activeHolder.id
+          continue
+        }
+        // Restore ownership to the single best surviving session (preferring one whose current conversation it is).
+        refs.sort((a, b) => {
+          if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1
+          return b.entry.startedAt.localeCompare(a.entry.startedAt)
+        })
+        const [winner, ...rest] = refs
+        winner!.entry.movedTo = null
+        for (const ref of rest) ref.entry.movedTo = winner!.session.id
+      }
       return record
     })
     for (const path of [

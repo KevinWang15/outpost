@@ -38,6 +38,7 @@ import {
   forkSession,
   getSession,
   listSessions,
+  newSessionConversation,
   switchSession,
   terminateSession,
   updateSession,
@@ -281,7 +282,8 @@ export async function serveNode(socketName: string) {
         return created
       },
       'sessions.update': args => updateSession(args.id, args.update as never),
-      'sessions.switch': args => switchSession(args.id, args.conversation),
+      'sessions.switch': args => switchSession(args.id, args.conversation, { reclaim: args.reclaim === true }),
+      'sessions.newConversation': args => newSessionConversation(args.id),
       'sessions.delete': async args => {
         await deleteSession(args.id)
         return null

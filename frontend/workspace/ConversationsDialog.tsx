@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowRightLeft, MessageSquareText } from 'lucide-react'
+import { ArrowRightLeft, MessageSquareText, Plus } from 'lucide-react'
 import type { Session } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
 import { Dialog } from '../ui/Dialog'
@@ -10,12 +10,14 @@ export default function ConversationsDialog({
   session,
   whileRunning,
   onSwitch,
+  onNewConversation,
   onClose,
 }: {
   session: Session
   /** What resuming does to the running coding tool; `onSwitch` stops it first. */
   whileRunning: string
-  onSwitch: (conversation: string) => Promise<unknown>
+  onSwitch: (conversation: string, options?: { reclaim?: boolean }) => Promise<unknown>
+  onNewConversation?: () => Promise<unknown>
   onClose: () => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
@@ -23,11 +25,24 @@ export default function ConversationsDialog({
   const current = session.conversations.at(-1)!
   const conversations = [...session.conversations].reverse()
 
-  async function choose(conversation: string) {
+  async function choose(conversation: string, reclaim = false) {
     setBusy(conversation)
     setError('')
     try {
-      await onSwitch(conversation)
+      await onSwitch(conversation, reclaim ? { reclaim: true } : undefined)
+      onClose()
+    } catch (problem) {
+      setError((problem as Error).message)
+      setBusy(null)
+    }
+  }
+
+  async function startNew() {
+    if (!onNewConversation) return
+    setBusy('__new__')
+    setError('')
+    try {
+      await onNewConversation()
       onClose()
     } catch (problem) {
       setError((problem as Error).message)
@@ -42,14 +57,28 @@ export default function ConversationsDialog({
       busy={busy !== null}
       onClose={onClose}
       footer={
-        <button className="button" type="button" disabled={busy !== null} onClick={onClose}>
-          Close
-        </button>
+        <>
+          {onNewConversation && (
+            <button
+              className={current.movedTo ? 'button primary' : 'button'}
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void startNew()}
+            >
+              <Plus size={14} />
+              {busy === '__new__' ? 'Starting…' : 'New conversation'}
+            </button>
+          )}
+          <button className="button" type="button" disabled={busy !== null} onClick={onClose}>
+            Close
+          </button>
+        </>
       }
     >
       {current.movedTo && (
         <p className="warning" role="status">
-          The current conversation continues in {current.movedTo.name} now. Choose another one to resume here.
+          The current conversation continues in {current.movedTo.name} now. Resume another conversation, move it back
+          here, or start a new one.
         </p>
       )}
       {session.driver !== null && <p className="hint">{whileRunning}</p>}
@@ -73,16 +102,28 @@ export default function ConversationsDialog({
                     : `Started ${relativeTime(conversation.startedAt).replace('Just now', 'just now')}`}
                 </span>
               </span>
-              {!isCurrent && !conversation.movedTo && (
+              {conversation.movedTo ? (
                 <button
                   className="button small"
-                  aria-label={`Resume ${label}`}
+                  aria-label={`Move ${label} back here`}
                   disabled={busy !== null}
-                  onClick={() => void choose(conversation.id)}
+                  onClick={() => void choose(conversation.id, true)}
                 >
                   <ArrowRightLeft size={14} />
-                  {busy === conversation.id ? 'Switching…' : 'Resume'}
+                  {busy === conversation.id ? 'Moving…' : 'Move back'}
                 </button>
+              ) : (
+                !isCurrent && (
+                  <button
+                    className="button small"
+                    aria-label={`Resume ${label}`}
+                    disabled={busy !== null}
+                    onClick={() => void choose(conversation.id)}
+                  >
+                    <ArrowRightLeft size={14} />
+                    {busy === conversation.id ? 'Switching…' : 'Resume'}
+                  </button>
+                )
               )}
             </li>
           )

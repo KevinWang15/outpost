@@ -277,9 +277,17 @@ export default function TargetView({
           session={panel.session}
           whileRunning="Resuming another conversation stops the coding tool. The session continues in that conversation when it starts again."
           onClose={close}
-          onSwitch={async conversation => {
+          onSwitch={async (conversation, options) => {
             if (panel.session.driver) await api(`${sessionPath(panel.session)}/terminate`, 'POST')
-            await api<Session>(`${sessionPath(panel.session)}/switch`, 'POST', { conversation })
+            await api<Session>(`${sessionPath(panel.session)}/switch`, 'POST', {
+              conversation,
+              ...(options?.reclaim ? { reclaim: true } : {}),
+            })
+            await refresh()
+          }}
+          onNewConversation={async () => {
+            if (panel.session.driver) await api(`${sessionPath(panel.session)}/terminate`, 'POST')
+            await api<Session>(`${sessionPath(panel.session)}/conversations`, 'POST', {})
             await refresh()
           }}
         />

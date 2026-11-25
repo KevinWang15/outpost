@@ -14,6 +14,7 @@ import {
   deleteSession,
   forkSession,
   listSessions,
+  newSessionConversation,
   switchSession,
   updateSession,
 } from '../../machine/sessions'
@@ -392,4 +393,62 @@ test('image chunks stay with their attachment and an interrupted upload cannot f
     viewer.close()
     replacement.close()
   }
+})
+
+test('deleting a session reconciles movedTo pointers and restores ownership without duplicates', async t => {
+  const { input } = setup(t)
+  const first = await createSession(input({ name: 'First' }))
+  const second = await createSession(input({ name: 'Second' }))
+  const third = await createSession(input({ name: 'Third' }))
+  const movedId = currentConversation(first)
+
+  // Move conversation: First -> Second -> Third.
+  await changeRegistry(registry => {
+    switchConversation(registry, second.id, movedId)
+    switchConversation(registry, third.id, movedId)
+  })
+  // Deleting middle session Second while Third still holds movedId must re-point First -> Third.
+  await deleteSession(second.id)
+  const afterMidDelete = readRegistry().sessions.find(s => s.id === first.id)!
+  assert.equal(afterMidDelete.conversations.at(-1)!.movedTo, third.id)
+
+  // Deleting active holder Third restores movedId to First (movedTo becomes null).
+  await deleteSession(third.id)
+  const restored = readRegistry().sessions.find(s => s.id === first.id)!
+  assert.equal(restored.conversations.at(-1)!.movedTo, null)
+})
+
+test('reclaim moves a conversation back from a stopped session, and newSessionConversation unsticks a stranded session', async t => {
+  const { input } = setup(t)
+  const source = await createSession(input({ name: 'Source' }))
+  const thief = await createSession(input({ name: 'Thief' }))
+  const original = currentConversation(source)
+
+  // Move Source's only conversation to Thief.
+  await changeRegistry(registry => {
+    switchConversation(registry, thief.id, original)
+  })
+  assert.equal(
+    readRegistry()
+      .sessions.find(s => s.id === source.id)!
+      .conversations.at(-1)!.movedTo,
+    thief.id,
+  )
+
+  // Plain switch refuses a moved conversation, while reclaim moves it back.
+  await assert.rejects(switchSession(source.id, original), /moved to another session/)
+  const reclaimed = await switchSession(source.id, original, { reclaim: true })
+  assert.equal(reclaimed.conversations.at(-1)!.id, original)
+  assert.equal(reclaimed.conversations.at(-1)!.movedTo, null)
+  assert.equal(
+    readRegistry()
+      .sessions.find(s => s.id === thief.id)!
+      .conversations.at(-1)!.movedTo,
+    source.id,
+  )
+
+  // Thief is now stranded on movedTo; newSessionConversation allocates a fresh active conversation.
+  const fresh = await newSessionConversation(thief.id)
+  assert.equal(fresh.conversations.at(-1)!.movedTo, null)
+  assert.notEqual(fresh.conversations.at(-1)!.id, original)
 })

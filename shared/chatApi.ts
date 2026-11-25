@@ -194,8 +194,13 @@ export const chatClientMessage = Type.Union([
   message('stop', { id, ...session }),
   /** Edit the session; launch configuration applies when it next starts. */
   message('session-update', { id, ...session, update: sessionUpdate }),
-  /** Make an earlier conversation current; refused while the session runs. */
-  message('session-switch', { id, ...session, conversation: Type.String({ minLength: 1, maxLength: 128 }) }),
+  /** Make an earlier conversation current (or reclaim a moved one); refused while the session runs. */
+  message('session-switch', {
+    id,
+    ...session,
+    conversation: Type.String({ minLength: 1, maxLength: 128 }),
+    reclaim: Type.Optional(Type.Boolean()),
+  }),
   /** Start a new conversation in the running chat, like /new in a terminal. */
   message('new-conversation', { id, ...session }),
   /** A new session on a new Git branch and worktree, from this one. */

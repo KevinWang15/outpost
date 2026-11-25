@@ -18,6 +18,12 @@ interface Handlers {
   deliveries(waiting: number): void
 }
 
+// Leading-edge coalescing intervals keep worst-case client frame rate
+// (input <= 100/s, resize <= 40/s, ack <= 100/s) safely under the server's
+// 300 messages/second cap while adding 0ms latency to normal interactive typing.
+const INPUT_COALESCE_MS = 10
+const RESIZE_COALESCE_MS = 25
+
 /** The web client of the terminal protocol (shared/protocol.ts). Reconnects
  * with the resume token after drops; an ended session requires explicit reconnect. */
 export class TerminalSocket {
@@ -44,6 +50,13 @@ export class TerminalSocket {
   private receivedAt = 0
   private online = typeof navigator === 'undefined' || navigator.onLine !== false
   private requestedSize: { cols: number; rows: number } | null = null
+  private pendingResize: { cols: number; rows: number } | null = null
+  private resizeTimer: ReturnType<typeof setTimeout> | undefined
+  private lastResizeAt = 0
+  private inputQueue: Uint8Array<ArrayBuffer>[] = []
+  private inputQueueBytes = 0
+  private inputTimer: ReturnType<typeof setTimeout> | undefined
+  private lastInputAt = 0
   private active = false
   private drafting = false
   private heartbeat: ReturnType<typeof setTimeout> | undefined
@@ -237,6 +250,15 @@ export class TerminalSocket {
     this.cleanup = null
     clearTimeout(this.heartbeat)
     this.heartbeat = undefined
+    clearTimeout(this.inputTimer)
+    this.inputTimer = undefined
+    this.inputQueue = []
+    this.inputQueueBytes = 0
+    this.lastInputAt = 0
+    clearTimeout(this.resizeTimer)
+    this.resizeTimer = undefined
+    this.pendingResize = null
+    this.lastResizeAt = 0
     if (this.probe) clearTimeout(this.probe.timer)
     this.probe = null
     const socket = this.socket
@@ -359,6 +381,9 @@ export class TerminalSocket {
   }
 
   private send(message: ClientMessage) {
+    // Preserve FIFO order between buffered PTY input and ordered control commands
+    // without letting background acks/pings break input burst coalescing.
+    if (message.type !== 'ack' && message.type !== 'ping') this.flushInput()
     const data = JSON.stringify(message)
     const wire = this.socket
     if (wire && this.canSend(new TextEncoder().encode(data).length, wire)) wire.send(data)
@@ -373,27 +398,84 @@ export class TerminalSocket {
     return true
   }
 
+  private sendInputBytes(bytes: Uint8Array<ArrayBuffer>, wire: WebSocket) {
+    for (let offset = 0; offset < bytes.length; offset += maxInputMessage)
+      wire.send(bytes.subarray(offset, offset + maxInputMessage))
+    this.lastInputAt = Date.now()
+  }
+
+  private flushInput() {
+    clearTimeout(this.inputTimer)
+    this.inputTimer = undefined
+    if (this.inputQueue.length === 0) return
+    const chunks = this.inputQueue
+    const total = this.inputQueueBytes
+    this.inputQueue = []
+    this.inputQueueBytes = 0
+    const wire = this.socket
+    if (!this.connected || !wire || !this.canSend(total, wire)) return
+    if (chunks.length === 1) {
+      this.sendInputBytes(chunks[0], wire)
+      return
+    }
+    const merged = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+    this.sendInputBytes(merged, wire)
+  }
+
+  private flushResize() {
+    clearTimeout(this.resizeTimer)
+    this.resizeTimer = undefined
+    const next = this.pendingResize
+    this.pendingResize = null
+    if (!next || !this.connected) return
+    if (this.requestedSize?.cols === next.cols && this.requestedSize.rows === next.rows) return
+    this.requestedSize = next
+    this.lastResizeAt = Date.now()
+    this.send({ type: 'resize', cols: next.cols, rows: next.rows })
+  }
+
   input(data: string | Uint8Array<ArrayBuffer>) {
     if (!this.connected) return false
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
+    if (bytes.length === 0) return true
     if (bytes.length > 1024 * 1024) {
       this.fail('Terminal input is limited to 1 MiB at a time. Reconnect and paste smaller sections.')
       return false
     }
     const wire = this.socket
-    if (!wire || !this.canSend(bytes.length, wire)) return false
-    for (let offset = 0; offset < bytes.length; offset += maxInputMessage)
-      wire.send(bytes.subarray(offset, offset + maxInputMessage))
+    if (!wire || !this.canSend(this.inputQueueBytes + bytes.length, wire)) return false
+    const elapsed = Date.now() - this.lastInputAt
+    if (this.inputQueue.length === 0 && elapsed >= INPUT_COALESCE_MS) {
+      this.sendInputBytes(bytes, wire)
+      return true
+    }
+    this.inputQueue.push(bytes)
+    this.inputQueueBytes += bytes.length
+    this.inputTimer ??= setTimeout(() => this.flushInput(), Math.max(1, INPUT_COALESCE_MS - elapsed))
     return true
   }
 
   resize(cols: number, rows: number) {
     if (this.waitingForSize) return this.open()
-    if (!this.connected || (this.requestedSize?.cols === cols && this.requestedSize.rows === rows)) return
-    // Track requests, not rendered geometry: the target's acknowledgement may
-    // still be in flight when the user resizes back to an earlier dimension.
-    this.requestedSize = { cols, rows }
-    this.send({ type: 'resize', cols, rows })
+    if (!this.connected) return
+    const latest = this.pendingResize ?? this.requestedSize
+    if (latest?.cols === cols && latest.rows === rows) return
+    const elapsed = Date.now() - this.lastResizeAt
+    if (!this.resizeTimer && elapsed >= RESIZE_COALESCE_MS) {
+      // Track requests, not rendered geometry: the target's acknowledgement may
+      // still be in flight when the user resizes back to an earlier dimension.
+      this.requestedSize = { cols, rows }
+      this.lastResizeAt = Date.now()
+      this.send({ type: 'resize', cols, rows })
+      return
+    }
+    this.pendingResize = { cols, rows }
+    this.resizeTimer ??= setTimeout(() => this.flushResize(), Math.max(1, RESIZE_COALESCE_MS - elapsed))
   }
 
   draft(active: boolean) {
@@ -413,6 +495,7 @@ export class TerminalSocket {
     // Store this viewer's latest size before claiming control of the PTY.
     const size = this.size()
     if (size) this.resize(size.cols, size.rows)
+    this.flushResize()
     this.send({ type: 'focus', active })
   }
 

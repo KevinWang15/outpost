@@ -101,6 +101,7 @@ fn init(cx: &mut App) {
     theme.foreground = rgb(0xe6e6e6).into();
     theme.popover_foreground = rgb(0xe6e6e6).into();
     theme.muted_foreground = rgb(0x8c8c8c).into();
+    theme.placeholder = rgb(0x666666).into();
     theme.primary = rgb(0xe6e6e6).into();
     theme.primary_hover = rgb(0xffffff).into();
     theme.primary_foreground = rgb(0x0c0c0c).into();
@@ -114,10 +115,18 @@ fn init(cx: &mut App) {
     theme.input_border_hover = rgb(0x454545).into();
     theme.ring = rgb(0x666666).into();
     theme.selection = rgba(0xffffff38).into();
+    theme.disabled_bg = rgb(0x141414).into();
+    theme.disabled_foreground = rgb(0x525252).into();
+    theme.slider_track = rgb(0x262626).into();
     theme.slider_fill = rgb(0xe6e6e6).into();
     theme.toggle_track_off = rgb(0x2b2b2b).into();
     theme.toggle_track_on = rgb(0x22c55e).into();
     theme.toggle_thumb = rgb(0xffffff).into();
+    theme.tooltip_bg = rgb(0x1a1a1a).into();
+    theme.tooltip_foreground = rgb(0xe6e6e6).into();
+    theme.tooltip_border = rgb(0x2f2f2f).into();
+    theme.chart_baseline = rgb(0x666666).into();
+    theme.chart_gridline = rgba(0xffffff1a).into();
     theme.focus_ring_width = px(2.);
     theme.radius_md = px(7.);
     theme.mono_font_family = Some(crate::terminal::FAMILY.into());

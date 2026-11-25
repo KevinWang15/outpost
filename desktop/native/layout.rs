@@ -1,7 +1,7 @@
 // Persistent pane identities keep terminals alive when their layout changes.
 pub type Id = usize;
 pub const GAP: f32 = 6.;
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Axis {
     Across,
     Down,

@@ -111,6 +111,8 @@ pub struct Pane {
     dragging: bool,
     selection_changed: bool,
     mouse_reported_button: Option<MouseButton>,
+    last_mouse_motion: Option<(u8, usize, usize, u8)>,
+    scroll_remainder: f32,
     pending_copy: Option<String>,
     marked: String,
 }
@@ -245,6 +247,8 @@ impl Pane {
             dragging: false,
             selection_changed: false,
             mouse_reported_button: None,
+            last_mouse_motion: None,
+            scroll_remainder: 0.0,
             pending_copy: None,
             marked: String::new(),
         }
@@ -349,6 +353,8 @@ impl Pane {
     pub fn reset(&mut self, cols: u16, rows: u16) {
         self.grid_visible = false;
         self.pending_copy = None;
+        self.last_mouse_motion = None;
+        self.scroll_remainder = 0.0;
         self.term = Term::new(
             Config {
                 scrolling_history: self.scrollback,
@@ -674,10 +680,12 @@ impl Pane {
         up: bool,
         mods: Modifiers,
         force: bool,
+        dedupe_motion: bool,
         cx: &mut Context<Self>,
     ) -> bool {
         let mode = *self.term.mode();
         if (!force && Self::bypass_mouse_mode(mods)) || !mode.intersects(TermMode::MOUSE_MODE) {
+            self.last_mouse_motion = None;
             return false;
         }
         let pos = self.point(p);
@@ -686,28 +694,117 @@ impl Pane {
         }
         let x = pos.column.0 + 1;
         let y = pos.line.0 as usize + 1;
-        let flags = 8 * u8::from(mods.alt) + 16 * u8::from(mods.control);
-        let data = if mode.contains(TermMode::SGR_MOUSE) {
+        let flags = mouse_mod_flags(mods);
+        if dedupe_motion {
+            let key = (code, x, y, flags);
+            if self.last_mouse_motion == Some(key) {
+                return true;
+            }
+            self.last_mouse_motion = Some(key);
+        } else if up {
+            self.last_mouse_motion = None;
+        } else {
+            self.last_mouse_motion = Some((32 + code, x, y, flags));
+        }
+        let Some(data) = encode_mouse_sequence(mode, code, x, y, up, flags) else {
+            return true;
+        };
+        self.write(data, cx);
+        true
+    }
+    fn scroll_mouse_report(
+        &mut self,
+        up: bool,
+        count: usize,
+        p: Point<Pixels>,
+        mods: Modifiers,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mode = *self.term.mode();
+        if Self::bypass_mouse_mode(mods) || !mode.intersects(TermMode::MOUSE_MODE) {
+            return false;
+        }
+        let pos = self.point(p);
+        if pos.line.0 < 0 {
+            return false;
+        }
+        let x = pos.column.0 + 1;
+        let y = pos.line.0 as usize + 1;
+        let code = if up { 64 } else { 65 };
+        let Some(seq) = encode_mouse_sequence(mode, code, x, y, false, mouse_mod_flags(mods))
+        else {
+            return true;
+        };
+        let mut batch = Vec::with_capacity(seq.len() * count);
+        for _ in 0..count {
+            batch.extend_from_slice(&seq);
+        }
+        self.write(batch, cx);
+        true
+    }
+}
+
+fn mouse_mod_flags(mods: Modifiers) -> u8 {
+    8 * u8::from(mods.alt) + 16 * u8::from(mods.control)
+}
+
+fn encode_mouse_sequence(
+    mode: TermMode,
+    code: u8,
+    x: usize,
+    y: usize,
+    up: bool,
+    flags: u8,
+) -> Option<Vec<u8>> {
+    if mode.contains(TermMode::SGR_MOUSE) {
+        Some(
             format!(
                 "\x1b[<{};{x};{y}{}",
                 code + flags,
                 if up { "m" } else { "M" }
             )
-            .into_bytes()
-        } else if x <= 223 && y <= 223 {
-            vec![
-                27,
-                91,
-                77,
-                32 + if up { 3 } else { code } + flags,
-                32 + x as u8,
-                32 + y as u8,
-            ]
-        } else {
-            return true;
-        };
-        self.write(data, cx);
-        true
+            .into_bytes(),
+        )
+    } else if x <= 223 && y <= 223 {
+        Some(vec![
+            27,
+            91,
+            77,
+            32 + if up { 3 } else { code } + flags,
+            32 + x as u8,
+            32 + y as u8,
+        ])
+    } else {
+        None
+    }
+}
+
+fn accumulate_scroll_steps(
+    remainder: &mut f32,
+    delta: ScrollDelta,
+    cell_height: Pixels,
+) -> (usize, bool) {
+    match delta {
+        ScrollDelta::Lines(p) => {
+            *remainder = 0.0;
+            if p.y.abs() < 0.01 {
+                return (0, true);
+            }
+            ((p.y.abs().ceil() as usize).clamp(1, 60), p.y > 0.0)
+        }
+        ScrollDelta::Pixels(p) => {
+            let rows = f32::from(p.y) / f32::from(cell_height).max(1.0);
+            if rows.abs() < 1e-4 {
+                return (0, true);
+            }
+            if *remainder != 0.0 && remainder.signum() != rows.signum() {
+                *remainder = 0.0;
+            }
+            *remainder += rows;
+            let whole = remainder.trunc() as i32;
+            *remainder -= whole as f32;
+            ((whole.unsigned_abs() as usize).min(60), whole > 0)
+        }
     }
 }
 impl Drop for Pane {
@@ -1342,7 +1439,7 @@ impl Pane {
                 return;
             }
         }
-        if self.mouse_report(button, e.position, false, e.modifiers, false, cx) {
+        if self.mouse_report(button, e.position, false, e.modifiers, false, false, cx) {
             self.mouse_reported_button = Some(e.button);
             self.dragging = false;
             self.selection_changed = false;
@@ -1419,8 +1516,11 @@ impl Pane {
                 false,
                 e.modifiers,
                 force,
+                true,
                 cx,
             );
+        } else {
+            self.last_mouse_motion = None;
         }
     }
     fn finish_drag(&mut self, cx: &mut Context<Self>) {
@@ -1451,7 +1551,7 @@ impl Pane {
                 MouseButton::Right => 2,
                 _ => return,
             };
-            self.mouse_report(code, e.position, true, e.modifiers, true, cx);
+            self.mouse_report(code, e.position, true, e.modifiers, true, false, cx);
         }
     }
 }
@@ -1468,36 +1568,29 @@ impl Render for Pane {
             .bg(rgb(colors::BG))
             .on_key_down(cx.listener(|s, e, w, cx| s.key(e, w, cx)))
             .on_scroll(cx.listener(|s, e: &ScrollEvent, _, cx| {
-                let delta = match e.delta {
-                    ScrollDelta::Lines(p) => p.y,
-                    ScrollDelta::Pixels(p) => f32::from(p.y) / f32::from(s.cell.height),
-                };
-                if delta.abs() < 0.01 {
+                let (n, up) =
+                    accumulate_scroll_steps(&mut s.scroll_remainder, e.delta, s.cell.height);
+                if n == 0 {
+                    cx.stop_propagation();
                     return;
                 }
-                let n = (delta.abs().ceil() as i32).clamp(1, 60);
-                if s.term.mode().intersects(TermMode::MOUSE_MODE) && !Self::bypass_mouse_mode(e.modifiers) {
-                    for _ in 0..n {
-                        s.mouse_report(
-                            if delta > 0. { 64 } else { 65 },
-                            e.position,
-                            false,
-                            e.modifiers,
-                            false,
-                            cx,
-                        );
-                    }
+                if s.scroll_mouse_report(up, n, e.position, e.modifiers, cx) {
+                    // Coalesced into a single terminal input write.
                 } else if s
                     .term
                     .mode()
                     .contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL)
                 {
+                    let seq = if up { b"\x1bOA" } else { b"\x1bOB" };
+                    let mut batch = Vec::with_capacity(seq.len() * n);
                     for _ in 0..n {
-                        s.write(if delta > 0. { b"\x1bOA" } else { b"\x1bOB" }.to_vec(), cx)
+                        batch.extend_from_slice(seq);
                     }
+                    s.write(batch, cx);
                 } else {
+                    let delta = n as i32;
                     s.term
-                        .scroll_display(Scroll::Delta(if delta > 0. { n } else { -n }));
+                        .scroll_display(Scroll::Delta(if up { delta } else { -delta }));
                     cx.notify()
                 }
                 cx.stop_propagation()
@@ -1804,5 +1897,54 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn pixel_scroll_accumulates_sub_row_deltas_and_resets_on_direction_flip() {
+        use super::{accumulate_scroll_steps, encode_mouse_sequence};
+        use alacritty_terminal::term::TermMode;
+        use gpui::{ScrollDelta, point};
+
+        let cell_h = px(20.);
+        let mut rem = 0.0;
+        // Three small 8px ticks = 24px -> emits 1 step once threshold is reached, keeping 4px remainder.
+        assert_eq!(
+            accumulate_scroll_steps(&mut rem, ScrollDelta::Pixels(point(px(0.), px(8.))), cell_h),
+            (0, false)
+        );
+        assert_eq!(
+            accumulate_scroll_steps(&mut rem, ScrollDelta::Pixels(point(px(0.), px(8.))), cell_h),
+            (0, false)
+        );
+        assert_eq!(
+            accumulate_scroll_steps(&mut rem, ScrollDelta::Pixels(point(px(0.), px(8.))), cell_h),
+            (1, true)
+        );
+        assert!((rem - 0.2).abs() < 1e-4);
+
+        // Reversing direction clears the old remainder so opposite scroll starts cleanly.
+        assert_eq!(
+            accumulate_scroll_steps(&mut rem, ScrollDelta::Pixels(point(px(0.), px(-20.))), cell_h),
+            (1, false)
+        );
+        assert!(rem.abs() < 1e-4);
+
+        // Discrete line scroll clears remainder and clamps to 60.
+        rem = 0.7;
+        assert_eq!(
+            accumulate_scroll_steps(&mut rem, ScrollDelta::Lines(point(0., 80.)), cell_h),
+            (60, true)
+        );
+        assert_eq!(rem, 0.0);
+
+        // SGR and X10 mouse sequence encoding.
+        assert_eq!(
+            encode_mouse_sequence(TermMode::MOUSE_MODE | TermMode::SGR_MOUSE, 64, 12, 5, false, 0),
+            Some(b"\x1b[<64;12;5M".to_vec())
+        );
+        assert_eq!(
+            encode_mouse_sequence(TermMode::MOUSE_MODE, 64, 224, 5, false, 0),
+            None
+        );
     }
 }

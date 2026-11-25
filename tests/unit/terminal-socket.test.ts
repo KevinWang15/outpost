@@ -475,3 +475,71 @@ test('a lost paste acknowledgement does not replay input', async t => {
   readyForImages(replacement)
   assert.ok(!replacement.requests().some(m => m.type === 'image-paste' || m.type === 'image-write'))
 })
+
+test('input sends immediately on leading edge, coalesces rapid bursts, and preserves order before control frames', t => {
+  const { client, socket } = setup(t)
+  socket.ready()
+  socket.sent.length = 0
+
+  // First keystroke goes out immediately with zero coalescing delay.
+  assert.ok(client.input('a'))
+  assert.equal(socket.sent.length, 1)
+  assert.equal(Buffer.from(socket.sent[0] as Uint8Array).toString('utf8'), 'a')
+
+  // A rapid 500-message burst within the coalescing window merges into one binary frame.
+  for (let i = 0; i < 500; i++) assert.ok(client.input('b'))
+  assert.equal(socket.sent.length, 1)
+  t.mock.timers.tick(10)
+  assert.equal(socket.sent.length, 2)
+  assert.equal(Buffer.from(socket.sent[1] as Uint8Array).toString('utf8'), 'b'.repeat(500))
+
+  // Buffered input flushes ahead of ordered control frames (like draft), never behind them.
+  assert.ok(client.input('c'))
+  client.draft(true)
+  assert.equal(socket.sent.length, 4)
+  assert.equal(Buffer.from(socket.sent[2] as Uint8Array).toString('utf8'), 'c')
+  assert.deepEqual(JSON.parse(socket.sent[3] as string), { type: 'draft', active: true })
+
+  // Closing discards any buffered input instead of leaking it later.
+  assert.ok(client.input('d'))
+  client.close()
+  t.mock.timers.tick(50)
+  assert.equal(socket.sent.length, 4)
+})
+
+test('rapid resize bursts coalesce to the latest geometry and flush before focus', t => {
+  const dims = { cols: 80, rows: 24 }
+  const { client, socket } = setup(t, () => dims)
+  socket.ready()
+  socket.sent.length = 0
+
+  // Leading-edge resize sends immediately once past the window; intermediate sizes coalesce.
+  t.mock.timers.tick(25)
+  for (let cols = 81; cols <= 180; cols++) {
+    dims.cols = cols
+    client.resize(cols, 24)
+  }
+  assert.deepEqual(
+    socket.requests().filter(m => m.type === 'resize'),
+    [{ type: 'resize', cols: 81, rows: 24 }],
+  )
+  t.mock.timers.tick(25)
+  assert.deepEqual(
+    socket.requests().filter(m => m.type === 'resize'),
+    [
+      { type: 'resize', cols: 81, rows: 24 },
+      { type: 'resize', cols: 180, rows: 24 },
+    ],
+  )
+
+  // Focus flushes a pending resize immediately so geometry arrives before focus.
+  dims.cols = 190
+  client.setActive(true)
+  assert.deepEqual(
+    socket.requests().slice(-2),
+    [
+      { type: 'resize', cols: 190, rows: 24 },
+      { type: 'focus', active: true },
+    ],
+  )
+})

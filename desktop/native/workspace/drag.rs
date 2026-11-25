@@ -15,7 +15,6 @@ pub(super) struct DragState {
     pub(super) gesture: Option<Gesture>,
     pub(super) strip: ScrollHandle,
     pub(super) rendered_tabs: Vec<Option<Id>>,
-    pub(super) rendered_anchor: Option<Destination>,
     ghost: Option<(WindowHandle<DragLabel>, Point<Pixels>)>,
     pub(super) empty_bar: SnapshotSource,
     pub(super) preview: Option<Preview>,
@@ -79,11 +78,16 @@ impl Workspace {
         } else {
             self.panes[&pane].read(cx).title.clone()
         };
+        let status = if whole {
+            panes::pane_activity_state(panes::tab_representative(tab, &self.panes, cx))
+        } else {
+            panes::pane_activity_state(self.panes[&pane].read(cx))
+        };
         self.drag.gesture = Some(Gesture {
             item: DragItem {
                 pane,
                 whole,
-                label: DragLabel::new(label, self.panes[&pane].read(cx).mark),
+                label: DragLabel::new(label, self.panes[&pane].read(cx).mark, status),
                 window: self.id,
             },
             start,
@@ -171,7 +175,19 @@ impl Workspace {
             _ => None,
         };
         let old = g.hover;
-        let label = g.item.label.clone();
+        let mut label = g.item.label.clone();
+        label.status = if g.item.whole {
+            self.tabs
+                .iter()
+                .find(|t| t.layout.contains(g.item.pane))
+                .and_then(|t| {
+                    panes::pane_activity_state(panes::tab_representative(t, &self.panes, cx))
+                })
+        } else {
+            self.panes
+                .get(&g.item.pane)
+                .and_then(|p| panes::pane_activity_state(p.read(cx)))
+        };
         let moving_tab = self
             .tabs
             .iter()
@@ -246,27 +262,55 @@ impl Workspace {
         });
     }
     fn preview_at(&mut self, preview: Option<Preview>, pos: Point<Pixels>, cx: &mut Context<Self>) {
+        let mut scrolled = false;
         if preview
             .as_ref()
             .is_some_and(|p| !matches!(p.destination, Destination::Split(..)))
         {
             let strip = &self.drag.strip;
             let b = strip.bounds();
-            if b.contains(&pos) {
+            let max_x = strip.max_offset().x;
+            if max_x > px(0.) && pos.y >= px(0.) && pos.y < px(56.) {
                 let dx = if pos.x < b.left() + px(24.) {
                     px(6.)
-                } else if pos.x > b.right() - px(24.) {
+                } else if pos.x > b.right() - px(24.) && pos.x < b.right() + px(60.) {
                     -px(6.)
                 } else {
                     px(0.)
                 };
-                let mut offset = strip.offset();
-                offset.x = (offset.x + dx).clamp(-strip.max_offset().x, px(0.));
-                strip.set_offset(offset);
+                if dx != px(0.) {
+                    let prev = strip.offset();
+                    let mut offset = prev;
+                    offset.x = (offset.x + dx).clamp(-max_x, px(0.));
+                    if offset != prev {
+                        strip.set_offset(offset);
+                        scrolled = true;
+                    }
+                }
             }
         }
+        let changed = self.drag.preview.as_ref().map(|p| {
+            (
+                p.destination,
+                p.moving_tab,
+                p.bounds,
+                p.label.status,
+                p.body.is_some(),
+            )
+        }) != preview.as_ref().map(|p| {
+            (
+                p.destination,
+                p.moving_tab,
+                p.bounds,
+                p.label.status,
+                p.body.is_some(),
+            )
+        });
+        let has_live_body = preview.as_ref().is_some_and(|p| p.body.is_some());
         self.drag.preview = preview;
-        cx.notify()
+        if changed || scrolled || has_live_body {
+            cx.notify();
+        }
     }
     fn clear_preview(&mut self, target: Option<WindowHandle<Self>>, cx: &mut App) {
         self.drag.preview = None;
@@ -332,39 +376,44 @@ impl Workspace {
         Landing::Outside
     }
     fn hit(&self, g: &Gesture, pos: Point<Pixels>, h: WindowHandle<Self>) -> Landing {
-        let strip = self.drag.strip.bounds();
-        let end = self
-            .drag
-            .empty_bar
-            .bounds()
-            .map_or(strip.right(), |b| b.right());
-        if pos.y >= px(0.) && pos.y < px(40.) && pos.x >= strip.left() && pos.x < end {
-            let mut marker = strip.right();
-            let mut dest = Destination::Tab;
-            for (i, slot) in self.drag.rendered_tabs.iter().copied().enumerate() {
-                let Some(mut b) = self.drag.strip.bounds_for_item(i) else {
-                    continue;
-                };
-                b.origin += self.drag.strip.offset();
-                if let Some(tab) = slot {
-                    if pos.x < b.center().x {
-                        dest = Destination::Before(tab);
-                        marker = b.left();
-                        break;
-                    }
-                } else if pos.x >= b.left() && pos.x < b.right() {
-                    dest = self.drag.rendered_anchor.unwrap_or(Destination::Tab);
-                    marker = b.left();
-                    break;
-                }
-                marker = b.right();
-            }
-            marker = marker.clamp(strip.left(), end);
-            return Landing::Place(
-                h,
-                dest,
-                Bounds::new(point(marker, px(3.)), size(px(3.), px(34.))),
-            );
+        let reordering_same_tab = g.item.whole
+            && g.item.window == self.id
+            && self
+                .tabs
+                .get(self.current)
+                .is_some_and(|t| t.layout.contains(g.item.pane));
+        let bar_bottom = if reordering_same_tab {
+            px(56.)
+        } else {
+            px(40.)
+        };
+        if pos.y >= px(0.) && pos.y < bar_bottom && pos.x >= px(0.) {
+            let moving_tab = (g.item.window == self.id)
+                .then(|| {
+                    self.tabs
+                        .iter()
+                        .find(|t| {
+                            t.layout.contains(g.item.pane)
+                                && (g.item.whole || matches!(t.layout, Layout::Pane(_)))
+                        })
+                        .map(|t| t.id)
+                })
+                .flatten();
+            let offset = self.drag.strip.offset();
+            let slots: Vec<_> = self
+                .drag
+                .rendered_tabs
+                .iter()
+                .copied()
+                .enumerate()
+                .filter_map(|(i, slot)| {
+                    let mut b = self.drag.strip.bounds_for_item(i)?;
+                    b.origin += offset;
+                    Some((slot, b))
+                })
+                .collect();
+            let dest = resolve_tab_strip_drop(pos.x, &slots, moving_tab);
+            return Landing::Place(h, dest, Bounds::default());
         }
         if self.page != Page::Terminal {
             return Landing::Cancel;
@@ -583,7 +632,10 @@ impl Workspace {
     }
     pub(super) fn drag_overlay(&self) -> Option<AnyElement> {
         let p = self.drag.preview.as_ref()?;
-        let b = p.bounds;
+        let is_split = matches!(p.destination, Destination::Split(..));
+        if !is_split && p.body.is_none() {
+            return None;
+        }
         let mut layer = div().absolute().inset_0().overflow_hidden();
         if let Some(preview) = &p.body {
             layer = layer.child(
@@ -598,18 +650,65 @@ impl Workspace {
                     .child(preview.render(&preview.layout)),
             );
         }
-        layer = layer.child(
-            div()
-                .absolute()
-                .left(b.left())
-                .top(b.top())
-                .w(b.size.width)
-                .h(b.size.height)
-                .bg(rgba(0xa5c9ff38))
-                .border_2()
-                .border_color(rgb(0xa5c9ff)),
-        );
+        if is_split {
+            let b = p.bounds;
+            layer = layer.child(
+                div()
+                    .absolute()
+                    .left(b.left())
+                    .top(b.top())
+                    .w(b.size.width)
+                    .h(b.size.height)
+                    .bg(rgba(0xa5c9ff38))
+                    .border_2()
+                    .border_color(rgb(0xa5c9ff)),
+            );
+        }
         Some(layer.into_any_element())
+    }
+}
+
+/// Resolve the drop destination along the horizontal tab strip without oscillation.
+///
+/// When the dragged tab (or its provisional preview slot `None`) is present in `slots`,
+/// the pointer stays anchored to that slot until it decisively crosses the horizontal
+/// center of a neighboring real tab to the left or right. Because swapping shifts the
+/// crossed tab by the preview slot's width, the pointer cannot immediately bounce back.
+fn resolve_tab_strip_drop(
+    pos_x: Pixels,
+    slots: &[(Option<Id>, Bounds<Pixels>)],
+    moving_tab: Option<Id>,
+) -> Destination {
+    let active_idx = slots
+        .iter()
+        .position(|(slot, _)| slot.is_none() || (moving_tab.is_some() && *slot == moving_tab));
+    if let Some(pivot) = active_idx {
+        for &(slot, bounds) in &slots[..pivot] {
+            if let Some(tab) = slot
+                && pos_x < bounds.center().x
+            {
+                return Destination::Before(tab);
+            }
+        }
+        let mut after = None;
+        for (offset, &(slot, bounds)) in slots[pivot + 1..].iter().enumerate() {
+            if slot.is_some() && pos_x > bounds.center().x {
+                after = Some(pivot + 1 + offset);
+            }
+        }
+        let search_from = after.map_or(pivot + 1, |idx| idx + 1);
+        slots[search_from..]
+            .iter()
+            .find_map(|&(slot, _)| slot.map(Destination::Before))
+            .unwrap_or(Destination::Tab)
+    } else {
+        slots
+            .iter()
+            .find_map(|&(slot, bounds)| {
+                let tab = slot?;
+                (pos_x < bounds.center().x).then_some(Destination::Before(tab))
+            })
+            .unwrap_or(Destination::Tab)
     }
 }
 
@@ -617,13 +716,42 @@ impl Workspace {
 pub(super) struct DragLabel {
     title: String,
     mark: Option<&'static AgentMark>,
+    status: Option<ActivityState>,
 }
 impl DragLabel {
-    pub(super) fn new(title: String, mark: Option<&'static AgentMark>) -> Self {
-        Self { title, mark }
+    pub(super) fn new(
+        title: String,
+        mark: Option<&'static AgentMark>,
+        status: Option<ActivityState>,
+    ) -> Self {
+        Self {
+            title,
+            mark,
+            status,
+        }
     }
     pub(super) fn content(&self) -> Div {
-        agent_label(self.mark, self.title.clone())
+        row()
+            .flex_1()
+            .min_w_0()
+            .gap(px(6.))
+            .children(
+                self.status
+                    .map(|state| panes::activity_state_badge(state, px(16.), true)),
+            )
+            .child(agent_label(self.mark, self.title.clone()))
+    }
+    pub(super) fn tab_content(&self) -> Div {
+        row()
+            .flex_1()
+            .min_w_0()
+            .gap(px(6.))
+            .children(
+                self.status
+                    .map(|state| panes::activity_state_badge(state, px(16.), true)),
+            )
+            .children(self.mark.map(|m| m.icon(14.)))
+            .child(div().flex_1().truncate().child(self.title.clone()))
     }
 }
 impl Render for DragLabel {
@@ -684,5 +812,154 @@ impl LivePreview {
                 .child(col().flex_1().child(self.render(second)))
                 .into_any_element(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot_bounds(x: f32, width: f32) -> Bounds<Pixels> {
+        Bounds::new(point(px(x), px(4.)), size(px(width), px(36.)))
+    }
+
+    #[::core::prelude::v1::test]
+    fn tab_strip_drop_stays_stable_across_preview_and_adjacent_gaps() {
+        // [A (42..252), PREVIEW (254..464), C (466..676)]
+        let slots = vec![
+            (Some(1), slot_bounds(42., 210.)),
+            (None, slot_bounds(254., 210.)),
+            (Some(3), slot_bounds(466., 210.)),
+        ];
+
+        // Anywhere between A.center (147) and C.center (571) stays anchored before C,
+        // including the right half of A, the 2px gaps, the preview itself, and the left half of C.
+        for x in [147., 200., 253., 254., 359., 464., 465., 466., 570., 571.] {
+            assert_eq!(
+                resolve_tab_strip_drop(px(x), &slots, Some(2)),
+                Destination::Before(3),
+                "unexpected jump at x={x}"
+            );
+        }
+        // Crossing A.center to the left (including far-left over the logo) moves before A.
+        assert_eq!(
+            resolve_tab_strip_drop(px(146.), &slots, Some(2)),
+            Destination::Before(1)
+        );
+        assert_eq!(
+            resolve_tab_strip_drop(px(8.), &slots, Some(2)),
+            Destination::Before(1)
+        );
+        // Crossing C.center to the right appends at the end.
+        assert_eq!(
+            resolve_tab_strip_drop(px(572.), &slots, Some(2)),
+            Destination::Tab
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn tab_strip_drop_never_oscillates_after_swap_even_with_variable_widths() {
+        // Before swap: [A (42..172, w=130, center=107), PREVIEW (174..414, w=240)]
+        let before_left = vec![
+            (Some(1), slot_bounds(42., 130.)),
+            (None, slot_bounds(174., 240.)),
+        ];
+        let trigger_left = px(106.);
+        assert_eq!(
+            resolve_tab_strip_drop(trigger_left, &before_left, Some(2)),
+            Destination::Before(1)
+        );
+        // After swap: [PREVIEW (42..282, w=240), A (284..414, w=130, center=349)]
+        let after_left = vec![
+            (None, slot_bounds(42., 240.)),
+            (Some(1), slot_bounds(284., 130.)),
+        ];
+        assert_eq!(
+            resolve_tab_strip_drop(trigger_left, &after_left, Some(2)),
+            Destination::Before(1),
+            "holding pointer at trigger point must not bounce back right"
+        );
+
+        // Now drag back right past A's new center (349):
+        let trigger_right = px(350.);
+        assert_eq!(
+            resolve_tab_strip_drop(trigger_right, &after_left, Some(2)),
+            Destination::Tab
+        );
+        // After swapping right, layout returns to before_left where A.center=107:
+        assert_eq!(
+            resolve_tab_strip_drop(trigger_right, &before_left, Some(2)),
+            Destination::Tab,
+            "holding pointer at trigger point must not bounce back left"
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn tab_strip_drop_handles_frame_zero_same_window_and_cross_window() {
+        let slots = vec![
+            (Some(1), slot_bounds(42., 210.)),
+            (Some(2), slot_bounds(254., 210.)),
+            (Some(3), slot_bounds(466., 210.)),
+        ];
+
+        // Frame 0 dragging tab 2 within its own window stays in place (Before(3)), never Before(2).
+        assert_eq!(
+            resolve_tab_strip_drop(px(260.), &slots, Some(2)),
+            Destination::Before(3)
+        );
+        assert_eq!(
+            resolve_tab_strip_drop(px(450.), &slots, Some(2)),
+            Destination::Before(3)
+        );
+        // Fast jump across tab 1 center immediately moves to Before(1).
+        assert_eq!(
+            resolve_tab_strip_drop(px(100.), &slots, Some(2)),
+            Destination::Before(1)
+        );
+
+        // Frame 0 cross-window drag (moving_tab = None) inserts before whichever tab center it's left of.
+        assert_eq!(
+            resolve_tab_strip_drop(px(100.), &slots, None),
+            Destination::Before(1)
+        );
+        assert_eq!(
+            resolve_tab_strip_drop(px(300.), &slots, None),
+            Destination::Before(2)
+        );
+        assert_eq!(
+            resolve_tab_strip_drop(px(500.), &slots, None),
+            Destination::Before(3)
+        );
+        assert_eq!(
+            resolve_tab_strip_drop(px(700.), &slots, None),
+            Destination::Tab
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn tab_strip_drop_handles_multi_tab_jumps_and_empty_strip() {
+        let slots = vec![
+            (None, slot_bounds(42., 210.)),
+            (Some(1), slot_bounds(254., 210.)),
+            (Some(2), slot_bounds(466., 210.)),
+            (Some(3), slot_bounds(678., 210.)),
+        ];
+        // Jump from slot 0 past tab 1 (center 359) into tab 2 left half -> Before(2).
+        assert_eq!(
+            resolve_tab_strip_drop(px(400.), &slots, Some(9)),
+            Destination::Before(2)
+        );
+        // Jump past tab 2 (center 571) into tab 3 left half -> Before(3).
+        assert_eq!(
+            resolve_tab_strip_drop(px(620.), &slots, Some(9)),
+            Destination::Before(3)
+        );
+        // Jump past tab 3 (center 783) -> Tab.
+        assert_eq!(
+            resolve_tab_strip_drop(px(800.), &slots, Some(9)),
+            Destination::Tab
+        );
+        // Empty strip always lands as Tab.
+        assert_eq!(resolve_tab_strip_drop(px(100.), &[], None), Destination::Tab);
     }
 }

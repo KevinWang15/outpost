@@ -1,8 +1,8 @@
 use super::*;
 
 pub(super) const DEFAULT_FONT_SIZE: f32 = 13.5;
-const MIN_FONT_SIZE: f32 = 10.0;
-const MAX_FONT_SIZE: f32 = 28.0;
+pub(super) const MIN_FONT_SIZE: f32 = 10.0;
+pub(super) const MAX_FONT_SIZE: f32 = 28.0;
 const FONT_STEP: f32 = 0.5;
 const SCROLLBACK_PRESETS: [usize; 4] = [5_000, 10_000, 50_000, 100_000];
 
@@ -626,6 +626,13 @@ impl Workspace {
                 ("Find in terminal", &["⌘", "F"]),
                 ("Write a message", &["⌘", "Return"]),
                 ("Clear screen", &["⌘", "K"]),
+                ("Reload terminal", &["⌘", "R"]),
+                ("Larger text", &["⌘", "+"]),
+                ("Smaller text", &["⌘", "−"]),
+                ("Reset text size", &["⌘", "0"]),
+                ("Settings", &["⌘", ","]),
+                ("Close window", &["⌘", "Shift", "W"]),
+                ("Toggle full screen", &["Ctrl", "⌘", "F"]),
             ]
         } else {
             &[
@@ -635,27 +642,46 @@ impl Workspace {
                 ("Find in terminal", &["Ctrl", "Shift", "F"]),
                 ("Write a message", &["Ctrl", "Shift", "Enter"]),
                 ("Clear screen", &["Ctrl", "Shift", "K"]),
+                ("Reload terminal", &["Ctrl", "Shift", "R"]),
+                ("Larger text", &["Ctrl", "+"]),
+                ("Smaller text", &["Ctrl", "−"]),
+                ("Reset text size", &["Ctrl", "0"]),
+                ("Settings", &["Ctrl", ","]),
+                ("Close window", &["Alt", "F4"]),
+                ("Toggle full screen", &["F11"]),
             ]
         };
         let right_shortcuts: &[(&'static str, &[&'static str])] = if mac {
             &[
-                ("New terminal", &["⌘", "T"]),
+                ("New terminal tab", &["⌘", "T"]),
+                ("New window", &["⌘", "Shift", "N"]),
                 ("Switch session", &["⌘", "P"]),
+                ("Outpost sessions", &["⌘", "Shift", "O"]),
+                ("Next / previous tab", &["Ctrl", "Tab"]),
+                ("Go to tab 1–8 / last", &["⌘", "1–9"]),
+                ("Move tab left / right", &["Ctrl", "Shift", "PgUp/Dn"]),
                 ("Split side by side", &["⌘", "D"]),
                 ("Split top & bottom", &["⌘", "Shift", "D"]),
-                ("Zoom pane", &["⌘", "Shift", "Return"]),
-                ("Next tab", &["Ctrl", "Tab"]),
-                ("Close pane", &["⌘", "W"]),
+                ("Zoom / restore pane", &["⌘", "Shift", "Return"]),
+                ("Focus other pane", &["⌘", "⌥", "←/→"]),
+                ("Close focused pane", &["⌘", "W"]),
+                ("Close current tab", &["⌘", "⌥", "W"]),
             ]
         } else {
             &[
-                ("New terminal", &["Ctrl", "Shift", "T"]),
+                ("New terminal tab", &["Ctrl", "Shift", "T"]),
+                ("New window", &["Ctrl", "Shift", "N"]),
                 ("Switch session", &["Ctrl", "Shift", "P"]),
+                ("Outpost sessions", &["Ctrl", "Shift", "O"]),
+                ("Next / previous tab", &["Ctrl", "Tab"]),
+                ("Go to tab 1–8 / last", &["Alt", "1–9"]),
+                ("Move tab left / right", &["Ctrl", "Shift", "PgUp/Dn"]),
                 ("Split side by side", &["Ctrl", "Shift", "D"]),
                 ("Split top & bottom", &["Ctrl", "Alt", "D"]),
-                ("Zoom pane", &["Ctrl", "Alt", "Enter"]),
-                ("Next tab", &["Ctrl", "Tab"]),
-                ("Close pane", &["Ctrl", "Shift", "W"]),
+                ("Zoom / restore pane", &["Ctrl", "Alt", "Enter"]),
+                ("Focus other pane", &["Ctrl", "Alt", "←/→"]),
+                ("Close focused pane", &["Ctrl", "Shift", "W"]),
+                ("Close current tab", &["Ctrl", "Alt", "W"]),
             ]
         };
 
@@ -683,9 +709,9 @@ impl Workspace {
                 .flex()
                 .flex_row()
                 .items_stretch()
-                .child(build_shortcut_col("EDITING & SEARCH", left_shortcuts))
+                .child(build_shortcut_col("EDITING & VIEW", left_shortcuts))
                 .child(div().w(px(1.)).flex_none().bg(rgb(0x202020)))
-                .child(build_shortcut_col("WORKSPACE & SPLITS", right_shortcuts)),
+                .child(build_shortcut_col("TABS, SPLITS & WORKSPACE", right_shortcuts)),
         );
 
         // Footer: About & Updates

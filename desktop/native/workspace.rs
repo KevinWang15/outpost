@@ -30,6 +30,64 @@ use std::{
 const BG: u32 = 0x0c0c0c;
 const TEXT: u32 = 0xe6e6e6;
 const MUTED: u32 = 0xa3a3a3;
+const TAB_IDEAL_W: f32 = 210.;
+const TAB_MAX_W: f32 = 240.;
+const TAB_MIN_W: f32 = 108.;
+const TAB_GAP: f32 = 2.;
+const COMPACT_BAR_WIDTH: f32 = 760.;
+
+#[derive(Clone, Copy, Debug)]
+struct ChromeLayout {
+    compact_bar: bool,
+    overflowing: bool,
+    show_overflow_menu: bool,
+    drag_min: f32,
+    est_max_scroll_x: f32,
+}
+
+fn compute_chrome_layout(
+    viewport_w: f32,
+    slot_count: usize,
+    is_macos: bool,
+    is_windows: bool,
+) -> ChromeLayout {
+    let compact_bar = viewport_w < COMPACT_BAR_WIDTH;
+    let drag_min = if compact_bar { 56. } else { 80. };
+    let left_pad = if is_macos { 78. } else { 8. };
+    let right_edge = if is_windows { 138. } else { 8. };
+    let right_tools = if compact_bar { 0. } else { 30. * 3. + 4. * 3. };
+    // Home (30) + gaps around strip/actions/drag + '+' (30) + optional '⌄' when compact (2+26).
+    let actions_base = if compact_bar { 30. + 2. + 26. } else { 30. };
+    let fixed_without_arrows =
+        left_pad + 30. + 4. + 4. + actions_base + 4. + drag_min + 4. + right_tools + right_edge;
+    let avail_without_arrows = (viewport_w - fixed_without_arrows).max(0.);
+    let min_tabs_total = if slot_count == 0 {
+        0.
+    } else {
+        slot_count as f32 * TAB_MIN_W + (slot_count - 1) as f32 * TAB_GAP
+    };
+    let overflowing = min_tabs_total > avail_without_arrows + 0.5;
+    let show_overflow_menu = compact_bar || overflowing;
+    let extra_when_overflowing = if overflowing {
+        // ◀ (24 + 2) + ▶ (2 + 24) + optional '⌄' appearing on wide bars (2 + 26).
+        52. + if compact_bar { 0. } else { 28. }
+    } else {
+        0.
+    };
+    let avail_strip_w = (avail_without_arrows - extra_when_overflowing).max(0.);
+    let est_max_scroll_x = if overflowing {
+        (min_tabs_total - avail_strip_w).max(0.)
+    } else {
+        0.
+    };
+    ChromeLayout {
+        compact_bar,
+        overflowing,
+        show_overflow_menu,
+        drag_min,
+        est_max_scroll_x,
+    }
+}
 #[derive(Clone, Copy, PartialEq)]
 enum Page {
     Terminal,
@@ -63,6 +121,8 @@ pub struct Workspace {
     startup_cloak: bool,
     startup_hint: bool,
     new_tab_menu_open: bool,
+    bar_menu_open: bool,
+    strip_scroll_anim: Option<(std::time::Instant, f32, f32)>,
     pane_menu: Option<Id>,
     context_menu: Option<(Id, Point<Pixels>)>,
     toast: Option<ToastNotice>,
@@ -105,7 +165,7 @@ struct DragItem {
     whole: bool,
     label: DragLabel,
 }
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Destination {
     Split(Id, Axis, bool),
     Before(Id),
@@ -222,8 +282,9 @@ fn icon(
         .justify_center()
         .items_center()
         .rounded(px(5.))
+        .text_color(rgba(0xffffffa6))
         .cursor_pointer()
-        .hover(|s| s.bg(rgba(0xffffff18)))
+        .hover(|s| s.bg(rgba(0xffffff18)).text_color(rgb(0xf0f0f0)))
         .child(lucide_icon(symbol).size(px(17.)))
         .on_click(cx.listener(move |s, _, w, cx| action(s, w, cx)))
 }
@@ -349,6 +410,7 @@ impl Workspace {
         cx.observe_window_activation(w, |s, w, cx| {
             if !w.is_window_active() {
                 s.set_new_tab_menu(false, cx);
+                s.set_bar_menu(false, cx);
                 s.pane_menu = None;
                 s.context_menu = None;
                 s.cancel_drag(cx);
@@ -366,6 +428,10 @@ impl Workspace {
             weak.update(cx, |s, cx| s.request_window_close(w, cx))
                 .unwrap_or(true)
         });
+        let focus = cx.focus_handle();
+        focus.focus(w, cx);
+        cx.on_focus_lost(w, |s, w, cx| s.restore_focus(w, cx))
+            .detach();
         Self {
             watches: HashMap::new(),
             drag: DragState::default(),
@@ -376,6 +442,8 @@ impl Workspace {
             startup_cloak,
             startup_hint: false,
             new_tab_menu_open: false,
+            bar_menu_open: false,
+            strip_scroll_anim: None,
             pane_menu: None,
             context_menu: None,
             toast: None,
@@ -386,7 +454,7 @@ impl Workspace {
             tabs: vec![],
             current: 0,
             page: Page::Home,
-            focus: cx.focus_handle(),
+            focus,
             logo: Arc::new(Image::from_bytes(
                 ImageFormat::Png,
                 include_bytes!("../../public/outpost-256.png").to_vec(),
@@ -485,6 +553,7 @@ impl Workspace {
         };
         self.message.clear();
         self.new_tab_menu_open = false;
+        self.bar_menu_open = false;
         self.pane_menu = None;
         self.context_menu = None;
         self.files_menu = None;
@@ -526,6 +595,8 @@ impl Workspace {
         if let Some(i) = self.tabs.iter().position(|t| t.layout.contains(id)) {
             self.current = i;
             self.tabs[i].active = id;
+            self.strip_scroll_anim = None;
+            self.drag.strip.scroll_to_item(i);
             self.show(Page::Terminal, w, cx)
         }
     }
@@ -851,11 +922,16 @@ impl Workspace {
     fn selected_item(&self, whole: bool, cx: &App) -> Option<DragItem> {
         let tab = self.tabs.get(self.current)?;
         let pane = self.panes.get(&tab.active)?.read(cx);
+        let status = if whole {
+            panes::pane_activity_state(panes::tab_representative(tab, &self.panes, cx))
+        } else {
+            panes::pane_activity_state(pane)
+        };
         Some(DragItem {
             pane: tab.active,
             window: self.id,
             whole,
-            label: DragLabel::new(pane.title.clone(), pane.mark),
+            label: DragLabel::new(pane.title.clone(), pane.mark, status),
         })
     }
     fn detach(&mut self, whole: bool, w: &mut Window, cx: &mut Context<Self>) {
@@ -876,6 +952,22 @@ impl Workspace {
             self.receive(t, dest, w, cx)
         }
     }
+    fn restart_local_pane(&mut self, id: Id, w: &mut Window, cx: &mut Context<Self>) {
+        let Some(old) = self.panes.get(&id).cloned() else {
+            return;
+        };
+        match old.update(cx, |p, cx| p.restarted_local(w, cx)) {
+            Ok(pane) => {
+                self.watch(id, &pane, w, cx);
+                self.panes.insert(id, pane);
+                self.select(id, w, cx);
+            }
+            Err(e) => {
+                self.message = e.to_string();
+                cx.notify();
+            }
+        }
+    }
     fn reload_selected(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.get(self.current) else {
             return;
@@ -891,22 +983,7 @@ impl Workspace {
             "Restarting ends the current shell and discards its draft.",
             w,
             cx,
-            move |s, w, cx| {
-                let Some(old) = s.panes.get(&id).cloned() else {
-                    return;
-                };
-                match old.update(cx, |p, cx| p.restarted_local(w, cx)) {
-                    Ok(pane) => {
-                        s.watch(id, &pane, w, cx);
-                        s.panes.insert(id, pane);
-                        s.select(id, w, cx);
-                    }
-                    Err(e) => {
-                        s.message = e.to_string();
-                        cx.notify();
-                    }
-                }
-            },
+            move |s, w, cx| s.restart_local_pane(id, w, cx),
         );
     }
     fn remove_pane(&mut self, id: Id) {
@@ -1194,9 +1271,14 @@ impl Workspace {
                                     p.activity_detail = None;
                                     p.status = state["message"]
                                         .as_str()
-                                        .or(state["kind"].as_str())
-                                        .unwrap_or("")
-                                        .into();
+                                        .filter(|m| !m.is_empty())
+                                        .map(str::to_owned)
+                                        .unwrap_or_else(|| match p.connection {
+                                            ConnectionState::Connecting => "Connecting…".into(),
+                                            ConnectionState::Reconnecting => "Reconnecting…".into(),
+                                            ConnectionState::Closed => "Disconnected".into(),
+                                            ConnectionState::Connected => String::new(),
+                                        });
                                 }
                             }
                             "session" => {
@@ -1343,8 +1425,115 @@ impl Workspace {
         };
         self.show(next, w, cx);
     }
+    fn any_popup_open(&self) -> bool {
+        self.new_tab_menu_open
+            || self.bar_menu_open
+            || self.pane_menu.is_some()
+            || self.context_menu.is_some()
+            || self.files_menu.is_some()
+            || self.preview_id.is_some()
+    }
+    fn restore_focus(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        if self.page == Page::Terminal
+            && !self.any_popup_open()
+            && let Some(p) = self.active()
+        {
+            p.update(cx, |p, cx| p.focus_terminal(w, cx));
+        } else {
+            self.focus.focus(w, cx);
+        }
+    }
+    fn cycle_tab(&mut self, delta: isize, w: &mut Window, cx: &mut Context<Self>) {
+        let n = self.tabs.len();
+        if n == 0 {
+            return;
+        }
+        let next = (self.current as isize + delta).rem_euclid(n as isize) as usize;
+        self.select(self.tabs[next].active, w, cx);
+    }
+    fn select_tab_index(&mut self, one_based: usize, w: &mut Window, cx: &mut Context<Self>) {
+        let target = if one_based == 9 {
+            self.tabs.last()
+        } else {
+            one_based.checked_sub(1).and_then(|i| self.tabs.get(i))
+        };
+        if let Some(t) = target {
+            self.select(t.active, w, cx);
+        }
+    }
+    fn move_tab(&mut self, delta: isize, w: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs.len() <= 1 {
+            return;
+        }
+        if let Some(next) = self
+            .current
+            .checked_add_signed(delta)
+            .filter(|i| *i < self.tabs.len())
+        {
+            self.tabs.swap(self.current, next);
+            self.current = next;
+            self.strip_scroll_anim = None;
+            self.drag.strip.scroll_to_item(next);
+            if self.page == Page::Manage {
+                self.show(Page::Terminal, w, cx);
+            } else {
+                cx.notify();
+            }
+        }
+    }
+    fn focus_pane_delta(&mut self, delta: isize, w: &mut Window, cx: &mut Context<Self>) {
+        let Some(t) = self.tabs.get(self.current) else {
+            return;
+        };
+        let mut ids = Vec::new();
+        t.layout.pane_order(&mut ids);
+        if ids.len() <= 1 {
+            return;
+        }
+        let pos = ids.iter().position(|id| *id == t.active).unwrap_or(0) as isize;
+        let next = (pos + delta).rem_euclid(ids.len() as isize) as usize;
+        self.select(ids[next], w, cx);
+    }
+    fn adjust_font_size(&mut self, delta: Option<f32>, cx: &mut Context<Self>) {
+        let next = match delta {
+            Some(d) => ((self.fontsize() + d) * 2.0).round() / 2.0,
+            None => settings::DEFAULT_FONT_SIZE,
+        }
+        .clamp(settings::MIN_FONT_SIZE, settings::MAX_FONT_SIZE);
+        self.prefs["fontSize"] = json!(next);
+        self.settings(cx);
+        self.show_toast(None, format!("Text size: {next:.1} px"), false, cx);
+    }
+    fn open_sessions(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        self.split_at = None;
+        if items(&self.accounts["accounts"]).is_empty() {
+            self.show(Page::Home, w, cx);
+        } else {
+            self.catalogue(w, cx);
+        }
+    }
+    fn close_focused_pane(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.page, Page::Terminal | Page::Find | Page::Compose)
+            && let Some(t) = self.tabs.get(self.current)
+        {
+            self.close(t.active, w, cx);
+        }
+    }
+    fn close_current_tab(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.page, Page::Terminal | Page::Find | Page::Compose)
+            && let Some(t) = self.tabs.get(self.current)
+        {
+            self.close_tab(t.active, w, cx);
+        }
+    }
+    fn close_current_window(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        if self.request_window_close(w, cx) {
+            w.remove_window();
+        }
+    }
     fn shortcuts(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
         if self.new_tab_menu_open
+            || self.bar_menu_open
             || self.pane_menu.is_some()
             || self.context_menu.is_some()
             || self.file_key(e, w, cx)
@@ -1359,11 +1548,6 @@ impl Workspace {
         }
         let k = &e.keystroke;
         let m = k.modifiers;
-        let cmd = if cfg!(target_os = "macos") {
-            m.platform
-        } else {
-            m.control && m.shift
-        };
         let key = k.key.as_str();
         if self.page == Page::Create && self.create.any_open(cx) {
             if key == "escape" {
@@ -1373,95 +1557,172 @@ impl Workspace {
             }
             return;
         }
+        let mac = cfg!(target_os = "macos");
+        let no_mod = !m.control && !m.alt && !m.platform && !m.shift;
+        let shift_only = m.shift && !m.control && !m.alt && !m.platform;
+        let ctrl = m.control && !m.shift && !m.alt && !m.platform;
+        let ctrl_shift = m.control && m.shift && !m.alt && !m.platform;
+        let ctrl_alt = m.control && m.alt && !m.shift && !m.platform;
+        let alt = m.alt && !m.control && !m.shift && !m.platform;
+        let cmd = m.platform && !m.control && !m.alt && !m.shift;
+        let cmd_shift = m.platform && m.shift && !m.control && !m.alt;
+        let cmd_alt = m.platform && m.alt && !m.control && !m.shift;
+        let primary = if mac { cmd } else { ctrl_shift };
+        let accel = if mac { cmd } else { ctrl };
+        let accel_any_shift = if mac {
+            m.platform && !m.control && !m.alt
+        } else {
+            m.control && !m.alt && !m.platform
+        };
+        let pane_alt = if mac { cmd_alt } else { ctrl_alt };
+        let split_down_mod = if mac { cmd_shift } else { ctrl_alt };
+        let on_terminal = matches!(self.page, Page::Terminal | Page::Find | Page::Compose);
+
         if matches!(self.page, Page::Choose | Page::Switch)
-            && !m.control
-            && !m.alt
-            && !m.platform
-            && !m.shift
+            && no_mod
             && matches!(key, "down" | "up")
         {
             self.step_picker(if key == "down" { 1 } else { -1 }, cx);
+        } else if self.page == Page::Find
+            && ((shift_only && matches!(key, "enter" | "f3"))
+                || ((if mac { cmd_shift } else { ctrl_shift }) && key == "g"))
+        {
+            self.find(false, cx);
+        } else if self.page == Page::Find
+            && ((no_mod && key == "f3") || (accel && key == "g"))
+        {
+            self.find(true, cx);
         } else if key == "escape"
+            && no_mod
             && ((self.page != Page::Terminal && !self.tabs.is_empty())
                 || !matches!(self.page, Page::Terminal | Page::Home))
         {
             self.dismiss_page(w, cx)
         } else if key == "enter"
+            && (no_mod || shift_only)
             && !matches!(self.page, Page::Terminal | Page::Settings)
             && (self.page != Page::Compose || !m.shift)
             && !(self.page == Page::Create && self.create.any_focused(w, cx))
         {
             self.submit(w, cx)
-        } else if key == "tab" && m.control && !self.tabs.is_empty() {
-            let n = self.tabs.len();
-            let next = (self.current + if m.shift { n - 1 } else { 1 }) % n;
-            self.select(self.tabs[next].active, w, cx)
-        } else if key == "right"
-            && m.alt
-            && (m.platform || m.control)
+        } else if (mac && m.control && m.platform && !m.alt && !m.shift && key == "f")
+            || (!mac && no_mod && key == "f11")
+        {
+            if !e.is_held {
+                w.toggle_fullscreen();
+            }
+        } else if (ctrl || ctrl_shift) && key == "tab" && !self.tabs.is_empty() {
+            self.cycle_tab(if m.shift { -1 } else { 1 }, w, cx);
+        } else if ctrl && matches!(key, "pagedown" | "pageup") && !self.tabs.is_empty() {
+            self.cycle_tab(if key == "pagedown" { 1 } else { -1 }, w, cx);
+        } else if mac
+            && ((cmd_shift && matches!(key, "]" | "[")) || (cmd && matches!(key, "}" | "{")))
+            && !self.tabs.is_empty()
+        {
+            self.cycle_tab(if matches!(key, "]" | "}") { 1 } else { -1 }, w, cx);
+        } else if ctrl_shift && matches!(key, "pageup" | "pagedown") && !self.tabs.is_empty() {
+            self.move_tab(if key == "pageup" { -1 } else { 1 }, w, cx);
+        } else if (if mac { cmd } else { alt })
+            && matches!(key, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+            && !self.tabs.is_empty()
+        {
+            self.select_tab_index(key.parse::<usize>().unwrap(), w, cx);
+        } else if accel_any_shift && matches!(key, "=" | "+") {
+            self.adjust_font_size(Some(1.0), cx);
+        } else if accel && key == "-" {
+            self.adjust_font_size(Some(-1.0), cx);
+        } else if accel && key == "0" {
+            self.adjust_font_size(None, cx);
+        } else if (accel && key == ",")
+            || (!mac && ((ctrl_shift && key == ",") || (ctrl && key == "<")))
+        {
+            if !e.is_held {
+                self.show(Page::Settings, w, cx);
+            }
+        } else if pane_alt
+            && matches!(key, "right" | "down" | "left" | "up")
             && self.page == Page::Terminal
             && !self.tabs.is_empty()
         {
-            let t = &self.tabs[self.current];
-            let mut ids = Vec::new();
-            t.layout.pane_order(&mut ids);
-            let pos = ids.iter().position(|id| *id == t.active).unwrap_or(0);
-            self.select(ids[(pos + 1) % ids.len()], w, cx)
-        } else if key == "d"
+            self.focus_pane_delta(if matches!(key, "right" | "down") { 1 } else { -1 }, w, cx);
+        } else if split_down_mod
+            && key == "d"
             && self.page == Page::Terminal
-            && !cfg!(target_os = "macos")
-            && m.control
-            && m.alt
+            && !self.tabs.is_empty()
         {
-            self.split(Axis::Down, w, cx)
-        } else if key == "enter"
+            if !e.is_held {
+                self.split(Axis::Down, w, cx);
+            }
+        } else if split_down_mod
+            && key == "enter"
             && self.page == Page::Terminal
             && self.active().is_some()
-            && !cfg!(target_os = "macos")
-            && m.control
-            && m.alt
         {
-            self.toggle_zoom(self.tabs[self.current].active, w, cx)
-        } else if cmd {
+            if !e.is_held {
+                self.toggle_zoom(self.tabs[self.current].active, w, cx);
+            }
+        } else if pane_alt && key == "w" && on_terminal && !self.tabs.is_empty() {
+            if !e.is_held {
+                self.close_current_tab(w, cx);
+            }
+        } else if (mac && cmd_shift && key == "w") || (!mac && alt && key == "f4") {
+            if !e.is_held {
+                self.close_current_window(w, cx);
+            }
+        } else if ((mac && (cmd || cmd_shift)) || (!mac && ctrl_shift)) && key == "n" {
+            if !e.is_held
+                && let Err(err) = crate::open_workspace(true, cx)
+            {
+                self.message = err.to_string();
+                cx.notify();
+            }
+        } else if (if mac { cmd_shift } else { ctrl_shift }) && key == "o" {
+            if !e.is_held {
+                self.open_sessions(w, cx);
+            }
+        } else if primary {
             match key {
                 "t" => {
-                    self.split_at = None;
-                    self.local(None, w, cx)
-                }
-                "d" if self.page == Page::Terminal => self.split(
-                    if m.shift && cfg!(target_os = "macos") || m.alt {
-                        Axis::Down
-                    } else {
-                        Axis::Across
-                    },
-                    w,
-                    cx,
-                ),
-                "w" if self.page == Page::Terminal => {
-                    if let Some(t) = self.tabs.get(self.current) {
-                        self.close(t.active, w, cx)
+                    if !e.is_held {
+                        self.split_at = None;
+                        self.local(None, w, cx);
                     }
                 }
-                "p" => self.show(Page::Switch, w, cx),
-                "," => self.show(Page::Settings, w, cx),
-                "f" if self.active().is_some() => self.show(Page::Find, w, cx),
-                "enter"
-                    if self.page == Page::Terminal
-                        && self.active().is_some()
-                        && cfg!(target_os = "macos")
-                        && m.shift =>
-                {
-                    self.toggle_zoom(self.tabs[self.current].active, w, cx)
-                }
-                "enter" if self.active().is_some() => self.show(Page::Compose, w, cx),
-                "n" => {
-                    if let Err(e) = crate::open_workspace(true, cx) {
-                        self.message = e.to_string()
+                "d" if self.page == Page::Terminal && !self.tabs.is_empty() => {
+                    if !e.is_held {
+                        self.split(Axis::Across, w, cx);
                     }
                 }
-                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
-                    if let Some(t) = self.tabs.get(key.parse::<usize>().unwrap() - 1) {
-                        self.select(t.active, w, cx)
+                "w" if on_terminal && !self.tabs.is_empty() => {
+                    if !e.is_held {
+                        self.close_focused_pane(w, cx);
+                    }
+                }
+                "r" if on_terminal && !self.tabs.is_empty() => {
+                    if !e.is_held {
+                        self.reload_selected(w, cx);
+                    }
+                }
+                "k" if self.page == Page::Terminal && self.active().is_some() => {
+                    if !e.is_held
+                        && let Some(p) = self.active()
+                    {
+                        p.update(cx, |p, cx| p.clear_screen(true, cx));
+                    }
+                }
+                "p" => {
+                    if !e.is_held {
+                        self.show(Page::Switch, w, cx);
+                    }
+                }
+                "f" if self.active().is_some() => {
+                    if !e.is_held {
+                        self.show(Page::Find, w, cx);
+                    }
+                }
+                "enter" if self.active().is_some() => {
+                    if !e.is_held {
+                        self.show(Page::Compose, w, cx);
                     }
                 }
                 _ => return,
@@ -1476,12 +1737,193 @@ impl Workspace {
         if self.new_tab_menu_open != open {
             self.new_tab_menu_open = open;
             if open {
+                self.bar_menu_open = false;
                 self.pane_menu = None;
                 self.context_menu = None;
                 self.files_menu = None;
             }
             cx.notify();
         }
+    }
+    fn set_bar_menu(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.bar_menu_open != open {
+            self.bar_menu_open = open;
+            if open {
+                self.new_tab_menu_open = false;
+                self.pane_menu = None;
+                self.context_menu = None;
+                self.files_menu = None;
+            }
+            cx.notify();
+        }
+    }
+    fn scroll_tab_strip(
+        &mut self,
+        direction: f32,
+        fallback_max_x: f32,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let strip_w = f32::from(self.drag.strip.bounds().size.width);
+        let step = (strip_w * 0.72).clamp(TAB_MIN_W + 12., 260.);
+        let measured_max = f32::from(self.drag.strip.max_offset().x);
+        let max_x = if measured_max > 0.5 {
+            measured_max
+        } else {
+            fallback_max_x
+        };
+        if max_x <= 0.5 {
+            self.strip_scroll_anim = None;
+            self.drag.strip.set_offset(Point::default());
+            cx.notify();
+            return;
+        }
+        let current_x = f32::from(self.drag.strip.offset().x);
+        let base_x = self
+            .strip_scroll_anim
+            .map_or(current_x, |(_, _, target_x)| target_x);
+        let target_x = (base_x + direction * step).clamp(-max_x, 0.);
+        if (target_x - current_x).abs() < 0.5 {
+            self.strip_scroll_anim = None;
+            self.drag.strip.set_offset(point(px(target_x), px(0.)));
+            cx.notify();
+            return;
+        }
+        self.strip_scroll_anim = Some((std::time::Instant::now(), current_x, target_x));
+        self.step_strip_scroll(w, cx);
+    }
+    fn step_strip_scroll(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        let Some((start, from_x, to_x)) = self.strip_scroll_anim else {
+            return;
+        };
+        const DURATION_SECS: f32 = 0.14;
+        let t = (start.elapsed().as_secs_f32() / DURATION_SECS).clamp(0., 1.);
+        let eased = 1. - (1. - t).powi(3);
+        let next_x = from_x + (to_x - from_x) * eased;
+        let max_x = f32::from(self.drag.strip.max_offset().x);
+        let clamped_x = if max_x > 0.5 {
+            next_x.clamp(-max_x, 0.)
+        } else {
+            next_x.min(0.)
+        };
+        self.drag.strip.set_offset(point(px(clamped_x), px(0.)));
+        cx.notify();
+        if t >= 1. {
+            self.strip_scroll_anim = None;
+            return;
+        }
+        let weak = cx.weak_entity();
+        w.on_next_frame(move |w, cx| {
+            let _ = weak.update(cx, |s, cx| s.step_strip_scroll(w, cx));
+        });
+    }
+    fn bar_overflow_menu(
+        &self,
+        compact_bar: bool,
+        overflowing: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let open = self.bar_menu_open;
+        let toggle = || cx.listener(move |s, _: &MouseDownEvent, _, cx| s.set_bar_menu(!open, cx));
+        let tooltip = if compact_bar {
+            "Open tabs and actions"
+        } else {
+            "All open tabs"
+        };
+        let trigger = div()
+            .on_mouse_down(MouseButton::Left, toggle())
+            .child(
+                gpui::components::Button::icon("bar-overflow", LucideIcon::ChevronDown)
+                    .ghost()
+                    .size(ComponentSize::Sm)
+                    .w(px(26.))
+                    .h(px(30.))
+                    .text_color(if open {
+                        rgba(0xf0f0f0ff)
+                    } else {
+                        rgba(0xffffffa6)
+                    })
+                    .hover_bg(rgba(0xffffff18).into())
+                    .when(open, |button| button.bg(rgba(0xffffff18)))
+                    .when(!open, move |button| button.tooltip_text(tooltip))
+                    .on_click(cx.listener(move |s, e: &ClickEvent, _, cx| {
+                        if !matches!(e, ClickEvent::Mouse(_)) {
+                            s.set_bar_menu(!open, cx);
+                        }
+                    })),
+            );
+        let mut menu = dropdown_menu("bar-overflow-menu", open)
+            .trigger(trigger)
+            .min_width(px(230.))
+            .max_width(px(300.))
+            .max_height(px(360.))
+            .on_close(cx.listener(|s, _, _, cx| s.set_bar_menu(false, cx)));
+        let show_tabs = !self.tabs.is_empty() && (overflowing || compact_bar);
+        if show_tabs {
+            menu = menu.entry(MenuEntry::Label(
+                format!("Open tabs ({})", self.tabs.len()).into(),
+            ));
+            let active_tab_idx = (self.page == Page::Terminal).then_some(self.current);
+            for (i, tab) in self.tabs.iter().enumerate() {
+                let id = tab.active;
+                let title = if tab.name.is_empty() {
+                    self.panes[&id].read(cx).title.clone()
+                } else {
+                    tab.name.clone()
+                };
+                menu = menu.entry(MenuEntry::checkbox_item(
+                    title,
+                    active_tab_idx == Some(i),
+                    cx.listener(move |s, _, w, cx| s.select(id, w, cx)),
+                ));
+            }
+        }
+        if compact_bar {
+            if show_tabs {
+                menu = menu.entry(MenuEntry::Separator);
+            }
+            let (switch_sc, split_r_sc, split_d_sc, settings_sc) = if cfg!(target_os = "macos") {
+                ("⌘P", "⌘D", "⇧⌘D", "⌘,")
+            } else {
+                ("Ctrl+Shift+P", "Ctrl+Shift+D", "Ctrl+Alt+D", "Ctrl+,")
+            };
+            menu = menu.entry(
+                MenuEntry::item_with_icon(
+                    "Switch session…",
+                    LucideIcon::Search,
+                    cx.listener(|s, _, w, cx| s.show(Page::Switch, w, cx)),
+                )
+                .with_shortcut(switch_sc),
+            );
+            if self.page == Page::Terminal {
+                menu = menu
+                    .entry(
+                        MenuEntry::item_with_icon(
+                            "Split right",
+                            LucideIcon::Columns2,
+                            cx.listener(|s, _, w, cx| s.split(Axis::Across, w, cx)),
+                        )
+                        .with_shortcut(split_r_sc),
+                    )
+                    .entry(
+                        MenuEntry::item_with_icon(
+                            "Split down",
+                            LucideIcon::Rows2,
+                            cx.listener(|s, _, w, cx| s.split(Axis::Down, w, cx)),
+                        )
+                        .with_shortcut(split_d_sc),
+                    );
+            }
+            menu = menu.entry(
+                MenuEntry::item_with_icon(
+                    "Settings",
+                    LucideIcon::Settings,
+                    cx.listener(|s, _, w, cx| s.show(Page::Settings, w, cx)),
+                )
+                .with_shortcut(settings_sc),
+            );
+        }
+        menu
     }
     fn new_tab_menu(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
         let open = self.new_tab_menu_open;
@@ -1498,8 +1940,19 @@ impl Workspace {
                     .size(ComponentSize::Sm)
                     .w(px(30.))
                     .h(px(30.))
+                    .text_color(if open {
+                        rgba(0xf0f0f0ff)
+                    } else {
+                        rgba(0xffffffa6)
+                    })
+                    .hover_bg(rgba(0xffffff18).into())
+                    .when(open, |button| button.bg(rgba(0xffffff18)))
                     .when(!open, |button| {
-                        button.tooltip_text("Open a terminal or session")
+                        button.tooltip_text(if cfg!(target_os = "macos") {
+                            "New terminal (⌘T)"
+                        } else {
+                            "New terminal (Ctrl+Shift+T)"
+                        })
                     })
                     .on_click(cx.listener(move |s, e: &ClickEvent, _, cx| {
                         if !matches!(e, ClickEvent::Mouse(_)) {
@@ -1556,47 +2009,74 @@ impl Workspace {
                 }),
             ))
         } else {
-            menu.entry(MenuEntry::item_with_icon(
-                "Outpost session…",
-                LucideIcon::Server,
-                cx.listener(|s, _, w, cx| {
-                    s.split_at = None;
-                    s.catalogue(w, cx)
+            menu.entry(
+                MenuEntry::item_with_icon(
+                    "Outpost session…",
+                    LucideIcon::Server,
+                    cx.listener(|s, _, w, cx| {
+                        s.split_at = None;
+                        s.catalogue(w, cx)
+                    }),
+                )
+                .with_shortcut(if cfg!(target_os = "macos") {
+                    "⇧⌘O"
+                } else {
+                    "Ctrl+Shift+O"
                 }),
-            ))
+            )
         }
     }
     fn chrome(&self, w: &Window, cx: &mut Context<Self>) -> Div {
         let slots = self.strip_slots();
         let active_tab_idx = (self.page == Page::Terminal).then_some(self.current);
         let hairline = rgba(0xffffff1a);
+        let layout = compute_chrome_layout(
+            f32::from(w.viewport_size().width),
+            slots.len(),
+            cfg!(target_os = "macos"),
+            cfg!(windows),
+        );
+        if !layout.overflowing && f32::from(self.drag.strip.offset().x) != 0. {
+            self.drag.strip.set_offset(Point::default());
+        }
+        let offset_x = f32::from(self.drag.strip.offset().x);
+        let measured_max_x = f32::from(self.drag.strip.max_offset().x);
+        let max_scroll_x = if measured_max_x > 0.5 {
+            measured_max_x
+        } else {
+            layout.est_max_scroll_x
+        };
+        let can_scroll_left = layout.overflowing && offset_x < -0.5;
+        let can_scroll_right = layout.overflowing && offset_x > -(max_scroll_x - 0.5);
         let mut strip = row()
-            .h_full()
+            .size_full()
             .items_end()
-            .gap(px(2.))
+            .gap(px(TAB_GAP))
             .id("tabs")
+            .hide_scrollbar()
             .track_scroll(&self.drag.strip)
-            .overflow_x_scroll()
-            .max_w(relative(0.76));
+            .overflow_x_scroll();
         for (pos, &slot) in slots.iter().enumerate() {
             let Some(i) = slot else {
                 let preview = self.drag.preview.as_ref().expect("preview slot");
                 strip = strip.child(
                     row()
                         .h(px(36.))
-                        .min_w(px(130.))
-                        .w(px(210.))
-                        .max_w(px(240.))
-                        .px(px(9.))
+                        .min_w(px(TAB_MIN_W))
+                        .w(px(TAB_IDEAL_W))
+                        .max_w(px(TAB_MAX_W))
+                        .pl(px(8.))
+                        .pr(px(27.))
                         .items_center()
-                        .truncate()
                         .rounded_t(px(7.))
-                        .bg(rgb(BG))
+                        .bg(rgb(0x151515))
                         .border_t_1()
                         .border_l_1()
                         .border_r_1()
-                        .border_color(rgba(0xffffff24))
-                        .child(preview.label.content()),
+                        .border_color(rgba(0xffffff38))
+                        .text_color(rgb(0xf0f0f0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(preview.label.tab_content()),
                 );
                 continue;
             };
@@ -1614,19 +2094,22 @@ impl Workspace {
             };
             let rep = panes::tab_representative(tab, &self.panes, cx);
             let status_tip = panes::pane_status_label(rep);
-            let tab_status = panes::status_badge(rep, px(16.)).map(|badge| {
-                div()
-                    .id(("tab-status", tab.id))
-                    .flex_none()
-                    .tooltip(move |w, cx| Tooltip::text(status_tip.clone(), w, cx))
-                    .child(badge)
-            });
+            let tab_status =
+                panes::status_badge_with_emphasis(rep, px(16.), active).map(|badge| {
+                    div()
+                        .id(("tab-status", tab.id))
+                        .flex_none()
+                        .tooltip(move |w, cx| Tooltip::text(status_tip.clone(), w, cx))
+                        .child(badge)
+                });
+            let tab_tip = title.clone();
             let handle = row()
                 .id(("tab-handle", tab.id))
                 .role(gpui::accesskit::Role::Tab)
                 .aria_selected(active)
                 .focusable()
                 .tab_stop(i == self.current)
+                .tooltip(move |w, cx| Tooltip::text(tab_tip.clone(), w, cx))
                 .on_click(cx.listener(move |s, e: &ClickEvent, w, cx| {
                     if !matches!(e, ClickEvent::Mouse(_)) {
                         s.select(id, w, cx);
@@ -1635,14 +2118,15 @@ impl Workspace {
                 .flex_1()
                 .min_w_0()
                 .h_full()
-                .pl(px(9.))
-                .gap(px(6.))
+                .pl(px(8.))
+                .gap(px(5.))
                 .cursor_pointer()
                 .aria_label(format!("Select or drag tab {title}"))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |s, e: &MouseDownEvent, w, cx| {
                         w.prevent_default();
+                        s.strip_scroll_anim = None;
                         if e.click_count == 2 {
                             s.cancel_drag(cx);
                             s.select(id, w, cx);
@@ -1655,7 +2139,7 @@ impl Workspace {
                 )
                 .children(tab_status)
                 .children(self.panes[&id].read(cx).mark.map(|m| m.icon(14.)))
-                .child(div().flex_1().truncate().child(title.clone()))
+                .child(div().flex_1().min_w_0().truncate().child(title.clone()))
                 .when(!matches!(tab.layout, Layout::Pane(_)), |e| {
                     e.child(text(
                         self.panes
@@ -1664,17 +2148,17 @@ impl Workspace {
                             .count()
                             .to_string(),
                         10.,
-                        MUTED,
+                        if active { MUTED } else { 0x6a6a6a },
                     ))
                 });
             let tab = row()
                 .id(("tab", tab.id))
                 .relative()
-                .min_w(px(130.))
-                .w(px(210.))
-                .max_w(px(240.))
+                .min_w(px(TAB_MIN_W))
+                .w(px(TAB_IDEAL_W))
+                .max_w(px(TAB_MAX_W))
                 .pr(px(3.))
-                .gap(px(6.))
+                .gap(px(2.))
                 .cursor_pointer()
                 .when(active, |e| {
                     e.h(px(36.))
@@ -1683,16 +2167,16 @@ impl Workspace {
                         .border_t_1()
                         .border_l_1()
                         .border_r_1()
-                        .border_color(hairline)
-                        .text_color(rgb(TEXT))
+                        .border_color(rgba(0xffffff22))
+                        .text_color(rgb(0xf0f0f0))
                         .font_weight(FontWeight::MEDIUM)
                 })
                 .when(!active, |e| {
                     e.h(px(32.))
                         .mb(px(2.))
                         .rounded(px(6.))
-                        .text_color(rgb(0xc8c8c8))
-                        .hover(|s| s.bg(rgba(0xffffff16)).text_color(rgb(TEXT)))
+                        .text_color(rgba(0xffffff80))
+                        .hover(|s| s.bg(rgba(0xffffff16)).text_color(rgba(0xffffffcc)))
                         .when(next_inactive, |s| {
                             s.child(
                                 div()
@@ -1701,18 +2185,26 @@ impl Workspace {
                                     .top(px(8.))
                                     .bottom(px(8.))
                                     .w(px(1.))
-                                    .bg(rgba(0xffffff1a)),
+                                    .bg(rgba(0xffffff18)),
                             )
                         })
                 })
                 .child(handle)
-                .child(panes::header_button(
-                    ("tab-close", tab.id),
-                    LucideIcon::X,
-                    "Close tab",
-                    true,
-                    cx.listener(move |s, _, w, cx| s.close_tab(id, w, cx)),
-                ))
+                .child(
+                    panes::header_button(
+                        ("tab-close", tab.id),
+                        LucideIcon::X,
+                        "Close tab",
+                        true,
+                        cx.listener(move |s, _, w, cx| s.close_tab(id, w, cx)),
+                    )
+                    .size(px(22.))
+                    .text_color(if active {
+                        rgba(0xffffff99)
+                    } else {
+                        rgba(0xffffff66)
+                    }),
+                )
                 .on_mouse_up(
                     MouseButton::Middle,
                     cx.listener(move |s, _, w, cx| s.close_tab(id, w, cx)),
@@ -1726,10 +2218,112 @@ impl Workspace {
                 );
             strip = strip.child(tab)
         }
-        let glass_tint = if w.is_window_active() {
-            rgba(0x111111a8)
+        let scroll_btn = |id: &'static str,
+                          glyph: LucideIcon,
+                          tip: &'static str,
+                          enabled: bool,
+                          direction: f32| {
+            let fallback_max = layout.est_max_scroll_x;
+            div()
+                .id(id)
+                .role(gpui::accesskit::Role::Button)
+                .aria_label(tip)
+                .w(px(24.))
+                .h(px(30.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(5.))
+                .text_color(if enabled {
+                    rgba(0xffffffa6)
+                } else {
+                    rgba(0xffffff3d)
+                })
+                .when(enabled, |e| {
+                    e.cursor_pointer()
+                        .hover(|s| s.bg(rgba(0xffffff18)).text_color(rgb(0xf0f0f0)))
+                        .tooltip(move |w, cx| Tooltip::text(tip, w, cx))
+                        .on_mouse_down(MouseButton::Left, |_, w, _| w.prevent_default())
+                        .on_click(cx.listener(move |s, _, w, cx| {
+                            s.scroll_tab_strip(direction, fallback_max, w, cx)
+                        }))
+                })
+                .child(lucide_icon(glyph).size(px(14.)))
+        };
+        let strip_region = div()
+            .relative()
+            .flex_shrink_1()
+            .min_w_0()
+            .h_full()
+            .overflow_hidden()
+            .child(strip)
+            .when(can_scroll_left, |e| {
+                e.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom(px(1.))
+                        .w(px(18.))
+                        .bg(linear_gradient(
+                            90.,
+                            linear_color_stop(rgba(0x1b1b1cc8), 0.),
+                            linear_color_stop(rgba(0x1b1b1c00), 1.),
+                        )),
+                )
+            })
+            .when(can_scroll_right, |e| {
+                e.child(
+                    div()
+                        .absolute()
+                        .right_0()
+                        .top_0()
+                        .bottom(px(1.))
+                        .w(px(18.))
+                        .bg(linear_gradient(
+                            270.,
+                            linear_color_stop(rgba(0x1b1b1cc8), 0.),
+                            linear_color_stop(rgba(0x1b1b1c00), 1.),
+                        )),
+                )
+            });
+        let tab_cluster = row()
+            .h_full()
+            .flex_shrink_1()
+            .min_w_0()
+            .gap(px(2.))
+            .when(layout.overflowing, |e| {
+                e.child(scroll_btn(
+                    "tabs-scroll-left",
+                    LucideIcon::ChevronLeft,
+                    "Scroll tabs left",
+                    can_scroll_left,
+                    1.,
+                ))
+            })
+            .child(strip_region)
+            .when(layout.overflowing, |e| {
+                e.child(scroll_btn(
+                    "tabs-scroll-right",
+                    LucideIcon::ChevronRight,
+                    "Scroll tabs right",
+                    can_scroll_right,
+                    -1.,
+                ))
+            });
+        let tab_actions = row()
+            .flex_none()
+            .gap(px(2.))
+            .child(self.new_tab_menu(cx))
+            .when(layout.show_overflow_menu, |e| {
+                e.child(self.bar_overflow_menu(layout.compact_bar, layout.overflowing, cx))
+            });
+        let window_active = w.is_window_active();
+        let glass_tint = if window_active {
+            rgba(0x1b1b1ba3)
         } else {
-            rgba(0x111111cc)
+            rgba(0x1b1b1bc4)
         };
         row()
             .relative()
@@ -1754,6 +2348,7 @@ impl Workspace {
                 div()
                     .id("home")
                     .size(px(30.))
+                    .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1767,13 +2362,14 @@ impl Workspace {
                     })),
             )
             .when(!self.startup_cloak, |bar| {
-                bar.child(strip).child(self.new_tab_menu(cx))
+                bar.child(tab_cluster).child(tab_actions)
             })
             .child(snapshot_source(
                 &self.drag.empty_bar,
                 div()
                     .id("window-drag-area")
                     .flex_1()
+                    .min_w(px(layout.drag_min))
                     .h_full()
                     .window_control_area(WindowControlArea::Drag)
                     .when(!cfg!(windows), |area| {
@@ -1786,14 +2382,34 @@ impl Workspace {
                         })
                     }),
             ))
-            .when(!self.startup_cloak, |bar| {
-                bar.child(icon("switch", LucideIcon::Search, cx, |s, w, cx| {
-                    s.show(Page::Switch, w, cx)
-                }))
+            .when(!self.startup_cloak && !layout.compact_bar, |bar| {
+                let mac = cfg!(target_os = "macos");
+                let switch_tip = if mac {
+                    "Switch session (⌘P)"
+                } else {
+                    "Switch session (Ctrl+Shift+P)"
+                };
+                let split_tip = if mac {
+                    "Split side by side (⌘D) · Right-click to split down"
+                } else {
+                    "Split side by side (Ctrl+Shift+D) · Right-click to split down"
+                };
+                let settings_tip = if mac {
+                    "Settings (⌘,)"
+                } else {
+                    "Settings (Ctrl+,)"
+                };
+                bar.child(
+                    icon("switch", LucideIcon::Search, cx, |s, w, cx| {
+                        s.show(Page::Switch, w, cx)
+                    })
+                    .tooltip(move |w, cx| Tooltip::text(switch_tip, w, cx)),
+                )
                 .child(if self.page == Page::Terminal {
                     icon("split", LucideIcon::Columns2, cx, |s, w, cx| {
                         s.split(Axis::Across, w, cx)
                     })
+                    .tooltip(move |w, cx| Tooltip::text(split_tip, w, cx))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(|s, _, w, cx| s.split(Axis::Down, w, cx)),
@@ -1806,16 +2422,25 @@ impl Workspace {
                         .flex()
                         .items_center()
                         .justify_center()
+                        .text_color(rgba(0xffffffa6))
                         .opacity(0.35)
                         .child(lucide_icon(LucideIcon::Columns2).size(px(17.)))
                         .into_any_element()
                 })
-                .child(icon("settings", LucideIcon::Settings, cx, |s, w, cx| {
-                    s.show(Page::Settings, w, cx)
-                }))
+                .child(
+                    icon("settings", LucideIcon::Settings, cx, |s, w, cx| {
+                        s.show(Page::Settings, w, cx)
+                    })
+                    .tooltip(move |w, cx| Tooltip::text(settings_tip, w, cx)),
+                )
             })
             .when(cfg!(windows), |bar| {
                 // Win32 handles clicks, Snap Layouts, and the normal close request through these hitboxes.
+                let caption_fg = if window_active {
+                    rgba(0xffffffa6)
+                } else {
+                    rgba(0xffffff66)
+                };
                 let caption = |id: &'static str, area: WindowControlArea, glyph: &'static str| {
                     div()
                         .id(id)
@@ -1827,11 +2452,12 @@ impl Workspace {
                         .window_control_area(area)
                         .font_family("Segoe MDL2 Assets")
                         .text_size(px(10.))
+                        .text_color(caption_fg)
                         .hover(move |s| {
                             if area == WindowControlArea::Close {
-                                s.bg(rgb(0xc42b1c))
+                                s.bg(rgb(0xc42b1c)).text_color(rgb(0xffffff))
                             } else {
-                                s.bg(rgba(0xffffff18))
+                                s.bg(rgba(0xffffff18)).text_color(rgb(0xf0f0f0))
                             }
                         })
                         .child(glyph)
@@ -1862,6 +2488,134 @@ impl Workspace {
                 )
             })
     }
+    fn pane_status_overlay(
+        &self,
+        id: Id,
+        pane: &Pane,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
+        if pane.status.is_empty() {
+            return None;
+        }
+        let remote = pane.server.is_some();
+        let pending = remote
+            && matches!(
+                pane.connection,
+                ConnectionState::Connecting | ConnectionState::Reconnecting
+            );
+        let icon = if pending {
+            activity_badge(ActivityState::Pending)
+                .size(px(17.))
+                .color(rgb(0x9a9a9a))
+                .into_any_element()
+        } else {
+            lucide_icon(if remote {
+                LucideIcon::WifiOff
+            } else {
+                LucideIcon::CircleX
+            })
+            .size(px(17.))
+            .text_color(rgb(0xf87171))
+            .into_any_element()
+        };
+        let mut actions = row().items_center().justify_center().gap(px(8.));
+        if remote {
+            actions = actions.child(
+                button(
+                    ("pane-reconnect", id),
+                    !pending,
+                    cx,
+                    move |s, _, cx| {
+                        if let Some(pane) = s.panes.get(&id) {
+                            pane.read(cx).command("reconnect", json!({}))
+                        }
+                    },
+                )
+                .child(
+                    row()
+                        .gap(px(6.))
+                        .child(lucide_icon(LucideIcon::RotateCw).size(px(13.5)))
+                        .child("Reconnect"),
+                ),
+            );
+            if !pending {
+                actions = actions.child(
+                    button(("pane-status-close", id), false, cx, move |s, w, cx| {
+                        s.close(id, w, cx)
+                    })
+                    .child("Close"),
+                );
+            }
+        } else {
+            actions = actions
+                .child(
+                    button(
+                        ("pane-restart", id),
+                        true,
+                        cx,
+                        move |s, w, cx| s.restart_local_pane(id, w, cx),
+                    )
+                    .child(
+                        row()
+                            .gap(px(6.))
+                            .child(lucide_icon(LucideIcon::RotateCw).size(px(13.5)))
+                            .child("Restart"),
+                    ),
+                )
+                .child(
+                    button(("pane-status-close", id), false, cx, move |s, w, cx| {
+                        s.close(id, w, cx)
+                    })
+                    .child("Close"),
+                );
+        }
+        Some(
+            div()
+                .id(("pane-status-overlay", id))
+                .absolute()
+                .inset_0()
+                .occlude()
+                .backdrop_blur(px(6.))
+                .bg(rgba(0x0c0c0c96))
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .px(px(24.))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |s, _, w, cx| {
+                        if s.tabs.get(s.current).is_some_and(|t| t.active != id) {
+                            s.select(id, w, cx);
+                        }
+                    }),
+                )
+                .child(
+                    col()
+                        .items_center()
+                        .gap(px(14.))
+                        .max_w(px(420.))
+                        .child(
+                            row()
+                                .items_center()
+                                .justify_center()
+                                .gap(px(8.))
+                                .child(div().flex_none().child(icon))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .text_center()
+                                        .text_size(px(14.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(rgb(if pending { 0xd4d4d4 } else { 0xf0f0f0 }))
+                                        .child(pane.status.clone()),
+                                ),
+                        )
+                        .child(actions),
+                )
+                .into_any_element(),
+        )
+    }
     fn node(&self, node: &Layout, headers: bool, cx: &mut Context<Self>) -> AnyElement {
         match node {
             Layout::Pane(id) => {
@@ -1873,20 +2627,7 @@ impl Workspace {
                 if headers {
                     body = body.child(self.pane_header(id, pane, active, cx));
                 }
-                let status = (!pane.status.is_empty()).then(|| {
-                    row()
-                        .absolute()
-                        .top(px(5.))
-                        .left(px(5.))
-                        .bg(rgb(BG))
-                        .px(px(8.))
-                        .child(text(pane.status.clone(), 12., MUTED))
-                        .when(pane.server.is_some(), |e| {
-                            e.child(control("Reconnect", false, cx, move |s, _, cx| {
-                                s.panes[&id].read(cx).command("reconnect", json!({}))
-                            }))
-                        })
-                });
+                let status = self.pane_status_overlay(id, pane, cx);
                 if pane.waiting > 0 {
                     body = body.child(control(
                         format!("Deliver waiting message ({})", pane.waiting),
@@ -2374,10 +3115,9 @@ impl Workspace {
                             .checked_add_signed(direction)
                             .filter(|i| *i < self.tabs.len())
                         {
+                            let _ = next;
                             order = order.child(control(label, false, cx, move |s, w, cx| {
-                                s.tabs.swap(s.current, next);
-                                s.current = next;
-                                s.show(Page::Terminal, w, cx);
+                                s.move_tab(direction, w, cx);
                             }));
                         }
                     }
@@ -2480,7 +3220,6 @@ impl Render for Workspace {
             .into_iter()
             .map(|slot| slot.map(|i| self.tabs[i].id))
             .collect();
-        self.drag.rendered_anchor = self.drag.preview.as_ref().map(|p| p.destination);
         let body = if self.startup_cloak {
             self.startup_cloak_view()
         } else if matches!(
@@ -2594,16 +3333,24 @@ impl Render for Workspace {
                 s.split_at = None;
                 s.local(None, w, cx)
             }))
+            .on_action(cx.listener(|s, _: &crate::menu::OpenSessions, w, cx| {
+                s.open_sessions(w, cx)
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SwitchSession, w, cx| {
+                s.show(Page::Switch, w, cx)
+            }))
             .on_action(cx.listener(|s, _: &crate::menu::TerminalActions, w, cx| s.manage(w, cx)))
             .on_action(
                 cx.listener(|s, _: &crate::menu::Settings, w, cx| s.show(Page::Settings, w, cx)),
             )
             .on_action(cx.listener(|s, _: &crate::menu::CloseTerminal, w, cx| {
-                if s.page == Page::Terminal
-                    && let Some(t) = s.tabs.get(s.current)
-                {
-                    s.close(t.active, w, cx)
-                }
+                s.close_focused_pane(w, cx)
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::CloseTab, w, cx| {
+                s.close_current_tab(w, cx)
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::CloseWindow, w, cx| {
+                s.close_current_window(w, cx)
             }))
             .on_action(cx.listener(|s, _: &crate::menu::CopySelection, _, cx| {
                 if s.page == Page::Terminal
@@ -2631,12 +3378,102 @@ impl Render for Workspace {
                     s.show(Page::Find, w, cx);
                 }
             }))
+            .on_action(cx.listener(|s, _: &crate::menu::ComposeMessage, w, cx| {
+                if s.active().is_some() {
+                    s.show(Page::Compose, w, cx);
+                }
+            }))
             .on_action(cx.listener(|s, _: &crate::menu::ClearScreen, _, cx| {
                 if s.page == Page::Terminal
                     && let Some(p) = s.active()
                 {
                     p.update(cx, |p, cx| p.clear_screen(true, cx));
                 }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SplitColumns, w, cx| {
+                if s.page == Page::Terminal && !s.tabs.is_empty() {
+                    s.split(Axis::Across, w, cx);
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SplitRows, w, cx| {
+                if s.page == Page::Terminal && !s.tabs.is_empty() {
+                    s.split(Axis::Down, w, cx);
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::ToggleZoom, w, cx| {
+                if s.page == Page::Terminal
+                    && let Some(t) = s.tabs.get(s.current)
+                {
+                    s.toggle_zoom(t.active, w, cx);
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::FocusNextPane, w, cx| {
+                if s.page == Page::Terminal {
+                    s.focus_pane_delta(1, w, cx);
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::FocusPrevPane, w, cx| {
+                if s.page == Page::Terminal {
+                    s.focus_pane_delta(-1, w, cx);
+                }
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::IncreaseFontSize, _, cx| {
+                s.adjust_font_size(Some(1.0), cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::DecreaseFontSize, _, cx| {
+                s.adjust_font_size(Some(-1.0), cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::ResetFontSize, _, cx| {
+                s.adjust_font_size(None, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::ReloadTerminal, w, cx| {
+                if matches!(s.page, Page::Terminal | Page::Find | Page::Compose)
+                    && !s.tabs.is_empty()
+                {
+                    s.reload_selected(w, cx);
+                }
+            }))
+            .on_action(cx.listener(|_, _: &crate::menu::ToggleFullscreen, w, _| {
+                w.toggle_fullscreen();
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::NextTab, w, cx| {
+                s.cycle_tab(1, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::PrevTab, w, cx| {
+                s.cycle_tab(-1, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::MoveTabLeft, w, cx| {
+                s.move_tab(-1, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::MoveTabRight, w, cx| {
+                s.move_tab(1, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab1, w, cx| {
+                s.select_tab_index(1, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab2, w, cx| {
+                s.select_tab_index(2, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab3, w, cx| {
+                s.select_tab_index(3, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab4, w, cx| {
+                s.select_tab_index(4, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab5, w, cx| {
+                s.select_tab_index(5, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab6, w, cx| {
+                s.select_tab_index(6, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab7, w, cx| {
+                s.select_tab_index(7, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab8, w, cx| {
+                s.select_tab_index(8, w, cx);
+            }))
+            .on_action(cx.listener(|s, _: &crate::menu::SelectTab9, w, cx| {
+                s.select_tab_index(9, w, cx);
             }))
             .capture_key_down(cx.listener(|s, e, w, cx| s.shortcuts(e, w, cx)))
     }
@@ -2790,7 +3627,8 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         })
     })?;
     test.update_window(remote_window.into(), |root, w, cx| {
-        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        ws.update(cx, |s, cx| {
             let origin = "https://example.com";
             s.create_form(origin.into(), "first".into(), w, cx);
             assert_eq!(commands.try_recv().unwrap()["accountId"], "first");
@@ -2877,7 +3715,8 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         })?;
     }
     test.update_window(remote_window.into(), |root, w, cx| {
-        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        ws.update(cx, |s, cx| {
             let origin = "https://example.com";
             assert_eq!(s.tool, "claude");
             // Replace duplicate env with a valid unique variable and submit.
@@ -2927,7 +3766,8 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     switched.sort_unstable();
     assert_eq!(switched, vec![(1, false), (2, true)]);
     test.update_window(remote_window.into(), |root, w, cx| {
-        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        ws.update(cx, |s, cx| {
             s.show(Page::Settings, w, cx);
             s.prefs["unlimitedScrollback"] = json!(true);
             s.settings(cx);
@@ -2967,7 +3807,8 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     })?;
     // A publication on a background tab must refresh that pane while Files is closed.
     test.update_window(remote_window.into(), |root, w, cx| {
-        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        ws.update(cx, |s, cx| {
             s.event(
                 json!({"event":"connection","pane":2,"state":{"kind":"connected"}}),
                 w,
@@ -3048,6 +3889,12 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 "Reconnecting… · Retrying"
             );
             s.event(
+                json!({"event":"connection","pane":2,"state":{"kind":"closed"}}),
+                w,
+                cx,
+            );
+            assert_eq!(s.panes[&p2].read(cx).status, "Disconnected");
+            s.event(
                 json!({"event":"connection","pane":2,"state":{"kind":"closed","message":"Session ended"}}),
                 w,
                 cx,
@@ -3056,6 +3903,10 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 panes::pane_activity_state(s.panes[&p2].read(cx)),
                 Some(ActivityState::Disconnected)
             );
+        });
+        // Render the full-pane blurred error overlay before restoring the connection.
+        w.draw(cx).clear(cx);
+        ws.update(cx, |s, cx| {
             // Restore pane 2 to connected + working for the remaining workspace assertions.
             s.event(
                 json!({"event":"connection","pane":2,"state":{"kind":"connected"}}),
@@ -3462,7 +4313,8 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             .save(PathBuf::from(&dir).join("choose-session.png"))?;
     }
     test.update_window(remote_window.into(), |root, w, cx| {
-        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        ws.update(cx, |s, cx| {
             s.dismiss_page(w, cx);
             assert!(s.page == Page::Terminal);
 
@@ -3491,6 +4343,22 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             s.dismiss_page(w, cx);
             assert!(s.page == Page::Terminal);
 
+            // Verify Reload shortcut reconnects the focused remote pane.
+            let reload_key = if cfg!(target_os = "macos") {
+                "cmd-r"
+            } else {
+                "ctrl-shift-r"
+            };
+            s.shortcuts(
+                &KeyDownEvent {
+                    keystroke: Keystroke::parse(reload_key).unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                w,
+                cx,
+            );
+
             s.show(Page::Switch, w, cx);
             // Switch lists 2 open panes + only the 1 non-open catalogue session (sess-other).
             assert_eq!(s.picker_items(cx).len(), 3);
@@ -3501,7 +4369,13 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         });
     })?;
     draw_remote(&mut test);
-    while commands.try_recv().is_ok() {}
+    let mut saw_reconnect = false;
+    while let Ok(cmd) = commands.try_recv() {
+        if cmd["op"] == "reconnect" {
+            saw_reconnect = true;
+        }
+    }
+    assert!(saw_reconnect, "reload shortcut must send reconnect for remote pane");
 
     test.update_window(window.into(), |_, w, _| w.activate_window())?;
     test.run_until_parked();
@@ -3538,6 +4412,62 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             assert!(!ws.read(cx).startup_local);
             assert!(ws.read(cx).page == Page::Terminal);
             assert_eq!(ws.read(cx).tabs.len(), 1);
+            // Overflow the 700px (compact) title bar with 7 tabs and verify:
+            // - compact bar keeps >= 56px window-drag area and generous scrollable tab strip
+            // - opening tab 7 auto-scrolls the strip right on frame 0
+            // - selecting tab 0 auto-scrolls the strip back to the start
+            // - the overflow menu renders cleanly and tooltips stay neutral monochrome.
+            let first_pane = ws.read(cx).tabs[0].active;
+            ws.update(cx, |s, cx| {
+                for _ in 0..6 {
+                    s.local(None, w, cx);
+                }
+            });
+            w.draw(cx).clear(cx);
+            let drag_bar = ws
+                .read(cx)
+                .drag
+                .empty_bar
+                .bounds()
+                .expect("window drag area laid out");
+            assert!(
+                drag_bar.size.width >= px(55.5),
+                "compact window-drag-area must keep >= 56px even with overflowing tabs, got {:?}",
+                drag_bar.size.width
+            );
+            let strip_bounds = ws.read(cx).drag.strip.bounds();
+            assert!(
+                strip_bounds.size.width >= px(240.),
+                "compact bar should preserve roomy tab strip, got {:?}",
+                strip_bounds.size.width
+            );
+            assert!(
+                ws.read(cx).drag.strip.max_offset().x > px(0.),
+                "7 tabs on 700px window should overflow horizontally"
+            );
+            assert!(
+                ws.read(cx).drag.strip.offset().x < px(0.),
+                "active last tab should auto-scroll into view on frame 0, got {:?}",
+                ws.read(cx).drag.strip.offset().x
+            );
+            ws.update(cx, |s, cx| s.select(first_pane, w, cx));
+            w.draw(cx).clear(cx);
+            assert_eq!(
+                ws.read(cx).drag.strip.offset().x,
+                px(0.),
+                "selecting first tab must scroll strip back to 0"
+            );
+            ws.update(cx, |s, cx| s.set_bar_menu(true, cx));
+            w.draw(cx).clear(cx);
+            assert!(ws.read(cx).bar_menu_open);
+            ws.update(cx, |s, cx| s.set_bar_menu(false, cx));
+            let theme = cx.theme();
+            assert!(
+                theme.tooltip_bg.s < 0.01 && theme.tooltip_border.s < 0.01,
+                "tooltip colors must stay neutral monochrome, got bg={:?} border={:?}",
+                theme.tooltip_bg,
+                theme.tooltip_border
+            );
         })?;
         test.update_window(cloak_win.into(), |_, w, _| w.remove_window())?;
         test.run_until_parked();
@@ -3568,6 +4498,172 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             hub.bridge = None;
             hub.prefs = saved_prefs;
         });
+        test.run_until_parked();
+    }
+    // Verify keyboard shortcuts work reliably across focus loss, Windows shifted keys,
+    // tab/pane navigation, font sizing, and close requests.
+    {
+        let sc_win = test.open_window(size(px(900.), px(600.)), |w, cx| {
+            cx.new(|cx| Workspace::new(false, w, cx))
+        })?;
+        let dispatch_key = |w: &mut Window, cx: &mut App, keystroke: Keystroke, is_held: bool| {
+            w.dispatch_event(
+                PlatformInput::KeyDown(KeyDownEvent {
+                    keystroke,
+                    is_held,
+                    prefer_character_input: false,
+                }),
+                cx,
+            );
+        };
+        let mac = cfg!(target_os = "macos");
+        let new_tab = Keystroke::parse(if mac { "cmd-t" } else { "ctrl-shift-t" }).unwrap();
+        let split_col = Keystroke::parse(if mac { "cmd-d" } else { "ctrl-shift-d" }).unwrap();
+        let split_row = Keystroke::parse(if mac { "cmd-shift-d" } else { "ctrl-alt-d" }).unwrap();
+        let zoom_key =
+            Keystroke::parse(if mac { "cmd-shift-enter" } else { "ctrl-alt-enter" }).unwrap();
+        let pane_next =
+            Keystroke::parse(if mac { "cmd-alt-right" } else { "ctrl-alt-right" }).unwrap();
+        let pane_prev =
+            Keystroke::parse(if mac { "cmd-alt-left" } else { "ctrl-alt-left" }).unwrap();
+        let settings_key = Keystroke::parse(if mac { "cmd-," } else { "ctrl-," }).unwrap();
+        let tab_1 = Keystroke::parse(if mac { "cmd-1" } else { "alt-1" }).unwrap();
+        let tab_last = Keystroke::parse(if mac { "cmd-9" } else { "alt-9" }).unwrap();
+        let font_up = Keystroke::parse(if mac { "cmd-=" } else { "ctrl-=" }).unwrap();
+        let font_down = Keystroke::parse(if mac { "cmd--" } else { "ctrl--" }).unwrap();
+        let font_reset = Keystroke::parse(if mac { "cmd-0" } else { "ctrl-0" }).unwrap();
+        let close_pane = Keystroke::parse(if mac { "cmd-w" } else { "ctrl-shift-w" }).unwrap();
+        let close_tab = Keystroke::parse(if mac { "cmd-alt-w" } else { "ctrl-alt-w" }).unwrap();
+
+        test.update_window(sc_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            w.draw(cx).clear(cx);
+            assert!(ws.read(cx).page == Page::Home);
+            // Shortcuts must work immediately on Page::Home without clicking first.
+            dispatch_key(w, cx, new_tab.clone(), false);
+            assert_eq!(ws.read(cx).tabs.len(), 1);
+            assert!(ws.read(cx).page == Page::Terminal);
+            // Auto-repeat must not spawn extra tabs.
+            dispatch_key(w, cx, new_tab.clone(), true);
+            assert_eq!(ws.read(cx).tabs.len(), 1);
+
+            // Simulate clicking a non-focusable area (blur) and verify shortcuts still work.
+            w.draw(cx).clear(cx);
+            w.blur(cx);
+            dispatch_key(w, cx, new_tab.clone(), false);
+            assert_eq!(ws.read(cx).tabs.len(), 2);
+            dispatch_key(w, cx, new_tab.clone(), false);
+            assert_eq!(ws.read(cx).tabs.len(), 3);
+            let tab_ids: Vec<Id> = ws.read(cx).tabs.iter().map(|t| t.id).collect();
+
+            // Tab switching: Alt+1 / Cmd+1 -> first, Alt+9 / Cmd+9 -> last, Ctrl+Tab, Ctrl+PageUp/Down.
+            dispatch_key(w, cx, tab_1.clone(), false);
+            assert_eq!(ws.read(cx).current, 0);
+            dispatch_key(w, cx, tab_last.clone(), false);
+            assert_eq!(ws.read(cx).current, 2);
+            dispatch_key(w, cx, Keystroke::parse("ctrl-tab").unwrap(), false);
+            assert_eq!(ws.read(cx).current, 0);
+            dispatch_key(w, cx, Keystroke::parse("ctrl-shift-tab").unwrap(), false);
+            assert_eq!(ws.read(cx).current, 2);
+            dispatch_key(w, cx, Keystroke::parse("ctrl-pageup").unwrap(), false);
+            assert_eq!(ws.read(cx).current, 1);
+            dispatch_key(w, cx, Keystroke::parse("ctrl-pagedown").unwrap(), false);
+            assert_eq!(ws.read(cx).current, 2);
+
+            // Reorder active tab left and back right via Ctrl+Shift+PageUp / PageDown.
+            dispatch_key(w, cx, Keystroke::parse("ctrl-shift-pageup").unwrap(), false);
+            assert_eq!(ws.read(cx).current, 1);
+            assert_eq!(ws.read(cx).tabs[1].id, tab_ids[2]);
+            dispatch_key(w, cx, Keystroke::parse("ctrl-shift-pagedown").unwrap(), false);
+            assert_eq!(ws.read(cx).current, 2);
+            assert_eq!(ws.read(cx).tabs[2].id, tab_ids[2]);
+
+            // Splits, pane cycling forward & backward, and zoom toggle.
+            let initial_pane = ws.read(cx).tabs[2].active;
+            dispatch_key(w, cx, split_col, false);
+            let second_pane = ws.read(cx).tabs[2].active;
+            assert_ne!(second_pane, initial_pane);
+            dispatch_key(w, cx, split_row, false);
+            let third_pane = ws.read(cx).tabs[2].active;
+            assert_ne!(third_pane, second_pane);
+            dispatch_key(w, cx, pane_prev, false);
+            assert_eq!(ws.read(cx).tabs[2].active, second_pane);
+            dispatch_key(w, cx, pane_next, false);
+            assert_eq!(ws.read(cx).tabs[2].active, third_pane);
+            dispatch_key(w, cx, zoom_key.clone(), false);
+            assert!(ws.read(cx).tabs[2].zoom);
+            dispatch_key(w, cx, zoom_key, false);
+            assert!(!ws.read(cx).tabs[2].zoom);
+
+            // Settings shortcut (Ctrl+, on Win/Linux, Cmd+, on macOS) + Windows shifted Ctrl+<.
+            dispatch_key(w, cx, settings_key, false);
+            assert!(ws.read(cx).page == Page::Settings);
+            dispatch_key(w, cx, Keystroke::parse("escape").unwrap(), false);
+            assert!(ws.read(cx).page == Page::Terminal);
+            if !mac {
+                dispatch_key(
+                    w,
+                    cx,
+                    Keystroke {
+                        modifiers: Modifiers::control(),
+                        key: "<".into(),
+                        key_char: None,
+                    },
+                    false,
+                );
+                assert!(ws.read(cx).page == Page::Settings);
+                dispatch_key(w, cx, Keystroke::parse("escape").unwrap(), false);
+            }
+
+            // Font size shortcuts (+1, shifted +, -1, reset 0) and ensure Ctrl+_ is untouched.
+            assert!((ws.read(cx).fontsize() - settings::DEFAULT_FONT_SIZE).abs() < 0.01);
+            dispatch_key(w, cx, font_up, false);
+            assert!((ws.read(cx).fontsize() - (settings::DEFAULT_FONT_SIZE + 1.0)).abs() < 0.01);
+            dispatch_key(
+                w,
+                cx,
+                Keystroke {
+                    modifiers: if mac {
+                        Modifiers::command()
+                    } else {
+                        Modifiers::control()
+                    },
+                    key: "+".into(),
+                    key_char: None,
+                },
+                false,
+            );
+            assert!((ws.read(cx).fontsize() - (settings::DEFAULT_FONT_SIZE + 2.0)).abs() < 0.01);
+            dispatch_key(w, cx, font_down, false);
+            assert!((ws.read(cx).fontsize() - (settings::DEFAULT_FONT_SIZE + 1.0)).abs() < 0.01);
+            if !mac {
+                // Ctrl+_ (readline undo) must not be hijacked as font zoom out.
+                dispatch_key(
+                    w,
+                    cx,
+                    Keystroke {
+                        modifiers: Modifiers::control(),
+                        key: "_".into(),
+                        key_char: None,
+                    },
+                    false,
+                );
+                assert!(
+                    (ws.read(cx).fontsize() - (settings::DEFAULT_FONT_SIZE + 1.0)).abs() < 0.01
+                );
+            }
+            dispatch_key(w, cx, font_reset, false);
+            assert!((ws.read(cx).fontsize() - settings::DEFAULT_FONT_SIZE).abs() < 0.01);
+
+            // Close focused pane & close current tab shortcuts open close confirmation.
+            assert!(!ws.read(cx).close_pending);
+            dispatch_key(w, cx, close_pane, false);
+            assert!(ws.read(cx).close_pending);
+            ws.update(cx, |s, _| s.close_pending = false);
+            dispatch_key(w, cx, close_tab, false);
+            assert!(ws.read(cx).close_pending);
+        })?;
+        test.update_window(sc_win.into(), |_, w, _| w.remove_window())?;
         test.run_until_parked();
     }
     // Open the menu from the real + target. Dismissing it must leave the workspace alone.
@@ -4034,4 +5130,40 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     prompts.run_until_parked();
     assert!(prompts.read(|cx| cx.windows().is_empty()));
     Ok(())
+}
+
+#[cfg(test)]
+mod chrome_tests {
+    use super::compute_chrome_layout;
+
+    #[::core::prelude::v1::test]
+    fn chrome_layout_adapts_cleanly_from_wide_to_crowded() {
+        // Wide window with 3 tabs: full toolbar, no scroll arrows, no overflow menu.
+        let wide = compute_chrome_layout(1100., 3, false, true);
+        assert!(!wide.compact_bar);
+        assert!(!wide.overflowing);
+        assert!(!wide.show_overflow_menu);
+        assert_eq!(wide.drag_min, 80.);
+
+        // Wide window with 10 tabs: keeps full toolbar, adds scroll arrows & tab-list menu.
+        let wide_many = compute_chrome_layout(1100., 10, false, true);
+        assert!(!wide_many.compact_bar);
+        assert!(wide_many.overflowing);
+        assert!(wide_many.show_overflow_menu);
+        assert!(wide_many.est_max_scroll_x > 0.);
+
+        // Narrow 540px window with 2 tabs: compact toolbar collapses right actions into ⌄, tabs fit without arrows.
+        let narrow_two = compute_chrome_layout(540., 2, false, true);
+        assert!(narrow_two.compact_bar);
+        assert!(!narrow_two.overflowing);
+        assert!(narrow_two.show_overflow_menu);
+        assert_eq!(narrow_two.drag_min, 56.);
+
+        // Narrow 540px window with 4 tabs: compact toolbar + scroll arrows + positive estimated max scroll.
+        let narrow_four = compute_chrome_layout(540., 4, false, true);
+        assert!(narrow_four.compact_bar);
+        assert!(narrow_four.overflowing);
+        assert!(narrow_four.show_overflow_menu);
+        assert!(narrow_four.est_max_scroll_x > 0.);
+    }
 }

@@ -74,27 +74,49 @@ pub(super) fn pane_status_label(pane: &Pane) -> String {
     parts.join(" · ")
 }
 
-fn status_color(state: ActivityState) -> Rgba {
+fn status_color(state: ActivityState, active: bool) -> Rgba {
     match state {
         ActivityState::Ready => rgb(0x4ade80),
-        ActivityState::Working => rgb(0xe6e6e6),
+        ActivityState::Working => {
+            if active {
+                rgb(0xe6e6e6)
+            } else {
+                rgba(0xffffff88)
+            }
+        }
         ActivityState::Attention => rgb(0xfbbf24),
         ActivityState::Error => rgb(0xf87171),
         ActivityState::Pending
         | ActivityState::Idle
         | ActivityState::Disconnected
-        | ActivityState::Unknown => rgb(0x8f8f8f),
+        | ActivityState::Unknown => {
+            if active {
+                rgb(0x8f8f8f)
+            } else {
+                rgba(0xffffff66)
+            }
+        }
     }
 }
 
+pub(super) fn activity_state_badge(state: ActivityState, size: Pixels, active: bool) -> AnyElement {
+    activity_badge(state)
+        .size(size)
+        .color(status_color(state, active))
+        .into_any_element()
+}
+
 pub(super) fn status_badge(pane: &Pane, size: Pixels) -> Option<AnyElement> {
+    status_badge_with_emphasis(pane, size, true)
+}
+
+pub(super) fn status_badge_with_emphasis(
+    pane: &Pane,
+    size: Pixels,
+    active: bool,
+) -> Option<AnyElement> {
     let state = pane_activity_state(pane)?;
-    Some(
-        activity_badge(state)
-            .size(size)
-            .color(status_color(state))
-            .into_any_element(),
-    )
+    Some(activity_state_badge(state, size, active))
 }
 
 fn needs_attention(pane: &Pane) -> bool {
@@ -165,9 +187,9 @@ pub(super) fn header_button(
         .flex()
         .justify_center()
         .items_center()
-        .rounded(px(3.))
+        .rounded(px(4.))
         .cursor_pointer()
-        .hover(|s| s.bg(rgba(0xffffff1c)).text_color(rgb(TEXT)))
+        .hover(|s| s.bg(rgba(0xffffff1c)).text_color(rgb(0xf0f0f0)))
         .when(show_hint, |e| {
             e.tooltip(move |w, cx| Tooltip::text(label, w, cx))
         })
@@ -349,13 +371,16 @@ impl Workspace {
                 }),
             )
         };
+        let mac = cfg!(target_os = "macos");
         let mut entries = vec![
             item("Split side by side", LucideIcon::Columns2, |s, _, w, cx| {
                 s.split(Axis::Across, w, cx)
-            }),
+            })
+            .with_shortcut(if mac { "⌘D" } else { "Ctrl+Shift+D" }),
             item("Split top and bottom", LucideIcon::Rows2, |s, _, w, cx| {
                 s.split(Axis::Down, w, cx)
-            }),
+            })
+            .with_shortcut(if mac { "⌘⇧D" } else { "Ctrl+Alt+D" }),
             item(
                 zoom_label,
                 if self.tabs[self.current].zoom {
@@ -364,7 +389,8 @@ impl Workspace {
                     LucideIcon::Maximize2
                 },
                 Self::toggle_zoom,
-            ),
+            )
+            .with_shortcut(if mac { "⌘⇧↵" } else { "Ctrl+Alt+Enter" }),
             MenuEntry::Separator,
             item(
                 "Move pane to its own tab",
@@ -406,7 +432,8 @@ impl Workspace {
             MenuEntry::Separator,
             item("Reload terminal", LucideIcon::RotateCw, |s, _, w, cx| {
                 s.reload_selected(w, cx)
-            }),
+            })
+            .with_shortcut(if mac { "⌘R" } else { "Ctrl+Shift+R" }),
             item(
                 "Terminal actions…",
                 LucideIcon::Ellipsis,
@@ -416,7 +443,8 @@ impl Workspace {
                 "Close pane",
                 Some(LucideIcon::X),
                 cx.listener(move |s, _, w, cx| s.close(id, w, cx)),
-            ),
+            )
+            .with_shortcut(if mac { "⌘W" } else { "Ctrl+Shift+W" }),
         ]);
         entries
     }

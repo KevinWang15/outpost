@@ -3,6 +3,7 @@ import { machineSetupLabels } from '../shared/model'
 import { resolve } from 'node:path'
 import { terminalService } from '../shared/terminalService'
 import { serveChat } from './chat'
+import { runAttachCommand, runInstallCliCommand, runListCommand, runNewCommand } from './cli'
 import { command, hook } from './commands'
 import { unenroll, ownership, enrollSsh, authorizeNode } from './installation'
 import { enrollOutbound, runOutbound } from './outbound'
@@ -11,7 +12,11 @@ import { serveNode } from './node'
 import { enterState, useSessionBinding } from './state'
 import { serveTerminal } from './terminal'
 
-const usage = `Usage: outpost-terminal COMMAND
+const usage = `Usage: outpost COMMAND
+  new [DIR] [OPTIONS]  create a new session (interactive TUI or --yes) and open in Outpost
+  ls                   list Outpost sessions on this machine
+  attach SESSION       open an existing session in an enclosing Outpost terminal
+  install-cli          install the \`outpost\` command onto PATH (~/.local/bin/outpost)
   node --socket PATH   the machine end of Outpost's connection (Outpost runs it)
   serve | chat-serve   a session's terminal service or chat host (the node runs them)
   enroll ssh SOCKET    bind this machine to the Outpost instance opening SSH
@@ -27,6 +32,7 @@ const usage = `Usage: outpost-terminal COMMAND
   --version`
 
 const [role, ...args] = process.argv.slice(2)
+const initialCwd = process.cwd()
 const run = async () => {
   // Commands a coding tool runs follow their launch's binding; Outpost's own
   // processes (node, drivers) always use the state directory of their user.
@@ -37,6 +43,16 @@ const run = async () => {
   if (role === 'publish' && args[0]) args[0] = resolve(args[0])
   if (role !== 'agent' && role !== '--version' && (!sessionCommand || binding)) enterState()
   switch (role) {
+    case 'new':
+    case 'create':
+      return runNewCommand(args, initialCwd)
+    case 'ls':
+    case 'list':
+      return runListCommand(args)
+    case 'attach':
+      return runAttachCommand(args)
+    case 'install-cli':
+      return runInstallCliCommand(args, initialCwd)
     case '--version':
       if (args.length) {
         if (args.length !== 2 || args[0] !== '--socket') throw Error(usage)

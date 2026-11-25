@@ -14,6 +14,7 @@ import {
 import { dirname, join, relative } from 'node:path'
 import { removeSupervisor } from './supervisor'
 import { driverStatus } from './drivers'
+import { installHelpers } from './launch'
 import { readRegistry } from './registry'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { locked, machineExecutable, readJson, state, statePath, writeJson } from './state'
@@ -110,6 +111,7 @@ function installExecutable() {
   flush(source)
   renameSync(source, machineExecutable())
   flush(bin)
+  installHelpers()
 }
 
 export function writeOwnership<T extends Configuration | PendingOutbound>(configuration: T) {

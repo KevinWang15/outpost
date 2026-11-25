@@ -119,7 +119,7 @@ struct ToastNotice {
     sticky: bool,
 }
 pub struct Workspace {
-    watches: HashMap<Id, ([Subscription; 5], SnapshotSource)>,
+    watches: HashMap<Id, ([Subscription; 6], SnapshotSource)>,
     drag: DragState,
     active_order: usize,
     handle: AnyWindowHandle,
@@ -787,9 +787,29 @@ impl Workspace {
                 cx.notify();
             }
         });
+        let open_session = cx.subscribe(p, move |s, p, e: &crate::terminal::PaneOpenSession, cx| {
+            if !s.panes.contains_key(&id) {
+                return;
+            }
+            let label = e.name.as_deref().unwrap_or(&e.session_id);
+            s.show_toast(Some(id), format!("Opening \"{label}\" in Outpost…"), false, cx);
+            let pane_server = p.read(cx).server.clone();
+            s.call(json!({
+                "op": "openSession",
+                "sessionId": e.session_id,
+                "name": e.name,
+                "origin": e.origin,
+                "targetId": e.target_id,
+                "hostname": e.hostname,
+                "paneServer": pane_server,
+            }));
+        });
         self.watches.insert(
             id,
-            ([sub, menu, paste_error, notice, ready], SnapshotSource::new()),
+            (
+                [sub, menu, paste_error, notice, ready, open_session],
+                SnapshotSource::new(),
+            ),
         );
     }
     fn local_profile(&self, id: Option<&str>) -> Option<&Value> {
@@ -1301,6 +1321,9 @@ impl Workspace {
                 } else {
                     self.startup_cloak = false;
                     self.startup_hint = false;
+                }
+                if e["toast"].as_bool() == Some(true) && !error_message.is_empty() {
+                    self.show_toast(None, error_message.clone(), false, cx);
                 }
                 self.message = error_message;
                 if self.page == Page::Create {
@@ -3834,12 +3857,25 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 p.find("row", false, cx);
                 assert_eq!(p.active_match_text().as_deref(), Some("row"));
                 p.clear_search(cx);
+                // Live OSC 7770 open-session request triggers an openSession command over the bridge.
+                p.restoring = false;
+                p.feed(
+                    b"\x1b]7770;outpost;open-session;eyJ2IjoxLCJzZXNzaW9uSWQiOiJhZmIyZjA0YS0yY2ZhLTQ3OTMtYmMyZi02NDc2NWQyZmVhZTciLCJuYW1lIjoia2Utd2FuZyIsInRvb2wiOiJhbnRpZ3Jhdml0eSIsImhvc3RuYW1lIjoiVEstS0UtV0FORyJ9\x07",
+                    cx,
+                );
             });
             s.reset_terminal_settings(cx);
             assert!(!s.has_custom_settings());
             assert_eq!(s.history(), crate::terminal::DEFAULT_HISTORY);
         })
     })?;
+    test.run_until_parked();
+    let open_cmd = std::iter::from_fn(|| commands.try_recv().ok())
+        .find(|c| c["op"] == "openSession")
+        .expect("OSC 7770 must emit openSession command");
+    assert_eq!(open_cmd["sessionId"], "afb2f04a-2cfa-4793-bc2f-64765d2feae7");
+    assert_eq!(open_cmd["name"], "ke-wang");
+    assert_eq!(open_cmd["hostname"], "TK-KE-WANG");
     test.update_window(remote_window.into(), |root, w, cx| {
         w.draw(cx).clear(cx);
         root.downcast::<Workspace>()

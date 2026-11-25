@@ -27,6 +27,7 @@ import {
   type DesktopSessionReference,
 } from '../../shared/desktopAuth'
 import { browserUrl } from '../../shared/signals'
+import { serverOrigin } from '../../shared/serverOrigin'
 import { SessionFileCache } from '../../shared/sessionFileCache'
 import { parseSessionFile, previewImage } from '../../shared/sessionFiles'
 import { softwareLabel, type SessionInput } from '../../shared/model'
@@ -376,6 +377,11 @@ type Cmd = {
   sound: boolean
   localShell: string | null
   target: string
+  targetId?: string
+  sessionId?: string
+  hostname?: string
+  name?: string
+  paneServer?: string
   requestId: string
   input: SessionInput
   file: unknown
@@ -415,6 +421,71 @@ async function handle(c: Cmd) {
       const ref = catalogue.find(s => s.id === c.value) ?? recent.get(c.value)
       if (!ref) throw new Error('Session is no longer available')
       return attach(await accounts.launch(ref), c.window)
+    }
+    case 'openSession': {
+      const sessionId = typeof c.sessionId === 'string' ? c.sessionId.trim() : ''
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId))
+        throw new Error('Invalid open-session request.')
+      let preferredOrigin: string | undefined
+      if (typeof c.origin === 'string' && c.origin.trim()) {
+        try {
+          preferredOrigin = serverOrigin(c.origin)
+        } catch {
+          preferredOrigin = undefined
+        }
+      }
+      const targetId = typeof c.targetId === 'string' && c.targetId.trim() ? c.targetId.trim() : undefined
+      const paneServer = typeof c.paneServer === 'string' && c.paneServer.trim() ? c.paneServer.trim() : undefined
+      const signedIn = accounts.snapshot().accounts
+      // Fast path: outbound-enrolled machine told us its exact Outpost server origin and target ID.
+      if (preferredOrigin && targetId) {
+        const account = signedIn.find(entry => entry.origin === preferredOrigin)
+        if (account) {
+          try {
+            const launch = await accounts.launch({
+              server: preferredOrigin,
+              accountId: account.account.id,
+              targetId,
+              sessionId,
+            })
+            await attach(launch, c.window)
+            void refresh().catch(() => {})
+            return
+          } catch {
+            // Fall through to catalogue discovery across all signed-in servers.
+          }
+        }
+      }
+      const findMatch = () => {
+        const matches = catalogue.filter(item => item.sessionId === sessionId && ownsSession(item))
+        if (!matches.length) return undefined
+        if (preferredOrigin) {
+          const byOrigin = matches.find(item => item.server === preferredOrigin)
+          if (byOrigin) return byOrigin
+        }
+        if (paneServer) {
+          const byPaneServer = matches.find(item => item.server === paneServer)
+          if (byPaneServer) return byPaneServer
+        }
+        if (targetId) {
+          const byTarget = matches.find(item => item.targetId === targetId)
+          if (byTarget) return byTarget
+        }
+        return matches[0]
+      }
+      let match = findMatch()
+      if (!match) {
+        await refresh()
+        match = findMatch()
+      }
+      if (match) {
+        await attach(await accounts.launch(match), c.window)
+        return
+      }
+      if (!signedIn.length) throw new Error('Sign in to an Outpost server first to open sessions from the CLI.')
+      const label = typeof c.name === 'string' && c.name.trim() ? `"${c.name.trim()}"` : sessionId
+      const hint = preferredOrigin ? ` (${preferredOrigin})` : c.hostname ? ` on ${c.hostname}` : ''
+      throw new Error(`Could not find session ${label}${hint} in your signed-in Outpost servers.`)
     }
     case 'prefs':
       await prefs.set(
@@ -574,7 +645,7 @@ async function main() {
   lines.on('line', line => {
     try {
       const c = JSON.parse(line) as Cmd
-      run(handle(c), { window: c.window, pane: c.pane })
+      run(handle(c), { window: c.window, pane: c.pane, ...(c.op === 'openSession' ? { toast: true } : {}) })
     } catch (e) {
       emit('error', { message: message(e) })
     }

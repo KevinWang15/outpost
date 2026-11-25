@@ -52,8 +52,8 @@ export function which(command: string, path = process.env.PATH ?? '') {
   return null
 }
 
-/** Helpers on the session's PATH: `outpost publish FILE` and the BROWSER program. */
-function installHelpers() {
+/** Helpers on the session's PATH: `outpost` CLI and the BROWSER program. */
+export function installHelpers() {
   const executable = machineExecutable()
   const helpers = {
     outpost: `#!/bin/sh\nexec ${quote(executable)} "$@"\n`,

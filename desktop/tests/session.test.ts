@@ -492,3 +492,126 @@ test('sign-out clears only the selected server when revocation fails', async t =
   assert.equal(restoredTrust.has(origins[1]), true)
   accounts.dispose()
 })
+
+test(
+  'openSession command opens sessions via outbound fast path and SSH catalogue discovery',
+  { timeout: 20000 },
+  async t => {
+    const dir = await mkdtemp(join(tmpdir(), 'outpost-open-session-test-'))
+    t.after(() => rm(dir, { recursive: true, force: true }))
+    const fastId = '11111111-2222-4333-8444-555555555555'
+    const sshId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+    const credential = 'op_app_' + 'b'.repeat(43)
+    const login = { account: { id: 'account', name: 'Test', email: null }, expiresAt: Date.now() + 600000 }
+    const sessions = [
+      { targetId: 'machine-1', sessionId: fastId, title: 'Fast Session', detail: 'outbound', tool: 'claude' },
+    ]
+    let connectCalls = 0
+    const server = createServer((req, res) => {
+      if (req.headers.authorization !== 'Bearer ' + credential) {
+        res.writeHead(401).end()
+        return
+      }
+      res.setHeader('Content-Type', 'application/json')
+      if (req.url === '/api/desktop/account') return void res.end(JSON.stringify(login))
+      if (req.url === '/api/desktop/targets') return void res.end(JSON.stringify([{ id: 'machine-1', name: 'Devbox' }]))
+      if (req.url === '/api/desktop/targets/machine-1/sessions') return void res.end(JSON.stringify(sessions))
+      const match = /^\/api\/desktop\/targets\/machine-1\/sessions\/([^/]+)\/connect$/.exec(req.url ?? '')
+      if (match && req.method === 'POST') {
+        const found = sessions.find(s => s.sessionId === match[1])
+        if (!found) {
+          res.writeHead(404).end()
+          return
+        }
+        connectCalls++
+        const body: DesktopLaunch = {
+          title: found.title,
+          targetId: found.targetId,
+          sessionId: found.sessionId,
+          accountId: login.account.id,
+          loginId: 'desktop:' + randomUUID(),
+          server: origin,
+          token: 'fixture.grant' + connectCalls,
+        }
+        return void res.end(JSON.stringify(body))
+      }
+      res.writeHead(404).end()
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    t.after(() => server.close())
+    const address = server.address()
+    assert(address && typeof address === 'object')
+    const origin = 'http://127.0.0.1:' + address.port
+
+    // Seed trust + saved login for this test server.
+    const trust = new ServerTrust(join(dir, 'server-trust.json'), async () => true)
+    await trust.ensure(origin)
+    await new ServerLoginStore(join(dir, 'server-logins.json')).put({
+      origin,
+      token: credential,
+      account: login.account,
+      expiresAt: login.expiresAt,
+    })
+
+    const child = spawn(
+      process.execPath,
+      [fileURLToPath(new URL('../dist/outpost-helper.cjs', import.meta.url)), dir],
+      {
+        stdio: ['pipe', 'pipe', 'inherit'],
+      },
+    )
+    t.after(() => child.kill())
+    const events: Array<Record<string, unknown>> = []
+    const waiters: Array<() => void> = []
+    const rl = createInterface({ input: child.stdout })
+    rl.on('line', line => {
+      events.push(JSON.parse(line))
+      for (const wake of waiters.splice(0)) wake()
+    })
+    const waitFor = async (predicate: (e: Record<string, unknown>) => boolean) => {
+      const deadline = Date.now() + 8000
+      while (true) {
+        const idx = events.findIndex(predicate)
+        if (idx !== -1) return events.splice(idx, 1)[0]
+        if (Date.now() > deadline) throw new Error(`Timed out waiting for event; seen: ${JSON.stringify(events)}`)
+        await new Promise<void>(resolve => {
+          waiters.push(resolve)
+          setTimeout(resolve, 100)
+        })
+      }
+    }
+    const send = (cmd: object) => child.stdin.write(JSON.stringify(cmd) + '\n')
+
+    // Wait for initial accounts snapshot.
+    await waitFor(e => e.event === 'accounts')
+
+    // 1. Outbound fast path: origin + targetId + sessionId launches immediately.
+    send({ op: 'openSession', window: 1, sessionId: fastId, origin, targetId: 'machine-1', name: 'Fast Session' })
+    const fastOpened = await waitFor(e => e.event === 'opened' && e.title === 'Fast Session')
+    assert.equal(fastOpened.window, 1)
+    assert.equal(fastOpened.server, origin)
+
+    // 2. SSH discovery path: newly created session without origin/targetId triggers refresh() and opens.
+    sessions.push({ targetId: 'machine-1', sessionId: sshId, title: 'SSH Created', detail: 'ssh', tool: 'codex' })
+    send({ op: 'openSession', window: 2, sessionId: sshId, hostname: 'devbox', name: 'SSH Created' })
+    const sshOpened = await waitFor(e => e.event === 'opened' && e.title === 'SSH Created')
+    assert.equal(sshOpened.window, 2)
+    assert.equal(sshOpened.server, origin)
+
+    // 3. Unknown session emits a clear error without touching untrusted origins.
+    send({
+      op: 'openSession',
+      window: 1,
+      sessionId: '99999999-9999-4999-8999-999999999999',
+      origin: 'https://untrusted.invalid',
+      targetId: 'x',
+      name: 'Unknown',
+    })
+    const err = await waitFor(e => e.event === 'error' && String(e.message).includes('Could not find session'))
+    assert.match(String(err.message), /Unknown/)
+
+    child.stdin.end()
+    await once(child, 'exit')
+  },
+)

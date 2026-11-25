@@ -3,6 +3,8 @@ import { Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { imageProblem } from '../../shared/images'
+import { OPEN_SESSION_OSC, parseOpenSessionOscData } from '../../shared/openSessionSignal'
+import { pagePaths } from '../../shared/pages'
 import { browserUrl } from '../../shared/signals'
 import { terminalService } from '../../shared/terminalService'
 import { clearScreenShortcut } from '../../shared/terminalShortcuts'
@@ -52,6 +54,8 @@ export class TerminalSession {
   private geometry: TerminalGeometry
   private activity: TerminalActivity
   private info: { id: string; name: string }
+  private target: { id: string; name: string } | null = null
+  private lastOpenSession: { id: string; at: number } | null = null
   private modifiers: TerminalModifiers = {}
   private cleanups: (() => void)[] = []
   private disposed = false
@@ -79,6 +83,39 @@ export class TerminalSession {
       term.loadAddon(new Unicode11Addon())
       term.unicode.activeVersion = '11'
       term.open(options.surface)
+      const openSessionOsc = term.parser.registerOscHandler(OPEN_SESSION_OSC, data => {
+        if (this.disposed || rendering.restoring) return true
+        const request = parseOpenSessionOscData(data)
+        if (!request) return true
+        const now = Date.now()
+        if (
+          this.lastOpenSession &&
+          this.lastOpenSession.id === request.sessionId &&
+          now - this.lastOpenSession.at < 2000
+        )
+          return true
+        this.lastOpenSession = { id: request.sessionId, at: now }
+        const sameOrigin = !request.origin || request.origin === window.location.origin
+        const targetId =
+          (sameOrigin && request.targetId) || this.target?.id || (sameOrigin ? request.targetId : undefined)
+        if (!targetId) {
+          this.notice(`Session "${request.name ?? request.sessionId}" created on another Outpost server.`)
+          return true
+        }
+        const title = request.name
+          ? this.target?.name
+            ? `${request.name} · ${this.target.name}`
+            : request.name
+          : 'Web terminal'
+        const query = new URLSearchParams({ target: targetId, session: request.sessionId, title })
+        const url = new URL(`${pagePaths.terminal}?${query}`, window.location.origin).href
+        this.notice(`Opening "${request.name ?? request.sessionId}"…`)
+        void openBrowserTab(url).then(opened => {
+          if (!this.disposed && !opened) options.blockedLink(url)
+        })
+        return true
+      })
+      this.own(() => openSessionOsc.dispose())
       this.own(attachTerminalLinks(term, url => options.blockedLink(url)))
       this.own(options.attachSearch(term, options.container))
       this.attachRenderer()
@@ -95,6 +132,7 @@ export class TerminalSession {
       this.connection = new TerminalSocket(options.token, size, rendering, {
         state,
         hello: message => {
+          this.target = message.target
           this.setTitle(
             `${message.target.id}/${message.session.id}`,
             `${message.session.name} · ${message.target.name}`,

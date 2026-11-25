@@ -3,9 +3,14 @@
 //! resizing a PTY during hover.
 use super::*;
 
+const DRAG_BADGE_MAX_W: f32 = 276.;
+const DRAG_BADGE_H: f32 = 34.;
+
 pub(super) struct Gesture {
     item: DragItem,
     start: Point<Pixels>,
+    cursor: Point<Pixels>,
+    outside: bool,
     active: bool,
     generation: Id,
     hover: Option<WindowHandle<Workspace>>,
@@ -20,6 +25,9 @@ pub(super) struct DragState {
     pub(super) preview: Option<Preview>,
 }
 impl DragState {
+    pub(super) fn is_active(&self) -> bool {
+        self.gesture.as_ref().is_some_and(|g| g.active)
+    }
     pub(super) fn dragged_pane(&self) -> Option<Id> {
         self.gesture
             .as_ref()
@@ -33,6 +41,76 @@ pub(super) struct Preview {
     bounds: Bounds<Pixels>,
     pub(super) label: DragLabel,
     body: Option<LivePreview>,
+    cursor: Option<Point<Pixels>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DropHint {
+    icon: LucideIcon,
+    label: &'static str,
+    accent: bool,
+}
+
+fn drop_hint_for(destination: Option<Destination>) -> DropHint {
+    match destination {
+        Some(Destination::Split(_, Axis::Across, true)) => DropHint {
+            icon: LucideIcon::Columns2,
+            label: "Split left",
+            accent: true,
+        },
+        Some(Destination::Split(_, Axis::Across, false)) => DropHint {
+            icon: LucideIcon::Columns2,
+            label: "Split right",
+            accent: true,
+        },
+        Some(Destination::Split(_, Axis::Down, true)) => DropHint {
+            icon: LucideIcon::Rows2,
+            label: "Split top",
+            accent: true,
+        },
+        Some(Destination::Split(_, Axis::Down, false)) => DropHint {
+            icon: LucideIcon::Rows2,
+            label: "Split bottom",
+            accent: true,
+        },
+        Some(Destination::Before(_) | Destination::Tab) => DropHint {
+            icon: LucideIcon::PanelTop,
+            label: "Move to tab",
+            accent: true,
+        },
+        None => DropHint {
+            icon: LucideIcon::GripVertical,
+            label: "Drag to split or tab bar",
+            accent: false,
+        },
+    }
+}
+
+fn clamp_drag_badge_origin(
+    cursor: Point<Pixels>,
+    viewport: Size<Pixels>,
+    badge_w: f32,
+    badge_h: f32,
+) -> Point<Pixels> {
+    let margin = 8.0_f32;
+    let vw = f32::from(viewport.width);
+    let vh = f32::from(viewport.height);
+    let cx = f32::from(cursor.x);
+    let cy = f32::from(cursor.y);
+
+    let mut x = cx + 14.0;
+    if x + badge_w + margin > vw {
+        x = (cx - badge_w - 12.0).max(margin);
+    }
+    x = x.clamp(margin, (vw - badge_w - margin).max(margin));
+
+    let mut y = cy + 16.0;
+    if y + badge_h + margin > vh {
+        y = (cy - badge_h - 12.0).max(margin);
+    }
+    y = y.clamp(margin, (vh - badge_h - margin).max(margin));
+
+    point(px(x), px(y))
 }
 #[derive(Clone, Copy)]
 enum Landing {
@@ -91,6 +169,8 @@ impl Workspace {
                 window: self.id,
             },
             start,
+            cursor: start,
+            outside: false,
             active: false,
             generation: next_id(),
             hover: None,
@@ -143,7 +223,15 @@ impl Workspace {
                                 >= 8.
                         {
                             g.active = true;
+                            g.cursor = e.position;
                             s.drag_tick(w, cx);
+                            cx.notify();
+                        } else if g.active && g.cursor != e.position {
+                            let show_local_badge = !g.item.whole && !g.outside;
+                            g.cursor = e.position;
+                            if show_local_badge {
+                                cx.notify();
+                            }
                         }
                         if s.drag.gesture.as_ref().is_some_and(|g| g.active) {
                             cx.stop_propagation();
@@ -220,31 +308,48 @@ impl Workspace {
             }
             _ => None,
         };
-        self.update_ghost(
-            matches!(landing, Landing::Outside),
-            &label,
-            to_desktop(w, pos, cx),
-            cx,
-        );
+        let outside = matches!(landing, Landing::Outside);
+        let show_cursor_badge =
+            !g.item.whole || matches!(landing, Landing::Place(_, Destination::Split(..), _));
+        self.update_ghost(outside, &label, to_desktop(w, pos, cx), cx);
+        let cursor_changed = {
+            let g_mut = self.drag.gesture.as_mut().unwrap();
+            let changed = g_mut.cursor != pos || g_mut.outside != outside;
+            g_mut.cursor = pos;
+            g_mut.outside = outside;
+            g_mut.hover = target;
+            changed
+        };
         if old != target {
             self.clear_preview(old, cx);
             cx.notify();
+        } else if cursor_changed && show_cursor_badge && !outside {
+            cx.notify();
         }
-        self.drag.gesture.as_mut().unwrap().hover = target;
         if let Landing::Place(h, destination, bounds) = landing {
-            let preview = Some(Preview {
-                moving_tab,
-                destination,
-                bounds,
-                label,
-                body: snapshot,
-            });
             let screen = to_desktop(w, pos, cx);
             if AnyWindowHandle::from(h) == w.window_handle() {
+                let preview = Some(Preview {
+                    moving_tab,
+                    destination,
+                    bounds,
+                    label,
+                    body: snapshot,
+                    cursor: show_cursor_badge.then_some(pos),
+                });
                 self.preview_at(preview, pos, cx);
             } else {
                 let _ = h.update(cx, |s, w, cx| {
-                    s.preview_at(preview, from_desktop(w, screen, cx), cx)
+                    let local = from_desktop(w, screen, cx);
+                    let preview = Some(Preview {
+                        moving_tab,
+                        destination,
+                        bounds,
+                        label,
+                        body: snapshot,
+                        cursor: show_cursor_badge.then_some(local),
+                    });
+                    s.preview_at(preview, local, cx)
                 });
             }
         }
@@ -296,6 +401,7 @@ impl Workspace {
                 p.bounds,
                 p.label.status,
                 p.body.is_some(),
+                p.cursor,
             )
         }) != preview.as_ref().map(|p| {
             (
@@ -304,6 +410,7 @@ impl Workspace {
                 p.bounds,
                 p.label.status,
                 p.body.is_some(),
+                p.cursor,
             )
         });
         let has_live_body = preview.as_ref().is_some_and(|p| p.body.is_some());
@@ -587,7 +694,7 @@ impl Workspace {
             let opts = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                     d.bounds().origin + offset,
-                    size(px(240.), px(40.)),
+                    size(px(268.), px(38.)),
                 ))),
                 display_id: Some(d.id()),
                 kind: WindowKind::PopUp,
@@ -630,14 +737,38 @@ impl Workspace {
         slots.insert(index, None);
         slots
     }
-    pub(super) fn drag_overlay(&self) -> Option<AnyElement> {
-        let p = self.drag.preview.as_ref()?;
-        let is_split = matches!(p.destination, Destination::Split(..));
-        if !is_split && p.body.is_none() {
+    pub(super) fn drag_overlay(&self, w: &Window) -> Option<AnyElement> {
+        let preview = self.drag.preview.as_ref();
+        let is_split = preview.is_some_and(|p| matches!(p.destination, Destination::Split(..)));
+        let has_body = preview.is_some_and(|p| p.body.is_some());
+
+        // Cursor-following floating card: shown during pane drags (both over drop targets and neutral
+        // areas) and when dragging a tab over a split drop zone. Hidden while outside the window
+        // because the OS popup ghost takes over seamlessly there.
+        let cursor_card: Option<(&DragLabel, Point<Pixels>, Option<Destination>)> =
+            if let Some(p) = preview
+                && let Some(cursor) = p.cursor
+            {
+                Some((&p.label, cursor, Some(p.destination)))
+            } else if let Some(g) = self.drag.gesture.as_ref()
+                && g.active
+                && !g.item.whole
+                && !g.outside
+                && g.hover.is_none()
+            {
+                Some((&g.item.label, g.cursor, None))
+            } else {
+                None
+            };
+
+        if !is_split && !has_body && cursor_card.is_none() {
             return None;
         }
+
         let mut layer = div().absolute().inset_0().overflow_hidden();
-        if let Some(preview) = &p.body {
+        if let Some(p) = preview
+            && let Some(body) = &p.body
+        {
             layer = layer.child(
                 div()
                     .absolute()
@@ -647,21 +778,83 @@ impl Workspace {
                     .right_0()
                     .overflow_hidden()
                     .bg(rgb(BG))
-                    .child(preview.render(&preview.layout)),
+                    .child(body.render(&body.layout)),
             );
         }
-        if is_split {
+        if let Some(p) = preview
+            && is_split
+        {
             let b = p.bounds;
+            let inset = px(4.);
+            let w_box = (b.size.width - inset * 2.).max(px(12.));
+            let h_box = (b.size.height - inset * 2.).max(px(12.));
             layer = layer.child(
                 div()
                     .absolute()
-                    .left(b.left())
-                    .top(b.top())
-                    .w(b.size.width)
-                    .h(b.size.height)
-                    .bg(rgba(0xa5c9ff38))
+                    .left(b.left() + inset)
+                    .top(b.top() + inset)
+                    .w(w_box)
+                    .h(h_box)
+                    .rounded(px(8.))
+                    .bg(rgba(0x60a5fa24))
                     .border_2()
-                    .border_color(rgb(0xa5c9ff)),
+                    .border_color(rgba(0x60a5fad8)),
+            );
+        }
+        if let Some((label, cursor, dest)) = cursor_card {
+            let hint = drop_hint_for(dest);
+            let origin = clamp_drag_badge_origin(
+                cursor,
+                w.viewport_size(),
+                DRAG_BADGE_MAX_W,
+                DRAG_BADGE_H,
+            );
+            layer = layer.child(
+                row()
+                    .absolute()
+                    .left(origin.x)
+                    .top(origin.y)
+                    .max_w(px(DRAG_BADGE_MAX_W))
+                    .h(px(DRAG_BADGE_H))
+                    .px(px(10.))
+                    .gap(px(7.))
+                    .rounded(px(8.))
+                    .backdrop_blur(px(12.))
+                    .bg(rgba(0x18181cf0))
+                    .border_1()
+                    .border_color(if hint.accent {
+                        rgba(0x60a5fa88)
+                    } else {
+                        rgba(0xffffff2c)
+                    })
+                    .shadow_lg()
+                    .text_size(px(12.))
+                    .text_color(rgb(0xf0f0f0))
+                    .child(
+                        lucide_icon(hint.icon)
+                            .size(px(13.5))
+                            .flex_none()
+                            .text_color(if hint.accent {
+                                rgb(0x93c5fd)
+                            } else {
+                                rgb(MUTED)
+                            }),
+                    )
+                    .child(div().flex_1().min_w_0().child(label.tab_content()))
+                    .when(hint.accent, |e| {
+                        e.child(
+                            div()
+                                .flex_none()
+                                .px(px(6.))
+                                .py(px(1.5))
+                                .rounded(px(4.))
+                                .bg(rgba(0x3b82f630))
+                                .text_size(px(10.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(0x93c5fd))
+                                .child(hint.label),
+                        )
+                    }),
             );
         }
         Some(layer.into_any_element())
@@ -730,17 +923,6 @@ impl DragLabel {
             status,
         }
     }
-    pub(super) fn content(&self) -> Div {
-        row()
-            .flex_1()
-            .min_w_0()
-            .gap(px(6.))
-            .children(
-                self.status
-                    .map(|state| panes::activity_state_badge(state, px(16.), true)),
-            )
-            .child(agent_label(self.mark, self.title.clone()))
-    }
     pub(super) fn tab_content(&self) -> Div {
         row()
             .flex_1()
@@ -759,13 +941,33 @@ impl Render for DragLabel {
         row()
             .size_full()
             .items_center()
-            .px(px(12.))
-            .bg(rgb(0x1a1a1a))
+            .px(px(10.))
+            .gap(px(7.))
+            .rounded(px(8.))
+            .bg(rgb(0x18181c))
             .border_1()
-            .border_color(rgb(0x5a5a5a))
-            .text_color(rgb(TEXT))
-            .truncate()
-            .child(self.content())
+            .border_color(rgba(0x60a5fa88))
+            .text_size(px(12.))
+            .text_color(rgb(0xf0f0f0))
+            .child(
+                lucide_icon(LucideIcon::AppWindow)
+                    .size(px(13.5))
+                    .flex_none()
+                    .text_color(rgb(0x93c5fd)),
+            )
+            .child(div().flex_1().min_w_0().child(self.tab_content()))
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(6.))
+                    .py(px(1.5))
+                    .rounded(px(4.))
+                    .bg(rgba(0x3b82f630))
+                    .text_size(px(10.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(0x93c5fd))
+                    .child("New window"),
+            )
     }
 }
 struct LivePreview {
@@ -961,5 +1163,42 @@ mod tests {
         );
         // Empty strip always lands as Tab.
         assert_eq!(resolve_tab_strip_drop(px(100.), &[], None), Destination::Tab);
+    }
+
+    #[::core::prelude::v1::test]
+    fn drag_badge_clamps_inside_viewport_and_describes_drop_targets() {
+        let vp = size(px(800.), px(600.));
+
+        // Mid-window cursor places the floating card cleanly below-right of the pointer.
+        assert_eq!(
+            clamp_drag_badge_origin(point(px(200.), px(150.)), vp, 240., 34.),
+            point(px(214.), px(166.))
+        );
+
+        // Near right & bottom edges flips/clamps so the card never clips off-screen.
+        let corner = clamp_drag_badge_origin(point(px(780.), px(590.)), vp, 240., 34.);
+        assert!(f32::from(corner.x) + 240. <= 792. + 0.01);
+        assert!(f32::from(corner.y) + 34. <= 592. + 0.01);
+        assert!(f32::from(corner.x) >= 8. && f32::from(corner.y) >= 8.);
+
+        // Drop hints distinguish every split direction, tab-bar drop, and neutral drag.
+        assert_eq!(
+            drop_hint_for(Some(Destination::Split(1, Axis::Across, true))).label,
+            "Split left"
+        );
+        assert_eq!(
+            drop_hint_for(Some(Destination::Split(1, Axis::Across, false))).label,
+            "Split right"
+        );
+        assert_eq!(
+            drop_hint_for(Some(Destination::Split(1, Axis::Down, true))).label,
+            "Split top"
+        );
+        assert_eq!(
+            drop_hint_for(Some(Destination::Split(1, Axis::Down, false))).label,
+            "Split bottom"
+        );
+        assert_eq!(drop_hint_for(Some(Destination::Tab)).label, "Move to tab");
+        assert!(!drop_hint_for(None).accent);
     }
 }

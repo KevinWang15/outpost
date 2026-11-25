@@ -2875,6 +2875,7 @@ impl Workspace {
                     .then(|| self.files_dropdown(id, pane, cx));
                 let find_bar = active.then(|| self.find_overlay(id, pane, cx)).flatten();
                 let badge_top = if find_bar.is_some() { px(50.) } else { px(6.) };
+                let dragged = self.drag.dragged_pane() == Some(id);
                 let surface = col()
                     .relative()
                     .pt(px(5.))
@@ -2883,8 +2884,18 @@ impl Workspace {
                     .flex_1()
                     .overflow_hidden()
                     .child(p)
-                    .when(!active, |e| {
+                    .when(!active && !dragged, |e| {
                         e.child(div().absolute().inset_0().bg(rgba(0x00000052)))
+                    })
+                    .when(dragged, |e| {
+                        e.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .bg(rgba(0x0000007a))
+                                .border_1()
+                                .border_color(rgba(0xffffff2c)),
+                        )
                     })
                     .children(status)
                     .children(
@@ -3291,6 +3302,7 @@ impl Render for Workspace {
         });
         col()
             .relative()
+            .when(self.drag.is_active(), |e| e.cursor(CursorStyle::ClosedHand))
             .child(self.drag_listener(cx))
             .track_focus(&self.focus)
             .size_full()
@@ -3309,7 +3321,7 @@ impl Render for Workspace {
             .child(self.context_menu_overlay(cx))
             .child(self.tab_context_menu_overlay(cx))
             .children(self.tab_rename_overlay(cx))
-            .children(self.drag_overlay())
+            .children(self.drag_overlay(w))
             .children(self.file_viewer(cx))
             .when_some(visible_toast, |e, toast| {
                 e.child(
@@ -5210,6 +5222,51 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         test.capture_screenshot(window.into())?
             .save(PathBuf::from(dir).join("split.png"))?;
     }
+    // Dragging a split pane header must immediately show cursor-following drag feedback even while
+    // still over the source pane, and keep showing it over split drop targets until released.
+    test.update_window(window.into(), |root, w, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        w.draw(cx).clear(cx);
+        let left_id = ws.read(cx).tabs[0].layout.first();
+        let left_bounds = ws.read(cx).watches[&left_id].1.bounds().unwrap();
+        let header_start = point(left_bounds.left() + px(40.), left_bounds.top() + px(14.));
+        let over_self = point(left_bounds.left() + px(70.), left_bounds.top() + px(60.));
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: header_start,
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: over_self,
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Default::default(),
+            }),
+            cx,
+        );
+        assert_eq!(ws.read(cx).drag.dragged_pane(), Some(left_id));
+        assert!(
+            ws.read(cx).drag_overlay(w).is_some(),
+            "pane drag must render cursor-following feedback even over the source pane"
+        );
+        w.draw(cx).clear(cx);
+        w.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                position: over_self,
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count: 1,
+            }),
+            cx,
+        );
+        assert!(ws.read(cx).drag.dragged_pane().is_none());
+        assert!(ws.read(cx).drag_overlay(w).is_none());
+    })?;
     // Exercise the same capture, geometry and release handlers as a physical drag.
     let gesture = |test: &mut HeadlessAppContext,
                    handle: AnyWindowHandle,

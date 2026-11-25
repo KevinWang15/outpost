@@ -215,6 +215,7 @@ impl Workspace {
         if open {
             self.select(id, w, cx);
             self.context_menu = None;
+            self.tab_menu = None;
             self.pane_menu = Some(id);
         } else if self.pane_menu == Some(id) {
             self.pane_menu = None;
@@ -434,11 +435,6 @@ impl Workspace {
                 s.reload_selected(w, cx)
             })
             .with_shortcut(if mac { "⌘R" } else { "Ctrl+Shift+R" }),
-            item(
-                "Terminal actions…",
-                LucideIcon::Ellipsis,
-                |s, _, w, cx| s.manage(w, cx),
-            ),
             MenuEntry::destructive_item(
                 "Close pane",
                 Some(LucideIcon::X),
@@ -460,10 +456,316 @@ impl Workspace {
             self.tabs[i].active = id;
         }
         self.new_tab_menu_open = false;
+        self.bar_menu_open = false;
         self.pane_menu = None;
+        self.tab_menu = None;
         self.files_menu = None;
         self.context_menu = Some((id, position));
         cx.notify();
+    }
+
+    pub(super) fn open_tab_menu(
+        &mut self,
+        tab_id: Id,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.tabs.iter().any(|t| t.id == tab_id) {
+            return;
+        }
+        self.new_tab_menu_open = false;
+        self.bar_menu_open = false;
+        self.pane_menu = None;
+        self.context_menu = None;
+        self.files_menu = None;
+        self.tab_menu = Some((tab_id, position));
+        cx.notify();
+    }
+
+    pub(super) fn open_tab_rename(
+        &mut self,
+        tab_id: Id,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == tab_id) else {
+            return;
+        };
+        let current = tab.name.clone();
+        self.new_tab_menu_open = false;
+        self.bar_menu_open = false;
+        self.pane_menu = None;
+        self.context_menu = None;
+        self.tab_menu = None;
+        self.files_menu = None;
+        self.tab_rename = Some(tab_id);
+        self.tab_rename_input
+            .update(cx, |s, cx| s.set_value_silent(&current, cx));
+        self.tab_rename_input.read(cx).focus_handle(cx).focus(w, cx);
+        cx.notify();
+    }
+
+    pub(super) fn close_tab_rename(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        if self.tab_rename.take().is_some() {
+            self.restore_focus(w, cx);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn commit_tab_rename(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab_id) = self.tab_rename.take()
+            && let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id)
+        {
+            tab.name = self
+                .tab_rename_input
+                .read(cx)
+                .value()
+                .trim()
+                .chars()
+                .take(120)
+                .collect();
+        }
+        self.restore_focus(w, cx);
+        cx.notify();
+    }
+
+    pub(super) fn tab_rename_overlay(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let tab_id = self.tab_rename?;
+        let tab = self.tabs.iter().find(|t| t.id == tab_id)?;
+        let default_title = self
+            .panes
+            .get(&tab.active)
+            .map(|p| p.read(cx).title.clone())
+            .unwrap_or_default();
+        let subtitle = if default_title.is_empty() {
+            "Leave blank to use the terminal title.".to_owned()
+        } else {
+            format!("Leave blank to use “{default_title}”.")
+        };
+        Some(
+            div()
+                .id("tab-rename-backdrop")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .bg(rgba(0x0000005c))
+                .flex()
+                .flex_col()
+                .items_center()
+                .pt(px(56.))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|s, _, w, cx| s.close_tab_rename(w, cx)),
+                )
+                .child(
+                    col()
+                        .id("tab-rename-dialog")
+                        .w(px(360.))
+                        .max_w(relative(0.9))
+                        .p(px(16.))
+                        .gap(px(10.))
+                        .rounded(px(10.))
+                        .bg(rgb(0x141414))
+                        .border_1()
+                        .border_color(rgb(0x2e2e2e))
+                        .shadow_lg()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            col()
+                                .gap(px(2.))
+                                .child(
+                                    div()
+                                        .text_size(px(14.))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(rgb(0xf4f4f4))
+                                        .child("Rename tab"),
+                                )
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(12.))
+                                        .text_color(rgb(MUTED))
+                                        .child(subtitle),
+                                ),
+                        )
+                        .child(field(&self.tab_rename_input))
+                        .child(
+                            row()
+                                .justify_end()
+                                .pt(px(2.))
+                                .child(control("Cancel", false, cx, |s, w, cx| {
+                                    s.close_tab_rename(w, cx)
+                                }))
+                                .child(control("Save", true, cx, |s, w, cx| {
+                                    s.commit_tab_rename(w, cx)
+                                })),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    pub(super) fn tab_context_menu_overlay(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let active = self.tab_menu.and_then(|(tab_id, pos)| {
+            let idx = self.tabs.iter().position(|t| t.id == tab_id)?;
+            let tab = &self.tabs[idx];
+            Some((tab_id, idx, tab.active, pos))
+        });
+        let position = active.map(|(_, _, _, pos)| pos);
+        let mut menu = popup_menu("tab-context-menu", position)
+            .min_width(px(244.))
+            .on_close(cx.listener(|s, _, _, cx| {
+                if s.tab_menu.take().is_some() {
+                    cx.notify();
+                }
+            }));
+
+        if let Some((tab_id, idx, pane_id, _)) = active {
+            let mac = cfg!(target_os = "macos");
+            let is_current = idx == self.current;
+            let tab_count = self.tabs.len();
+            let can_move_left = idx > 0;
+            let can_move_right = idx + 1 < tab_count;
+            let current_active_pane = self.tabs.get(self.current).map(|t| t.active);
+
+            menu = menu
+                .entry(MenuEntry::item_with_icon(
+                    "Rename tab…",
+                    LucideIcon::Pencil,
+                    cx.listener(move |s, _, w, cx| s.open_tab_rename(tab_id, w, cx)),
+                ))
+                .entry({
+                    let entry = MenuEntry::item_with_icon(
+                        "Reload terminal",
+                        LucideIcon::RotateCw,
+                        cx.listener(move |s, _, w, cx| s.reload_pane(pane_id, w, cx)),
+                    );
+                    if is_current {
+                        entry.with_shortcut(if mac { "⌘R" } else { "Ctrl+Shift+R" })
+                    } else {
+                        entry
+                    }
+                })
+                .entry(MenuEntry::Separator)
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Split side by side",
+                        LucideIcon::Columns2,
+                        cx.listener(move |s, _, w, cx| {
+                            if s.panes.contains_key(&pane_id) {
+                                s.select(pane_id, w, cx);
+                                s.split(Axis::Across, w, cx);
+                            }
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘D" } else { "Ctrl+Shift+D" }),
+                )
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Split top and bottom",
+                        LucideIcon::Rows2,
+                        cx.listener(move |s, _, w, cx| {
+                            if s.panes.contains_key(&pane_id) {
+                                s.select(pane_id, w, cx);
+                                s.split(Axis::Down, w, cx);
+                            }
+                        }),
+                    )
+                    .with_shortcut(if mac { "⌘⇧D" } else { "Ctrl+Alt+D" }),
+                )
+                .entry(MenuEntry::item_with_icon(
+                    "Split with Outpost session…",
+                    LucideIcon::Server,
+                    cx.listener(move |s, _, w, cx| {
+                        if s.panes.contains_key(&pane_id) {
+                            s.select(pane_id, w, cx);
+                            s.split_at = Some((pane_id, Axis::Across));
+                            s.open_sessions(w, cx);
+                        }
+                    }),
+                ))
+                .entry(MenuEntry::Separator)
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Move tab left",
+                        LucideIcon::ArrowLeft,
+                        cx.listener(move |s, _, _, cx| s.move_tab_by_id(tab_id, -1, cx)),
+                    )
+                    .with_disabled(!can_move_left),
+                )
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Move tab right",
+                        LucideIcon::ArrowRight,
+                        cx.listener(move |s, _, _, cx| s.move_tab_by_id(tab_id, 1, cx)),
+                    )
+                    .with_disabled(!can_move_right),
+                );
+
+            if !is_current
+                && let Some(dest) = current_active_pane
+            {
+                menu = menu.entry(MenuEntry::item_with_icon(
+                    "Move beside active tab",
+                    LucideIcon::PanelRight,
+                    cx.listener(move |s, _, w, cx| {
+                        if let Some(item) = s.tab_drag_item(tab_id, cx)
+                            && let Some(transfer) = s.take_item(&item)
+                        {
+                            s.receive(transfer, Destination::Split(dest, Axis::Across, false), w, cx);
+                        }
+                    }),
+                ));
+            }
+
+            menu = menu.entry(MenuEntry::item_with_icon(
+                "Move tab to new window",
+                LucideIcon::AppWindow,
+                cx.listener(move |s, _, w, cx| s.detach_tab(tab_id, w, cx)),
+            ));
+
+            for other in cx.windows().into_iter().filter(|h| *h != self.handle) {
+                let Some(target) = other.downcast::<Workspace>() else {
+                    continue;
+                };
+                let Ok(workspace) = target.read(cx) else {
+                    continue;
+                };
+                let title = workspace
+                    .active()
+                    .map(|p| p.read(cx).title.clone())
+                    .unwrap_or_else(|| "Outpost".into());
+                let label = format!("Move to window {} · {title}", workspace.id);
+                menu = menu.entry(MenuEntry::item_with_icon(
+                    label,
+                    LucideIcon::AppWindow,
+                    cx.listener(move |s, _, w, cx| {
+                        if let Some(item) = s.tab_drag_item(tab_id, cx) {
+                            s.transfer_to(&item, target, Destination::Tab, w, cx);
+                        }
+                    }),
+                ));
+            }
+
+            menu = menu.entry(MenuEntry::Separator).entry(
+                MenuEntry::destructive_item(
+                    "Close tab",
+                    Some(LucideIcon::X),
+                    cx.listener(move |s, _, w, cx| s.close_tab(pane_id, w, cx)),
+                )
+                .with_shortcut(if mac { "⌘⌥W" } else { "Ctrl+Alt+W" }),
+            );
+
+            if tab_count > 1 {
+                menu = menu.entry(MenuEntry::destructive_item(
+                    "Close other tabs",
+                    Some(LucideIcon::X),
+                    cx.listener(move |s, _, w, cx| s.close_other_tabs(tab_id, w, cx)),
+                ));
+            }
+        }
+
+        menu
     }
 
     pub(super) fn context_menu_overlay(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
@@ -594,14 +896,21 @@ impl Workspace {
                     )
                     .with_shortcut(if mac { "⌘⇧D" } else { "Ctrl+Alt+D" }),
                 )
-                .entry(MenuEntry::item_with_icon(
-                    "Terminal actions…",
-                    LucideIcon::Ellipsis,
-                    cx.listener(move |s, _, w, cx| {
-                        s.select(id, w, cx);
-                        s.manage(w, cx);
-                    }),
+                .entry(
+                    MenuEntry::item_with_icon(
+                        "Reload terminal",
+                        LucideIcon::RotateCw,
+                        cx.listener(move |s, _, w, cx| s.reload_pane(id, w, cx)),
+                    )
+                    .with_shortcut(if mac { "⌘R" } else { "Ctrl+Shift+R" }),
+                );
+            if managed {
+                menu = menu.entry(MenuEntry::item_with_icon(
+                    "Session files",
+                    LucideIcon::FolderOpen,
+                    cx.listener(move |s, _, w, cx| s.open_files(id, w, cx)),
                 ));
+            }
         }
 
         menu

@@ -7,7 +7,6 @@ actions!(
         NewTerminal,
         OpenSessions,
         SwitchSession,
-        TerminalActions,
         Settings,
         CloseTerminal,
         CloseTab,
@@ -119,7 +118,6 @@ pub fn init(cx: &mut App) {
             MenuItem::action("Reset terminal text size", ResetFontSize),
             MenuItem::separator(),
             MenuItem::action("Reload terminal", ReloadTerminal),
-            MenuItem::action("Terminal actions…", TerminalActions),
             MenuItem::action("Toggle full screen", ToggleFullscreen),
         ]),
         Menu::new("Tabs").items([

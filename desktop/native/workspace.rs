@@ -95,7 +95,6 @@ enum Page {
     Switch,
     Choose,
     Settings,
-    Manage,
     Create,
     Find,
     Compose,
@@ -125,6 +124,8 @@ pub struct Workspace {
     strip_scroll_anim: Option<(std::time::Instant, f32, f32)>,
     pane_menu: Option<Id>,
     context_menu: Option<(Id, Point<Pixels>)>,
+    tab_menu: Option<(Id, Point<Pixels>)>,
+    tab_rename: Option<Id>,
     toast: Option<ToastNotice>,
     close_pending: bool,
     page: Page,
@@ -138,6 +139,7 @@ pub struct Workspace {
     find_query: Entity<InputState>,
     history_input: Entity<InputState>,
     name: Entity<InputState>,
+    tab_rename_input: Entity<InputState>,
     compose: Entity<TextBoxState>,
     split_at: Option<(Id, Axis)>,
     bounds: HashMap<Id, Bounds<Pixels>>,
@@ -175,6 +177,7 @@ enum Destination {
 enum CloseScope {
     Window,
     Tab(Id),
+    OtherTabs(Id),
     Pane(Id),
 }
 fn strval(v: &Value, key: &str) -> String {
@@ -393,6 +396,17 @@ impl Workspace {
             }
         })
         .detach();
+        let tab_rename_input = entry("Custom tab name", cx);
+        cx.subscribe_in(
+            &tab_rename_input,
+            w,
+            |s: &mut Self, _, event: &InputEvent, w, cx| {
+                if let InputEvent::Submit(_) = event {
+                    s.commit_tab_rename(w, cx);
+                }
+            },
+        )
+        .detach();
         let compose = cx.new(|cx| TextBoxState::new(cx).placeholder("Write a message…"));
         cx.subscribe(&compose, |s: &mut Self, _, e: &TextBoxEvent, cx| {
             if let TextBoxEvent::Change(value) = e
@@ -413,6 +427,7 @@ impl Workspace {
                 s.set_bar_menu(false, cx);
                 s.pane_menu = None;
                 s.context_menu = None;
+                s.tab_menu = None;
                 s.cancel_drag(cx);
             } else {
                 s.active_order = next_id();
@@ -446,6 +461,8 @@ impl Workspace {
             strip_scroll_anim: None,
             pane_menu: None,
             context_menu: None,
+            tab_menu: None,
+            tab_rename: None,
             toast: None,
             close_pending: false,
             bridge,
@@ -471,6 +488,7 @@ impl Workspace {
             find_query,
             history_input,
             name: entry("Refactor billing", cx),
+            tab_rename_input,
             compose,
             split_at: None,
             bounds: Default::default(),
@@ -556,6 +574,8 @@ impl Workspace {
         self.bar_menu_open = false;
         self.pane_menu = None;
         self.context_menu = None;
+        self.tab_menu = None;
+        self.tab_rename = None;
         self.files_menu = None;
         self.preview_id = None;
         self.preview = None;
@@ -759,6 +779,11 @@ impl Workspace {
             self.request_close(CloseScope::Tab(tab.id), w, cx);
         }
     }
+    fn close_other_tabs(&mut self, keep_tab_id: Id, w: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs.iter().any(|t| t.id == keep_tab_id) {
+            self.request_close(CloseScope::OtherTabs(keep_tab_id), w, cx);
+        }
+    }
     fn close(&mut self, pane: Id, w: &mut Window, cx: &mut Context<Self>) {
         self.request_close(CloseScope::Pane(pane), w, cx);
     }
@@ -769,6 +794,10 @@ impl Workspace {
                 .tabs
                 .iter()
                 .any(|t| t.id == tab && t.layout.contains(id)),
+            CloseScope::OtherTabs(keep) => self
+                .tabs
+                .iter()
+                .any(|t| t.id != keep && t.layout.contains(id)),
             CloseScope::Pane(pane) => pane == id && self.panes.contains_key(&id),
         }
     }
@@ -795,6 +824,10 @@ impl Workspace {
             CloseScope::Tab(_) => (
                 format!("Close this tab and its {count} {noun}?"),
                 "Close tab",
+            ),
+            CloseScope::OtherTabs(_) => (
+                format!("Close the other tabs ({count} {noun})?"),
+                "Close other tabs",
             ),
             CloseScope::Window => (
                 format!("Close this window and its {count} {noun}?"),
@@ -919,6 +952,17 @@ impl Workspace {
         });
         Some((tab, panes, remote))
     }
+    fn tab_drag_item(&self, tab_id: Id, cx: &App) -> Option<DragItem> {
+        let tab = self.tabs.iter().find(|t| t.id == tab_id)?;
+        let pane = self.panes.get(&tab.active)?.read(cx);
+        let status = panes::pane_activity_state(panes::tab_representative(tab, &self.panes, cx));
+        Some(DragItem {
+            pane: tab.active,
+            window: self.id,
+            whole: true,
+            label: DragLabel::new(pane.title.clone(), pane.mark, status),
+        })
+    }
     fn selected_item(&self, whole: bool, cx: &App) -> Option<DragItem> {
         let tab = self.tabs.get(self.current)?;
         let pane = self.panes.get(&tab.active)?.read(cx);
@@ -937,6 +981,11 @@ impl Workspace {
     fn detach(&mut self, whole: bool, w: &mut Window, cx: &mut Context<Self>) {
         if let Some(item) = self.selected_item(whole, cx) {
             self.detach_item(&item, None, w, cx)
+        }
+    }
+    fn detach_tab(&mut self, tab_id: Id, w: &mut Window, cx: &mut Context<Self>) {
+        if let Some(item) = self.tab_drag_item(tab_id, cx) {
+            self.detach_item(&item, None, w, cx);
         }
     }
     fn place_selected(
@@ -968,14 +1017,21 @@ impl Workspace {
             }
         }
     }
-    fn reload_selected(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        let Some(tab) = self.tabs.get(self.current) else {
+    fn reload_pane(&mut self, id: Id, w: &mut Window, cx: &mut Context<Self>) {
+        let Some(pane) = self.panes.get(&id) else {
             return;
         };
-        let id = tab.active;
-        if self.panes[&id].read(cx).server.is_some() {
-            self.panes[&id].read(cx).command("reconnect", json!({}));
-            self.show(Page::Terminal, w, cx);
+        if pane.read(cx).server.is_some() {
+            pane.read(cx).command("reconnect", json!({}));
+            if self
+                .tabs
+                .get(self.current)
+                .is_some_and(|t| t.layout.contains(id))
+            {
+                self.show(Page::Terminal, w, cx);
+            } else {
+                cx.notify();
+            }
             return;
         }
         confirm(
@@ -985,6 +1041,11 @@ impl Workspace {
             cx,
             move |s, w, cx| s.restart_local_pane(id, w, cx),
         );
+    }
+    fn reload_selected(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.tabs.get(self.current).map(|t| t.active) {
+            self.reload_pane(id, w, cx);
+        }
     }
     fn remove_pane(&mut self, id: Id) {
         self.remove_leaf(id);
@@ -1011,7 +1072,13 @@ impl Workspace {
                 tab.layout = layout;
                 tab.zoom = false
             } else {
-                self.tabs.remove(i);
+                let removed_tab = self.tabs.remove(i).id;
+                if self.tab_menu.is_some_and(|(t, _)| t == removed_tab) {
+                    self.tab_menu = None;
+                }
+                if self.tab_rename == Some(removed_tab) {
+                    self.tab_rename = None;
+                }
                 if i < self.current {
                     self.current -= 1
                 }
@@ -1370,12 +1437,6 @@ impl Workspace {
                 }
             }
             Page::Create => self.submit_create(cx),
-            Page::Manage => {
-                if let Some(t) = self.tabs.get_mut(self.current) {
-                    t.name = self.name.read(cx).value().chars().take(120).collect()
-                }
-                self.show(Page::Terminal, w, cx)
-            }
             Page::Switch | Page::Choose => {
                 let index = self.picker_index;
                 self.activate_picker_item(index, w, cx);
@@ -1404,13 +1465,6 @@ impl Workspace {
             })
         }
     }
-    pub(super) fn manage(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        if let Some(t) = self.tabs.get(self.current) {
-            self.name
-                .update(cx, |s, cx| s.set_value_silent(&t.name, cx));
-            self.show(Page::Manage, w, cx)
-        }
-    }
     fn catalogue(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         self.refreshing_catalogue = true;
         self.call(json!({"op":"refresh"}));
@@ -1430,6 +1484,8 @@ impl Workspace {
             || self.bar_menu_open
             || self.pane_menu.is_some()
             || self.context_menu.is_some()
+            || self.tab_menu.is_some()
+            || self.tab_rename.is_some()
             || self.files_menu.is_some()
             || self.preview_id.is_some()
     }
@@ -1461,24 +1517,31 @@ impl Workspace {
             self.select(t.active, w, cx);
         }
     }
-    fn move_tab(&mut self, delta: isize, w: &mut Window, cx: &mut Context<Self>) {
+    fn move_tab_by_id(&mut self, tab_id: Id, delta: isize, cx: &mut Context<Self>) {
         if self.tabs.len() <= 1 {
             return;
         }
-        if let Some(next) = self
-            .current
+        let Some(index) = self.tabs.iter().position(|t| t.id == tab_id) else {
+            return;
+        };
+        if let Some(next) = index
             .checked_add_signed(delta)
             .filter(|i| *i < self.tabs.len())
         {
-            self.tabs.swap(self.current, next);
-            self.current = next;
-            self.strip_scroll_anim = None;
-            self.drag.strip.scroll_to_item(next);
-            if self.page == Page::Manage {
-                self.show(Page::Terminal, w, cx);
-            } else {
-                cx.notify();
+            self.tabs.swap(index, next);
+            if self.current == index {
+                self.current = next;
+                self.strip_scroll_anim = None;
+                self.drag.strip.scroll_to_item(next);
+            } else if self.current == next {
+                self.current = index;
             }
+            cx.notify();
+        }
+    }
+    fn move_tab(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if let Some(id) = self.tabs.get(self.current).map(|t| t.id) {
+            self.move_tab_by_id(id, delta, cx);
         }
     }
     fn focus_pane_delta(&mut self, delta: isize, w: &mut Window, cx: &mut Context<Self>) {
@@ -1532,12 +1595,41 @@ impl Workspace {
         }
     }
     fn shortcuts(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
+        if self.tab_menu.is_some() {
+            if e.keystroke.key == "escape" && !e.keystroke.modifiers.modified() {
+                self.tab_menu = None;
+                self.restore_focus(w, cx);
+                cx.notify();
+                w.prevent_default();
+                cx.stop_propagation();
+            }
+            return;
+        }
         if self.new_tab_menu_open
             || self.bar_menu_open
             || self.pane_menu.is_some()
             || self.context_menu.is_some()
             || self.file_key(e, w, cx)
         {
+            return;
+        }
+        if self.tab_rename.is_some() {
+            let m = e.keystroke.modifiers;
+            if !m.control && !m.alt && !m.platform && !m.shift {
+                match e.keystroke.key.as_str() {
+                    "escape" => {
+                        self.close_tab_rename(w, cx);
+                        w.prevent_default();
+                        cx.stop_propagation();
+                    }
+                    "enter" => {
+                        self.commit_tab_rename(w, cx);
+                        w.prevent_default();
+                        cx.stop_propagation();
+                    }
+                    _ => {}
+                }
+            }
             return;
         }
         if e.keystroke.key == "escape" && self.drag.gesture.is_some() {
@@ -1621,7 +1713,7 @@ impl Workspace {
         {
             self.cycle_tab(if matches!(key, "]" | "}") { 1 } else { -1 }, w, cx);
         } else if ctrl_shift && matches!(key, "pageup" | "pagedown") && !self.tabs.is_empty() {
-            self.move_tab(if key == "pageup" { -1 } else { 1 }, w, cx);
+            self.move_tab(if key == "pageup" { -1 } else { 1 }, cx);
         } else if (if mac { cmd } else { alt })
             && matches!(key, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
             && !self.tabs.is_empty()
@@ -1740,6 +1832,7 @@ impl Workspace {
                 self.bar_menu_open = false;
                 self.pane_menu = None;
                 self.context_menu = None;
+                self.tab_menu = None;
                 self.files_menu = None;
             }
             cx.notify();
@@ -1752,6 +1845,7 @@ impl Workspace {
                 self.new_tab_menu_open = false;
                 self.pane_menu = None;
                 self.context_menu = None;
+                self.tab_menu = None;
                 self.files_menu = None;
             }
             cx.notify();
@@ -2066,7 +2160,7 @@ impl Workspace {
                         .w(px(TAB_IDEAL_W))
                         .max_w(px(TAB_MAX_W))
                         .pl(px(8.))
-                        .pr(px(27.))
+                        .pr(px(29.))
                         .items_center()
                         .rounded_t(px(7.))
                         .bg(rgb(0x151515))
@@ -2081,6 +2175,7 @@ impl Workspace {
                 continue;
             };
             let tab = &self.tabs[i];
+            let tab_id = tab.id;
             let id = tab.active;
             let active = active_tab_idx == Some(i);
             let next_inactive = slots
@@ -2129,9 +2224,7 @@ impl Workspace {
                         s.strip_scroll_anim = None;
                         if e.click_count == 2 {
                             s.cancel_drag(cx);
-                            s.select(id, w, cx);
-                            s.manage(w, cx);
-                            s.name.read(cx).focus_handle(cx).focus(w, cx);
+                            s.open_tab_rename(tab_id, w, cx);
                         } else {
                             s.arm(id, true, e.position, w, cx);
                         }
@@ -2151,41 +2244,46 @@ impl Workspace {
                         if active { MUTED } else { 0x6a6a6a },
                     ))
                 });
+            let tab_group: SharedString = format!("tab-grp-{}", tab.id).into();
             let tab = row()
                 .id(("tab", tab.id))
+                .group(tab_group.clone())
                 .relative()
+                .h(px(36.))
                 .min_w(px(TAB_MIN_W))
                 .w(px(TAB_IDEAL_W))
                 .max_w(px(TAB_MAX_W))
-                .pr(px(3.))
+                .pr(px(5.))
                 .gap(px(2.))
+                .rounded_t(px(7.))
+                .border_t_1()
+                .border_l_1()
+                .border_r_1()
                 .cursor_pointer()
                 .when(active, |e| {
-                    e.h(px(36.))
-                        .rounded_t(px(7.))
-                        .bg(rgb(BG))
-                        .border_t_1()
-                        .border_l_1()
-                        .border_r_1()
+                    e.bg(rgb(BG))
                         .border_color(rgba(0xffffff22))
                         .text_color(rgb(0xf0f0f0))
                         .font_weight(FontWeight::MEDIUM)
                 })
                 .when(!active, |e| {
-                    e.h(px(32.))
-                        .mb(px(2.))
-                        .rounded(px(6.))
+                    e.border_color(rgba(0x00000000))
                         .text_color(rgba(0xffffff80))
-                        .hover(|s| s.bg(rgba(0xffffff16)).text_color(rgba(0xffffffcc)))
+                        .hover(|s| {
+                            s.bg(rgba(0xffffff16))
+                                .border_color(rgba(0xffffff10))
+                                .text_color(rgba(0xffffffcc))
+                        })
                         .when(next_inactive, |s| {
                             s.child(
                                 div()
                                     .absolute()
-                                    .right_0()
-                                    .top(px(8.))
-                                    .bottom(px(8.))
+                                    .right(px(-2.))
+                                    .top(px(9.))
+                                    .bottom(px(9.))
                                     .w(px(1.))
-                                    .bg(rgba(0xffffff18)),
+                                    .bg(rgba(0xffffff18))
+                                    .group_hover(tab_group, |s| s.opacity(0.)),
                             )
                         })
                 })
@@ -2211,9 +2309,10 @@ impl Workspace {
                 )
                 .on_mouse_down(
                     MouseButton::Right,
-                    cx.listener(move |s, _, w, cx| {
-                        s.select(id, w, cx);
-                        s.manage(w, cx)
+                    cx.listener(move |s, e: &MouseDownEvent, w, cx| {
+                        w.prevent_default();
+                        cx.stop_propagation();
+                        s.open_tab_menu(tab_id, e.position, cx);
                     }),
                 );
             strip = strip.child(tab)
@@ -2979,213 +3078,6 @@ impl Workspace {
             Page::Create => {
                 content = content.child(self.create_view(cx));
             }
-            Page::Manage => {
-                content = content
-                    .child(title("ORGANIZE YOUR WORKSPACE", "Terminal actions"))
-                    .child(section("Tab name"))
-                    .child(
-                        row()
-                            .child(col().flex_1().child(field(&self.name)))
-                            .child(control("Save name", false, cx, |s, w, cx| s.submit(w, cx))),
-                    );
-                content = content.child(
-                    row()
-                        .child(control("Split side by side", false, cx, |s, w, cx| {
-                            s.split(Axis::Across, w, cx)
-                        }))
-                        .child(control("Split top and bottom", false, cx, |s, w, cx| {
-                            s.split(Axis::Down, w, cx)
-                        }))
-                        .child(control(
-                            "Split with managed session",
-                            false,
-                            cx,
-                            |s, w, cx| {
-                                s.split_at =
-                                    s.tabs.get(s.current).map(|t| (t.active, Axis::Across));
-                                s.catalogue(w, cx)
-                            },
-                        )),
-                );
-                content = content.child(
-                    row()
-                        .child(control("Copy selection", false, cx, |s, w, cx| {
-                            if let Some(id) = s.tabs.get(s.current).map(|t| t.active)
-                                && let Some(p) = s.panes.get(&id).cloned()
-                                && p.update(cx, |p, cx| p.copy(cx))
-                            {
-                                s.show_toast(Some(id), "Copied to clipboard".into(), false, cx);
-                            }
-                            s.show(Page::Terminal, w, cx)
-                        }))
-                        .child(control("Paste", false, cx, |s, w, cx| {
-                            if let Some(p) = s.active() {
-                                p.update(cx, |p, cx| p.paste_clipboard(cx))
-                            }
-                            s.show(Page::Terminal, w, cx)
-                        }))
-                        .when(
-                            self.active().is_some_and(|p| p.read(cx).server.is_some()),
-                            |row| {
-                                row.child(control(
-                                    "Paste image as file path",
-                                    false,
-                                    cx,
-                                    |s, w, cx| {
-                                        if let Some(p) = s.active() {
-                                            p.update(cx, |p, cx| p.paste_image_path(cx));
-                                        }
-                                        s.show(Page::Terminal, w, cx)
-                                    },
-                                ))
-                            },
-                        )
-                        .child(control("Select all", false, cx, |s, w, cx| {
-                            s.select_all(cx);
-                            s.show(Page::Terminal, w, cx)
-                        })),
-                );
-                content = content.child(
-                    row()
-                        .child(control("Find", false, cx, |s, w, cx| {
-                            s.show(Page::Find, w, cx)
-                        }))
-                        .child(control("Write a message", false, cx, |s, w, cx| {
-                            s.show(Page::Compose, w, cx)
-                        }))
-                        .child(control("Clear screen", false, cx, |s, w, cx| {
-                            if let Some(p) = s.active() {
-                                p.update(cx, |p, cx| p.clear_screen(true, cx))
-                            }
-                            s.show(Page::Terminal, w, cx)
-                        })),
-                );
-                if self.active().is_some_and(|p| p.read(cx).server.is_some()) {
-                    content = content.child(row().child(control(
-                        "Session files",
-                        false,
-                        cx,
-                        |s, w, cx| {
-                            let id = s.tabs[s.current].active;
-                            s.open_files(id, w, cx);
-                        },
-                    )))
-                }
-                content = content.child(
-                    row()
-                        .child(control("Move tab to new window", false, cx, |s, w, cx| {
-                            s.detach(true, w, cx)
-                        }))
-                        .child(control("Move pane to new window", false, cx, |s, w, cx| {
-                            s.detach(false, w, cx)
-                        })),
-                );
-                if let Some(tab) = self.tabs.get(self.current) {
-                    content = content.child(row().child(control(
-                        "Reload focused terminal",
-                        false,
-                        cx,
-                        |s, w, cx| s.reload_selected(w, cx),
-                    )));
-                    if !matches!(tab.layout, Layout::Pane(_)) {
-                        content = content.child(
-                            row()
-                                .child(control(
-                                    "Move pane to its own tab",
-                                    false,
-                                    cx,
-                                    |s, w, cx| s.place_selected(false, Destination::Tab, w, cx),
-                                ))
-                                .child(control(
-                                    if tab.zoom {
-                                        "Restore split panes"
-                                    } else {
-                                        "Zoom pane"
-                                    },
-                                    false,
-                                    cx,
-                                    |s, w, cx| s.toggle_zoom(s.tabs[s.current].active, w, cx),
-                                )),
-                        );
-                    }
-                    let mut order = row();
-                    for (label, direction) in [("Move tab left", -1isize), ("Move tab right", 1)] {
-                        if let Some(next) = self
-                            .current
-                            .checked_add_signed(direction)
-                            .filter(|i| *i < self.tabs.len())
-                        {
-                            let _ = next;
-                            order = order.child(control(label, false, cx, move |s, w, cx| {
-                                s.move_tab(direction, w, cx);
-                            }));
-                        }
-                    }
-                    content = content.child(order);
-                    for (i, other) in self
-                        .tabs
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| *i != self.current)
-                    {
-                        let dest = other.active;
-                        let pane = self.panes[&dest].read(cx);
-                        let label = agent_label(
-                            pane.mark,
-                            format!("Move beside tab {} · {}", i + 1, pane.title),
-                        );
-                        content = content.child(
-                            button(("move-beside", dest), false, cx, move |s, w, cx| {
-                                s.place_selected(
-                                    true,
-                                    Destination::Split(dest, Axis::Across, false),
-                                    w,
-                                    cx,
-                                )
-                            })
-                            .child(label),
-                        );
-                    }
-                    for h in cx
-                        .windows()
-                        .into_iter()
-                        .filter(|h| *h != self.handle)
-                        .filter_map(|h| h.downcast::<Workspace>())
-                    {
-                        let Ok(other) = h.read(cx) else { continue };
-                        let active = other.active();
-                        let pane = active.as_ref().map(|p| p.read(cx));
-                        let title = pane.map_or("Outpost", |p| p.title.as_str());
-                        let mut actions = row();
-                        for (whole, label) in [(true, "Move tab"), (false, "Move pane")] {
-                            let label = format!("{label} to window {} · {title}", other.id);
-                            actions = actions.child(
-                                button(
-                                    SharedString::from(label.clone()),
-                                    false,
-                                    cx,
-                                    move |s, w, cx| {
-                                        if let Some(item) = s.selected_item(whole, cx) {
-                                            s.transfer_to(&item, h, Destination::Tab, w, cx)
-                                        }
-                                    },
-                                )
-                                .child(agent_label(pane.and_then(|p| p.mark), label)),
-                            );
-                        }
-                        content = content.child(actions);
-                    }
-                    content = content.child(
-                        row()
-                            .child(control("Close pane", false, cx, |s, w, cx| {
-                                s.close(s.tabs[s.current].active, w, cx)
-                            }))
-                            .child(control("Close tab", false, cx, |s, w, cx| {
-                                s.close_tab(s.tabs[s.current].active, w, cx)
-                            })),
-                    );
-                }
-            }
             Page::Find | Page::Compose => {}
             Page::Terminal => {}
         }
@@ -3280,6 +3172,8 @@ impl Render for Workspace {
                     .children(self.picker_overlay(cx)),
             )
             .child(self.context_menu_overlay(cx))
+            .child(self.tab_context_menu_overlay(cx))
+            .children(self.tab_rename_overlay(cx))
             .children(self.drag_overlay())
             .children(self.file_viewer(cx))
             .when_some(visible_toast, |e, toast| {
@@ -3339,7 +3233,6 @@ impl Render for Workspace {
             .on_action(cx.listener(|s, _: &crate::menu::SwitchSession, w, cx| {
                 s.show(Page::Switch, w, cx)
             }))
-            .on_action(cx.listener(|s, _: &crate::menu::TerminalActions, w, cx| s.manage(w, cx)))
             .on_action(
                 cx.listener(|s, _: &crate::menu::Settings, w, cx| s.show(Page::Settings, w, cx)),
             )
@@ -3442,11 +3335,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|s, _: &crate::menu::PrevTab, w, cx| {
                 s.cycle_tab(-1, w, cx);
             }))
-            .on_action(cx.listener(|s, _: &crate::menu::MoveTabLeft, w, cx| {
-                s.move_tab(-1, w, cx);
+            .on_action(cx.listener(|s, _: &crate::menu::MoveTabLeft, _, cx| {
+                s.move_tab(-1, cx);
             }))
-            .on_action(cx.listener(|s, _: &crate::menu::MoveTabRight, w, cx| {
-                s.move_tab(1, w, cx);
+            .on_action(cx.listener(|s, _: &crate::menu::MoveTabRight, _, cx| {
+                s.move_tab(1, cx);
             }))
             .on_action(cx.listener(|s, _: &crate::menu::SelectTab1, w, cx| {
                 s.select_tab_index(1, w, cx);
@@ -4662,6 +4555,101 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             ws.update(cx, |s, _| s.close_pending = false);
             dispatch_key(w, cx, close_tab, false);
             assert!(ws.read(cx).close_pending);
+            ws.update(cx, |s, _| s.close_pending = false);
+
+            // Tab right-click context menu must NEVER change the active tab or replace the pane's content.
+            w.draw(cx).clear(cx);
+            assert_eq!(ws.read(cx).current, 2);
+            assert!(ws.read(cx).page == Page::Terminal);
+            let first_tab_id = ws.read(cx).tabs[0].id;
+            let active_tab_id = ws.read(cx).tabs[2].id;
+            let first_tab_x = if mac { 160. } else { 90. };
+            w.dispatch_event(
+                PlatformInput::MouseDown(MouseDownEvent {
+                    position: point(px(first_tab_x), px(20.)),
+                    button: MouseButton::Right,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            w.draw(cx).clear(cx);
+            assert_eq!(
+                ws.read(cx).tab_menu.map(|(id, _)| id),
+                Some(first_tab_id),
+                "right-clicking inactive tab must open context menu for that tab"
+            );
+            assert_eq!(
+                ws.read(cx).current,
+                2,
+                "right-clicking an inactive tab must not switch the active tab"
+            );
+            assert!(
+                ws.read(cx).page == Page::Terminal,
+                "right-clicking a tab must never replace the terminal view"
+            );
+            // Escape closes the tab context menu and leaves the terminal active.
+            dispatch_key(w, cx, Keystroke::parse("escape").unwrap(), false);
+            w.draw(cx).clear(cx);
+            assert!(ws.read(cx).tab_menu.is_none());
+            assert!(ws.read(cx).page == Page::Terminal);
+
+            // Moving an inactive tab via tab menu keeps the current active tab selected.
+            ws.update(cx, |s, cx| s.move_tab_by_id(first_tab_id, 1, cx));
+            assert_eq!(ws.read(cx).tabs[1].id, first_tab_id);
+            assert_eq!(ws.read(cx).tabs[ws.read(cx).current].id, active_tab_id);
+
+            // Lightweight tab rename overlay keeps Page::Terminal intact and commits on Enter.
+            ws.update(cx, |s, cx| s.open_tab_rename(first_tab_id, w, cx));
+            w.draw(cx).clear(cx);
+            assert_eq!(ws.read(cx).tab_rename, Some(first_tab_id));
+            assert!(ws.read(cx).page == Page::Terminal);
+            ws.update(cx, |s, cx| {
+                s.tab_rename_input
+                    .update(cx, |input, cx| input.set_value_silent("Build shell", cx));
+            });
+            dispatch_key(w, cx, Keystroke::parse("enter").unwrap(), false);
+        })?;
+        test.run_until_parked();
+        test.update_window(sc_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            let active_tab_id = ws.read(cx).tabs[ws.read(cx).current].id;
+            assert!(ws.read(cx).tab_rename.is_none());
+            assert_eq!(ws.read(cx).tabs[1].name, "Build shell");
+            assert!(ws.read(cx).page == Page::Terminal);
+
+            // Close other tabs requests confirmation for all tabs except the chosen one.
+            ws.update(cx, |s, cx| s.close_other_tabs(active_tab_id, w, cx));
+            assert!(ws.read(cx).close_pending);
+            ws.update(cx, |s, _| s.close_pending = false);
+        })?;
+        // Verify Escape also closes an open tab context menu after PopupMenu deferred focus settles.
+        let first_tab_x = if mac { 160. } else { 90. };
+        test.update_window(sc_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            let first_tab_id = ws.read(cx).tabs[0].id;
+            w.dispatch_event(
+                PlatformInput::MouseDown(MouseDownEvent {
+                    position: point(px(first_tab_x), px(20.)),
+                    button: MouseButton::Right,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            w.draw(cx).clear(cx);
+            assert_eq!(ws.read(cx).tab_menu.map(|(id, _)| id), Some(first_tab_id));
+        })?;
+        test.run_until_parked();
+        test.update_window(sc_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            w.draw(cx).clear(cx);
+            dispatch_key(w, cx, Keystroke::parse("escape").unwrap(), false);
+            w.draw(cx).clear(cx);
+            assert!(ws.read(cx).tab_menu.is_none());
+            assert!(ws.read(cx).page == Page::Terminal);
         })?;
         test.update_window(sc_win.into(), |_, w, _| w.remove_window())?;
         test.run_until_parked();

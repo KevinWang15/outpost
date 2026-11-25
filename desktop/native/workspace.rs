@@ -393,11 +393,32 @@ impl Workspace {
                 .placeholder("Search sessions, machines, or servers…")
                 .leading_icon(LucideIcon::Search)
         });
-        cx.subscribe(&query, |s: &mut Self, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change(_)) {
-                s.picker_index = 0;
+        cx.subscribe_in(&query, w, |s: &mut Self, _, event: &InputEvent, w, cx| {
+            match event {
+                InputEvent::Change(_) => {
+                    s.picker_index = 0;
+                    cx.notify();
+                }
+                InputEvent::Submit(_) if matches!(s.page, Page::Choose | Page::Switch) => {
+                    let index = s.picker_index;
+                    s.activate_picker_item(index, w, cx);
+                }
+                _ => cx.notify(),
             }
-            cx.notify()
+        })
+        .detach();
+        let address = entry("https://outpost.example.com", cx);
+        cx.subscribe_in(&address, w, |s: &mut Self, _, event: &InputEvent, w, cx| {
+            if matches!(event, InputEvent::Submit(_)) && s.page == Page::Home {
+                s.submit(w, cx);
+            }
+        })
+        .detach();
+        let name = entry("Refactor billing", cx);
+        cx.subscribe_in(&name, w, |s: &mut Self, _, event: &InputEvent, w, cx| {
+            if matches!(event, InputEvent::Submit(_)) && s.page == Page::Create {
+                s.submit(w, cx);
+            }
         })
         .detach();
         let find_query = cx.new(|cx| {
@@ -524,11 +545,11 @@ impl Workspace {
             } else {
                 prefs
             },
-            address: entry("https://outpost.example.com", cx),
+            address,
             query,
             find_query,
             history_input,
-            name: entry("Refactor billing", cx),
+            name,
             tab_rename_input,
             compose,
             split_at: None,
@@ -4322,11 +4343,22 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         test.capture_screenshot(remote_window.into())?
             .save(PathBuf::from(&dir).join("choose-session.png"))?;
     }
+    // Pressing real Enter while the picker search Input is focused must submit via InputEvent::Submit
+    // and activate the highlighted session (returning to Page::Terminal).
+    test.update_window(remote_window.into(), |root, w, cx| {
+        let ws = root.downcast::<Workspace>().unwrap();
+        assert!(ws.read(cx).page == Page::Choose);
+        assert!(ws.read(cx).query.read(cx).focus_handle(cx).is_focused(w));
+        w.dispatch_keystroke(Keystroke::parse("enter").unwrap(), cx);
+    })?;
+    test.run_until_parked();
     test.update_window(remote_window.into(), |root, w, cx| {
         let ws = root.downcast::<Workspace>().unwrap();
         ws.update(cx, |s, cx| {
-            s.dismiss_page(w, cx);
-            assert!(s.page == Page::Terminal);
+            assert!(
+                s.page == Page::Terminal,
+                "pressing Enter in the session picker search input must connect/select the highlighted row"
+            );
 
             // Verify iTerm2-style floating Find overlay: live search, modes, navigation, Tab selection, and Esc dismiss.
             let find_pane = s.active().unwrap();

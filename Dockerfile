@@ -12,9 +12,10 @@ RUN npx tsc --noEmit && npx tsc --noEmit -p tsconfig.node.json \
 
 FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssh-client \
+    && apt-get install -y --no-install-recommends ca-certificates curl openssh-client \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir /state && chown node:node /state
+    && mkdir /state && chown node:node /state \
+    && mkdir -m 700 /var/lib/outpost-machine && chown node:node /var/lib/outpost-machine
 WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules

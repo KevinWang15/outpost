@@ -196,7 +196,7 @@ export default function TargetView({
           <SoftwarePanel target={target} state={software} onInstalled={() => void refresh()} />
           <SessionTable
             sessions={sessions}
-            error={error}
+            error={missing.length > 0 ? '' : error}
             refreshing={refreshing}
             canCreate={ready}
             checking={checking}

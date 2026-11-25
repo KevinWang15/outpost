@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { hostname as osHostname } from 'node:os'
 import { join } from 'node:path'
 import type { IncomingHttpHeaders } from 'node:http'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
@@ -92,13 +93,17 @@ export class LocalDeployment implements Deployment {
         throw new AppError('Running sessions on the Outpost server requires Linux, including WSL.', 400)
     })
   }
-  static async open(directory: string, machineOrigin?: string) {
+  static async open(directory: string, machineOrigin?: string, options?: { seedLocal?: boolean; hostname?: string }) {
     if (machineOrigin) {
       const address = new URL(machineOrigin)
       if (address.protocol !== 'https:' || address.origin !== machineOrigin || loopbackHost(address.hostname))
         throw new Error('OUTPOST_MACHINE_ORIGIN must be an HTTPS origin for a machine-only reverse proxy.')
     }
-    return new LocalDeployment(directory, await serverSecret(directory), machineOrigin)
+    const deployment = new LocalDeployment(directory, await serverSecret(directory), machineOrigin)
+    if (options?.seedLocal && deployment.localTargets) {
+      await deployment.store.seedLocalIfNew(options.hostname ?? osHostname())
+    }
+    return deployment
   }
   admits(request: Caller) {
     if (!isLoopbackAddress(request.ip))

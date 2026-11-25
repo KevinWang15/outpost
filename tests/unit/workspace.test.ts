@@ -6,6 +6,7 @@ import test from 'node:test'
 import { harnessSoftware, setupTargets, type SoftwareId, type SoftwareStatus, type Target } from '../../shared/model'
 import { sessionCreationOptions } from '../../shared/sessionCreation'
 import { Installations } from '../../backend/installations'
+import { LocalDeployment } from '../../backend/deployment'
 import type { TargetContext } from '../../backend/sessions'
 import type { SoftwareService } from '../../backend/software'
 import { Workspace } from '../../backend/workspace'
@@ -55,6 +56,49 @@ test('one co-located machine per workspace and outbound machines rename cleanly'
   await workspace.add({ ...base, id: crypto.randomUUID(), name: 'Replacement', kind: 'local' })
   const remote = await workspace.add({ ...base, id: crypto.randomUUID(), name: 'Remote', kind: 'outbound' })
   assert.equal((await workspace.edit(remote.id, { name: 'Build box' })).name, 'Build box')
+})
+
+test('seedLocalIfNew adds this computer once on fresh local workspaces and respects removal', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'outpost-seed-local-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const workspace = new Workspace(directory)
+
+  const seeded = await workspace.seedLocalIfNew('  dev-workstation\n')
+  assert.ok(seeded)
+  assert.equal(seeded.kind, 'local')
+  assert.equal(seeded.name, 'dev-workstation')
+  assert.equal((await workspace.list()).length, 1)
+
+  // Subsequent startups do not duplicate or alter an existing workspace.json.
+  assert.equal(await workspace.seedLocalIfNew('other-host'), null)
+
+  // Removing the seeded machine persists an empty workspace.json and never resurrects it.
+  await workspace.remove(seeded.id)
+  assert.deepEqual(await workspace.list(), [])
+  assert.equal(await workspace.seedLocalIfNew('dev-workstation'), null)
+  assert.deepEqual(await workspace.list(), [])
+
+  // Blank hostnames fall back to "This computer".
+  const fallbackDir = await mkdtemp(join(tmpdir(), 'outpost-seed-fallback-'))
+  t.after(() => rm(fallbackDir, { recursive: true, force: true }))
+  const fallback = await new Workspace(fallbackDir).seedLocalIfNew('   \x00 ')
+  assert.equal(fallback?.name, 'This computer')
+
+  // LocalDeployment.open seeds automatically when seedLocal is enabled on Linux, and respects removal on reopen.
+  const deployDir = await mkdtemp(join(tmpdir(), 'outpost-seed-deploy-'))
+  t.after(() => rm(deployDir, { recursive: true, force: true }))
+  const first = await LocalDeployment.open(deployDir, undefined, { seedLocal: true, hostname: 'my-linux-box' })
+  const initialTargets = await first.workspace().list()
+  if (first.localTargets) {
+    assert.equal(initialTargets.length, 1)
+    assert.equal(initialTargets[0].kind, 'local')
+    assert.equal(initialTargets[0].name, 'my-linux-box')
+    await first.workspace().remove(initialTargets[0].id)
+    const reopened = await LocalDeployment.open(deployDir, undefined, { seedLocal: true, hostname: 'my-linux-box' })
+    assert.deepEqual(await reopened.workspace().list(), [])
+  } else {
+    assert.deepEqual(initialTargets, [])
+  }
 })
 
 test('sessionCreationOptions auto-detects installed harnesses and separates core software requirements', () => {

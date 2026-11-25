@@ -35,6 +35,7 @@ export class MachineConnectionError extends MachineError {
     readonly publicMessage: string,
     status: number,
     detail = publicMessage,
+    readonly serviceRequired = false,
   ) {
     super(detail, status)
   }
@@ -229,7 +230,7 @@ export class MachineConnection {
           ) {
             const missing =
               'Outpost machine service is missing on this machine. Open Software on the machine page to install it.'
-            return this.lost(missing, 502, missing)
+            return this.lost(missing, 502, missing, true)
           }
           this.lost(
             this.started ? 'The connection to the machine was lost.' : stderr.split('\n').at(-1) || sshUnavailable,
@@ -276,7 +277,7 @@ export class MachineConnection {
         clearTimeout(timer)
         if (message.version !== terminalService.version || message.protocol !== machineProtocol) {
           const problem = `This machine runs Outpost machine service ${message.version}; ${terminalService.version} is required. Open Software on the machine page to install it.`
-          this.lost(problem, 409)
+          this.lost(problem, 409, problem, true)
           return
         }
         this.started = true
@@ -355,7 +356,12 @@ export class MachineConnection {
   }
 
   /** The connection ended: every caller learns now; the next use reconnects. */
-  private lost(message: string, status = 502, publicMessage = this.transport ? sshUnavailable : outboundOffline) {
+  private lost(
+    message: string,
+    status = 502,
+    publicMessage = this.transport ? sshUnavailable : outboundOffline,
+    serviceRequired = false,
+  ) {
     const child = this.child
     const incoming = this.incoming
     if (!child && !incoming) return
@@ -364,7 +370,7 @@ export class MachineConnection {
     // The next call can start a handshake before the interrupted one settles.
     this.starting = null
     incoming?.destroy()
-    const error = new MachineConnectionError(publicMessage, status, message)
+    const error = new MachineConnectionError(publicMessage, status, message, serviceRequired)
     this.startFailed?.(error)
     this.started = false
     this.writer?.dispose()

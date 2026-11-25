@@ -1,4 +1,5 @@
-import { chmod, mkdir } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { access, chmod, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Ajv } from 'ajv'
 import type { ExecutionEnvironment, Target, TargetUpdate } from '../shared/model'
@@ -102,5 +103,38 @@ export class Workspace {
       if (!data.targets.some(item => item.id === id)) throw new AppError('Machine not found', 404)
       data.targets = data.targets.filter(item => item.id !== id)
     })
+  }
+  /** Seed this computer once on a brand-new workspace. No-op once workspace.json exists. */
+  seedLocalIfNew(rawName: string): Promise<Target | null> {
+    const work = this.queue.then(async () => {
+      await mkdir(this.directory, { recursive: true, mode: 0o700 })
+      await chmod(this.directory, 0o700)
+      try {
+        await access(this.path)
+        return null
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      const cleaned = Array.from(rawName)
+        .filter(char => {
+          const code = char.charCodeAt(0)
+          return code >= 0x20 && code !== 0x7f
+        })
+        .join('')
+        .trim()
+        .slice(0, 80)
+      const target: Target = {
+        kind: 'local',
+        id: randomUUID(),
+        name: cleaned || 'This computer',
+        createdAt: new Date().toISOString(),
+      }
+      validateSettings(target)
+      this.deploymentPolicy?.(target)
+      await writeJsonFile(this.path, { version: 3, targets: [target] } satisfies WorkspaceFile)
+      return target
+    })
+    this.queue = work.catch(() => {})
+    return work
   }
 }

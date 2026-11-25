@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { Check, ChevronDown, CircleDashed, Download, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
 import { harnesses } from '../../shared/harnesses'
 import {
@@ -47,6 +47,14 @@ export default function SoftwarePanel({
   const orderedHarnesses = [...availableHarnesses, ...unavailableHarnesses]
   const claudeAdapter = byId.get('claude-agent-acp')
   const running = job?.status === 'running'
+  const needsCoreSetup = coreMissing.length > 0 || (!!error && !report && target.kind !== 'outbound')
+  const prevJobStatus = useRef(job?.status)
+  const notifyInstalled = useEffectEvent(onInstalled)
+  useEffect(() => {
+    const previous = prevJobStatus.current
+    prevJobStatus.current = job?.status
+    if (previous === 'running' && job?.status === 'succeeded') notifyInstalled()
+  }, [job?.status])
   const ready = !running && !error && !!report && coreMissing.length === 0 && availableHarnesses.length > 0
   const open =
     expanded ??
@@ -207,10 +215,10 @@ export default function SoftwarePanel({
               </ul>
             </div>
           )}
-          {((job && !running) || (!running && coreMissing.length > 0)) && (
+          {((job && !running) || (!running && needsCoreSetup)) && (
             <div className="software-actions">
-              {!running && coreMissing.length > 0 && (
-                <button className="button small" onClick={() => void setup()}>
+              {!running && needsCoreSetup && (
+                <button className="button primary small" onClick={() => void setup()}>
                   Set up machine software
                 </button>
               )}

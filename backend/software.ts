@@ -12,6 +12,7 @@ import {
 import { inspectionScript, softwareReport } from '../shared/node/softwareInspection'
 import { toolInstaller } from '../shared/node/toolInstaller'
 import { AppError } from './errors'
+import { MachineConnectionError } from './machines'
 import { MachineAssets, platformName } from './machineAssets'
 import { detectPlatform, sshServiceInstaller, sshToolInstaller } from './machineInstaller'
 import { runCommand, type CommandResult } from './process'
@@ -57,8 +58,15 @@ export class SoftwareClient implements SoftwareService {
     }
   }
 
-  inspect(context: TargetContext, signal?: AbortSignal) {
-    return this.report(context, signal)
+  async inspect(context: TargetContext, signal?: AbortSignal) {
+    try {
+      return await this.report(context, signal, false)
+    } catch (error) {
+      if (context.transport && !signal?.aborted && error instanceof MachineConnectionError && error.serviceRequired) {
+        return this.report(context, signal, true)
+      }
+      throw error
+    }
   }
 
   async setup(

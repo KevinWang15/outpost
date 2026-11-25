@@ -311,7 +311,7 @@ test('the production server serves the terminal page on direct navigation and re
   await app.listen({ host: '127.0.0.1', port: 0 })
   const port = (app.server.address() as { port: number }).port
   for (const method of ['GET', 'HEAD'] as const) {
-    for (const url of ['/terminal?target=box&session=session', '/desktop']) {
+    for (const url of ['/terminal?target=box&session=session', '/desktop', '/guide', '/guide/machine-cli']) {
       const response = await app.inject({
         method,
         url,

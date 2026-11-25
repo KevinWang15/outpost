@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowLeft, LogOut, MessagesSquare, Monitor, ScrollText, Settings2, UserRound } from 'lucide-react'
+import { ArrowLeft, BookOpen, LogOut, MessagesSquare, Monitor, ScrollText, Settings2, UserRound } from 'lucide-react'
 import { pagePaths } from '../../shared/pages'
 import AccountDialog from '../auth/AccountDialog'
 import { useAuth } from '../auth/useAuth'
@@ -8,7 +8,7 @@ import { useDesktopEntry } from '../desktop/useDesktopEntry'
 import { Menu } from './Menu'
 import { useToast } from './toast-context'
 
-type SidebarPage = 'machines' | 'chat' | 'logs'
+type SidebarPage = 'machines' | 'chat' | 'logs' | 'guide'
 
 export function AppSidebar({ page, children }: { page: SidebarPage; children: ReactNode }) {
   return (
@@ -50,6 +50,9 @@ function SidebarFooter({ page }: { page: SidebarPage }) {
         </a>
         <a className="sidebar-link" href={pagePaths.logs} aria-current={page === 'logs' ? 'page' : undefined}>
           <ScrollText size={16} /> Logs and webhooks
+        </a>
+        <a className="sidebar-link" href={pagePaths.guide} aria-current={page === 'guide' ? 'page' : undefined}>
+          <BookOpen size={16} /> User guide
         </a>
       </nav>
       <button

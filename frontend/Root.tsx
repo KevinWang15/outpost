@@ -8,8 +8,11 @@ const TerminalPage = lazy(() => import('./terminal/TerminalPage'))
 const DesktopAuthorizePage = lazy(() => import('./desktop/DesktopAuthorizePage'))
 const ChatApp = lazy(() => import('./chat/ChatApp'))
 const LogsPage = lazy(() => import('./logs/LogsPage'))
+const GuidePage = lazy(() => import('./guide/GuidePage'))
 
 export default function Root() {
+  const pathname = window.location.pathname
+  const isGuide = pathname === pagePaths.guide || pathname.startsWith(`${pagePaths.guide}/`)
   return (
     <Suspense
       fallback={
@@ -18,20 +21,22 @@ export default function Root() {
         </div>
       }
     >
-      {window.location.pathname === pagePaths.desktop ? (
+      {pathname === pagePaths.desktop ? (
         <DesktopDownloadPage />
-      ) : window.location.pathname === pagePaths.desktopAuthorize ? (
+      ) : pathname === pagePaths.desktopAuthorize ? (
         <AuthGate>
           <DesktopAuthorizePage requestId={new URLSearchParams(window.location.search).get('request') ?? ''} />
         </AuthGate>
       ) : (
         <AuthGate>
-          {window.location.pathname === pagePaths.terminal ? (
+          {pathname === pagePaths.terminal ? (
             <TerminalPage />
-          ) : window.location.pathname === pagePaths.chat ? (
+          ) : pathname === pagePaths.chat ? (
             <ChatApp />
-          ) : window.location.pathname === pagePaths.logs ? (
+          ) : pathname === pagePaths.logs ? (
             <LogsPage />
+          ) : isGuide ? (
+            <GuidePage />
           ) : (
             <App />
           )}

@@ -3,6 +3,7 @@ export const pagePaths = {
   workspace: '/',
   chat: '/chat',
   logs: '/logs',
+  guide: '/guide',
   terminal: '/terminal',
   desktop: '/desktop',
   desktopAuthorize: '/desktop/authorize',

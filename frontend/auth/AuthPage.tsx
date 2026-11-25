@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
 import { pagePaths } from '../../shared/pages'
-import { ArrowRight, CheckCircle2, Eye, EyeOff, Mail } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Eye, EyeOff, Mail, MailCheck } from 'lucide-react'
 import type { AuthMessage } from '../../shared/auth'
 import { api, ApiError } from '../api'
 import { useAuth } from './useAuth'
@@ -132,7 +132,7 @@ export default function AuthPage({ path }: { path: string }) {
           <p className="auth-subtitle">{subtitles[kind]}</p>
           {message && (
             <div className="auth-message" role="status">
-              <CheckCircle2 />
+              <CheckCircle2 size={16} aria-hidden="true" />
               <p>{message}</p>
             </div>
           )}
@@ -200,7 +200,7 @@ export default function AuthPage({ path }: { path: string }) {
                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                         onClick={() => setShowPassword(!showPassword)}
                       >
-                        {showPassword ? <EyeOff /> : <Eye />}
+                        {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
                       </button>
                     </div>
                   </label>
@@ -250,7 +250,13 @@ export default function AuthPage({ path }: { path: string }) {
                         : kind === 'reset'
                           ? 'Reset password'
                           : 'Sign in'}
-                {kind === 'verify' || kind === 'forgot' ? <Mail /> : <ArrowRight />}
+                {kind === 'verify' && token ? (
+                  <MailCheck size={16} aria-hidden="true" />
+                ) : kind === 'verify' || kind === 'forgot' ? (
+                  <Mail size={16} aria-hidden="true" />
+                ) : (
+                  <ArrowRight size={16} aria-hidden="true" />
+                )}
               </button>
             )}
           </form>

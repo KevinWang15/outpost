@@ -189,6 +189,9 @@ svg {
       background: #b91c1c;
     }
   }
+  svg {
+    flex-shrink: 0;
+  }
   &.small {
     height: 28px;
     padding: 0 10px;
@@ -502,6 +505,31 @@ kbd {
     flex-shrink: 0;
   }
 }
+.machine-local-option {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  .button {
+    flex-shrink: 0;
+  }
+}
+.machine-local-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text);
+  svg {
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+}
 @media (max-width: 640px) {
   .machine-wizard .form-row {
     flex-wrap: nowrap;
@@ -540,6 +568,14 @@ kbd {
   }
   .machine-guide-panel h3 {
     font-size: 18px;
+  }
+  .machine-local-option {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    .button {
+      width: 100%;
+    }
   }
 }
 .disclosure {
@@ -2395,6 +2431,7 @@ textarea.code,
 }
 .auth-message {
   display: flex;
+  align-items: flex-start;
   gap: 10px;
   margin-bottom: 16px;
   padding: 12px;
@@ -2402,6 +2439,10 @@ textarea.code,
   border-radius: var(--radius);
   background: var(--success-soft);
   color: var(--success);
+  svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
 }
 .auth-dev-link {
   display: grid;
@@ -2424,18 +2465,21 @@ textarea.code,
 .password-field {
   position: relative;
   input {
-    padding-right: 42px;
+    padding-right: 40px;
   }
   .icon-button {
     position: absolute;
     top: 50%;
     right: 4px;
+    width: 28px;
+    height: 28px;
     transform: translateY(-50%);
   }
 }
 .auth-submit {
   width: 100%;
   height: 38px;
+  gap: 8px;
   margin-top: 6px;
 }
 .auth-links {

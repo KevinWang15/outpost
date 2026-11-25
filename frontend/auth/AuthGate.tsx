@@ -106,7 +106,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                 void load().catch(problem => setError(problem.message))
               }}
             >
-              <RefreshCw /> Try again
+              <RefreshCw size={15} aria-hidden="true" /> Try again
             </button>
           </>
         ) : (

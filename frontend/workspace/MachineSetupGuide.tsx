@@ -93,17 +93,17 @@ export default function MachineSetupGuide({
         <div className="machine-path">
           <div className="machine-route" aria-hidden="true">
             <span>
-              <Laptop />
+              <Laptop size={18} />
               Your browser
             </span>
-            <ArrowRight />
+            <ArrowRight size={15} />
             <span>
-              <Server />
+              <Server size={18} />
               {hosted ? 'Hosted Outpost' : 'Local Outpost'}
             </span>
-            {method === 'outbound' ? <ArrowLeft /> : <ArrowRight />}
+            {method === 'outbound' ? <ArrowLeft size={15} /> : <ArrowRight size={15} />}
             <span>
-              <HardDrive />
+              <HardDrive size={18} />
               Linux machine
             </span>
           </div>
@@ -120,9 +120,15 @@ export default function MachineSetupGuide({
         </dl>
       </section>
       {localAvailable && (
-        <button type="button" className="button" onClick={onLocal}>
-          Run sessions on this computer
-        </button>
+        <div className="machine-local-option">
+          <div className="machine-local-copy">
+            <Laptop size={16} aria-hidden="true" />
+            <span>Want to run sessions directly on this Linux machine?</span>
+          </div>
+          <button type="button" className="button" onClick={onLocal}>
+            Run sessions on this computer
+          </button>
+        </div>
       )}
     </div>
   )

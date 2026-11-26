@@ -55,7 +55,13 @@ export class TerminalActivity {
       error => {
         if (generation !== this.generation) return
         this.pending.delete(token)
-        this.notice(`Could not mark this completion as seen: ${(error as Error).message}`)
+        const reason = error instanceof Error ? error.message : String(error)
+        if (reason === 'Already seen.') {
+          this.checked.add(token)
+          if (this.checked.size > 32) this.checked.delete(this.checked.values().next().value!)
+          return
+        }
+        this.notice(`Could not mark this completion as seen: ${reason}`)
       },
     )
   }

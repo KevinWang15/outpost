@@ -415,8 +415,9 @@ export async function serveTerminal() {
           } else if (message.type === 'ping') {
             sendControl(socket, { type: 'result', id: message.id, ok: true })
           } else if (message.type === 'acknowledge') {
-            const ok = activity.acknowledge(String(message.completionId))
-            sendControl(socket, { type: 'result', id: message.id, ok, ...(ok ? {} : { message: 'Already seen.' }) })
+            // Idempotent: a concurrent keystroke, viewer, or newer turn may have already cleared it.
+            activity.acknowledge(String(message.completionId))
+            sendControl(socket, { type: 'result', id: message.id, ok: true })
           } else if (message.type === 'signal-result') {
             const waiting = signals.get(message.id)
             if (!waiting) continue

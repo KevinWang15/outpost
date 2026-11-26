@@ -99,3 +99,16 @@ test('reconnection drops old acknowledgement replies and waits for the current g
   await tick()
   assert.equal(f.notices.length, 0)
 })
+
+test('an Already seen reply from an older machine is treated as acknowledged without error or retry', async () => {
+  const f = fixture()
+  f.activity.update(completion())
+  f.activity.setActive(true)
+  assert.equal(f.requests.length, 1)
+  f.requests[0].reject(new Error('Already seen.'))
+  await tick()
+  assert.equal(f.notices.length, 0)
+  // Subsequent interactions before the idle broadcast do not re-send the same token.
+  f.activity.acknowledge()
+  assert.equal(f.requests.length, 1)
+})

@@ -2829,30 +2829,37 @@ impl Workspace {
         }
         Some(
             div()
-                .id(("pane-status-overlay", id))
                 .absolute()
                 .inset_0()
-                .occlude()
-                .backdrop_blur(px(6.))
-                .bg(rgba(0x0c0c0c96))
                 .flex()
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .px(px(24.))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |s, _, w, cx| {
-                        if s.tabs.get(s.current).is_some_and(|t| t.active != id) {
-                            s.select(id, w, cx);
-                        }
-                    }),
-                )
+                .px(px(20.))
                 .child(
                     col()
+                        .id(("pane-status-overlay", id))
+                        .occlude()
                         .items_center()
                         .gap(px(14.))
+                        .p(px(20.))
                         .max_w(px(420.))
+                        .rounded(px(12.))
+                        .backdrop_blur(px(14.))
+                        .bg(rgba(0x161618cc))
+                        .border_1()
+                        .border_color(rgba(0xffffff22))
+                        .shadow_lg()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |s, _, w, cx| {
+                                cx.stop_propagation();
+                                if s.tabs.get(s.current).is_some_and(|t| t.active != id) {
+                                    s.select(id, w, cx);
+                                }
+                            }),
+                        )
+                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                         .child(
                             row()
                                 .items_center()

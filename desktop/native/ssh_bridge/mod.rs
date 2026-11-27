@@ -11,7 +11,7 @@ mod paste;
 mod protocol;
 
 pub use paste::{SshBridgeActions, SshBridgePane};
-pub use protocol::{MAX_SSH_BRIDGE_OSC_BYTES, SshRemoteMessage, parse_ssh_bridge_osc_data};
+pub use protocol::{MAX_SSH_BRIDGE_PAYLOAD_BYTES, SshRemoteMessage, parse_ssh_bridge_payload};
 
 use portable_pty::CommandBuilder;
 use std::{fs, path::Path};
@@ -20,7 +20,7 @@ use std::{fs, path::Path};
 pub const ENABLED: bool = true;
 
 pub fn is_enabled() -> bool {
-    ENABLED && std::env::var_os("OUTPOST_DISABLE_SSH_BRIDGE").is_none()
+    ENABLED && std::env::var("OUTPOST_DISABLE_SSH_BRIDGE").as_deref() != Ok("1")
 }
 
 /// Remote POSIX bootstrap command passed on interactive `ssh` logins.
@@ -281,7 +281,7 @@ function global:__OutpostInvokeSsh {
           elseif ($rest.Substring($i + 1) -match '^(?i)(RemoteCommand|RequestTTY=no)') { $passthrough = $true }
           break
         }
-        if ('BbcDEeFIiJLlmopQRSw'.IndexOf($ch) -ge 0) {
+        if ('BbcDEeFIiJLlmpQRSw'.IndexOf($ch) -ge 0) {
           if ($i + 1 -ge $rest.Length) { $skip = $true }
           break
         }

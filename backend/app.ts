@@ -22,6 +22,7 @@ import { terminalRoutes } from './routes/terminal'
 import { enrollmentRoutes } from './enrollment'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
+import { isStandaloneAgentTool, SSH_BRIDGE_ENABLED } from '../shared/sshBridgeProtocol'
 import { DesktopAccess } from './desktop-access'
 import { desktopRoutes } from './routes/desktop'
 import { ChatHub } from './chat/hub'
@@ -122,16 +123,13 @@ export async function createApp(options: AppOptions) {
     events: (owner, targetId) => void machineEvents.read(owner, targetId),
     // Agents' Outpost tool calls arrive on their machine's connection.
     agent: async (owner, targetId, call) => {
+      if (call.session === null && (!SSH_BRIDGE_ENABLED || !isStandaloneAgentTool(call.tool)))
+        throw new Error('This tool requires a managed Outpost session.')
       if (historyTools.has(call.tool)) {
         if (!history) throw new Error('Cross-machine history is turned off on this Outpost server.')
         return history.call(owner, call.tool, call.arguments)
       }
-      if (call.session === null) {
-        if (call.tool !== 'list_machines' && call.tool !== 'list_sessions')
-          throw new Error('This tool requires a managed Outpost session.')
-        return hub.agent(owner, { targetId, sessionId: '' }, call.tool, call.arguments)
-      }
-      return hub.agent(owner, { targetId, sessionId: call.session }, call.tool, call.arguments)
+      return hub.agent(owner, { targetId, sessionId: call.session ?? '' }, call.tool, call.arguments)
     },
   })
   const chat = new ChatServer(hub, new ChatTokens(deployment.secret), services)

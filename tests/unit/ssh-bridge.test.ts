@@ -19,10 +19,14 @@ import {
   encodeSshBridgeInput,
   encodeSshBridgeOsc,
   isStandaloneAgentTool,
-  parseSshBridgeOscData,
+  parseSshBridgePayload,
+  parseSshDesktopPayload,
   SSH_BRIDGE_ENABLED,
+  SSH_BRIDGE_INPUT_END,
+  SSH_BRIDGE_INPUT_START,
   SSH_IMAGE_CHUNK_BYTES,
   SshBridgeInputScanner,
+  type SshDesktopMessage,
   type SshRemoteMessage,
 } from '../../shared/sshBridgeProtocol'
 import { harness } from '../../machine/harnesses'
@@ -57,39 +61,49 @@ test('SSH bridge master switch is on by default and standalone MCP allowlist exc
   assert.equal(isStandaloneAgentTool('fetch_file'), false)
 })
 
-test('OSC 7770 SSH bridge protocol round-trips all message types and rejects invalid frames', () => {
-  const cases = [
+test('SSH bridge protocol round-trips remote OSC 7770 and desktop PUA frames and rejects invalid frames', () => {
+  const remoteCases: SshRemoteMessage[] = [
     { v: 1, t: 'ready', session: 'nonce_1', tool: 'claude', clipboard: true },
     { v: 1, t: 'bye', session: 'nonce_1' },
     { v: 1, t: 'shell' },
-    { v: 1, t: 'img.begin', session: 'nonce_1', id: 'img-1', mime: 'image/png', size: 1024, mode: 'attachment' },
     { v: 1, t: 'img.ack', id: 'img-1', next: 1024, chunkSize: SSH_IMAGE_CHUNK_BYTES },
-    { v: 1, t: 'img.data', id: 'img-1', offset: 0, data: samplePng.toString('base64') },
     { v: 1, t: 'img.done', id: 'img-1', ok: true, mode: 'path' },
     { v: 1, t: 'img.done', id: 'img-1', ok: false, message: 'Timed out.' },
-    { v: 1, t: 'img.cancel', id: 'img-1' },
-  ] as const
-
-  for (const msg of cases) {
+  ]
+  for (const msg of remoteCases) {
     const osc = encodeSshBridgeOsc(msg, 'st')
     assert.ok(osc.startsWith('\x1b]7770;outpost;ssh;'))
     assert.ok(osc.endsWith('\x1b\\'))
     const body = osc.slice('\x1b]7770;'.length, -2)
-    assert.deepEqual(parseSshBridgeOscData(body), msg)
+    assert.deepEqual(parseSshBridgePayload(body), msg)
+    assert.equal(parseSshDesktopPayload(body), null)
+  }
+
+  const desktopCases: SshDesktopMessage[] = [
+    { v: 1, t: 'img.begin', session: 'nonce_1', id: 'img-1', mime: 'image/png', size: 1024, mode: 'attachment' },
+    { v: 1, t: 'img.data', id: 'img-1', offset: 0, data: samplePng.toString('base64') },
+    { v: 1, t: 'img.cancel', id: 'img-1' },
+  ]
+  for (const msg of desktopCases) {
+    const frame = encodeSshBridgeInput(msg)
+    assert.ok(frame.startsWith(`${SSH_BRIDGE_INPUT_START}outpost;ssh;`))
+    assert.ok(frame.endsWith(SSH_BRIDGE_INPUT_END))
+    const body = frame.slice(SSH_BRIDGE_INPUT_START.length, -SSH_BRIDGE_INPUT_END.length)
+    assert.deepEqual(parseSshDesktopPayload(body), msg)
   }
 
   // Malformed version, tool, mime, id, and oversized chunk size are rejected.
   const bad = (obj: unknown) => `outpost;ssh;${Buffer.from(JSON.stringify(obj), 'utf8').toString('base64url')}`
-  assert.equal(parseSshBridgeOscData(bad({ v: 2, t: 'shell' })), null)
-  assert.equal(parseSshBridgeOscData(bad({ v: 1, t: 'ready', session: 'ok', tool: 'vim', clipboard: true })), null)
+  assert.equal(parseSshBridgePayload(bad({ v: 2, t: 'shell' })), null)
+  assert.equal(parseSshBridgePayload(bad({ v: 1, t: 'ready', session: 'ok', tool: 'vim', clipboard: true })), null)
   assert.equal(
-    parseSshBridgeOscData(
+    parseSshBridgePayload(
       bad({ v: 1, t: 'img.begin', session: 's', id: '1', mime: 'text/plain', size: 10, mode: 'attachment' }),
     ),
     null,
   )
-  assert.equal(parseSshBridgeOscData(bad({ v: 1, t: 'img.ack', id: 'bad id', next: 0 })), null)
-  assert.equal(parseSshBridgeOscData(bad({ v: 1, t: 'img.ack', id: '1', next: 0, chunkSize: 999999 })), null)
+  assert.equal(parseSshBridgePayload(bad({ v: 1, t: 'img.ack', id: 'bad id', next: 0 })), null)
+  assert.equal(parseSshBridgePayload(bad({ v: 1, t: 'img.ack', id: '1', next: 0, chunkSize: 999999 })), null)
 })
 
 test('SshBridgeInputScanner splits chunked PUA frames cleanly and passes through ESC/UTF-8 with zero delay', () => {
@@ -326,6 +340,44 @@ test('SshImageReceiver reassembles chunked images and delivers via X11 clipboard
   assert.ok(savedPath && existsSync(savedPath))
   assert.deepEqual(readFileSync(savedPath), samplePng)
   assert.deepEqual(replies2.at(-1), { v: 1, t: 'img.done', id: 'tx-2', ok: true, mode: 'path' })
+
+  // 3. img.cancel aborts an in-flight clipboard paste without emitting img.done or falling back to path.
+  const replies3: SshRemoteMessage[] = []
+  let pasteAborted = false
+  const receiver3 = new SshImageReceiver('nonce-3', m => replies3.push(m), {
+    exited: () => false,
+    clipboard: {
+      paste(_image, signal) {
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            pasteAborted = true
+            reject(new Error('Image paste cancelled.'))
+          })
+        })
+      },
+    },
+    sendKey: () => {},
+    pastePath: () => {
+      throw new Error('Cancelled paste must not fall back to path')
+    },
+  })
+  receiver3.handle({
+    v: 1,
+    t: 'img.begin',
+    session: 'nonce-3',
+    id: 'tx-3',
+    mime: 'image/png',
+    size: samplePng.length,
+    mode: 'attachment',
+  })
+  receiver3.handle({ v: 1, t: 'img.data', id: 'tx-3', offset: 0, data: samplePng.toString('base64') })
+  receiver3.handle({ v: 1, t: 'img.cancel', id: 'tx-3' })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(pasteAborted, true)
+  assert.equal(
+    replies3.some(m => m.t === 'img.done'),
+    false,
+  )
 })
 
 test('standalone SSH MCP binding exposes history + machine/session read tools and blocks session-only tools', async t => {

@@ -1,6 +1,7 @@
 //! Wire protocol for the experimental interactive SSH bridge.
-//! Mirrors `shared/sshBridgeProtocol.ts` over Outpost's private OSC 7770 namespace:
-//!   `ESC ] 7770 ; outpost ; ssh ; <base64url-json> (BEL | ST)`
+//! Mirrors `shared/sshBridgeProtocol.ts`:
+//!   - Remote -> Desktop (PTY output): `ESC ] 7770 ; outpost ; ssh ; <base64url-json> (BEL | ST)`
+//!   - Desktop -> Remote (PTY input):  `\u{E077}outpost;ssh;<base64url-json>\u{E078}`
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ pub const SSH_BRIDGE_PREFIX: &str = "outpost;ssh;";
 /// byte-for-byte through Windows ConPTY, WSL, macOS, and Linux PTYs with 0ms Escape latency.
 const SSH_BRIDGE_INPUT_START: char = '\u{E077}';
 const SSH_BRIDGE_INPUT_END: char = '\u{E078}';
-pub const MAX_SSH_BRIDGE_OSC_BYTES: usize = 32 * 1024;
+pub const MAX_SSH_BRIDGE_PAYLOAD_BYTES: usize = 32 * 1024;
 pub const DEFAULT_IMAGE_CHUNK_BYTES: usize = 16 * 1024;
 pub const IMAGE_WINDOW_CHUNKS: usize = 4;
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
@@ -103,8 +104,8 @@ fn valid_tool(value: &str) -> bool {
     )
 }
 
-pub fn parse_ssh_bridge_osc_data(data: &str) -> Option<SshRemoteMessage> {
-    if data.len() > MAX_SSH_BRIDGE_OSC_BYTES {
+pub fn parse_ssh_bridge_payload(data: &str) -> Option<SshRemoteMessage> {
+    if data.len() > MAX_SSH_BRIDGE_PAYLOAD_BYTES {
         return None;
     }
     let encoded = data.strip_prefix(SSH_BRIDGE_PREFIX)?.trim_end_matches('=');
@@ -195,7 +196,7 @@ mod tests {
     #[test]
     fn parses_all_remote_messages_and_rejects_malformed() {
         assert_eq!(
-            parse_ssh_bridge_osc_data(&encode_remote(&serde_json::json!({
+            parse_ssh_bridge_payload(&encode_remote(&serde_json::json!({
                 "v": 1, "t": "ready", "session": "abc123", "tool": "claude", "clipboard": true
             }))),
             Some(SshRemoteMessage::Ready {
@@ -205,13 +206,13 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_ssh_bridge_osc_data(&encode_remote(&serde_json::json!({
+            parse_ssh_bridge_payload(&encode_remote(&serde_json::json!({
                 "v": 1, "t": "shell"
             }))),
             Some(SshRemoteMessage::Shell)
         );
         assert_eq!(
-            parse_ssh_bridge_osc_data(&encode_remote(&serde_json::json!({
+            parse_ssh_bridge_payload(&encode_remote(&serde_json::json!({
                 "v": 1, "t": "img.ack", "id": "tx-1", "next": 4096, "chunkSize": 16384
             }))),
             Some(SshRemoteMessage::ImgAck {
@@ -221,13 +222,13 @@ mod tests {
             })
         );
         assert!(
-            parse_ssh_bridge_osc_data(&encode_remote(&serde_json::json!({
+            parse_ssh_bridge_payload(&encode_remote(&serde_json::json!({
                 "v": 2, "t": "shell"
             })))
             .is_none()
         );
         assert!(
-            parse_ssh_bridge_osc_data(&encode_remote(&serde_json::json!({
+            parse_ssh_bridge_payload(&encode_remote(&serde_json::json!({
                 "v": 1, "t": "ready", "session": "bad space", "tool": "claude", "clipboard": true
             })))
             .is_none()

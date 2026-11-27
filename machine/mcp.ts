@@ -8,7 +8,7 @@ import { terminalService } from '../shared/terminalService'
 import { filesChanged } from './commands'
 import { parseSessionFile } from '../shared/sessionFiles'
 import { contentPath, publish } from './files'
-import { isStandaloneAgentTool } from '../shared/sshBridgeProtocol'
+import { isStandaloneAgentTool, SSH_BRIDGE_ENABLED } from '../shared/sshBridgeProtocol'
 import { socketAddress, type McpBinding } from './state'
 import { installation } from './installation'
 
@@ -185,12 +185,15 @@ const standaloneInstructions =
   'Use list_machines and list_sessions to inspect enrolled machines and Outpost sessions.'
 
 export async function serveMcp(bound: McpBinding | null) {
-  const available = !bound ? [] : bound.session ? tools : standaloneTools
+  const standaloneActive = Boolean(bound && !bound.session && SSH_BRIDGE_ENABLED)
+  const available = !bound ? [] : bound.session ? tools : standaloneActive ? standaloneTools : []
   const serverInstructions = !bound
     ? 'No Outpost session is attached. No tools are available.'
     : bound.session
       ? instructions
-      : standaloneInstructions
+      : standaloneActive
+        ? standaloneInstructions
+        : 'No Outpost session is attached. No tools are available.'
   let initialized = false
   const send = (message: object) => process.stdout.write(`${JSON.stringify(message)}\n`)
   for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {

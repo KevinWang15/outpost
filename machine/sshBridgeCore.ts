@@ -74,6 +74,7 @@ export function installSshHelpers() {
   if (!SSH_BRIDGE_ENABLED) {
     rmSync(sshShellLauncher(), { force: true })
     rmSync(sshBinDir(), { recursive: true, force: true })
+    rmSync(sshInitDir(), { recursive: true, force: true })
     return
   }
   mkdirSync(state.directory, { recursive: true, mode: 0o700 })
@@ -203,10 +204,11 @@ export function buildShellInitFiles(executable: string, binDir: string): Record<
   }
 }
 
-/** Receives chunked OSC 7770 image paste frames and executes the unified `pasteTerminalImage` pipeline. */
+/** Receives chunked SSH bridge image paste frames and executes the unified `pasteTerminalImage` pipeline. */
 export class SshImageReceiver {
   private images = new TerminalImages()
   private lifetime = new AbortController()
+  private activePaste?: { id: string; abort: AbortController }
   private active?: {
     id: string
     mime: string
@@ -228,6 +230,8 @@ export class SshImageReceiver {
 
   close() {
     this.lifetime.abort()
+    this.activePaste?.abort.abort()
+    this.activePaste = undefined
     this.images.close()
     this.active = undefined
   }
@@ -238,10 +242,16 @@ export class SshImageReceiver {
         this.active = undefined
         this.images.close()
       }
+      if (this.activePaste?.id === message.id) {
+        this.activePaste.abort.abort()
+        this.activePaste = undefined
+      }
       return
     }
     if (message.t === 'img.begin') {
       if (message.session !== this.sessionNonce) return
+      this.activePaste?.abort.abort()
+      this.activePaste = undefined
       this.images.close()
       this.active = {
         id: message.id,
@@ -270,9 +280,12 @@ export class SshImageReceiver {
         if (active.offset === active.size) {
           const { id, mode } = active
           this.active = undefined
+          const pasteAbort = new AbortController()
+          this.activePaste = { id, abort: pasteAbort }
+          const signal = AbortSignal.any([this.lifetime.signal, pasteAbort.signal])
           void this.images
             .paste(id, image =>
-              pasteTerminalImage(image, mode, this.lifetime.signal, {
+              pasteTerminalImage(image, mode, signal, {
                 exited: this.options.exited,
                 held: () => false,
                 clipboard: this.options.clipboard,
@@ -281,15 +294,21 @@ export class SshImageReceiver {
               }),
             )
             .then(
-              usedMode => this.send({ v: 1, t: 'img.done', id, ok: true, mode: usedMode }),
-              error =>
+              usedMode => {
+                if (this.activePaste?.id === id) this.activePaste = undefined
+                this.send({ v: 1, t: 'img.done', id, ok: true, mode: usedMode })
+              },
+              error => {
+                if (this.activePaste?.id === id) this.activePaste = undefined
+                if (pasteAbort.signal.aborted) return
                 this.send({
                   v: 1,
                   t: 'img.done',
                   id,
                   ok: false,
                   message: (error as Error).message || 'Image paste failed.',
-                }),
+                })
+              },
             )
         }
       } catch (error) {

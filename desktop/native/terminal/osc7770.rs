@@ -1,10 +1,10 @@
-use crate::ssh_bridge::{self, MAX_SSH_BRIDGE_OSC_BYTES, SshRemoteMessage};
+use crate::ssh_bridge::{self, MAX_SSH_BRIDGE_PAYLOAD_BYTES, SshRemoteMessage};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 
 const MAX_OPEN_SESSION_OSC_BYTES: usize = 4096;
-const MAX_OSC_7770_PAYLOAD_BYTES: usize = MAX_SSH_BRIDGE_OSC_BYTES;
-const MAX_OPEN_SESSION_SKIP_BYTES: usize = 128 * 1024;
+const MAX_OSC_7770_PAYLOAD_BYTES: usize = MAX_SSH_BRIDGE_PAYLOAD_BYTES;
+const MAX_OSC_7770_SKIP_BYTES: usize = 128 * 1024;
 const OSC_7770_HEADER: &[u8] = b"7770;";
 const OPEN_SESSION_PREFIX: &str = "outpost;open-session;";
 
@@ -136,7 +136,7 @@ impl Osc7770Scanner {
             if let Some(req) = parse_open_session_osc_data(text) {
                 found.push(Osc7770Event::OpenSession(req));
             } else if ssh_bridge::is_enabled()
-                && let Some(msg) = ssh_bridge::parse_ssh_bridge_osc_data(text)
+                && let Some(msg) = ssh_bridge::parse_ssh_bridge_payload(text)
             {
                 found.push(Osc7770Event::SshBridge(msg));
             }
@@ -216,7 +216,7 @@ impl Osc7770Scanner {
                     } else {
                         self.oversized = true;
                         self.skipped += 1;
-                        if self.skipped >= MAX_OPEN_SESSION_SKIP_BYTES {
+                        if self.skipped >= MAX_OSC_7770_SKIP_BYTES {
                             self.clear_payload();
                             self.state = Osc7770State::Ground;
                         }

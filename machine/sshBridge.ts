@@ -181,9 +181,7 @@ export async function runSshWrap(toolArg: string | undefined, userArgs: string[]
   const onStdin = (chunk: Buffer) => {
     const { passthrough, messages } = scanner.scan(chunk)
     if (passthrough.length) writePty(passthrough)
-    for (const msg of messages) {
-      if (msg.t === 'img.begin' || msg.t === 'img.data' || msg.t === 'img.cancel') receiver.handle(msg)
-    }
+    for (const msg of messages) receiver.handle(msg)
   }
 
   const onResize = () => {

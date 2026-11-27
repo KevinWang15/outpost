@@ -7,7 +7,7 @@ import { authorizeNode, validNodeSocket, watchInstallation, nodeLock, installati
 import { inspectSoftware, installTool } from './software'
 import { allSoftware } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
-import { isStandaloneAgentTool } from '../shared/sshBridgeProtocol'
+import { isStandaloneAgentTool, SSH_BRIDGE_ENABLED } from '../shared/sshBridgeProtocol'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, mkdirSync, renameSync, rmSync, statSync, watch } from 'node:fs'
 import { createServer, type Socket } from 'node:net'
@@ -414,7 +414,7 @@ export async function serveNode(socketName: string) {
         const session = request.session
         const validSession =
           session === null
-            ? isStandaloneAgentTool(request.tool)
+            ? SSH_BRIDGE_ENABLED && isStandaloneAgentTool(request.tool)
             : typeof session === 'string' && readRegistry().sessions.some(record => record.id === session)
         if (!validSession || typeof request.tool !== 'string')
           return answer({ ok: false, message: 'Reconnect this session in Outpost to use Outpost’s tools.' })

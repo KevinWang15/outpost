@@ -6,15 +6,6 @@ use super::protocol::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 
-#[derive(Clone, Debug)]
-struct ActiveSession {
-    nonce: String,
-    #[allow(dead_code)]
-    tool: String,
-    #[allow(dead_code)]
-    clipboard: bool,
-}
-
 struct ActiveTransfer {
     id: String,
     bytes: Vec<u8>,
@@ -36,7 +27,7 @@ pub struct SshBridgeActions {
 
 #[derive(Default)]
 pub struct SshBridgePane {
-    session: Option<ActiveSession>,
+    session_nonce: Option<String>,
     transfer: Option<ActiveTransfer>,
     serial: u64,
     timeout_serial: u64,
@@ -44,7 +35,7 @@ pub struct SshBridgePane {
 
 impl SshBridgePane {
     pub fn is_active(&self) -> bool {
-        self.session.is_some()
+        self.session_nonce.is_some()
     }
 
     pub fn has_transfer(&self) -> bool {
@@ -52,7 +43,7 @@ impl SshBridgePane {
     }
 
     pub fn clear(&mut self) {
-        self.session = None;
+        self.session_nonce = None;
         self.transfer = None;
     }
 
@@ -67,7 +58,7 @@ impl SshBridgePane {
         bytes: Vec<u8>,
         as_path: bool,
     ) -> Result<(u64, Vec<u8>), String> {
-        let Some(session) = &self.session else {
+        let Some(nonce) = &self.session_nonce else {
             return Err("No SSH coding session is active in this terminal.".into());
         };
         if self.transfer.is_some() {
@@ -78,7 +69,7 @@ impl SshBridgePane {
         let size = bytes.len();
         let frame = encode_ssh_bridge_input(&SshDesktopMessage::ImgBegin {
             v: 1,
-            session: &session.nonce,
+            session: nonce,
             id: &id,
             mime,
             size,
@@ -106,7 +97,7 @@ impl SshBridgePane {
         if waiting_for_handshake {
             // The wrapper did not acknowledge the handshake in time; clear stale session state
             // so future pastes do not send control frames into an exited shell.
-            self.session = None;
+            self.session_nonce = None;
             return Some((
                 None,
                 "The remote SSH session did not answer the image paste request.".into(),
@@ -125,21 +116,13 @@ impl SshBridgePane {
     pub fn handle_remote(&mut self, msg: SshRemoteMessage) -> SshBridgeActions {
         let mut actions = SshBridgeActions::default();
         match msg {
-            SshRemoteMessage::Ready {
-                session,
-                tool,
-                clipboard,
-            } => {
+            SshRemoteMessage::Ready { session, .. } => {
                 self.transfer = None;
-                self.session = Some(ActiveSession {
-                    nonce: session,
-                    tool,
-                    clipboard,
-                });
+                self.session_nonce = Some(session);
             }
             SshRemoteMessage::Bye { session } => {
-                if self.session.as_ref().is_some_and(|s| s.nonce == session) {
-                    self.session = None;
+                if self.session_nonce.as_deref() == Some(session.as_str()) {
+                    self.session_nonce = None;
                     if self.transfer.take().is_some() {
                         actions.error =
                             Some("The coding tool exited before the image paste finished.".into());
@@ -149,7 +132,7 @@ impl SshBridgePane {
             }
             SshRemoteMessage::Shell => {
                 // The remote shell prompt regained control (e.g. after SIGKILL on the wrapper).
-                if self.session.take().is_some() {
+                if self.session_nonce.take().is_some() {
                     if self.transfer.take().is_some() {
                         actions.error =
                             Some("The coding tool exited before the image paste finished.".into());
@@ -194,8 +177,7 @@ impl SshBridgePane {
                 } else {
                     std::time::Duration::from_secs(10)
                 };
-                self.timeout_serial = self.timeout_serial.wrapping_add(1);
-                let next_token = self.timeout_serial;
+                let next_token = self.next_timeout_token();
                 if let Some(transfer) = self.transfer.as_mut() {
                     transfer.timeout_token = next_token;
                 }

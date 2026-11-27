@@ -30,7 +30,7 @@ export const SSH_IMAGE_CHUNK_BYTES = 16 * 1024
 /** Max in-flight image chunks in the sliding window (4 * 16 KiB = 64 KiB). */
 export const SSH_IMAGE_WINDOW_CHUNKS = 4
 /** Max UTF-8 bytes of one SSH bridge payload (after `7770;` or `\uE077`). */
-export const MAX_SSH_BRIDGE_OSC_BYTES = 32 * 1024
+export const MAX_SSH_BRIDGE_PAYLOAD_BYTES = 32 * 1024
 
 const idPattern = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -94,7 +94,7 @@ function fromBase64Url(encoded: string): string | null {
 }
 
 /** Encode a Remote -> Desktop OSC 7770 frame. */
-export function encodeSshBridgeOsc(message: SshBridgeMessage, terminator: 'bel' | 'st' = 'bel'): string {
+export function encodeSshBridgeOsc(message: SshRemoteMessage, terminator: 'bel' | 'st' = 'bel'): string {
   const encoded = toBase64Url(JSON.stringify(message))
   const end = terminator === 'st' ? '\x1b\\' : '\x07'
   return `\x1b]${SSH_BRIDGE_OSC};${SSH_BRIDGE_PREFIX}${encoded}${end}`
@@ -114,8 +114,8 @@ function validNonNegInt(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
-export function parseSshBridgeOscData(data: string): SshBridgeMessage | null {
-  if (data.length > MAX_SSH_BRIDGE_OSC_BYTES || !data.startsWith(SSH_BRIDGE_PREFIX)) return null
+export function parseSshBridgePayload(data: string): SshBridgeMessage | null {
+  if (data.length > MAX_SSH_BRIDGE_PAYLOAD_BYTES || !data.startsWith(SSH_BRIDGE_PREFIX)) return null
   const decoded = fromBase64Url(data.slice(SSH_BRIDGE_PREFIX.length))
   if (!decoded) return null
   let parsed: unknown
@@ -191,6 +191,12 @@ export function parseSshBridgeOscData(data: string): SshBridgeMessage | null {
   }
 }
 
+export function parseSshDesktopPayload(data: string): SshDesktopMessage | null {
+  const parsed = parseSshBridgePayload(data)
+  if (!parsed) return null
+  return parsed.t === 'img.begin' || parsed.t === 'img.data' || parsed.t === 'img.cancel' ? parsed : null
+}
+
 const INPUT_HEADER = encoder.encode(`${SSH_BRIDGE_INPUT_START}${SSH_BRIDGE_PREFIX}`)
 const INPUT_END = encoder.encode(SSH_BRIDGE_INPUT_END) // [0xee, 0x81, 0xb8]
 const MAX_SKIP_BYTES = 128 * 1024
@@ -214,11 +220,11 @@ export class SshBridgeInputScanner {
     this.skipped = 0
   }
 
-  private finishPayload(messages: SshBridgeMessage[]) {
+  private finishPayload(messages: SshDesktopMessage[]) {
     if (!this.oversized) {
       try {
         const text = SSH_BRIDGE_PREFIX + decoder.decode(new Uint8Array(this.payload))
-        const parsed = parseSshBridgeOscData(text)
+        const parsed = parseSshDesktopPayload(text)
         if (parsed) messages.push(parsed)
       } catch {
         /* Invalid UTF-8 payload ignored. */
@@ -227,12 +233,12 @@ export class SshBridgeInputScanner {
     this.clearPayload()
   }
 
-  scan(bytes: Uint8Array): { passthrough: Uint8Array; messages: SshBridgeMessage[] } {
+  scan(bytes: Uint8Array): { passthrough: Uint8Array; messages: SshDesktopMessage[] } {
     if (this.state === 'ground' && !bytes.includes(INPUT_HEADER[0])) {
       return { passthrough: bytes, messages: [] }
     }
     const out: number[] = []
-    const messages: SshBridgeMessage[] = []
+    const messages: SshDesktopMessage[] = []
     for (let i = 0; i < bytes.length; i++) {
       const b = bytes[i]
       switch (this.state) {
@@ -273,7 +279,7 @@ export class SshBridgeInputScanner {
             this.clearPayload()
             out.push(b)
             this.state = 'ground'
-          } else if (!this.oversized && this.payload.length < MAX_SSH_BRIDGE_OSC_BYTES) {
+          } else if (!this.oversized && this.payload.length < MAX_SSH_BRIDGE_PAYLOAD_BYTES) {
             this.payload.push(b)
           } else {
             this.oversized = true

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { LoaderCircle, MessagesSquare, Plus, RefreshCw, Search, SquareTerminal } from 'lucide-react'
 import { compareSessionsByRecency, type Session } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
+import { Link } from '../ui/Link'
 import { ToolIcon } from '../ui/ToolIcon'
 import ActivityBadge from './ActivityBadge'
 import { placeLabel, relativeTime } from './labels'
@@ -150,10 +151,10 @@ export default function SessionTable({
                 </span>
                 <div className="row-actions" role="cell">
                   {main.kind === 'chat' ? (
-                    <a className="button small" href={main.href}>
+                    <Link className="button small" href={main.href}>
                       <MessagesSquare size={14} />
                       Open in chat
-                    </a>
+                    </Link>
                   ) : (
                     <button className="button primary small" onClick={main.connect}>
                       Connect

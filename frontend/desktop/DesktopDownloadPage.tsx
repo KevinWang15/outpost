@@ -1,5 +1,6 @@
 import { desktopEntryUrl } from '../../shared/desktopAuth'
 import { pagePaths } from '../../shared/pages'
+import { Link } from '../ui/Link'
 
 const desktopReleases = 'https://github.com/KevinWang15/outpost/releases'
 
@@ -41,7 +42,7 @@ export default function DesktopDownloadPage() {
         Sign in through your browser and approve app access for 30 days. Connect several servers in the app and search
         all their sessions. The app never handles your password.
       </p>
-      <a href={pagePaths.workspace}>Back to machines</a>
+      <Link href={pagePaths.workspace}>Back to machines</Link>
     </main>
   )
 }

@@ -12,6 +12,7 @@ import { harnesses, harnessLabel } from '../../shared/harnesses'
 import { pagePaths } from '../../shared/pages'
 import type { SessionRef } from '../../shared/chatApi'
 import type { SessionCreationOptions } from '../../shared/sessionCreation'
+import { Link } from '../ui/Link'
 import ConversationsDialog from '../workspace/ConversationsDialog'
 import FinderDialog from '../workspace/FinderDialog'
 import ForkDialog from '../workspace/ForkDialog'
@@ -287,5 +288,5 @@ export function MachineLink({ targetId, children }: { targetId?: string; childre
   const href = targetId
     ? `${pagePaths.workspace}?target=${encodeURIComponent(targetId)}`
     : `${pagePaths.workspace}?add=1`
-  return <a href={href}>{children}</a>
+  return <Link href={href}>{children}</Link>
 }

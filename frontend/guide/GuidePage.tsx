@@ -2,15 +2,7 @@
 // Cmd/Ctrl+K search palette across articles & headings, match highlighting on jump,
 // collapsible section tree, breadcrumbs, Copy Markdown, zoomable image lightbox,
 // expandable tables, syntax-highlighted code blocks, and HTML/SVG previews.
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type MouseEvent as ReactMouseEvent,
-  type ReactNode,
-} from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -22,7 +14,9 @@ import {
   Search,
 } from 'lucide-react'
 import { copyText } from '../browser'
-import { AppSidebar } from '../ui/AppSidebar'
+import { isPlainLeftClick, navigate as routerNavigate, replaceUrl, useLocation } from '../router'
+import { SidebarBody } from '../ui/AppSidebar'
+import { Link } from '../ui/Link'
 import { Markdown } from '../ui/Markdown'
 import { dismissSearchHighlight, highlightSearchMatchInScopes, scrollToAnchorWithHighlight } from './anchors'
 import {
@@ -44,8 +38,31 @@ interface PendingHighlight {
   term: string | null
 }
 
-function initialSlug(): string {
-  const fromPath = slugFromPathname(window.location.pathname)
+const knownSlugs = new Set(guideCatalog.pages.map(page => page.slug))
+
+const renderGuideImage = (src: string, alt: string, key: number, block: boolean): ReactNode => {
+  const resolved = resolveGuideImage(src, guideImages)
+  if (!resolved) return null
+  if (!block) return <img key={key} className="guide-inline-image" src={resolved} alt={alt} loading="lazy" />
+  return <ImageLightbox key={key} src={resolved} alt={alt} />
+}
+
+const renderGuideTable = (table: ReactNode, key: number): ReactNode => (
+  <ExpandableTable key={key}>{table}</ExpandableTable>
+)
+
+const renderGuideCodeBlock = (code: string, language: string, key: number): ReactNode => (
+  <GuideCodeFence key={key} code={code} language={language} />
+)
+
+const renderGuideBlockquote = (
+  quotedLines: string[],
+  renderNested: (markdown: string) => ReactNode[],
+  key: number,
+): ReactNode => <GuideBlockquote key={key} quotedLines={quotedLines} renderNested={renderNested} />
+
+function slugForPathname(pathname: string): string {
+  const fromPath = slugFromPathname(pathname)
   if (fromPath && guideCatalog.bySlug.has(fromPath)) return fromPath
   return guideCatalog.pages[0]?.slug ?? ''
 }
@@ -56,12 +73,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"))
 }
 
-function isPlainLeftClick(event: ReactMouseEvent): boolean {
-  return !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)
-}
-
 export default function GuidePage() {
-  const [slug, setSlug] = useState<string>(initialSlug)
+  const location = useLocation()
+  const slug = slugForPathname(location.pathname)
   const [activeHeading, setActiveHeading] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
@@ -72,7 +86,6 @@ export default function GuidePage() {
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const copyTimerRef = useRef<number | null>(null)
 
-  const knownSlugs = useMemo(() => new Set(guideCatalog.pages.map(page => page.slug)), [])
   const current = guideCatalog.bySlug.get(slug) ?? guideCatalog.pages[0]
   const currentIndex = guideCatalog.pages.findIndex(page => page.slug === current?.slug)
   const previousPage = currentIndex > 0 ? guideCatalog.pages[currentIndex - 1] : null
@@ -82,46 +95,42 @@ export default function GuidePage() {
   const isMac = typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform)
   const shortcutLabel = isMac ? '⌘K' : 'Ctrl+K'
 
-  const navigate = useCallback((nextSlug: string, hash?: string, matchedTerm: string | null = null) => {
-    const targetPage = guideCatalog.bySlug.get(nextSlug)
-    if (!targetPage) return
-    dismissSearchHighlight()
-    setSlug(nextSlug)
-    setCollapsedSections(prev => (prev[targetPage.section] ? { ...prev, [targetPage.section]: false } : prev))
-    const url = guideHref(nextSlug, hash)
-    if (window.location.pathname + window.location.hash !== url) {
-      window.history.pushState(null, '', url)
-    }
-    if (hash || matchedTerm) {
-      pendingHighlightRef.current = { slug: nextSlug, hash, term: matchedTerm }
-      setHighlightNonce(n => n + 1)
-    } else {
-      pendingHighlightRef.current = null
-      requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }))
-    }
-  }, [])
+  const navigateGuide = useCallback(
+    (nextSlug: string, hash?: string, matchedTerm: string | null = null) => {
+      const targetPage = guideCatalog.bySlug.get(nextSlug)
+      if (!targetPage) return
+      dismissSearchHighlight()
+      setCollapsedSections(prev => (prev[targetPage.section] ? { ...prev, [targetPage.section]: false } : prev))
+      const url = guideHref(nextSlug, hash)
+      if (hash || matchedTerm) {
+        pendingHighlightRef.current = { slug: nextSlug, hash, term: matchedTerm }
+        setHighlightNonce(n => n + 1)
+      } else {
+        pendingHighlightRef.current = null
+        requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }))
+      }
+      routerNavigate(url, { transition: false })
+    },
+    [setCollapsedSections, setHighlightNonce],
+  )
 
   const jumpAnchor = useCallback(
     (hash: string) => {
       if (!current) return
-      pendingHighlightRef.current = null
-      const url = guideHref(current.slug, hash)
-      window.history.replaceState(null, '', url)
+      pendingHighlightRef.current = { slug: current.slug, hash, term: null }
       setActiveHeading(hash)
-      scrollToAnchorWithHighlight(hash)
+      setHighlightNonce(n => n + 1)
+      replaceUrl(guideHref(current.slug, hash))
     },
-    [current],
+    [current, setActiveHeading, setHighlightNonce],
   )
 
-  const handleSearchSelect = useCallback(
-    (hit: GuidePaletteHit) => {
-      setSearchOpen(false)
-      navigate(hit.item.slug, hit.item.hash, hit.matchedTerm)
-    },
-    [navigate],
-  )
+  function handleSearchSelect(hit: GuidePaletteHit) {
+    setSearchOpen(false)
+    navigateGuide(hit.item.slug, hit.item.hash, hit.matchedTerm)
+  }
 
-  const handleCopyMarkdown = useCallback(() => {
+  function handleCopyMarkdown() {
     if (!current) return
     void copyText(current.body)
       .then(() => {
@@ -133,7 +142,7 @@ export default function GuidePage() {
         }, 1600)
       })
       .catch(() => {})
-  }, [current])
+  }
 
   useEffect(
     () => () => {
@@ -155,7 +164,7 @@ export default function GuidePage() {
             onClick={event => {
               if (!isPlainLeftClick(event)) return
               event.preventDefault()
-              navigate(resolved.slug, resolved.hash)
+              navigateGuide(resolved.slug, resolved.hash)
             }}
           >
             {children}
@@ -179,9 +188,9 @@ export default function GuidePage() {
       }
       if (resolved.kind === 'app') {
         return (
-          <a key={key} href={resolved.href}>
+          <Link key={key} href={resolved.href}>
             {children}
-          </a>
+          </Link>
         )
       }
       return (
@@ -190,29 +199,7 @@ export default function GuidePage() {
         </a>
       )
     },
-    [knownSlugs, navigate, jumpAnchor],
-  )
-
-  const renderGuideImage = useCallback((src: string, alt: string, key: number, block: boolean) => {
-    const resolved = resolveGuideImage(src, guideImages)
-    if (!resolved) return null
-    if (!block) return <img key={key} className="guide-inline-image" src={resolved} alt={alt} loading="lazy" />
-    return <ImageLightbox key={key} src={resolved} alt={alt} />
-  }, [])
-
-  const renderGuideTable = useCallback((table: ReactNode, key: number) => {
-    return <ExpandableTable key={key}>{table}</ExpandableTable>
-  }, [])
-
-  const renderGuideCodeBlock = useCallback((code: string, language: string, key: number) => {
-    return <GuideCodeFence key={key} code={code} language={language} />
-  }, [])
-
-  const renderGuideBlockquote = useCallback(
-    (quotedLines: string[], renderNested: (markdown: string) => ReactNode[], key: number) => {
-      return <GuideBlockquote key={key} quotedLines={quotedLines} renderNested={renderNested} />
-    },
-    [],
+    [navigateGuide, jumpAnchor],
   )
 
   const createHeadingRenderer = useCallback(() => {
@@ -243,7 +230,7 @@ export default function GuidePage() {
     }
   }, [jumpAnchor])
 
-  // Sync document title, consume one-shot search highlights, or scroll to an initial URL hash.
+  // Sync document title, consume one-shot search highlights, or scroll to a URL hash / top.
   useEffect(() => {
     if (!current) return
     document.title = `${current.title} · User Guide · Outpost`
@@ -259,28 +246,15 @@ export default function GuidePage() {
       })
       return () => cancelAnimationFrame(frame)
     }
-    const initialHash = window.location.hash.replace(/^#/, '')
-    if (initialHash) {
-      const frame = requestAnimationFrame(() => scrollToAnchorWithHighlight(initialHash))
-      return () => cancelAnimationFrame(frame)
-    }
-  }, [current, highlightNonce])
-
-  // Browser Back / Forward sync.
-  useEffect(() => {
-    const onPopState = () => {
-      pendingHighlightRef.current = null
-      dismissSearchHighlight()
-      setSlug(initialSlug())
-      const hash = window.location.hash.replace(/^#/, '')
-      requestAnimationFrame(() => {
-        if (hash) scrollToAnchorWithHighlight(hash)
-        else window.scrollTo({ top: 0, behavior: 'auto' })
-      })
-    }
-    window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
-  }, [])
+    pendingHighlightRef.current = null
+    dismissSearchHighlight()
+    const hash = location.hash.replace(/^#/, '')
+    const frame = requestAnimationFrame(() => {
+      if (hash) scrollToAnchorWithHighlight(hash)
+      else window.scrollTo({ top: 0, behavior: 'auto' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [current, location.hash, highlightNonce])
 
   // Press Cmd/Ctrl+K (toggles even while palette input is focused) or `/` to open search palette.
   useEffect(() => {
@@ -328,19 +302,19 @@ export default function GuidePage() {
 
   if (!current) {
     return (
-      <div className="app guide-app">
-        <AppSidebar page="guide">
+      <>
+        <SidebarBody>
           <div className="sidebar-heading">
             <span>User guide</span>
           </div>
-        </AppSidebar>
+        </SidebarBody>
         <main className="content">
           <div className="empty page-empty">
             <BookOpen size={24} />
             <p>No guide pages found.</p>
           </div>
         </main>
-      </div>
+      </>
     )
   }
 
@@ -350,8 +324,8 @@ export default function GuidePage() {
     : (current.headings[0]?.id ?? '')
 
   return (
-    <div className="app guide-app">
-      <AppSidebar page="guide">
+    <>
+      <SidebarBody>
         <button
           type="button"
           className="guide-search-trigger"
@@ -399,7 +373,7 @@ export default function GuidePage() {
                           onClick={event => {
                             if (!isPlainLeftClick(event)) return
                             event.preventDefault()
-                            navigate(page.slug)
+                            navigateGuide(page.slug)
                           }}
                         >
                           <span>
@@ -414,7 +388,7 @@ export default function GuidePage() {
             )
           })}
         </div>
-      </AppSidebar>
+      </SidebarBody>
 
       <main className="content guide-content">
         <div className="guide-shell">
@@ -435,7 +409,7 @@ export default function GuidePage() {
                           onClick={event => {
                             if (!isPlainLeftClick(event)) return
                             event.preventDefault()
-                            navigate(crumb.slug!)
+                            navigateGuide(crumb.slug!)
                           }}
                         >
                           {crumb.title}
@@ -491,7 +465,7 @@ export default function GuidePage() {
                     onClick={event => {
                       if (!isPlainLeftClick(event)) return
                       event.preventDefault()
-                      navigate(previousPage.slug)
+                      navigateGuide(previousPage.slug)
                     }}
                   >
                     <span className="guide-pager-label">
@@ -509,7 +483,7 @@ export default function GuidePage() {
                     onClick={event => {
                       if (!isPlainLeftClick(event)) return
                       event.preventDefault()
-                      navigate(nextPage.slug)
+                      navigateGuide(nextPage.slug)
                     }}
                   >
                     <span className="guide-pager-label">
@@ -552,6 +526,6 @@ export default function GuidePage() {
         onClose={() => setSearchOpen(false)}
         onSelect={handleSearchSelect}
       />
-    </div>
+    </>
   )
 }

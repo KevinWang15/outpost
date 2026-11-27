@@ -14,6 +14,7 @@ import {
 import { harnesses, harnessLabel, supportsTerminal } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import { api } from '../api'
+import { navigate } from '../router'
 import ConnectDialog from '../connect/ConnectDialog'
 import { useConnect } from '../connect/useConnect'
 import { Confirm } from '../ui/Dialog'
@@ -96,7 +97,7 @@ export default function TargetView({
   const sessionPath = (session: Session) => `/targets/${target.id}/sessions/${session.id}`
 
   const inChat = (session: Session, extra?: { start?: boolean; schedule?: boolean }) =>
-    window.location.assign(chatHref(target.id, session.id, extra))
+    navigate(chatHref(target.id, session.id, extra))
 
   /** Prefer Chat for ACP-driven sessions and tools without a native CLI. */
   const opensInChat = (session: Session) => session.driver === 'chat' || !supportsTerminal(session.tool)

@@ -4,6 +4,7 @@ import { LoaderCircle } from 'lucide-react'
 import type { TerminalTicket } from '../../shared/protocol'
 import { api } from '../api'
 import { standaloneBrowser } from '../browser'
+import { Link } from '../ui/Link'
 import TerminalView from './TerminalView'
 
 export default function TerminalPage() {
@@ -83,7 +84,7 @@ export default function TerminalPage() {
           <LoaderCircle className="spin" size={18} /> Opening terminal…
         </p>
       )}
-      <a href={pagePaths.workspace}>Back to machines</a>
+      <Link href={pagePaths.workspace}>Back to machines</Link>
     </main>
   )
 }

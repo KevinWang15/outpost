@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Session } from '../../shared/model'
 import { api } from '../api'
+import { useAuth } from '../auth/useAuth'
+import { deleteCachedSessions, getCachedSessions, setCachedSessions } from './cache'
 
-/** Live sessions for one target. Sessions are always read from the target;
- * a failed read shows the error rather than an old list. */
+/** Live sessions for one target. Seeds from account cache for instant return visits,
+ * revalidates immediately, and clears the cached list on error rather than showing stale data. */
 export function useSessions(targetId: string, enabled = true) {
-  const [sessions, setSessions] = useState<Session[] | null>(null)
+  const { user } = useAuth()
+  const accountKey = user?.id ?? 'local'
+  const cached = enabled ? getCachedSessions(accountKey, targetId) : null
+  const [sessions, setSessions] = useState<Session[] | null>(cached)
   const [error, setError] = useState('')
-  const [refreshing, setRefreshing] = useState(true)
+  const [refreshing, setRefreshing] = useState(!cached)
   const request = useRef<AbortController | null>(null)
   const refresh = useCallback(
     async (quiet = false) => {
@@ -26,11 +31,13 @@ export function useSessions(targetId: string, enabled = true) {
           controller.signal,
         )
         if (!controller.signal.aborted) {
+          setCachedSessions(accountKey, targetId, result.sessions)
           setSessions(result.sessions)
           setError('')
         }
       } catch (problem) {
         if (!controller.signal.aborted) {
+          deleteCachedSessions(accountKey, targetId)
           setSessions([])
           setError((problem as Error).message)
         }
@@ -41,10 +48,10 @@ export function useSessions(targetId: string, enabled = true) {
         }
       }
     },
-    [targetId, enabled],
+    [accountKey, targetId, enabled],
   )
   useEffect(() => {
-    const initial = setTimeout(() => void refresh(), 0)
+    const initial = setTimeout(() => void refresh(Boolean(getCachedSessions(accountKey, targetId))), 0)
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void refresh(true)
     }, 10_000)
@@ -54,6 +61,6 @@ export function useSessions(targetId: string, enabled = true) {
       request.current?.abort()
       request.current = null
     }
-  }, [refresh])
+  }, [accountKey, targetId, refresh])
   return { sessions, error, refreshing, refresh }
 }

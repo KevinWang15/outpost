@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { LoaderCircle, Plus, Webhook as WebhookIcon } from 'lucide-react'
 import type { LogKind, LogView, Webhook } from '../../shared/logs'
 import { api } from '../api'
-import { AppSidebar } from '../ui/AppSidebar'
+import { useAuth } from '../auth/useAuth'
+import { SidebarBody } from '../ui/AppSidebar'
+import { getCachedLogs, setCachedLogs } from '../workspace/cache'
 import WebhookDialog from './WebhookDialog'
 import '../styles/logs.scss'
 
@@ -19,8 +21,11 @@ const views: { id: string; label: string; criteria: object }[] = [
 
 /** The account's activity log, in the log viewer, and its webhooks. */
 export default function LogsPage() {
-  const [view, setView] = useState<LogView | null>(null)
-  const [webhooks, setWebhooks] = useState<Webhook[] | null>(null)
+  const { user } = useAuth()
+  const accountKey = user?.id ?? 'local'
+  const cached = getCachedLogs(accountKey)
+  const [view, setView] = useState<LogView | null>(cached?.view ?? null)
+  const [webhooks, setWebhooks] = useState<Webhook[] | null>(cached?.webhooks ?? null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState('all')
   const [ready, setReady] = useState(false)
@@ -35,13 +40,14 @@ export default function LogsPage() {
       api<Webhook[]>('/webhooks', 'GET', undefined, controller.signal),
     ]).then(
       ([logView, list]) => {
+        setCachedLogs(accountKey, { view: logView, webhooks: list })
         setView(logView)
         setWebhooks(list)
       },
       problem => !controller.signal.aborted && setError((problem as Error).message),
     )
     return () => controller.abort()
-  }, [])
+  }, [accountKey])
 
   // The embedded viewer says when it is ready; filters are posted to it after that.
   useEffect(() => {
@@ -67,8 +73,8 @@ export default function LogsPage() {
     })}`
 
   return (
-    <div className="app logs-app">
-      <AppSidebar page="logs">
+    <>
+      <SidebarBody>
         <div className="sidebar-heading">
           <span>Show</span>
         </div>
@@ -119,7 +125,7 @@ export default function LogsPage() {
             <p className="hint-row muted">Send log events to another service as they happen.</p>
           )}
         </nav>
-      </AppSidebar>
+      </SidebarBody>
       <main className="content logs-content">
         <header className="page-header">
           <div className="page-title">
@@ -148,18 +154,23 @@ export default function LogsPage() {
           onSaved={saved => {
             setWebhooks(list => {
               const rest = (list ?? []).filter(item => item.id !== saved.id)
-              return editing === 'new'
-                ? [...rest, saved]
-                : (list ?? []).map(item => (item.id === saved.id ? saved : item))
+              const next =
+                editing === 'new' ? [...rest, saved] : (list ?? []).map(item => (item.id === saved.id ? saved : item))
+              if (view) setCachedLogs(accountKey, { view, webhooks: next })
+              return next
             })
             setEditing(null)
           }}
           onDeleted={id => {
-            setWebhooks(list => (list ?? []).filter(item => item.id !== id))
+            setWebhooks(list => {
+              const next = (list ?? []).filter(item => item.id !== id)
+              if (view) setCachedLogs(accountKey, { view, webhooks: next })
+              return next
+            })
             setEditing(null)
           }}
         />
       )}
-    </div>
+    </>
   )
 }

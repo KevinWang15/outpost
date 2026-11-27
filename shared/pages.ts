@@ -13,3 +13,13 @@ export const pagePaths = {
   forgotPassword: '/forgot-password',
   resetPassword: '/reset-password',
 } as const
+
+export const isGuidePath = (pathname: string) =>
+  pathname === pagePaths.guide || pathname.startsWith(`${pagePaths.guide}/`)
+
+export const isProtectedWorkspacePath = (pathname: string) =>
+  pathname === pagePaths.workspace ||
+  pathname === pagePaths.chat ||
+  pathname === pagePaths.terminal ||
+  pathname === pagePaths.logs ||
+  isGuidePath(pathname)

@@ -1788,6 +1788,33 @@ textarea.code,
   min-height: 100dvh;
   color: var(--muted);
 }
+.route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: left center;
+  animation: route-progress 1.2s ease-out 150ms forwards;
+}
+@keyframes route-progress {
+  0% {
+    opacity: 0.9;
+    transform: scaleX(0.08);
+  }
+  70% {
+    opacity: 0.9;
+    transform: scaleX(0.78);
+  }
+  100% {
+    opacity: 0.9;
+    transform: scaleX(0.92);
+  }
+}
 .auth-shell {
   display: grid;
   grid-template-columns: minmax(340px, 1fr) minmax(380px, 1fr);

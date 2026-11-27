@@ -14,7 +14,7 @@ import { describeCron } from '../../shared/cron'
 import { sessionKey, type ChannelView, type ChatSession } from '../../shared/chatApi'
 import { compareSessionsByRecency } from '../../shared/model'
 import { isMac } from '../browser'
-import { AppSidebar } from '../ui/AppSidebar'
+import { SidebarBody } from '../ui/AppSidebar'
 import { placeLabel } from '../workspace/labels'
 import { Avatar } from './Avatar'
 import { useChat, type Selection } from './context'
@@ -118,7 +118,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
     .filter(group => group.sessions.length || !filter)
   const schedules = [...client.schedules.values()]
   return (
-    <AppSidebar page="chat">
+    <SidebarBody>
       <label className="chat-search">
         <Search size={14} aria-hidden="true" />
         <input
@@ -265,6 +265,6 @@ export default function Sidebar({ selection }: { selection: Selection }) {
           </button>
         )}
       </div>
-    </AppSidebar>
+    </SidebarBody>
   )
 }

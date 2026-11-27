@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MessagesSquare, Plus } from 'lucide-react'
 import { sessionKey } from '../../shared/chatApi'
+import { navigate, replaceUrl, useLocation } from '../router'
 import ChannelView from './ChannelView'
 import { ChatClient } from './client'
 import { ChatClientContext, ShellContext, useChat, type ChatDialog, type Selection } from './context'
@@ -21,8 +22,8 @@ import SessionView from './SessionView'
 import Sidebar from './Sidebar'
 import '../styles/chat.scss'
 
-function selectionFromUrl(): Selection {
-  const query = new URLSearchParams(window.location.search)
+function selectionFromSearch(search: string): Selection {
+  const query = new URLSearchParams(search)
   const channel = query.get('channel')
   if (channel) return { kind: 'channel', channelId: channel }
   const target = query.get('target'),
@@ -77,7 +78,8 @@ function Welcome() {
 
 function Shell() {
   const { client } = useChat()
-  const [selection, setSelection] = useState<Selection>(selectionFromUrl)
+  const { search } = useLocation()
+  const selection = useMemo(() => selectionFromSearch(search), [search])
   const [dialog, setDialog] = useState<ChatDialog | null>(null)
   const intent = useRef(intentFromUrl())
   const loaded = client.sessionsLoaded
@@ -87,13 +89,8 @@ function Shell() {
     intent.current = { start: false, schedule: false }
     if (wanted.start) client.restart(selection)
     if (wanted.schedule) setDialog({ kind: 'schedule', scheduleId: null, session: selection })
-    window.history.replaceState(null, '', selectionUrl(selection))
+    replaceUrl(selectionUrl(selection))
   }, [client, selection, loaded])
-  useEffect(() => {
-    const restore = () => setSelection(selectionFromUrl())
-    window.addEventListener('popstate', restore)
-    return () => window.removeEventListener('popstate', restore)
-  }, [])
   // The tab title counts what needs attention.
   const attention =
     client.sessions.filter(needsYou).length +
@@ -107,54 +104,43 @@ function Shell() {
   return (
     <ShellContext.Provider
       value={{
-        select: next => {
-          setSelection(next)
-          window.history.pushState(null, '', selectionUrl(next))
-        },
+        select: next => navigate(selectionUrl(next), { transition: false }),
         open: setDialog,
       }}
     >
-      <div className={`chat-app ${selection ? 'has-selection' : ''}`}>
-        <Sidebar selection={selection} />
-        <main className="chat-main">
-          {selection?.kind === 'session' ? (
-            <SessionView
-              key={sessionKey(selection)}
-              target={selection}
-              onBack={() => {
-                setSelection(null)
-                window.history.pushState(null, '', selectionUrl(null))
-              }}
-            />
-          ) : selection?.kind === 'channel' ? (
-            <ChannelView
-              key={selection.channelId}
-              channelId={selection.channelId}
-              onBack={() => {
-                setSelection(null)
-                window.history.pushState(null, '', selectionUrl(null))
-              }}
-            />
-          ) : (
-            <Welcome />
-          )}
-        </main>
-        {dialog?.kind === 'session' && (
-          <NewSessionDialog machine={dialog.targetId} conversation={dialog.conversation} onClose={close} />
+      <Sidebar selection={selection} />
+      <main className="chat-main">
+        {selection?.kind === 'session' ? (
+          <SessionView
+            key={sessionKey(selection)}
+            target={selection}
+            onBack={() => navigate(selectionUrl(null), { transition: false })}
+          />
+        ) : selection?.kind === 'channel' ? (
+          <ChannelView
+            key={selection.channelId}
+            channelId={selection.channelId}
+            onBack={() => navigate(selectionUrl(null), { transition: false })}
+          />
+        ) : (
+          <Welcome />
         )}
-        {dialog?.kind === 'find' && <FindChatDialog query={dialog.query} onClose={close} />}
-        {dialog?.kind === 'fork' && <ForkChatDialog target={dialog} onClose={close} />}
-        {dialog?.kind === 'stop' && <StopChatDialog target={dialog} onClose={close} />}
-        {dialog?.kind === 'delete' && <DeleteChatDialog target={dialog} onClose={close} />}
-        {dialog?.kind === 'channel' && (
-          <ChannelDialog membersOnly={dialog.membersOnly} channelId={dialog.channelId} onClose={close} />
-        )}
-        {dialog?.kind === 'schedule' && (
-          <ScheduleDialog scheduleId={dialog.scheduleId} session={dialog.session} onClose={close} />
-        )}
-        {dialog?.kind === 'settings' && <SessionSettingsChatDialog target={dialog} onClose={close} />}
-        {dialog?.kind === 'conversations' && <ConversationsChatDialog target={dialog} onClose={close} />}
-      </div>
+      </main>
+      {dialog?.kind === 'session' && (
+        <NewSessionDialog machine={dialog.targetId} conversation={dialog.conversation} onClose={close} />
+      )}
+      {dialog?.kind === 'find' && <FindChatDialog query={dialog.query} onClose={close} />}
+      {dialog?.kind === 'fork' && <ForkChatDialog target={dialog} onClose={close} />}
+      {dialog?.kind === 'stop' && <StopChatDialog target={dialog} onClose={close} />}
+      {dialog?.kind === 'delete' && <DeleteChatDialog target={dialog} onClose={close} />}
+      {dialog?.kind === 'channel' && (
+        <ChannelDialog membersOnly={dialog.membersOnly} channelId={dialog.channelId} onClose={close} />
+      )}
+      {dialog?.kind === 'schedule' && (
+        <ScheduleDialog scheduleId={dialog.scheduleId} session={dialog.session} onClose={close} />
+      )}
+      {dialog?.kind === 'settings' && <SessionSettingsChatDialog target={dialog} onClose={close} />}
+      {dialog?.kind === 'conversations' && <ConversationsChatDialog target={dialog} onClose={close} />}
     </ShellContext.Provider>
   )
 }

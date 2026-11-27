@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Installation, SoftwareId, SoftwareReport } from '../../shared/model'
 import { api } from '../api'
+import { useAuth } from '../auth/useAuth'
+import { getCachedSoftware, setCachedSoftware } from './cache'
 
 export function useSoftware(targetId: string, enabled = true) {
-  const [report, setReport] = useState<SoftwareReport | null>(null)
+  const { user } = useAuth()
+  const accountKey = user?.id ?? 'local'
+  const cached = enabled ? getCachedSoftware(accountKey, targetId) : null
+  const [report, setReport] = useState<SoftwareReport | null>(cached)
   const [job, setJob] = useState<Installation | null>(null)
-  const [checking, setChecking] = useState(true)
+  const [checking, setChecking] = useState(!cached)
   const [error, setError] = useState('')
   const pending = useRef<AbortController | null>(null)
   const base = '/targets/' + targetId
@@ -14,7 +19,7 @@ export function useSoftware(targetId: string, enabled = true) {
     pending.current?.abort()
     const controller = new AbortController()
     pending.current = controller
-    setChecking(true)
+    if (!getCachedSoftware(accountKey, targetId)) setChecking(true)
     setError('')
     try {
       const { installation } = await api<{ installation: Installation | null }>(
@@ -27,13 +32,16 @@ export function useSoftware(targetId: string, enabled = true) {
       setJob(installation)
       if (installation?.status === 'running') return
       const result = await api<SoftwareReport>(base + '/software', 'GET', undefined, controller.signal)
-      if (!controller.signal.aborted) setReport(result)
+      if (!controller.signal.aborted) {
+        setCachedSoftware(accountKey, targetId, result)
+        setReport(result)
+      }
     } catch (problem) {
       if (!controller.signal.aborted) setError((problem as Error).message)
     } finally {
       if (!controller.signal.aborted) setChecking(false)
     }
-  }, [base, enabled])
+  }, [accountKey, base, enabled, targetId])
   useEffect(() => {
     const timer = setTimeout(() => void refresh(), 0)
     return () => {

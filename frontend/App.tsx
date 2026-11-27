@@ -2,11 +2,14 @@ import { useEffect, useReducer, useState } from 'react'
 import { LoaderCircle, Monitor, Plus, Server } from 'lucide-react'
 import type { ConversationResults, ConversationSearch, Target, TargetInput } from '../shared/model'
 import { api } from './api'
-import { AppSidebar } from './ui/AppSidebar'
+import { useAuth } from './auth/useAuth'
+import { replaceUrl } from './router'
+import { SidebarBody } from './ui/AppSidebar'
+import { getCachedTargets, setCachedTargets } from './workspace/cache'
 import FinderDialog from './workspace/FinderDialog'
+import { address } from './workspace/labels'
 import TargetDialog from './workspace/TargetDialog'
 import TargetView, { type TargetRequest } from './workspace/TargetView'
-import { address } from './workspace/labels'
 
 interface Workspace {
   targets: Target[] | null
@@ -21,18 +24,23 @@ type Action =
   | { type: 'added' | 'updated'; target: Target }
   | { type: 'removed'; id: string }
 
+function pickSelected(targets: Target[], current: string): string {
+  const requested = new URLSearchParams(window.location.search).get('target')
+  if (requested && targets.some(target => target.id === requested)) return requested
+  if (current && targets.some(target => target.id === current)) return current
+  return targets[0]?.id ?? ''
+}
+
 // Navigation and machine changes live together so late responses cannot undo newer choices.
 function reducer(state: Workspace, action: Action): Workspace {
   const targets = state.targets ?? []
   switch (action.type) {
-    case 'loaded': {
-      const requested = new URLSearchParams(window.location.search).get('target')
+    case 'loaded':
       return {
         ...state,
         targets: action.targets,
-        selected: action.targets.find(target => target.id === requested)?.id ?? action.targets[0]?.id ?? '',
+        selected: pickSelected(action.targets, state.selected),
       }
-    }
     case 'select':
       return { ...state, selected: action.id, visit: state.visit + 1, request: action.request ?? null }
     case 'added':
@@ -51,16 +59,23 @@ function reducer(state: Workspace, action: Action): Workspace {
   }
 }
 
+function initialWorkspace(accountKey: string): Workspace {
+  const cached = getCachedTargets(accountKey)
+  return {
+    targets: cached,
+    selected: cached ? pickSelected(cached, '') : '',
+    visit: 0,
+    request: null,
+  }
+}
+
 const searchMachine = (id: string, input: ConversationSearch, signal: AbortSignal) =>
   api<ConversationResults>(`/targets/${id}/conversations/search`, 'POST', input, signal)
 
 export default function App() {
-  const [{ targets, selected, visit, request }, dispatch] = useReducer(reducer, {
-    targets: null,
-    selected: '',
-    visit: 0,
-    request: null,
-  })
+  const { user } = useAuth()
+  const accountKey = user?.id ?? 'local'
+  const [{ targets, selected, visit, request }, dispatch] = useReducer(reducer, accountKey, initialWorkspace)
   const [error, setError] = useState('')
   // Chat links here with ?add=1 to add a machine.
   const [adding, setAdding] = useState(() => new URLSearchParams(window.location.search).has('add'))
@@ -68,27 +83,40 @@ export default function App() {
   const target = targets?.find(item => item.id === selected)
 
   useEffect(() => {
+    document.title = 'Outpost'
+  }, [])
+
+  useEffect(() => {
     const controller = new AbortController()
     api<Target[]>('/targets', 'GET', undefined, controller.signal).then(
-      items => dispatch({ type: 'loaded', targets: items }),
+      items => {
+        setCachedTargets(accountKey, items)
+        dispatch({ type: 'loaded', targets: items })
+      },
       problem => {
         if (!controller.signal.aborted) setError(problem.message)
       },
     )
     return () => controller.abort()
-  }, [])
+  }, [accountKey])
+
+  useEffect(() => {
+    if (!targets) return
+    setCachedTargets(accountKey, targets)
+  }, [accountKey, targets])
+
   useEffect(() => {
     if (!targets) return
     const url = new URL(window.location.href)
     url.searchParams.delete('add')
     if (selected) url.searchParams.set('target', selected)
     else url.searchParams.delete('target')
-    window.history.replaceState(null, '', url)
+    replaceUrl(`${url.pathname}${url.search}${url.hash}`)
   }, [targets, selected])
 
   return (
-    <div className="app">
-      <AppSidebar page="machines">
+    <>
+      <SidebarBody>
         <div className="sidebar-heading">
           <span>Machines</span>
           <button
@@ -120,7 +148,7 @@ export default function App() {
             )
           })}
         </nav>
-      </AppSidebar>
+      </SidebarBody>
       <main className="content">
         {error && (
           <p className="banner error" role="alert">
@@ -197,6 +225,6 @@ export default function App() {
           onClose={() => setFinding(false)}
         />
       )}
-    </div>
+    </>
   )
 }

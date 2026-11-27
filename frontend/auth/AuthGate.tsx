@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { pagePaths } from '../../shared/pages'
 import { LoaderCircle, RefreshCw } from 'lucide-react'
 import type { AuthState } from '../../shared/auth'
+import { isProtectedWorkspacePath, pagePaths } from '../../shared/pages'
 import { api } from '../api'
-import { AuthContext } from './useAuth'
+import { navigate as routerNavigate, useLocation } from '../router'
+import { clearWorkspaceCache } from '../workspace/cache'
 import AuthPage from './AuthPage'
 import { desktopReturnPath } from './returnPath'
+import { AuthContext } from './useAuth'
 
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState | null>(null)
   const [error, setError] = useState('')
-  const [path, setPath] = useState(window.location.pathname)
+  const { pathname: path, search } = useLocation()
   const generation = useRef(0)
   const channel = useRef<BroadcastChannel | null>(null)
   const returnTo = useRef(
@@ -18,17 +20,13 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       desktopReturnPath(new URLSearchParams(window.location.search).get('returnTo')),
   )
   const entry = useRef(
-    [pagePaths.workspace, pagePaths.chat, pagePaths.terminal, pagePaths.logs].some(
-      route => route === window.location.pathname,
-    ) ||
-      window.location.pathname === pagePaths.guide ||
-      window.location.pathname.startsWith(`${pagePaths.guide}/`)
-      ? window.location.pathname + window.location.search
+    isProtectedWorkspacePath(window.location.pathname)
+      ? window.location.pathname + window.location.search + window.location.hash
       : pagePaths.workspace,
   )
   const navigate = useCallback((destination: string) => {
     if (destination === pagePaths.workspace) {
-      window.location.assign(returnTo.current ?? entry.current)
+      routerNavigate(returnTo.current ?? entry.current, { replace: true })
       return
     }
     if (returnTo.current) {
@@ -36,8 +34,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       url.searchParams.set('returnTo', returnTo.current)
       destination = url.pathname + url.search
     }
-    window.history.pushState(null, '', destination)
-    setPath(new URL(destination, window.location.href).pathname)
+    routerNavigate(destination, { transition: false })
   }, [])
   const load = useCallback(async (signal?: AbortSignal, broadcast = false) => {
     const version = ++generation.current
@@ -59,14 +56,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     return () => controller.abort()
   }, [load])
   useEffect(() => {
-    const changed = () => setPath(window.location.pathname)
-    window.addEventListener('popstate', changed)
-    return () => window.removeEventListener('popstate', changed)
-  }, [])
-  useEffect(() => {
     if (state?.mode !== 'hosted') return
     const expired = () => {
       generation.current++
+      clearWorkspaceCache()
       setState({ mode: 'hosted', user: null })
       navigate(pagePaths.login)
     }
@@ -90,6 +83,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     entry.current = pagePaths.workspace
     returnTo.current = null
     generation.current++
+    clearWorkspaceCache()
     setState({ mode: 'hosted', user: null })
     channel.current?.postMessage('changed')
     navigate(pagePaths.login)
@@ -129,7 +123,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           {children}
         </div>
       ) : (
-        <AuthPage key={`${path}:${window.location.search}`} path={path} />
+        <AuthPage key={`${path}:${search}`} path={path} />
       )}
     </AuthContext.Provider>
   )

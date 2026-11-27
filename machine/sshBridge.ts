@@ -6,11 +6,12 @@ import { mkdirSync } from 'node:fs'
 import { basename, delimiter, join } from 'node:path'
 import { isHarnessId } from '../shared/harnesses'
 import { imageExtensions } from '../shared/images'
-import { formatProgramStatusReport } from '../shared/programStatus'
+import { formatProgramStatusReport, processProgramStatus } from '../shared/programStatus'
 import { encodeSshBridgeOsc, SshBridgeInputScanner, type SshRemoteMessage } from '../shared/sshBridgeProtocol'
 import { saveImageInDirectory } from './files'
 import { harness } from './harnesses'
 import { installation } from './installation'
+import { Sequences } from './sequences'
 import {
   buildShellInitFiles,
   installSshHelpers,
@@ -147,18 +148,28 @@ export async function runSshWrap(toolArg: string | undefined, userArgs: string[]
   const cols = Math.max(2, Math.min(400, process.stdout.columns || 80))
   const rows = Math.max(2, Math.min(200, process.stdout.rows || 24))
 
+  const sequences = new Sequences()
   const pty = new Bun.Terminal({
     cols,
     rows,
     data(_terminal, data) {
-      const chunk = Buffer.from(data)
+      const complete = sequences.feed(Buffer.from(data))
+      if (!complete) return
       // Track bracketed paste mode toggles without instantiating a headless VT emulator.
-      const text = chunk.toString('latin1')
-      const onIdx = text.lastIndexOf('\x1b[?2004h')
-      const offIdx = text.lastIndexOf('\x1b[?2004l')
+      const onIdx = complete.lastIndexOf('\x1b[?2004h')
+      const offIdx = complete.lastIndexOf('\x1b[?2004l')
       if (onIdx > offIdx) bracketedPaste = true
       else if (offIdx > onIdx) bracketedPaste = false
-      writeOuter(chunk)
+      // Answer OSC 7501 `?` queries locally on the remote PTY (before any trailing DA1
+      // crosses SSH, and immune to Windows ConPTY swallowing OSC input), while forwarding
+      // OSC 7501 reports verbatim to Outpost Desktop.
+      const out: string[] = []
+      processProgramStatus(complete, {
+        output: piece => out.push(piece),
+        reply: sequence => writePty(sequence),
+        report: report => out.push(formatProgramStatusReport(report, 'st')),
+      })
+      if (out.length) writeOuter(out.join(''))
     },
   })
 

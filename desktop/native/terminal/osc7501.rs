@@ -258,13 +258,9 @@ enum ScanState {
     Ground,
     Esc,
     Header(usize),
-    Payload {
-        allow_bel: bool,
-    },
-    PayloadEsc {
-        allow_bel: bool,
-    },
-    /// Pass-through for DCS/SOS/PM/APC control strings so embedded `7501;` text is untouched.
+    Payload,
+    PayloadEsc,
+    /// Pass-through for 7-bit DCS/SOS/PM/APC control strings so embedded `7501;` text is untouched.
     OtherString,
     OtherStringEsc,
 }
@@ -301,34 +297,26 @@ impl Osc7501Scanner {
         self.clear_payload();
     }
 
-    /// Strips OSC 7501 sequences from a PTY byte stream while preserving every other byte
-    /// verbatim. Returns `None` for the filtered buffer on the fast path when no ESC/C1 OSC
-    /// byte is present.
+    /// Strips 7-bit OSC 7501 sequences from a UTF-8 PTY byte stream while preserving every other
+    /// byte verbatim. Never matches raw 0x80..=0x9F bytes, which are UTF-8 continuation bytes.
+    /// Returns `None` for the filtered buffer on the fast path when no ESC byte is present.
     pub(super) fn scan(&mut self, bytes: &[u8]) -> (Option<Vec<u8>>, Vec<Osc7501Event>) {
-        if self.state == ScanState::Ground && !bytes.contains(&0x1b) && !bytes.contains(&0x9d) {
+        if self.state == ScanState::Ground && !bytes.contains(&0x1b) {
             return (None, Vec::new());
         }
         let mut out = Vec::with_capacity(bytes.len());
         let mut events = Vec::new();
         for &b in bytes {
             match self.state {
-                ScanState::Ground => match b {
-                    0x1b => {
+                ScanState::Ground => {
+                    if b == 0x1b {
                         self.pending.clear();
                         self.pending.push(0x1b);
                         self.state = ScanState::Esc;
-                    }
-                    0x9d => {
-                        self.pending.clear();
-                        self.pending.push(0x9d);
-                        self.state = ScanState::Header(0);
-                    }
-                    0x90 | 0x98 | 0x9e | 0x9f => {
+                    } else {
                         out.push(b);
-                        self.state = ScanState::OtherString;
                     }
-                    _ => out.push(b),
-                },
+                }
                 ScanState::Esc => match b {
                     b']' => {
                         self.pending.push(b']');
@@ -356,10 +344,9 @@ impl Osc7501Scanner {
                     if b == OSC_7501_HEADER[idx] {
                         self.pending.push(b);
                         if idx + 1 == OSC_7501_HEADER.len() {
-                            let allow_bel = self.pending.first() == Some(&0x1b);
                             self.pending.clear();
                             self.clear_payload();
-                            self.state = ScanState::Payload { allow_bel };
+                            self.state = ScanState::Payload;
                         } else {
                             self.state = ScanState::Header(idx + 1);
                         }
@@ -368,11 +355,6 @@ impl Osc7501Scanner {
                         self.pending.clear();
                         self.pending.push(0x1b);
                         self.state = ScanState::Esc;
-                    } else if b == 0x9d {
-                        out.extend_from_slice(&self.pending);
-                        self.pending.clear();
-                        self.pending.push(0x9d);
-                        self.state = ScanState::Header(0);
                     } else {
                         out.extend_from_slice(&self.pending);
                         out.push(b);
@@ -380,15 +362,12 @@ impl Osc7501Scanner {
                         self.state = ScanState::Ground;
                     }
                 }
-                ScanState::Payload { allow_bel } => {
-                    if b == 0x07 && allow_bel {
+                ScanState::Payload => {
+                    if b == 0x07 {
                         self.finish_payload(true, &mut events);
                         self.state = ScanState::Ground;
-                    } else if b == 0x9c {
-                        self.finish_payload(false, &mut events);
-                        self.state = ScanState::Ground;
                     } else if b == 0x1b {
-                        self.state = ScanState::PayloadEsc { allow_bel };
+                        self.state = ScanState::PayloadEsc;
                     } else if b == 0x18 || b == 0x1a {
                         self.clear_payload();
                         self.state = ScanState::Ground;
@@ -403,7 +382,7 @@ impl Osc7501Scanner {
                         }
                     }
                 }
-                ScanState::PayloadEsc { .. } => {
+                ScanState::PayloadEsc => {
                     if b == b'\\' {
                         self.finish_payload(false, &mut events);
                         self.state = ScanState::Ground;
@@ -426,21 +405,41 @@ impl Osc7501Scanner {
                     }
                 }
                 ScanState::OtherString => {
-                    out.push(b);
-                    if b == 0x9c || b == 0x18 || b == 0x1a {
+                    if b == 0x18 || b == 0x1a {
+                        out.push(b);
                         self.state = ScanState::Ground;
                     } else if b == 0x1b {
                         self.state = ScanState::OtherStringEsc;
+                    } else {
+                        out.push(b);
                     }
                 }
-                ScanState::OtherStringEsc => {
-                    out.push(b);
-                    if b == b'\\' {
+                ScanState::OtherStringEsc => match b {
+                    b'\\' => {
+                        out.push(0x1b);
+                        out.push(b'\\');
                         self.state = ScanState::Ground;
-                    } else if b != 0x1b {
+                    }
+                    b']' => {
+                        // Unterminated DCS/APC/PM aborted by an OSC: parse the OSC normally.
+                        self.pending.clear();
+                        self.pending.extend_from_slice(b"\x1b]");
+                        self.state = ScanState::Header(0);
+                    }
+                    b'P' | b'X' | b'^' | b'_' => {
+                        out.push(0x1b);
+                        out.push(b);
                         self.state = ScanState::OtherString;
                     }
-                }
+                    0x1b => {
+                        out.push(0x1b);
+                    }
+                    _ => {
+                        out.push(0x1b);
+                        out.push(b);
+                        self.state = ScanState::Ground;
+                    }
+                },
             }
         }
         (Some(out), events)
@@ -531,5 +530,48 @@ mod tests {
             sub,
             Osc7501Event::Report(ProgramStatusReport { id: Some(ref id), .. }) if id == "task/1"
         ));
+    }
+
+    #[test]
+    fn osc_7501_utf8_continuation_bytes_never_trap_scanner() {
+        let mut scanner = Osc7501Scanner::default();
+        // UTF-8 characters whose continuation bytes include 0x90 (┐, ←), 0x98 (‘, ▘),
+        // 0x9c (├), 0x9d (”, ▝), 0x9e („, ▞), and 0x9f (‟, ▟) must never be mistaken
+        // for 8-bit C1 controls.
+        let text = "┐←‘├”„‟▘▝▞▟中文";
+        let mut stream = Vec::new();
+        stream.extend_from_slice(b"\x1b]7501;state=working:app=codex\x1b\\");
+        stream.extend_from_slice(text.as_bytes());
+        stream.extend_from_slice(b"\x1b]7501;state=done:app=codex\x1b\\");
+        // Also verify an unterminated DCS/APC aborted by an OSC 7501 still parses the 7501 report.
+        stream.extend_from_slice(b"\x1b_unterminated\x1b]7501;state=idle:app=codex\x1b\\");
+
+        let mut out = Vec::new();
+        let mut events = Vec::new();
+        for &b in &stream {
+            let (f, ev) = scanner.scan(&[b]);
+            if let Some(buf) = f {
+                out.extend_from_slice(&buf);
+            } else {
+                out.push(b);
+            }
+            events.extend(ev);
+        }
+
+        assert_eq!(String::from_utf8(out).unwrap(), format!("{text}\x1b_unterminated"));
+        assert_eq!(
+            events
+                .into_iter()
+                .map(|e| match e {
+                    Osc7501Event::Report(r) => r.state,
+                    Osc7501Event::Query { .. } => panic!("unexpected query"),
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ProgramStatusState::Working,
+                ProgramStatusState::Done,
+                ProgramStatusState::Idle,
+            ]
+        );
     }
 }

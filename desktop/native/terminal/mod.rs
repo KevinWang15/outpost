@@ -382,6 +382,14 @@ impl Pane {
         self.server.is_some() || self.ssh_bridge.is_active()
     }
 
+    pub(super) fn acknowledge_local_finished(&mut self, cx: &mut Context<Self>) {
+        if self.server.is_none() && self.activity == "finished" {
+            self.activity = "idle".into();
+            self.activity_detail = None;
+            cx.emit(PaneChanged);
+        }
+    }
+
     pub(super) fn clear_local_activity(&mut self, cx: &mut Context<Self>) {
         if !self.activity.is_empty()
             || self.activity_blocked_kind.is_some()
@@ -738,6 +746,7 @@ impl Pane {
             if self.bell {
                 self.schedule_bell_auto_hide(cx);
             }
+            self.acknowledge_local_finished(cx);
         } else if self.bell && !self.bell_background {
             // The bell fired while this pane was already active; leaving it dismisses the flash.
             self.clear_bell(cx);
@@ -796,10 +805,7 @@ impl Pane {
             self.note_scroll_activity(cx);
         }
         self.term.selection = None;
-        if self.server.is_none() && self.activity == "finished" {
-            self.activity = "idle".into();
-            cx.emit(PaneChanged);
-        }
+        self.acknowledge_local_finished(cx);
         self.write(bytes, cx);
         cx.notify()
     }

@@ -161,8 +161,7 @@ impl Pane {
                 if self.server.is_some() {
                     self.command("observe", json!({}));
                 } else {
-                    self.activity = "idle".into();
-                    cx.emit(super::PaneChanged);
+                    self.acknowledge_local_finished(cx);
                 }
             }
         }

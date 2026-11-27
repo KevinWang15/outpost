@@ -236,7 +236,7 @@ export async function createApp(options: AppOptions) {
     const pages = new Set<string>(Object.values(pagePaths))
     app.setNotFoundHandler((request, reply) => {
       const pathname = request.url.split('?')[0]
-      const isGuidePage = /^\/guide(?:\/[a-z0-9-]+)?$/.test(pathname)
+      const isGuidePage = /^\/guide(?:\/[a-z0-9-]+)*\/?$/.test(pathname)
       if (['GET', 'HEAD'].includes(request.method) && (pages.has(pathname) || isGuidePage))
         return reply.type('text/html').send(html)
       return reply.code(404).send({ message: 'Not found' })

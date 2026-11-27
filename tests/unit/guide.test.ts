@@ -9,7 +9,7 @@ import {
   parseGuideDocument,
   resolveGuideImage,
   resolveGuideLink,
-  searchGuide,
+  searchGuideEntries,
   slugFromPathname,
   slugifyHeading,
 } from '../../frontend/guide/guide'
@@ -38,12 +38,15 @@ test('extractHeadings skips fenced code blocks and deduplicates identical headin
     '### Details',
   ].join('\n')
   const headings = extractHeadings(md)
-  assert.deepEqual(headings, [
-    { level: 2, text: 'Setup', id: 'setup' },
-    { level: 3, text: 'Details', id: 'details' },
-    { level: 2, text: 'Setup', id: 'setup-2' },
-    { level: 3, text: 'Details', id: 'details-2' },
-  ])
+  assert.deepEqual(
+    headings.map(({ level, text, id }) => ({ level, text, id })),
+    [
+      { level: 2, text: 'Setup', id: 'setup' },
+      { level: 3, text: 'Details', id: 'details' },
+      { level: 2, text: 'Setup', id: 'setup-2' },
+      { level: 3, text: 'Details', id: 'details-2' },
+    ],
+  )
   assert.equal(slugifyHeading('Auto-open in Outpost (`OSC 7770`)'), 'auto-open-in-outpost-osc-7770')
 })
 
@@ -66,12 +69,51 @@ test('resolveGuideLink handles relative .md links, /guide routes, anchors, app r
   assert.equal(slugFromPathname('/guide'), null)
   assert.equal(slugFromPathname('/guide/machine-cli'), 'machine-cli')
 
-  const images = new Map([['workspace.png', '/assets/workspace.png']])
+  const images = new Map([
+    ['workspace.png', '/assets/workspace.png'],
+    ['nested/diagram.png', '/assets/nested-diagram.png'],
+  ])
   assert.equal(resolveGuideImage('../images/workspace.png', images), '/assets/workspace.png')
   assert.equal(resolveGuideImage('docs/images/workspace.png', images), '/assets/workspace.png')
+  assert.equal(resolveGuideImage('./nested/diagram.png', images), '/assets/nested-diagram.png')
   assert.equal(resolveGuideImage('../images/missing.png', images), null)
   assert.equal(resolveGuideImage('https://example.com/a.png', images), null)
   assert.equal(resolveGuideImage('../../etc/passwd', images), null)
+  assert.equal(resolveGuideImage('../secret/workspace.png', images), null)
+})
+
+test('buildGuideCatalog filters drafts, preserves SNAKE_CASE env vars, and handles multi-token search snippets', () => {
+  const catalog = buildGuideCatalog({
+    '../../docs/guide/01-intro.md': [
+      '---',
+      'title: Intro Guide',
+      'navTitle: Intro',
+      'section: Start',
+      'order: 10',
+      'summary: Overview of configuration',
+      '---',
+      '# Intro Guide',
+      '',
+      '## Bridge Options',
+      'Set `OUTPOST_DISABLE_SSH_BRIDGE=1` to bypass the interactive bridge.',
+      '',
+      '## Next Topic',
+      'Unrelated paragraph here.',
+    ].join('\n'),
+    '../../docs/guide/02-hidden.md': '---\ntitle: Hidden\ndraft: true\n---\n# Hidden\nSecret',
+  })
+
+  assert.equal(catalog.pages.length, 1)
+  assert.equal(catalog.pages[0].navTitle, 'Intro')
+  assert.equal(catalog.pages[0].headings[0].id, 'bridge-options')
+  assert.match(catalog.pages[0].headings[0].searchText ?? '', /OUTPOST_DISABLE_SSH_BRIDGE=1/)
+  assert.doesNotMatch(catalog.pages[0].headings[0].searchText ?? '', /Unrelated paragraph/)
+
+  // Query spans title ("Intro") + body ("OUTPOST_DISABLE_SSH_BRIDGE") — snippet must still center on the body hit.
+  const hits = searchGuideEntries(catalog.searchItems, 'Intro OUTPOST_DISABLE_SSH_BRIDGE')
+  assert.equal(hits.length, 2)
+  assert.match(hits[0].snippet, /OUTPOST_DISABLE_SSH_BRIDGE/)
+  assert.equal(hits[0].matchedTerm, 'outpost_disable_ssh_bridge')
 })
 
 test('real docs/guide/*.md files form a valid catalog with Machine CLI and zero broken internal links', () => {
@@ -94,9 +136,17 @@ test('real docs/guide/*.md files form a valid catalog with Machine CLI and zero 
   assert.match(cliDoc.body, /OSC 7770/)
   assert.match(cliDoc.body, /install-cli/)
 
-  const hits = searchGuide(catalog.pages, 'OSC 7770')
-  assert.ok(hits.length >= 1)
-  assert.equal(hits[0].page.slug, 'machine-cli')
+  const cliHits = searchGuideEntries(catalog.searchItems, 'OSC 7770')
+  assert.ok(cliHits.length >= 1)
+  assert.equal(cliHits[0].item.slug, 'machine-cli')
+
+  // Unified article + heading search index returns matched terms and breadcrumbs.
+  const paletteHits = searchGuideEntries(catalog.searchItems, 'split pane chooser')
+  assert.ok(paletteHits.length >= 1)
+  assert.equal(paletteHits[0].item.slug, 'terminals')
+  assert.ok(paletteHits[0].matchedTerm)
+  assert.ok(cliDoc.breadcrumbs.length >= 2)
+  assert.equal(cliDoc.breadcrumbs.at(-1)?.title, cliDoc.title)
 
   // Verify every internal markdown link and image across all docs resolves to a real target.
   const imageDir = join(process.cwd(), 'docs', 'images')

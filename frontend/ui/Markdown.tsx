@@ -1,18 +1,8 @@
 // Safe React-element Markdown renderer shared by Chat and the User Guide.
 // Builds React elements (never HTML strings) and defaults to safe http(s)/mailto links.
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, Check, Copy, Info, Lightbulb } from 'lucide-react'
+import { Check, Copy } from 'lucide-react'
 import { copyText } from '../browser'
-
-type CalloutKind = 'NOTE' | 'TIP' | 'IMPORTANT' | 'WARNING' | 'CAUTION'
-
-const calloutMeta: Record<CalloutKind, { label: string; className: string; Icon: typeof Info }> = {
-  NOTE: { label: 'Note', className: 'note', Icon: Info },
-  TIP: { label: 'Tip', className: 'tip', Icon: Lightbulb },
-  IMPORTANT: { label: 'Important', className: 'important', Icon: AlertCircle },
-  WARNING: { label: 'Warning', className: 'warning', Icon: AlertTriangle },
-  CAUTION: { label: 'Caution', className: 'caution', Icon: AlertTriangle },
-}
 
 const safeUrl = (url: string) => {
   try {
@@ -39,20 +29,22 @@ interface RenderContext {
   mentions?: readonly string[]
   renderLink: (href: string, children: ReactNode, key: number) => ReactNode
   renderImage?: (src: string, alt: string, key: number, block: boolean) => ReactNode
+  renderCodeBlock?: (code: string, language: string, key: number) => ReactNode
+  renderTable?: (table: ReactNode, key: number) => ReactNode
+  renderBlockquote?: (quotedLines: string[], renderNested: (markdown: string) => ReactNode[], key: number) => ReactNode
   headingOffset: number
   renderHeading?: (level: number, raw: string, children: ReactNode, key: number) => ReactNode
-  callouts: boolean
   softBreaks: boolean
   defaultCodeLanguage: string
 }
 
 const inlinePatterns: [RegExp, (match: RegExpExecArray, key: number, ctx: RenderContext) => ReactNode][] = [
   [/(`+)([\s\S]+?)\1/y, (m, key) => <code key={key}>{m[2].trim() || m[2]}</code>],
-  [/\*\*(?=\S)([\s\S]+?\S)\*\*/y, (m, key, ctx) => <strong key={key}>{inline(m[1], ctx)}</strong>],
-  [/__(?=\S)([\s\S]+?\S)__(?!\w)/y, (m, key, ctx) => <strong key={key}>{inline(m[1], ctx)}</strong>],
+  [/\*\*(?=\S)([\s\S]*?\S)\*\*/y, (m, key, ctx) => <strong key={key}>{inline(m[1], ctx)}</strong>],
+  [/__(?=\S)([\s\S]*?\S)__(?!\w)/y, (m, key, ctx) => <strong key={key}>{inline(m[1], ctx)}</strong>],
   [/\*(?=[^\s*])([^*\n]+?)\*(?!\*)/y, (m, key, ctx) => <em key={key}>{inline(m[1], ctx)}</em>],
   [/_(?=[^\s_])([^_\n]+?)_(?!\w)/y, (m, key, ctx) => <em key={key}>{inline(m[1], ctx)}</em>],
-  [/~~(?=\S)([\s\S]+?\S)~~/y, (m, key, ctx) => <del key={key}>{inline(m[1], ctx)}</del>],
+  [/~~(?=\S)([\s\S]*?\S)~~/y, (m, key, ctx) => <del key={key}>{inline(m[1], ctx)}</del>],
   [
     /!\[([^\]\n]*)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/y,
     (m, key, ctx) => (ctx.renderImage ? ctx.renderImage(m[2], m[1], key, false) : m[0]),
@@ -118,7 +110,17 @@ function inline(text: string, ctx: RenderContext): ReactNode[] {
   return nodes
 }
 
-function CodeBlock({ code, language, defaultLanguage }: { code: string; language: string; defaultLanguage: string }) {
+export function CodeBlock({
+  code,
+  language,
+  defaultLanguage = '',
+  children,
+}: {
+  code: string
+  language: string
+  defaultLanguage?: string
+  children?: ReactNode
+}) {
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
@@ -129,8 +131,8 @@ function CodeBlock({ code, language, defaultLanguage }: { code: string; language
         <button
           type="button"
           className="icon-button"
-          aria-label="Copy code"
-          title="Copy code"
+          aria-label={copied ? 'Copied code' : 'Copy code'}
+          title={copied ? 'Copied' : 'Copy code'}
           onClick={() =>
             void copyText(code)
               .then(() => {
@@ -145,7 +147,7 @@ function CodeBlock({ code, language, defaultLanguage }: { code: string; language
         </button>
       </div>
       <pre>
-        <code>{code}</code>
+        <code>{children ?? code}</code>
       </pre>
     </div>
   )
@@ -172,7 +174,7 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
       index++
       continue
     }
-    const fence = line.match(/^\s*(```+|~~~+)\s*([\w+#.-]*)/)
+    const fence = line.match(/^\s*(```+|~~~+)\s*([\w+#.()-]*)/)
     if (fence) {
       const marker = fence[1]
       const body: string[] = []
@@ -183,9 +185,13 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
         body.push(lines[index++])
       }
       index++
-      out.push(
-        <CodeBlock key={key} code={body.join('\n')} language={fence[2]} defaultLanguage={ctx.defaultCodeLanguage} />,
-      )
+      const code = body.join('\n')
+      const language = fence[2]
+      if (ctx.renderCodeBlock) {
+        out.push(ctx.renderCodeBlock(code, language, key))
+      } else {
+        out.push(<CodeBlock key={key} code={code} language={language} defaultLanguage={ctx.defaultCodeLanguage} />)
+      }
       continue
     }
     const heading = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/)
@@ -209,20 +215,8 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
     if (line.startsWith('>')) {
       const quoted: string[] = []
       while (index < lines.length && lines[index].startsWith('>')) quoted.push(lines[index++].replace(/^>\s?/, ''))
-      const alertMatch = ctx.callouts ? quoted[0]?.trim().match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/) : null
-      if (alertMatch) {
-        const kind = alertMatch[1] as CalloutKind
-        const meta = calloutMeta[kind]
-        const Icon = meta.Icon
-        out.push(
-          <aside key={key} className={`guide-callout guide-callout-${meta.className}`} role="note">
-            <div className="guide-callout-title">
-              <Icon size={15} />
-              <span>{meta.label}</span>
-            </div>
-            <div className="guide-callout-body">{renderBlocks(quoted.slice(1).join('\n'), ctx)}</div>
-          </aside>,
-        )
+      if (ctx.renderBlockquote) {
+        out.push(ctx.renderBlockquote(quoted, md => renderBlocks(md, ctx), key))
       } else {
         out.push(<blockquote key={key}>{renderBlocks(quoted.join('\n'), ctx)}</blockquote>)
       }
@@ -241,32 +235,39 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
       const rows: string[][] = []
       while (index < lines.length && lines[index].includes('|') && lines[index].trim())
         rows.push(tableCells(lines[index++]))
-      out.push(
-        <div key={key} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                {head.map((cell, column) => (
-                  <th key={column} style={{ textAlign: align[column] }}>
-                    {inline(cell, ctx)}
-                  </th>
+      const table = (
+        <table>
+          <thead>
+            <tr>
+              {head.map((cell, column) => (
+                <th key={column} style={{ textAlign: align[column] }}>
+                  {inline(cell, ctx)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, number) => (
+              <tr key={number}>
+                {head.map((_, column) => (
+                  <td key={column} style={{ textAlign: align[column] }}>
+                    {inline(row[column] ?? '', ctx)}
+                  </td>
                 ))}
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, number) => (
-                <tr key={number}>
-                  {head.map((_, column) => (
-                    <td key={column} style={{ textAlign: align[column] }}>
-                      {inline(row[column] ?? '', ctx)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>,
+            ))}
+          </tbody>
+        </table>
       )
+      if (ctx.renderTable) {
+        out.push(ctx.renderTable(table, key))
+      } else {
+        out.push(
+          <div key={key} className="table-scroll">
+            {table}
+          </div>,
+        )
+      }
       continue
     }
     const item = line.match(listItem)
@@ -339,9 +340,11 @@ export interface MarkdownProps {
   mentions?: readonly string[]
   renderLink?: (href: string, children: ReactNode, key: number) => ReactNode
   renderImage?: (src: string, alt: string, key: number, block: boolean) => ReactNode
+  renderCodeBlock?: (code: string, language: string, key: number) => ReactNode
+  renderTable?: (table: ReactNode, key: number) => ReactNode
+  renderBlockquote?: (quotedLines: string[], renderNested: (markdown: string) => ReactNode[], key: number) => ReactNode
   headingOffset?: number
   createHeadingRenderer?: () => (level: number, raw: string, children: ReactNode, key: number) => ReactNode
-  callouts?: boolean
   softBreaks?: boolean
   defaultCodeLanguage?: string
 }
@@ -352,9 +355,11 @@ export const Markdown = memo(function Markdown({
   mentions,
   renderLink = defaultLink,
   renderImage,
+  renderCodeBlock,
+  renderTable,
+  renderBlockquote,
   headingOffset = 2,
   createHeadingRenderer,
-  callouts = false,
   softBreaks = true,
   defaultCodeLanguage = '',
 }: MarkdownProps) {
@@ -362,9 +367,11 @@ export const Markdown = memo(function Markdown({
     mentions,
     renderLink,
     renderImage,
+    renderCodeBlock,
+    renderTable,
+    renderBlockquote,
     headingOffset,
     renderHeading: createHeadingRenderer?.(),
-    callouts,
     softBreaks,
     defaultCodeLanguage,
   }

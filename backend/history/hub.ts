@@ -22,6 +22,7 @@ interface Account {
   index: HistoryIndexClient
   states: Map<string, MachineState>
   syncing: Promise<void> | null
+  warming: Promise<void> | null
   machines: HistoryMachine[]
   embeddingError: string | null
   embeddingRetryAt: number
@@ -65,6 +66,7 @@ export class HistoryHub {
         ),
         states: new Map(),
         syncing: null,
+        warming: null,
         machines: [],
         embeddingError: null,
         embeddingRetryAt: 0,
@@ -78,7 +80,17 @@ export class HistoryHub {
   }
   async start() {
     if (this.dependencies.background === false) return
-    for (const owner of this.dependencies.deployment.backgroundOwners()) this.watch(owner)
+    const owners = this.dependencies.deployment.backgroundOwners()
+    for (const owner of owners) this.watch(owner)
+    // Unconditionally warm the shared embedding model and each background account's index without blocking startup.
+    void (async () => {
+      await this.embed('warmup', 'query').catch(() => {})
+      for (const owner of owners) {
+        if (this.stopped) return
+        const account = this.accounts.get(owner.userId)
+        if (account) await this.warm(account)
+      }
+    })()
     this.timer = setInterval(() => {
       for (const owner of this.dependencies.deployment.backgroundOwners())
         if (!this.accounts.has(owner.userId)) this.watch(owner)
@@ -89,6 +101,7 @@ export class HistoryHub {
           // Drain in-flight refreshes and embedding work before closing its private index.
           void Promise.allSettled([
             account.syncing,
+            account.warming,
             account.embeddingJob,
             ...[...account.states.values()].map(state => state.refreshing),
           ]).finally(() => account.index.close())
@@ -96,6 +109,19 @@ export class HistoryHub {
         } else void this.sync(account)
       }
     }, 10000).unref()
+  }
+  private warm(account: Account) {
+    if (this.stopped || account.closed) return Promise.resolve()
+    account.warming ??= (async () => {
+      const ids = (await this.machines(account)).map(machine => machine.id)
+      if (!ids.length || this.stopped || account.closed) return
+      await account.index.call('search', { query: 'warmup', mode: 'mixed', limit: 1 }, ids)
+    })()
+      .catch(() => {})
+      .finally(() => {
+        account.warming = null
+      })
+    return account.warming
   }
   watch(owner: Owner) {
     if (this.stopped || this.dependencies.background === false) return
@@ -340,6 +366,7 @@ export class HistoryHub {
     await Promise.allSettled(
       [...this.accounts.values()].flatMap(account => [
         account.syncing,
+        account.warming,
         account.embeddingJob,
         ...[...account.states.values()].map(state => state.refreshing),
       ]),

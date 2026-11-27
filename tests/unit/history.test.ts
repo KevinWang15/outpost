@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import type { HistoryBatch, HistoryMachine, HistorySource } from '../../shared/history'
+import { LocalDeployment } from '../../backend/deployment'
+import { HistoryHub } from '../../backend/history/hub'
 import { HistoryIndex } from '../../backend/history/index'
 import { HistoryIndexClient } from '../../backend/history/index-client'
 import type { Embed } from '../../backend/history/embeddings'
@@ -600,4 +602,57 @@ test('history: a blocked SQLite write leaves the server event loop free and work
     await client.close()
   }
   await assert.rejects(client.call('coverage', ids), /closed/)
+})
+
+test('history: HistoryHub.start unconditionally warms embeddings and background account search without blocking', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'outpost-history-warm-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const deployment = await LocalDeployment.open(directory)
+  const target = await deployment.workspace().add({
+    id: 'box',
+    name: 'Box',
+    kind: 'outbound',
+    createdAt: new Date().toISOString(),
+  })
+  const seed = new HistoryIndex(join(directory, 'history', 'index.sqlite'), `${deployment.secret}:local`, embed)
+  try {
+    seed.ingest({ id: target.id, name: target.name, host: 'localhost' }, batch(source('warm'), ['a kitten']))
+    await seed.embedPending([target.id], 10)
+  } finally {
+    seed.close()
+  }
+  const calls: [string, string][] = []
+  let resolveWarm!: () => void
+  const warmed = new Promise<void>(resolve => {
+    resolveWarm = resolve
+  })
+  const hub = new HistoryHub({
+    deployment,
+    resolve: async () => {
+      throw new Error('offline')
+    },
+    reader: {
+      catalog: async () => ({ sources: [], next: null, warnings: [] }),
+      read: async () => ({ files: [], warnings: [] }),
+      message: async () => {
+        throw new Error('unused')
+      },
+    },
+    embed: async (text, kind) => {
+      calls.push([text, kind])
+      if (calls.length >= 2) resolveWarm()
+      return embed(text, kind)
+    },
+  })
+  try {
+    await hub.start()
+    await warmed
+    assert.deepEqual(calls.slice(0, 2), [
+      ['warmup', 'query'],
+      ['warmup', 'query'],
+    ])
+  } finally {
+    await hub.close()
+    deployment.close()
+  }
 })

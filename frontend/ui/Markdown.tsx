@@ -38,6 +38,7 @@ function defaultLink(href: string, children: ReactNode, key: number): ReactNode 
 interface RenderContext {
   mentions?: readonly string[]
   renderLink: (href: string, children: ReactNode, key: number) => ReactNode
+  renderImage?: (src: string, alt: string, key: number, block: boolean) => ReactNode
   headingOffset: number
   renderHeading?: (level: number, raw: string, children: ReactNode, key: number) => ReactNode
   callouts: boolean
@@ -52,11 +53,15 @@ const inlinePatterns: [RegExp, (match: RegExpExecArray, key: number, ctx: Render
   [/\*(?=[^\s*])([^*\n]+?)\*(?!\*)/y, (m, key, ctx) => <em key={key}>{inline(m[1], ctx)}</em>],
   [/_(?=[^\s_])([^_\n]+?)_(?!\w)/y, (m, key, ctx) => <em key={key}>{inline(m[1], ctx)}</em>],
   [/~~(?=\S)([\s\S]+?\S)~~/y, (m, key, ctx) => <del key={key}>{inline(m[1], ctx)}</del>],
+  [
+    /!\[([^\]\n]*)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/y,
+    (m, key, ctx) => (ctx.renderImage ? ctx.renderImage(m[2], m[1], key, false) : m[0]),
+  ],
   [/\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/y, (m, key, ctx) => ctx.renderLink(m[2], inline(m[1], ctx), key)],
   [/https?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]]/y, (m, key, ctx) => ctx.renderLink(m[0], m[0], key)],
 ]
 
-const baseTriggers = new Set(['`', '*', '_', '~', '[', 'h'])
+const baseTriggers = new Set(['`', '*', '_', '~', '!', '[', 'h'])
 
 function inline(text: string, ctx: RenderContext): ReactNode[] {
   const nodes: ReactNode[] = []
@@ -148,6 +153,7 @@ function CodeBlock({ code, language, defaultLanguage }: { code: string; language
 
 const listItem = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/
 const blockStart = /^(\s*(```|~~~)|#{1,6}\s|>|\s*([-*+]|\d{1,9}[.)])\s+|\s*([-*_])(\s*\4){2,}\s*$)/
+const standaloneImage = /^\s*!\[([^\]\n]*)\]\(((?:[^()\s]|\([^()\s]*\))+)\)\s*$/
 const tableCells = (line: string) =>
   line
     .trim()
@@ -299,8 +305,20 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
       )
       continue
     }
+    if (ctx.renderImage) {
+      const image = line.match(standaloneImage)
+      if (image) {
+        out.push(ctx.renderImage(image[2], image[1], key, true))
+        index++
+        continue
+      }
+    }
     const paragraph: string[] = []
-    while (index < lines.length && lines[index].trim() && !(paragraph.length && blockStart.test(lines[index])))
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !(paragraph.length && (blockStart.test(lines[index]) || (ctx.renderImage && standaloneImage.test(lines[index]))))
+    )
       paragraph.push(lines[index++])
     out.push(
       <p key={key}>
@@ -320,6 +338,7 @@ export interface MarkdownProps {
   className?: string
   mentions?: readonly string[]
   renderLink?: (href: string, children: ReactNode, key: number) => ReactNode
+  renderImage?: (src: string, alt: string, key: number, block: boolean) => ReactNode
   headingOffset?: number
   createHeadingRenderer?: () => (level: number, raw: string, children: ReactNode, key: number) => ReactNode
   callouts?: boolean
@@ -332,6 +351,7 @@ export const Markdown = memo(function Markdown({
   className = 'markdown',
   mentions,
   renderLink = defaultLink,
+  renderImage,
   headingOffset = 2,
   createHeadingRenderer,
   callouts = false,
@@ -341,6 +361,7 @@ export const Markdown = memo(function Markdown({
   const ctx: RenderContext = {
     mentions,
     renderLink,
+    renderImage,
     headingOffset,
     renderHeading: createHeadingRenderer?.(),
     callouts,

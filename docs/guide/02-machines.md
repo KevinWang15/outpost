@@ -23,6 +23,8 @@ Open [Machines](/) and click **Add a machine**:
 
 ## Software inspection and setup
 
+![Outpost Machines view showing software readiness and sessions on a workstation](../images/workspace.png)
+
 Select a machine to view its **Software** panel:
 
 - Outpost inspects the machine's login `PATH` and marks each supported coding tool (**Claude Code**, **Codex**, **Kimi Code**, **Antigravity CLI**, **DeepSeek Harness**) as available or missing.

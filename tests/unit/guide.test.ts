@@ -7,6 +7,7 @@ import {
   extractHeadings,
   parseFrontmatter,
   parseGuideDocument,
+  resolveGuideImage,
   resolveGuideLink,
   searchGuide,
   slugFromPathname,
@@ -64,6 +65,13 @@ test('resolveGuideLink handles relative .md links, /guide routes, anchors, app r
   assert.equal(resolveGuideLink('missing-page.md', slugs), null)
   assert.equal(slugFromPathname('/guide'), null)
   assert.equal(slugFromPathname('/guide/machine-cli'), 'machine-cli')
+
+  const images = new Map([['workspace.png', '/assets/workspace.png']])
+  assert.equal(resolveGuideImage('../images/workspace.png', images), '/assets/workspace.png')
+  assert.equal(resolveGuideImage('docs/images/workspace.png', images), '/assets/workspace.png')
+  assert.equal(resolveGuideImage('../images/missing.png', images), null)
+  assert.equal(resolveGuideImage('https://example.com/a.png', images), null)
+  assert.equal(resolveGuideImage('../../etc/passwd', images), null)
 })
 
 test('real docs/guide/*.md files form a valid catalog with Machine CLI and zero broken internal links', () => {
@@ -90,13 +98,17 @@ test('real docs/guide/*.md files form a valid catalog with Machine CLI and zero 
   assert.ok(hits.length >= 1)
   assert.equal(hits[0].page.slug, 'machine-cli')
 
-  // Verify every internal markdown link across all docs resolves to a real page and real heading anchor.
+  // Verify every internal markdown link and image across all docs resolves to a real target.
+  const imageDir = join(process.cwd(), 'docs', 'images')
+  const availableImages = new Map(readdirSync(imageDir).map(name => [name, `/assets/${name}`] as const))
   const knownSlugs = new Set(catalog.bySlug.keys())
-  const linkPattern = /\[[^\]]+\]\(([^)\s]+)\)/g
+  const linkPattern = /(?<!!)\[[^\]]+\]\(([^)\s]+)\)/g
+  const imagePattern = /!\[[^\]]*\]\(([^)\s]+)\)/g
+  let totalImages = 0
   for (const page of catalog.pages) {
     assert.ok(page.title.length > 0, `missing title in ${page.sourcePath}`)
     assert.ok(page.summary.length > 0, `missing summary in ${page.sourcePath}`)
-    // Strip fenced code blocks before scanning links.
+    // Strip fenced code blocks before scanning links and images.
     const withoutCode = page.body.replace(/```[\s\S]*?```/g, '')
     for (const match of withoutCode.matchAll(linkPattern)) {
       const href = match[1]
@@ -110,7 +122,14 @@ test('real docs/guide/*.md files form a valid catalog with Machine CLI and zero 
         )
       }
     }
+    for (const match of withoutCode.matchAll(imagePattern)) {
+      const src = match[1]
+      const resolved = resolveGuideImage(src, availableImages)
+      assert.ok(resolved, `broken or unsupported image "${src}" in ${page.sourcePath}`)
+      totalImages++
+    }
   }
+  assert.ok(totalImages >= 1, 'expected at least one screenshot attached in docs/guide')
 
   // parseGuideDocument fallback works without frontmatter.
   const minimal = parseGuideDocument('docs/guide/99-custom.md', '# Custom Topic\n\n## Section A\n')

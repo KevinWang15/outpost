@@ -2,7 +2,7 @@
 title: Sessions & Conversations
 section: Core Concepts
 order: 30
-summary: Create, configure, fork, and recover sessions and conversations across coding tools.
+summary: Create, edit, monitor, fork, and recover sessions and conversations across coding tools.
 ---
 
 # Sessions & Conversations
@@ -28,8 +28,23 @@ Every session supports the same configuration:
 - **Environment variables** — `KEY=VALUE` pairs passed to both terminal and Chat drivers.
 - **MCP servers** — standard `mcpServers` JSON objects (`stdio` command or `http` URL) merged alongside Outpost's built-in `outpost` MCP server.
 
+## Editing a session
+
+Open **Edit session** from a session's **…** menu to update any session parameter after creation:
+
+- **Name** and **Message delivery** take effect immediately.
+- **Coding harness** — switch the session to another installed coding tool on the same machine. Remembered conversation IDs from earlier harnesses are preserved on the session.
+- **Project directory** — point the session at a different directory (with live path autocomplete).
+- **Resume conversation ID** — choose a remembered conversation, enter a native ID directly, or click **Start fresh** to clear it so the next start begins a new conversation.
+- **Launch settings & Edit source** — update instructions, model, mode, arguments, environment variables, or MCP servers in the form or as a single JSON document via **Edit source**, with a live **Start command** preview.
+
 > [!TIP]
-> Under **Edit session**, changing the session **name** or **message delivery** applies immediately. Launch setting changes take effect on the next start — a running session shows **Changes apply at the next start → Restart now**.
+> When you change a running session's harness, directory, conversation ID, or launch settings, Outpost prompts right after saving to **Close and restart now** or apply the changes **Later** on the next start.
+
+## Session order and live status
+
+- **Most recently used order**: Sessions across **Machines**, **Chat**, and **Outpost Desktop** are sorted by most recently used so active work stays near the top.
+- **Live agent status (OSC 7501)**: Running sessions report live **Working** (including optional progress and detail text), **Waiting** (blocked on approval or input), and **Turn finished** badges via the OSC 7501 Program Status Protocol. Unread **Turn finished** badges stay latched until you return to the pane or click the badge to mark it checked.
 
 ## Forking into a Git worktree
 

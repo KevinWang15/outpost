@@ -181,6 +181,7 @@ export function buildGuideCatalog(files: Record<string, string>): GuideCatalog {
 function stripMarkdownForSnippet(markdown: string): string {
   return markdown
     .replace(/^\s*(?:```+|~~~+).*$/gm, ' ')
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/^#{1,6}\s+/gm, '')
@@ -308,4 +309,17 @@ export function resolveGuideLink(rawHref: string, knownSlugs: ReadonlySet<string
     return null
   }
   return null
+}
+
+/** Resolve a guide image reference (e.g. `../images/workspace.png`) to its bundled asset URL. */
+export function resolveGuideImage(rawSrc: string, images: ReadonlyMap<string, string>): string | null {
+  const src = rawSrc.trim()
+  if (!src || src.includes('://') || src.startsWith('//')) return null
+  const normalized = src
+    .replace(/\\/g, '/')
+    .replace(/^\.\.\/images\//, '')
+    .replace(/^(?:\.\/)?docs\/images\//, '')
+    .replace(/^(?:\.\/)?images\//, '')
+  if (!/^[\w.-]+\.(?:png|jpe?g|webp|gif|svg)$/i.test(normalized)) return null
+  return images.get(normalized) ?? null
 }

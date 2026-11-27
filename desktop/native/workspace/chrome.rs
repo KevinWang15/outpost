@@ -243,7 +243,9 @@ impl Workspace {
                         MenuEntry::item_with_icon(
                             "Split right",
                             LucideIcon::Columns2,
-                            cx.listener(|s, _, w, cx| s.split(Axis::Across, w, cx)),
+                            cx.listener(|s, _, w, cx| {
+                                s.open_split_menu(None, Axis::Across, None, w, cx)
+                            }),
                         )
                         .with_shortcut(split_r_sc),
                     )
@@ -251,7 +253,9 @@ impl Workspace {
                         MenuEntry::item_with_icon(
                             "Split down",
                             LucideIcon::Rows2,
-                            cx.listener(|s, _, w, cx| s.split(Axis::Down, w, cx)),
+                            cx.listener(|s, _, w, cx| {
+                                s.open_split_menu(None, Axis::Down, None, w, cx)
+                            }),
                         )
                         .with_shortcut(split_d_sc),
                     );
@@ -266,6 +270,77 @@ impl Workspace {
             );
         }
         menu
+    }
+
+    pub(super) fn open_menu_entries(
+        &self,
+        target: OpenTarget,
+        cx: &Context<Self>,
+    ) -> Vec<MenuEntry> {
+        let local_entry = |label: SharedString, profile: Option<String>| {
+            MenuEntry::item_with_icon(
+                label,
+                LucideIcon::Terminal,
+                cx.listener(move |s, _, w, cx| s.open_local(target, profile.clone(), w, cx)),
+            )
+        };
+        let mut entries = Vec::new();
+        let profiles = &self.prefs.profiles;
+        let is_new_tab = matches!(target, OpenTarget::NewTab);
+        let mac = cfg!(target_os = "macos");
+        let local_shortcut = if mac { "⌘T" } else { "Ctrl+Shift+T" };
+
+        if profiles.len() <= 1 {
+            if let OpenTarget::Split(_, axis) = target {
+                entries.push(MenuEntry::Label(match axis {
+                    Axis::Across => "Split right".into(),
+                    Axis::Down => "Split down".into(),
+                }));
+            }
+            let entry = local_entry("Local terminal".into(), None);
+            entries.push(if is_new_tab {
+                entry.with_shortcut(local_shortcut)
+            } else {
+                entry
+            });
+        } else {
+            let heading: SharedString = match target {
+                OpenTarget::NewTab => "Local shells".into(),
+                OpenTarget::Split(_, Axis::Across) => "Split right · Local shells".into(),
+                OpenTarget::Split(_, Axis::Down) => "Split down · Local shells".into(),
+            };
+            entries.push(MenuEntry::Label(heading));
+            let preferred = self.prefs.local_profile(None).map(|p| p.id.as_str());
+            for profile in profiles {
+                let entry = local_entry(profile.name.clone().into(), Some(profile.id.clone()));
+                entries.push(if is_new_tab && Some(profile.id.as_str()) == preferred {
+                    entry.with_shortcut(local_shortcut)
+                } else {
+                    entry
+                });
+            }
+        }
+
+        entries.push(MenuEntry::Separator);
+        if items(&self.accounts["accounts"]).is_empty() {
+            entries.push(MenuEntry::item_with_icon(
+                "Connect to an Outpost server…",
+                LucideIcon::Server,
+                cx.listener(move |s, _, w, cx| s.open_sessions_for(target, w, cx)),
+            ));
+        } else {
+            let entry = MenuEntry::item_with_icon(
+                "Outpost session…",
+                LucideIcon::Server,
+                cx.listener(move |s, _, w, cx| s.open_sessions_for(target, w, cx)),
+            );
+            entries.push(if is_new_tab {
+                entry.with_shortcut(if mac { "⇧⌘O" } else { "Ctrl+Shift+O" })
+            } else {
+                entry
+            });
+        }
+        entries
     }
 
     fn new_tab_menu(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
@@ -303,69 +378,85 @@ impl Workspace {
                         }
                     })),
             );
-        let local_entry = |label: SharedString, profile: Option<String>| {
-            MenuEntry::item_with_icon(
-                label,
-                LucideIcon::Terminal,
-                cx.listener(move |s, _, w, cx| {
-                    s.split_at = None;
-                    s.local(profile.clone(), w, cx)
-                }),
-            )
-        };
-        let mut menu = dropdown_menu("new-tab-menu", open)
+        dropdown_menu("new-tab-menu", open)
             .trigger(trigger)
             .min_width(px(240.))
-            .on_close(cx.listener(|s, _, _, cx| s.set_new_tab_menu(false, cx)));
-        let profiles = &self.prefs.profiles;
-        let shortcut = if cfg!(target_os = "macos") {
-            "⌘T"
-        } else {
-            "Ctrl+Shift+T"
+            .on_close(cx.listener(|s, _, _, cx| s.set_new_tab_menu(false, cx)))
+            .entries(self.open_menu_entries(OpenTarget::NewTab, cx))
+    }
+
+    fn split_button(&self, cx: &Context<Self>) -> AnyElement {
+        if self.page != Page::Terminal || self.tabs.is_empty() {
+            return div()
+                .size(px(30.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(rgba(0xffffffa6))
+                .opacity(0.35)
+                .child(lucide_icon(LucideIcon::Columns2).size(px(17.)))
+                .into_any_element();
+        }
+        let open_axis = match self.overlay {
+            Some(OverlayMenu::Split(_, axis, _)) => Some(axis),
+            _ => None,
         };
-        if profiles.len() <= 1 {
-            menu = menu.entry(local_entry("Local terminal".into(), None).with_shortcut(shortcut));
+        let open = open_axis.is_some();
+        let split_tip = if cfg!(target_os = "macos") {
+            "Split side by side (⌘D) · Right-click to split down"
         } else {
-            menu = menu.entry(MenuEntry::Label("Local shells".into()));
-            let preferred = self.prefs.local_profile(None).map(|p| p.id.as_str());
-            for profile in profiles {
-                let entry =
-                    local_entry(profile.name.clone().into(), Some(profile.id.clone()));
-                menu = menu.entry(if Some(profile.id.as_str()) == preferred {
-                    entry.with_shortcut(shortcut)
+            "Split side by side (Ctrl+Shift+D) · Right-click to split down"
+        };
+        // The split popup also dismisses on outside mouse-down. Capture this frame's
+        // open axis so clicking the button a second time closes it cleanly.
+        let toggle = |axis: Axis| {
+            cx.listener(move |s, e: &MouseDownEvent, w, cx| {
+                w.prevent_default();
+                cx.stop_propagation();
+                if open_axis == Some(axis) {
+                    s.close_split_menu(w, cx);
                 } else {
-                    entry
-                });
-            }
-        }
-        menu = menu.entry(MenuEntry::Separator);
-        if items(&self.accounts["accounts"]).is_empty() {
-            menu.entry(MenuEntry::item_with_icon(
-                "Connect to an Outpost server…",
-                LucideIcon::Server,
-                cx.listener(|s, _, w, cx| {
-                    s.split_at = None;
-                    s.show(Page::Home, w, cx);
-                    s.address.read(cx).focus_handle(cx).focus(w, cx);
-                }),
-            ))
-        } else {
-            menu.entry(
-                MenuEntry::item_with_icon(
-                    "Outpost session…",
-                    LucideIcon::Server,
-                    cx.listener(|s, _, w, cx| {
-                        s.split_at = None;
-                        s.catalogue(w, cx)
-                    }),
-                )
-                .with_shortcut(if cfg!(target_os = "macos") {
-                    "⇧⌘O"
-                } else {
-                    "Ctrl+Shift+O"
-                }),
-            )
-        }
+                    s.open_split_menu(None, axis, Some(point(e.position.x, px(40.))), w, cx);
+                }
+            })
+        };
+        div()
+            .id("split")
+            .role(gpui::accesskit::Role::Button)
+            .aria_label("Split pane")
+            .focusable()
+            .tab_stop(true)
+            .size(px(30.))
+            .flex_none()
+            .flex()
+            .justify_center()
+            .items_center()
+            .rounded(px(5.))
+            .text_color(if open {
+                rgba(0xf0f0f0ff)
+            } else {
+                rgba(0xffffffa6)
+            })
+            .cursor_pointer()
+            .hover(|s| s.bg(rgba(0xffffff18)).text_color(rgb(0xf0f0f0)))
+            .when(open, |e| e.bg(rgba(0xffffff18)))
+            .when(!open, move |e| {
+                e.tooltip(move |w, cx| Tooltip::text(split_tip, w, cx))
+            })
+            .on_mouse_down(MouseButton::Left, toggle(Axis::Across))
+            .on_mouse_down(MouseButton::Right, toggle(Axis::Down))
+            .on_click(cx.listener(move |s, e: &ClickEvent, w, cx| {
+                if !matches!(e, ClickEvent::Mouse(_)) {
+                    if open {
+                        s.close_split_menu(w, cx);
+                    } else {
+                        s.open_split_menu(None, Axis::Across, None, w, cx);
+                    }
+                }
+            }))
+            .child(lucide_icon(LucideIcon::Columns2).size(px(17.)))
+            .into_any_element()
     }
 
     pub(super) fn chrome(&self, w: &Window, cx: &mut Context<Self>) -> Div {
@@ -759,11 +850,6 @@ impl Workspace {
                 } else {
                     "Switch session (Ctrl+Shift+P)"
                 };
-                let split_tip = if mac {
-                    "Split side by side (⌘D) · Right-click to split down"
-                } else {
-                    "Split side by side (Ctrl+Shift+D) · Right-click to split down"
-                };
                 let settings_tip = if mac {
                     "Settings (⌘,)"
                 } else {
@@ -775,28 +861,7 @@ impl Workspace {
                     })
                     .tooltip(move |w, cx| Tooltip::text(switch_tip, w, cx)),
                 )
-                .child(if self.page == Page::Terminal {
-                    icon("split", LucideIcon::Columns2, cx, |s, w, cx| {
-                        s.split(Axis::Across, w, cx)
-                    })
-                    .tooltip(move |w, cx| Tooltip::text(split_tip, w, cx))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(|s, _, w, cx| s.split(Axis::Down, w, cx)),
-                    )
-                    .into_any_element()
-                } else {
-                    div()
-                        .size(px(30.))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(rgba(0xffffffa6))
-                        .opacity(0.35)
-                        .child(lucide_icon(LucideIcon::Columns2).size(px(17.)))
-                        .into_any_element()
-                })
+                .child(self.split_button(cx))
                 .child(
                     icon("settings", LucideIcon::Settings, cx, |s, w, cx| {
                         s.show(Page::Settings, w, cx)

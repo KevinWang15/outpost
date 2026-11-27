@@ -87,12 +87,7 @@ impl Workspace {
     }
 
     pub(super) fn open_sessions(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        self.split_at = None;
-        if items(&self.accounts["accounts"]).is_empty() {
-            self.show(Page::Home, w, cx);
-        } else {
-            self.catalogue(w, cx);
-        }
+        self.open_sessions_for(OpenTarget::NewTab, w, cx);
     }
 
     pub(super) fn close_focused_pane(&mut self, w: &mut Window, cx: &mut Context<Self>) {
@@ -118,7 +113,10 @@ impl Workspace {
     }
 
     pub(super) fn shortcuts(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.overlay, Some(OverlayMenu::Tab(..))) {
+        if matches!(
+            self.overlay,
+            Some(OverlayMenu::Tab(..) | OverlayMenu::Split(..))
+        ) {
             if e.keystroke.key == "escape" && !e.keystroke.modifiers.modified() {
                 self.overlay = None;
                 self.restore_focus(w, cx);
@@ -301,7 +299,7 @@ impl Workspace {
             && !self.tabs.is_empty()
         {
             if !e.is_held {
-                self.split(Axis::Down, w, cx);
+                self.open_split_menu(None, Axis::Down, None, w, cx);
             }
         } else if split_down_mod
             && key == "enter"
@@ -334,13 +332,12 @@ impl Workspace {
             match key {
                 "t" => {
                     if !e.is_held {
-                        self.split_at = None;
-                        self.local(None, w, cx);
+                        self.open_local(OpenTarget::NewTab, None, w, cx);
                     }
                 }
                 "d" if self.page == Page::Terminal && !self.tabs.is_empty() => {
                     if !e.is_held {
-                        self.split(Axis::Across, w, cx);
+                        self.open_split_menu(None, Axis::Across, None, w, cx);
                     }
                 }
                 "w" if on_terminal && !self.tabs.is_empty() => {

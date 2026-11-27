@@ -14,6 +14,7 @@ Beyond raw terminals, Outpost provides a structured **Chat** workspace, schedule
 Open [Chat](/chat) from the sidebar to converse with any session in a clean turn-by-turn UI:
 
 - Switch models, adjust agent modes, inspect tool calls, attach files, and approve permissions right from Chat.
+- Sessions in the Chat sidebar are ordered by most recently used so active conversations stay at the top.
 - Create **Channels** with multiple sessions from one or more machines and coordinate them using `@handles` (for example `@backend` or `@all`).
 - Manage a session's conversations (resume, move back, or start a new conversation) directly from the session header menu.
 

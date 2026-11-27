@@ -7,6 +7,8 @@ summary: How Outpost connects your Linux machines, coding agents, terminals, and
 
 # Welcome to Outpost
 
+![Outpost running coding sessions on a Linux workstation](../images/banner.png)
+
 Outpost runs coding agents on your own Linux machines and keeps every session alive even when you close your laptop, switch devices, or lose Wi-Fi.
 
 ## How Outpost fits together
@@ -36,7 +38,7 @@ Outpost runs coding agents on your own Linux machines and keeps every session al
 ## Where to go next
 
 - [Machines & Setup](02-machines.md) — connect Linux hosts and manage coding tool installations.
-- [Sessions & Conversations](03-sessions.md) — configure models, instructions, MCP servers, Git worktree forks, and conversations.
-- [Desktop & Web Terminals](04-terminals.md) — native split panes, search, scrollbar, clipboard, and image paste.
+- [Sessions & Conversations](03-sessions.md) — edit session harnesses and directories, configure launch settings, track live status, fork Git worktrees, and manage conversations.
+- [Desktop & Web Terminals](04-terminals.md) — unified split-pane chooser, search, scrollbar, clipboard, image paste, experimental interactive SSH bridge, and mobile web terminal.
 - [Machine CLI](05-machine-cli.md) — launch sessions from any terminal with an interactive TUI or scriptable flags and automatic tab opening.
 - [Chat, Schedules & Logs](06-chat-and-logs.md) — multi-agent channels, scheduled runs, cross-machine history search, and webhooks.

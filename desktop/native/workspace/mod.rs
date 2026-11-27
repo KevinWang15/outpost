@@ -60,9 +60,16 @@ enum OverlayMenu {
     BarOverflow,
     Pane(Id),
     Context(Id, Point<Pixels>),
+    Split(Id, Axis, Point<Pixels>),
     Tab(Id, Point<Pixels>),
     TabRename(Id),
     Files(Id),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OpenTarget {
+    NewTab,
+    Split(Id, Axis),
 }
 
 struct ToastNotice {
@@ -435,6 +442,9 @@ impl Workspace {
         } else {
             page
         };
+        if !matches!(self.page, Page::Choose | Page::Create) {
+            self.split_at = None;
+        }
         self.message.clear();
         self.overlay = None;
         self.files.preview_id = None;
@@ -660,9 +670,92 @@ impl Workspace {
         self.insert(pane, w, cx);
     }
 
-    fn split(&mut self, axis: Axis, w: &mut Window, cx: &mut Context<Self>) {
-        self.split_at = self.tabs.get(self.current).map(|t| (t.active, axis));
-        self.local(None, w, cx)
+    fn apply_open_target(&mut self, target: OpenTarget) {
+        self.split_at = match target {
+            OpenTarget::NewTab => None,
+            OpenTarget::Split(pane, axis) if self.panes.contains_key(&pane) => Some((pane, axis)),
+            OpenTarget::Split(..) => None,
+        };
+    }
+
+    pub(super) fn open_local(
+        &mut self,
+        target: OpenTarget,
+        profile: Option<String>,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_open_target(target);
+        self.local(profile, w, cx);
+    }
+
+    pub(super) fn open_sessions_for(
+        &mut self,
+        target: OpenTarget,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if items(&self.accounts["accounts"]).is_empty() {
+            self.split_at = None;
+            self.show(Page::Home, w, cx);
+            self.address.read(cx).focus_handle(cx).focus(w, cx);
+        } else {
+            self.apply_open_target(target);
+            self.catalogue(w, cx);
+        }
+    }
+
+    fn split_menu_anchor(&self, pane: Id, axis: Axis, w: &Window, cx: &App) -> Point<Pixels> {
+        let bounds = self
+            .watches
+            .get(&pane)
+            .and_then(|(_, snap)| snap.bounds())
+            .or_else(|| self.panes.get(&pane).map(|p| p.read(cx).bounds()))
+            .filter(|b| b.size.width > px(1.) && b.size.height > px(1.));
+        if let Some(b) = bounds {
+            match axis {
+                Axis::Across => point(b.left() + b.size.width * 0.5 + px(12.), b.top() + px(36.)),
+                Axis::Down => point(b.left() + px(24.), b.top() + b.size.height * 0.5 + px(12.)),
+            }
+        } else {
+            let vp = w.viewport_size();
+            point(
+                (vp.width * 0.5 - px(120.)).max(px(16.)),
+                (vp.height * 0.25).max(px(56.)),
+            )
+        }
+    }
+
+    pub(super) fn open_split_menu(
+        &mut self,
+        pane: Option<Id>,
+        axis: Axis,
+        position: Option<Point<Pixels>>,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = pane
+            .filter(|id| self.panes.contains_key(id))
+            .or_else(|| self.tabs.get(self.current).map(|t| t.active))
+        else {
+            return;
+        };
+        let pos = position.unwrap_or_else(|| self.split_menu_anchor(target, axis, w, cx));
+        let already_splitting_target = self.page == Page::Terminal
+            && matches!(self.overlay, Some(OverlayMenu::Split(p, _, _)) if p == target);
+        if !already_splitting_target {
+            self.select(target, w, cx);
+        }
+        self.overlay = Some(OverlayMenu::Split(target, axis, pos));
+        cx.notify();
+    }
+
+    pub(super) fn close_split_menu(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.overlay, Some(OverlayMenu::Split(..))) {
+            self.overlay = None;
+            self.restore_focus(w, cx);
+            cx.notify();
+        }
     }
 
     fn select_all(&self, cx: &mut Context<Self>) {
@@ -833,8 +926,14 @@ impl Workspace {
             if matches!(
                 self.overlay,
                 Some(OverlayMenu::Tab(t, _) | OverlayMenu::TabRename(t)) if t == tab.id
+            ) || matches!(
+                self.overlay,
+                Some(OverlayMenu::Split(p, _, _)) if tab.layout.contains(p)
             ) {
                 self.overlay = None;
+            }
+            if self.split_at.is_some_and(|(p, _)| tab.layout.contains(p)) {
+                self.split_at = None;
             }
             if self.hovered_tab == Some(tab.id) {
                 self.hovered_tab = None;
@@ -988,10 +1087,17 @@ impl Workspace {
     fn remove_leaf(&mut self, id: Id) {
         if matches!(
             self.overlay,
-            Some(OverlayMenu::Pane(p) | OverlayMenu::Context(p, _) | OverlayMenu::Files(p))
-                if p == id
+            Some(
+                OverlayMenu::Pane(p)
+                    | OverlayMenu::Context(p, _)
+                    | OverlayMenu::Split(p, _, _)
+                    | OverlayMenu::Files(p)
+            ) if p == id
         ) {
             self.overlay = None;
+        }
+        if self.split_at.is_some_and(|(p, _)| p == id) {
+            self.split_at = None;
         }
         if self.find.pane == Some(id) {
             self.find.pane = None;
@@ -1577,6 +1683,7 @@ impl Render for Workspace {
             )
             .child(self.context_menu_overlay(cx))
             .child(self.tab_context_menu_overlay(cx))
+            .child(self.split_menu_overlay(cx))
             .children(self.tab_rename_overlay(cx))
             .children(self.drag_overlay(w))
             .children(self.file_viewer(cx))
@@ -1628,8 +1735,7 @@ impl Render for Workspace {
                 )
             })
             .on_action(cx.listener(|s, _: &crate::menu::NewTerminal, w, cx| {
-                s.split_at = None;
-                s.local(None, w, cx)
+                s.open_local(OpenTarget::NewTab, None, w, cx)
             }))
             .on_action(cx.listener(|s, _: &crate::menu::OpenSessions, w, cx| {
                 s.open_sessions(w, cx)
@@ -1689,12 +1795,12 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|s, _: &crate::menu::SplitColumns, w, cx| {
                 if s.page == Page::Terminal && !s.tabs.is_empty() {
-                    s.split(Axis::Across, w, cx);
+                    s.open_split_menu(None, Axis::Across, None, w, cx);
                 }
             }))
             .on_action(cx.listener(|s, _: &crate::menu::SplitRows, w, cx| {
                 if s.page == Page::Terminal && !s.tabs.is_empty() {
-                    s.split(Axis::Down, w, cx);
+                    s.open_split_menu(None, Axis::Down, None, w, cx);
                 }
             }))
             .on_action(cx.listener(|s, _: &crate::menu::ToggleZoom, w, cx| {

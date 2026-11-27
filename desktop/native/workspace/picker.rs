@@ -355,10 +355,10 @@ impl Workspace {
         let has_accounts = !items(&self.accounts["accounts"]).is_empty();
 
         let heading = if choose {
-            if self.split_at.is_some() {
-                "Split with Outpost session"
-            } else {
-                "Outpost sessions"
+            match self.split_at {
+                Some((_, Axis::Across)) => "Split right with Outpost session",
+                Some((_, Axis::Down)) => "Split down with Outpost session",
+                None => "Outpost sessions",
             }
         } else {
             "Switch session"

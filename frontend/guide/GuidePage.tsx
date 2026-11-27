@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, BookOpen, Link as LinkIcon, Search, X } from 'lucide-react'
-import { createHeadingSlugger, guideHref, resolveGuideLink, searchGuide, slugFromPathname } from './guide'
+import {
+  createHeadingSlugger,
+  guideHref,
+  resolveGuideImage,
+  resolveGuideLink,
+  searchGuide,
+  slugFromPathname,
+} from './guide'
 import { AppSidebar } from '../ui/AppSidebar'
 import { Markdown } from '../ui/Markdown'
-import { guideCatalog } from './guideRegistry'
+import { guideCatalog, guideImages } from './guideRegistry'
 import '../styles/guide.scss'
 
 function initialSlug(): string {
@@ -106,6 +113,20 @@ export default function GuidePage() {
     },
     [knownSlugs, navigate, jumpAnchor],
   )
+
+  const renderGuideImage = useCallback((src: string, alt: string, key: number, block: boolean) => {
+    const resolved = resolveGuideImage(src, guideImages)
+    if (!resolved) return null
+    if (!block) return <img key={key} className="guide-inline-image" src={resolved} alt={alt} loading="lazy" />
+    return (
+      <figure key={key} className="guide-figure">
+        <div className="guide-figure-frame">
+          <img src={resolved} alt={alt} loading="lazy" />
+        </div>
+        {alt && <figcaption>{alt}</figcaption>}
+      </figure>
+    )
+  }, [])
 
   const createHeadingRenderer = useCallback(() => {
     const slugger = createHeadingSlugger()
@@ -331,6 +352,7 @@ export default function GuidePage() {
               softBreaks={false}
               defaultCodeLanguage="text"
               renderLink={renderGuideLink}
+              renderImage={renderGuideImage}
               createHeadingRenderer={createHeadingRenderer}
             />
             {(previousPage || nextPage) && (

@@ -113,10 +113,7 @@ impl Workspace {
                             false,
                             true,
                             cx,
-                            |s, w, cx| {
-                                s.split_at = None;
-                                s.local(None, w, cx)
-                            },
+                            |s, w, cx| s.open_local(OpenTarget::NewTab, None, w, cx),
                         )),
                     )
                     .child(

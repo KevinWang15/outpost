@@ -297,6 +297,43 @@
   }
 }
 
+.guide-prose .guide-figure {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0;
+
+  figcaption {
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+    text-align: center;
+  }
+}
+
+.guide-prose .guide-figure-frame {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  box-shadow: var(--shadow);
+
+  img {
+    display: block;
+    max-width: 100%;
+    max-height: 540px;
+    width: auto;
+    height: auto;
+    margin: 0 auto;
+  }
+}
+
+.guide-prose .guide-inline-image {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+  border-radius: 5px;
+}
+
 .guide-prose .code-block {
   overflow: hidden;
   border: 1px solid var(--border);

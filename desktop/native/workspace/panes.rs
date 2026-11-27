@@ -415,13 +415,15 @@ impl Workspace {
         };
         let mac = cfg!(target_os = "macos");
         let mut entries = vec![
-            item("Split side by side", LucideIcon::Columns2, |s, _, w, cx| {
-                s.split(Axis::Across, w, cx)
+            item("Split side by side", LucideIcon::Columns2, |s, id, w, cx| {
+                s.open_split_menu(Some(id), Axis::Across, None, w, cx)
             })
             .with_shortcut(if mac { "⌘D" } else { "Ctrl+Shift+D" }),
-            item("Split top and bottom", LucideIcon::Rows2, |s, _, w, cx| {
-                s.split(Axis::Down, w, cx)
-            })
+            item(
+                "Split top and bottom",
+                LucideIcon::Rows2,
+                |s, id, w, cx| s.open_split_menu(Some(id), Axis::Down, None, w, cx),
+            )
             .with_shortcut(if mac { "⌘⇧D" } else { "Ctrl+Alt+D" }),
             item(
                 zoom_label,
@@ -639,7 +641,7 @@ impl Workspace {
                 }
             }));
 
-        if let Some((tab_id, idx, pane_id, _)) = active {
+        if let Some((tab_id, idx, pane_id, pos)) = active {
             let mac = cfg!(target_os = "macos");
             let is_current = idx == self.current;
             let tab_count = self.tabs.len();
@@ -671,10 +673,7 @@ impl Workspace {
                         "Split side by side",
                         LucideIcon::Columns2,
                         cx.listener(move |s, _, w, cx| {
-                            if s.panes.contains_key(&pane_id) {
-                                s.select(pane_id, w, cx);
-                                s.split(Axis::Across, w, cx);
-                            }
+                            s.open_split_menu(Some(pane_id), Axis::Across, Some(pos), w, cx);
                         }),
                     )
                     .with_shortcut(if mac { "⌘D" } else { "Ctrl+Shift+D" }),
@@ -684,25 +683,11 @@ impl Workspace {
                         "Split top and bottom",
                         LucideIcon::Rows2,
                         cx.listener(move |s, _, w, cx| {
-                            if s.panes.contains_key(&pane_id) {
-                                s.select(pane_id, w, cx);
-                                s.split(Axis::Down, w, cx);
-                            }
+                            s.open_split_menu(Some(pane_id), Axis::Down, Some(pos), w, cx);
                         }),
                     )
                     .with_shortcut(if mac { "⌘⇧D" } else { "Ctrl+Alt+D" }),
                 )
-                .entry(MenuEntry::item_with_icon(
-                    "Split with Outpost session…",
-                    LucideIcon::Server,
-                    cx.listener(move |s, _, w, cx| {
-                        if s.panes.contains_key(&pane_id) {
-                            s.select(pane_id, w, cx);
-                            s.split_at = Some((pane_id, Axis::Across));
-                            s.open_sessions(w, cx);
-                        }
-                    }),
-                ))
                 .entry(MenuEntry::Separator)
                 .entry(
                     MenuEntry::item_with_icon(
@@ -792,7 +777,7 @@ impl Workspace {
                 }
             }));
 
-        if let Some((id, _, pane)) = active {
+        if let Some((id, pos, pane)) = active {
             let can_copy = pane.can_copy();
             let managed = pane.server.is_some();
             let mac = cfg!(target_os = "macos");
@@ -894,8 +879,7 @@ impl Workspace {
                         "Split side by side",
                         LucideIcon::Columns2,
                         cx.listener(move |s, _, w, cx| {
-                            s.select(id, w, cx);
-                            s.split(Axis::Across, w, cx);
+                            s.open_split_menu(Some(id), Axis::Across, Some(pos), w, cx);
                         }),
                     )
                     .with_shortcut(if mac { "⌘D" } else { "Ctrl+Shift+D" }),
@@ -905,8 +889,7 @@ impl Workspace {
                         "Split top and bottom",
                         LucideIcon::Rows2,
                         cx.listener(move |s, _, w, cx| {
-                            s.select(id, w, cx);
-                            s.split(Axis::Down, w, cx);
+                            s.open_split_menu(Some(id), Axis::Down, Some(pos), w, cx);
                         }),
                     )
                     .with_shortcut(if mac { "⌘⇧D" } else { "Ctrl+Alt+D" }),
@@ -928,6 +911,29 @@ impl Workspace {
             }
         }
 
+        menu
+    }
+
+    pub(super) fn split_menu_overlay(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let active = match self.overlay {
+            Some(OverlayMenu::Split(id, axis, pos)) if self.panes.contains_key(&id) => {
+                Some((id, axis, pos))
+            }
+            _ => None,
+        };
+        let active_overlay = active.map(|(id, axis, pos)| OverlayMenu::Split(id, axis, pos));
+        let position = active.map(|(_, _, pos)| pos);
+        let mut menu = popup_menu("split-pane-menu", position)
+            .min_width(px(240.))
+            .on_close(cx.listener(move |s, _, _, cx| {
+                if s.overlay.is_some() && s.overlay == active_overlay {
+                    s.overlay = None;
+                    cx.notify();
+                }
+            }));
+        if let Some((id, axis, _)) = active {
+            menu = menu.entries(self.open_menu_entries(OpenTarget::Split(id, axis), cx));
+        }
         menu
     }
 }

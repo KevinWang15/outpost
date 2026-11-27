@@ -1533,18 +1533,204 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             assert_eq!(ws.read(cx).current, 2);
             assert_eq!(ws.read(cx).tabs[2].id, tab_ids[2]);
 
-            // Splits, pane cycling forward & backward, and zoom toggle.
+            // Split shortcuts open the split chooser menu first instead of spawning immediately.
             let initial_pane = ws.read(cx).tabs[2].active;
-            dispatch_key(w, cx, split_col, false);
+            dispatch_key(w, cx, split_col.clone(), false);
+            assert!(
+                matches!(
+                    ws.read(cx).overlay,
+                    Some(OverlayMenu::Split(id, Axis::Across, _)) if id == initial_pane
+                ),
+                "split right shortcut must open split chooser menu for the active pane"
+            );
+            assert_eq!(ws.read(cx).tabs[2].active, initial_pane);
+            // Escape cancels the split chooser without splitting.
+            dispatch_key(w, cx, Keystroke::parse("escape").unwrap(), false);
+            assert!(ws.read(cx).overlay.is_none());
+            assert!(matches!(ws.read(cx).tabs[2].layout, Layout::Pane(id) if id == initial_pane));
+
+            // Re-open split right menu so we can select the local shell with the keyboard.
+            dispatch_key(w, cx, split_col.clone(), false);
+            w.draw(cx).clear(cx);
+        })?;
+        test.run_until_parked();
+        test.update_window(sc_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            let initial_pane = ws.read(cx).tabs[2].active;
+            w.draw(cx).clear(cx);
+            w.dispatch_keystroke(Keystroke::parse("down").unwrap(), cx);
+            let enter = Keystroke::parse("enter").unwrap();
+            w.dispatch_keystroke(enter.clone(), cx);
+            w.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke: enter }), cx);
             let second_pane = ws.read(cx).tabs[2].active;
             assert_ne!(second_pane, initial_pane);
-            dispatch_key(w, cx, split_row, false);
+            assert!(ws.read(cx).overlay.is_none());
+            assert!(matches!(
+                ws.read(cx).tabs[2].layout,
+                Layout::Split {
+                    axis: Axis::Across,
+                    ..
+                }
+            ));
+
+            // Split down shortcut opens the split chooser for Axis::Down.
+            dispatch_key(w, cx, split_row.clone(), false);
+            assert!(matches!(
+                ws.read(cx).overlay,
+                Some(OverlayMenu::Split(id, Axis::Down, _)) if id == second_pane
+            ));
+            w.draw(cx).clear(cx);
+        })?;
+        test.run_until_parked();
+        test.update_window(sc_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            let second_pane = ws.read(cx).tabs[2].active;
+            w.draw(cx).clear(cx);
+            w.dispatch_keystroke(Keystroke::parse("down").unwrap(), cx);
+            let enter = Keystroke::parse("enter").unwrap();
+            w.dispatch_keystroke(enter.clone(), cx);
+            w.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke: enter }), cx);
             let third_pane = ws.read(cx).tabs[2].active;
             assert_ne!(third_pane, second_pane);
+            assert!(ws.read(cx).overlay.is_none());
+
+            // Selecting Outpost session… from a split menu enters Page::Choose with split_at set,
+            // and pressing Escape clears split_at cleanly.
+            ws.update(cx, |s, cx| {
+                s.accounts = json!({"accounts":[{"origin":"https://example.com","account":{"id":"test"},"canCreate":true}]});
+                s.open_split_menu(Some(third_pane), Axis::Down, None, w, cx);
+            });
+            w.draw(cx).clear(cx);
+        })?;
+        test.run_until_parked();
+        test.update_window(sc_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            let third_pane = ws.read(cx).tabs[2].active;
+            w.draw(cx).clear(cx);
+            // Up wraps to the last entry ("Outpost session…").
+            w.dispatch_keystroke(Keystroke::parse("up").unwrap(), cx);
+            let enter = Keystroke::parse("enter").unwrap();
+            w.dispatch_keystroke(enter.clone(), cx);
+            w.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke: enter }), cx);
+            assert!(ws.read(cx).page == Page::Choose);
+            assert_eq!(ws.read(cx).split_at, Some((third_pane, Axis::Down)));
+            assert!(ws.read(cx).overlay.is_none());
+            dispatch_key(w, cx, Keystroke::parse("escape").unwrap(), false);
+            assert!(ws.read(cx).page == Page::Terminal);
+            assert_eq!(ws.read(cx).split_at, None);
+
+            // Context menu -> split transitions cleanly to OverlayMenu::Split at the same anchor.
+            let ctx_pos = point(px(320.), px(220.));
+            ws.update(cx, |s, cx| {
+                s.open_context_menu(third_pane, ctx_pos, cx);
+                s.open_split_menu(Some(third_pane), Axis::Across, Some(ctx_pos), w, cx);
+            });
+            assert_eq!(
+                ws.read(cx).overlay,
+                Some(OverlayMenu::Split(third_pane, Axis::Across, ctx_pos))
+            );
+            ws.update(cx, |s, cx| s.close_split_menu(w, cx));
+            assert!(ws.read(cx).overlay.is_none());
+
+            // Top-bar split button toggles Axis::Across on left-click, switches to Axis::Down on
+            // right-click without getting clobbered by outside-click dismissal, and closes on repeat.
+            w.draw(cx).clear(cx);
+            let split_btn_x = if cfg!(windows) { 693. } else { 843. };
+            let split_btn_pos = point(px(split_btn_x), px(20.));
+            let press_split = |w: &mut Window, cx: &mut App, button: MouseButton| {
+                w.dispatch_event(
+                    PlatformInput::MouseDown(MouseDownEvent {
+                        position: split_btn_pos,
+                        button,
+                        modifiers: Default::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    cx,
+                );
+                w.dispatch_event(
+                    PlatformInput::MouseUp(MouseUpEvent {
+                        position: split_btn_pos,
+                        button,
+                        modifiers: Default::default(),
+                        click_count: 1,
+                    }),
+                    cx,
+                );
+                w.draw(cx).clear(cx);
+            };
+            press_split(w, cx, MouseButton::Left);
+            assert!(
+                matches!(
+                    ws.read(cx).overlay,
+                    Some(OverlayMenu::Split(id, Axis::Across, _)) if id == third_pane
+                ),
+                "left-clicking toolbar split button must open Axis::Across split menu"
+            );
+            press_split(w, cx, MouseButton::Right);
+            assert!(
+                matches!(
+                    ws.read(cx).overlay,
+                    Some(OverlayMenu::Split(id, Axis::Down, _)) if id == third_pane
+                ),
+                "right-clicking toolbar split button while open must switch to Axis::Down"
+            );
+            press_split(w, cx, MouseButton::Right);
+            assert!(
+                ws.read(cx).overlay.is_none(),
+                "repeat right-click on toolbar split button must close the split menu"
+            );
+
+            // Multi-profile split chooser lists all local profiles and opens the selected one.
+            let alt_exe = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
+            ws.update(cx, |s, cx| {
+                s.prefs.profiles = vec![
+                    crate::prefs::ShellProfile {
+                        id: "primary".into(),
+                        name: "Primary Shell".into(),
+                        executable: alt_exe.into(),
+                        args: vec![],
+                    },
+                    crate::prefs::ShellProfile {
+                        id: "secondary".into(),
+                        name: "Secondary Shell".into(),
+                        executable: alt_exe.into(),
+                        args: vec![],
+                    },
+                ];
+                s.open_split_menu(Some(third_pane), Axis::Across, None, w, cx);
+            });
+            w.draw(cx).clear(cx);
+        })?;
+        test.run_until_parked();
+        if let Some(dir) = std::env::var_os("OUTPOST_TEST_SCREENSHOTS") {
+            test.advance_clock(gpui::components::ANIM_FAST);
+            test.update_window(sc_win.into(), |_, w, cx| w.draw(cx).clear(cx))?;
+            test.capture_screenshot(sc_win.into())?
+                .save(PathBuf::from(dir).join("split-menu.png"))?;
+        }
+        test.update_window(sc_win.into(), |root, w, cx| {
+            let ws = root.downcast::<Workspace>().unwrap();
+            let third_pane = ws.read(cx).tabs[2].active;
+            let alt_title = if cfg!(windows) { "cmd" } else { "sh" };
+            w.draw(cx).clear(cx);
+            // Down twice picks the second profile ("Secondary Shell").
+            w.dispatch_keystroke(Keystroke::parse("down").unwrap(), cx);
+            w.dispatch_keystroke(Keystroke::parse("down").unwrap(), cx);
+            let enter = Keystroke::parse("enter").unwrap();
+            w.dispatch_keystroke(enter.clone(), cx);
+            w.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke: enter }), cx);
+            let fourth_pane = ws.read(cx).tabs[2].active;
+            assert_ne!(fourth_pane, third_pane);
+            assert_eq!(ws.read(cx).panes[&fourth_pane].read(cx).title, alt_title);
+            assert!(ws.read(cx).overlay.is_none());
+
+            // Pane cycling forward & backward, and zoom toggle.
             dispatch_key(w, cx, pane_prev, false);
-            assert_eq!(ws.read(cx).tabs[2].active, second_pane);
+            let prev_pane = ws.read(cx).tabs[2].active;
+            assert_ne!(prev_pane, fourth_pane);
             dispatch_key(w, cx, pane_next, false);
-            assert_eq!(ws.read(cx).tabs[2].active, third_pane);
+            assert_eq!(ws.read(cx).tabs[2].active, fourth_pane);
             dispatch_key(w, cx, zoom_key.clone(), false);
             assert!(ws.read(cx).tabs[2].zoom);
             dispatch_key(w, cx, zoom_key, false);
@@ -1904,9 +2090,10 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         wait_for_output(&mut test, "LOCAL-PASTE=22")?;
     }
     test.update_window(window.into(), |root, w, cx| {
-        root.downcast::<Workspace>()
-            .unwrap()
-            .update(cx, |s, cx| s.split(Axis::Across, w, cx))
+        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+            let active = s.tabs[s.current].active;
+            s.open_local(OpenTarget::Split(active, Axis::Across), None, w, cx);
+        })
     })?;
     draw(&mut test);
     assert!(test.update_window(window.into(), |root, _, cx| {
@@ -2102,9 +2289,10 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     })?;
     // Move a nested layout as one tab, hover another window, cancel, then dock.
     test.update_window(window.into(), |root, w, cx| {
-        root.downcast::<Workspace>()
-            .unwrap()
-            .update(cx, |s, cx| s.split(Axis::Down, w, cx));
+        root.downcast::<Workspace>().unwrap().update(cx, |s, cx| {
+            let active = s.tabs[s.current].active;
+            s.open_local(OpenTarget::Split(active, Axis::Down), None, w, cx);
+        });
     })?;
     draw(&mut test);
     let start = test.update_window(window.into(), |root, _, cx| {
@@ -2171,9 +2359,9 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     prompts.update(init_test);
     let mut workspace = prompts.open_window(|w, cx| Workspace::new(false, w, cx));
     let (left, right) = workspace.update(|s, w, cx| {
-        s.local(None, w, cx);
+        s.open_local(OpenTarget::NewTab, None, w, cx);
         let left = s.tabs[s.current].active;
-        s.split(Axis::Across, w, cx);
+        s.open_local(OpenTarget::Split(left, Axis::Across), None, w, cx);
         (left, s.tabs[s.current].active)
     });
     let header_control =

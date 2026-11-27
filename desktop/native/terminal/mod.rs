@@ -880,6 +880,10 @@ impl Pane {
         self.term.selection_to_string().filter(|s| !s.is_empty())
     }
 
+    pub(crate) fn bounds(&self) -> Bounds<Pixels> {
+        self.bounds
+    }
+
     #[cfg(feature = "ui-tests")]
     pub fn screen_text(&self) -> String {
         (0..self.term.screen_lines() as i32)

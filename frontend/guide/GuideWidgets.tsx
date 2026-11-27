@@ -1,6 +1,6 @@
-// Interactive User Guide widgets (adapted from docs-starter, styled natively with Outpost's design system):
+// Interactive User Guide widgets styled with Outpost's design system:
 // zoomable/pannable image lightbox, expandable table modal, syntax-highlighted code blocks,
-// scaled controlled HTML/SVG previews, and GitHub/docs-starter callouts.
+// scaled controlled HTML/SVG previews, and GitHub-style alert callouts.
 import {
   useCallback,
   useEffect,

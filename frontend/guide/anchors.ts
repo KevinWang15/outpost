@@ -1,4 +1,4 @@
-// Smooth anchor scrolling and temporary search-match highlighting (adapted from docs-starter).
+// Smooth anchor scrolling and temporary search-match highlighting for the User Guide.
 const DEFAULT_SCROLL_Y = 96
 const SEARCH_TARGET_HIGHLIGHT_CLASS = 'search-target-highlight'
 const SEARCH_INLINE_HIGHLIGHT_CLASS = 'search-inline-highlight'

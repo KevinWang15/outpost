@@ -1,7 +1,7 @@
-// User Guide view integrated organically into Outpost's AppSidebar & light-slate design system.
-// Brings in docs-starter's best features: Cmd/Ctrl+K search palette across articles & headings,
-// match highlighting on jump, collapsible section tree, breadcrumbs, Copy Markdown,
-// zoomable image lightbox, expandable tables, syntax-highlighted code blocks, and HTML/SVG previews.
+// User Guide view integrated into Outpost's AppSidebar and light-slate design system:
+// Cmd/Ctrl+K search palette across articles & headings, match highlighting on jump,
+// collapsible section tree, breadcrumbs, Copy Markdown, zoomable image lightbox,
+// expandable tables, syntax-highlighted code blocks, and HTML/SVG previews.
 import {
   useCallback,
   useEffect,

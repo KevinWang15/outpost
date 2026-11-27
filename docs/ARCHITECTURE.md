@@ -727,10 +727,11 @@ directly from the PTY stream via the standard OSC 7501 protocol
   bytes are forwarded to headless xterm or viewers.
 - Root reports (`id` omitted) drive `TerminalActivity`: `working` → `working`
   (+ `progress`), `blocked` → `waiting` (+ `blockedKind` & `progress`),
-  `done` → `finished` (with a unique `completionId`), `error` → `error`,
-  `idle` → `idle`, `clear` → clears root and child records to `idle`.
-- Child reports (`id` present) are tracked independently (capped at 255, cleared
-  hierarchically by prefix) and never alter root turn state.
+  `done` → `finished` (with a unique `completionId`, latched across a subsequent
+  `idle` report until acknowledged or superseded by `working`, `blocked`,
+  `error`, or `clear`), `error` → `error`, `idle` → `idle`, `clear` → resets to `idle`.
+- Child reports (`id` present) are ignored for root turn state so subagents never
+  overwrite the session badge.
 - When the tool exits, `working` and `waiting` become `idle` while an unread
   completion or an error persists.
 
@@ -820,8 +821,8 @@ too, without waiting for a later PTY write or scrolling to a result.
 
 A message for a session running in a terminal (from another session, a
 channel or a schedule) goes to its terminal service, which types it in when
-that cannot get in your way (`machine/delivery.ts`): the agent is idle, as its
-hooks and transcript report; no viewer has a draft in the message box; no line
+that cannot get in your way (`machine/delivery.ts`): the agent is idle (or
+finished), as its OSC 7501 status reports; no viewer has a draft in the message box; no line
 you started typing in the tool is unfinished (no Enter, Ctrl+C or Ctrl+U since);
 and you have not typed for 3 seconds. The message is pasted (bracketed when the
 program asked for that) under its `[Outpost: …]` header, then Enter follows on

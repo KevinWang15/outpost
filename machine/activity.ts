@@ -31,6 +31,12 @@ interface ProgramRecord {
   at: string
 }
 
+interface CompletionRecord {
+  id: string
+  at: string
+  detail: string | null
+}
+
 const recordPath = (session: string) => statePath('activity', `${session}.json`)
 
 export function readActivity(session: string): ActivityRecord | null {
@@ -125,7 +131,7 @@ export class TerminalActivity {
   private conversation: string
   private root: ProgramRecord | null = null
   private doneSeq = 0
-  private completion: string | null = null
+  private completion: CompletionRecord | null = null
   private seen: string[]
   private running = true
   private value: SessionActivity
@@ -165,13 +171,19 @@ export class TerminalActivity {
       return
     }
 
+    const at = new Date().toISOString()
     if (report.state === 'done') {
+      const detail = formatDetail(report.title, report.msg)
       // Repeated `done` reports for the same completion keep the same completionId.
-      if (this.root?.state !== 'done') {
+      if (this.root?.state !== 'done' || !this.completion) {
         this.doneSeq++
-        this.completion = this.completionId(this.doneSeq)
+        this.completion = { id: this.completionId(this.doneSeq), at, detail }
+      } else {
+        this.completion = { id: this.completion.id, at, detail }
       }
-    } else {
+    } else if (report.state !== 'idle') {
+      // Latch an unacknowledged `done` across a subsequent `idle` report; only a new
+      // active/error/clear state or user acknowledgement clears it.
       this.completion = null
     }
 
@@ -182,7 +194,7 @@ export class TerminalActivity {
       app: report.app,
       title: report.title,
       msg: report.msg,
-      at: new Date().toISOString(),
+      at,
     }
     this.publish()
   }
@@ -192,12 +204,17 @@ export class TerminalActivity {
     if (!root) return activity('idle')
     const state = programToActivity[root.state]
     if (!this.running && (state === 'working' || state === 'waiting')) return activity('idle', { updatedAt: root.at })
-    if (state === 'finished') {
-      if (!this.completion || this.seen.includes(this.completion)) return activity('idle', { updatedAt: root.at })
-      return activity('finished', {
+    if (state === 'finished' || state === 'idle') {
+      if (this.completion && !this.seen.includes(this.completion.id)) {
+        return activity('finished', {
+          updatedAt: this.completion.at,
+          completionId: this.completion.id,
+          detail: this.completion.detail,
+        })
+      }
+      return activity('idle', {
         updatedAt: root.at,
-        completionId: this.completion,
-        detail: formatDetail(root.title, root.msg),
+        detail: state === 'idle' ? formatDetail(root.title, root.msg) : null,
       })
     }
     return activity(state, {

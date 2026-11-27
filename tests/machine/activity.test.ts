@@ -131,6 +131,68 @@ test('OSC 7501 root lifecycle: working, progress, blocked kinds, done, acknowled
   assert.equal(activity.current.state, 'idle')
 })
 
+test('OSC 7501 done latches across a subsequent idle until acknowledged, typed, or superseded', async t => {
+  const { start, session, changes } = await fixture(t, 'codex')
+  const activity = start()
+
+  // working -> idle (without done, e.g. cancelled/Esc) stays idle.
+  activity.reportStatus(report({ state: 'working', app: 'codex' }))
+  activity.reportStatus(report({ state: 'idle', app: 'codex' }))
+  assert.equal(activity.current.state, 'idle')
+  assert.equal(activity.current.completionId, null)
+
+  // working -> done -> idle keeps finished ("Needs you") latched with original completionId and detail.
+  activity.reportStatus(report({ state: 'working', app: 'codex' }))
+  activity.reportStatus(report({ state: 'done', app: 'codex', msg: 'Build green' }))
+  const latched = activity.current
+  assert.equal(latched.state, 'finished')
+  assert.ok(latched.completionId)
+  assert.equal(latched.detail, 'Build green')
+  const countBeforeIdle = changes.length
+
+  activity.reportStatus(report({ state: 'idle', app: 'codex' }))
+  assert.equal(activity.current.state, 'finished')
+  assert.equal(activity.current.completionId, latched.completionId)
+  assert.equal(activity.current.detail, 'Build green')
+  assert.equal(changes.length, countBeforeIdle, 'done -> idle does not emit spurious activity churn')
+
+  // Acknowledging while in idle clears to idle cleanly.
+  assert.equal(activity.acknowledge(latched.completionId!), true)
+  assert.equal(activity.current.state, 'idle')
+  assert.equal(activity.current.completionId, null)
+
+  // A subsequent idle after acknowledgement stays idle.
+  activity.reportStatus(report({ state: 'idle', app: 'codex', msg: 'Prompt ready' }))
+  assert.equal(activity.current.state, 'idle')
+  assert.equal(activity.current.detail, 'Prompt ready')
+
+  // A new working/blocked/error/clear state clears an unacknowledged latched completion.
+  activity.reportStatus(report({ state: 'done', app: 'codex', msg: 'First' }))
+  activity.reportStatus(report({ state: 'idle', app: 'codex' }))
+  assert.equal(activity.current.state, 'finished')
+  activity.reportStatus(report({ state: 'clear' }))
+  assert.equal(activity.current.state, 'idle')
+
+  // Typing clears a latched done -> idle completion.
+  activity.reportStatus(report({ state: 'working', app: 'codex' }))
+  activity.reportStatus(report({ state: 'done', app: 'codex', msg: 'Typed clear' }))
+  activity.reportStatus(report({ state: 'idle', app: 'codex' }))
+  assert.equal(activity.current.state, 'finished')
+  activity.input()
+  assert.equal(activity.current.state, 'idle')
+
+  // Process exit preserves an unseen latched done -> idle completion.
+  activity.reportStatus(report({ state: 'working', app: 'codex' }))
+  activity.reportStatus(report({ state: 'done', app: 'codex', msg: 'Ready to review' }))
+  activity.reportStatus(report({ state: 'idle', app: 'codex' }))
+  const persistedId = activity.current.completionId!
+  activity.exited()
+  assert.equal(activity.current.state, 'finished')
+  assert.equal(restingActivity(session.id).state, 'finished')
+  assert.equal(restingActivity(session.id).completionId, persistedId)
+  assert.equal(restingActivity(session.id).detail, 'Ready to review')
+})
+
 test('OSC 7501 child records are isolated from root turn state', async t => {
   const { start } = await fixture(t, 'claude')
   const activity = start()

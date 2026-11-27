@@ -1163,8 +1163,12 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             );
 
             s.show(Page::Switch, w, cx);
-            // Switch lists 2 open panes + only the 1 non-open catalogue session (sess-other).
-            assert_eq!(s.picker_items(cx).len(), 3);
+            // Switch lists 2 open panes (most recently used first) + only the 1 non-open catalogue session (sess-other).
+            let (p1, p2) = (s.remote[&1], s.remote[&2]);
+            let switch_items = s.picker_items(cx);
+            assert_eq!(switch_items.len(), 3);
+            assert!(matches!(switch_items[0], picker::PickerItem::OpenPane(id) if id == p2));
+            assert!(matches!(switch_items[1], picker::PickerItem::OpenPane(id) if id == p1));
             s.open_create_session(w, cx);
             assert!(s.page == Page::Create);
             assert_eq!(s.create.origin, "https://outpost.zoco.cc");
@@ -2181,6 +2185,88 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
     workspace.draw();
     workspace.simulate_keystroke("escape");
     assert_eq!(workspace.read(|s, _| s.overlay), None);
+
+    // Terminal bell lifecycle on normal shells:
+    // 1) Active pane bell auto-hides after 2 seconds.
+    workspace.update(|_, w, _| w.activate_window());
+    prompts.run_until_parked();
+    workspace.update(|s, _, cx| {
+        s.panes[&right].update(cx, |p, cx| p.feed(b"\x07", cx));
+        assert!(s.panes[&right].read(cx).bell);
+    });
+    prompts
+        .background_executor()
+        .advance_clock(Duration::from_millis(1500));
+    prompts.run_until_parked();
+    assert!(workspace.read(|s, cx| s.panes[&right].read(cx).bell));
+    prompts
+        .background_executor()
+        .advance_clock(Duration::from_millis(600));
+    prompts.run_until_parked();
+    assert!(!workspace.read(|s, cx| s.panes[&right].read(cx).bell));
+
+    // 2) Active pane bell clears immediately on typing.
+    workspace.update(|s, _, cx| {
+        s.panes[&right].update(cx, |p, cx| p.feed(b"\x07", cx));
+        assert!(s.panes[&right].read(cx).bell);
+    });
+    workspace.simulate_keystroke("a");
+    assert!(!workspace.read(|s, cx| s.panes[&right].read(cx).bell));
+
+    // 3) Bell fired while active clears immediately when switching away (no stale alert).
+    workspace.update(|s, w, cx| {
+        s.panes[&right].update(cx, |p, cx| p.feed(b"\x07", cx));
+        assert!(s.panes[&right].read(cx).bell);
+        s.select(left, w, cx);
+    });
+    prompts.run_until_parked();
+    assert!(!workspace.read(|s, cx| s.panes[&right].read(cx).bell));
+
+    // 4) Background pane bell persists indefinitely while unfocused, survives a brief flick,
+    //    and auto-hides 2 seconds after the pane stays active.
+    workspace.update(|s, _, cx| {
+        s.panes[&right].update(cx, |p, cx| p.feed(b"\x07", cx));
+        assert!(s.panes[&right].read(cx).bell);
+    });
+    prompts
+        .background_executor()
+        .advance_clock(Duration::from_secs(10));
+    prompts.run_until_parked();
+    assert!(workspace.read(|s, cx| s.panes[&right].read(cx).bell));
+    workspace.update(|s, w, cx| s.select(right, w, cx));
+    prompts.run_until_parked();
+    prompts
+        .background_executor()
+        .advance_clock(Duration::from_millis(500));
+    prompts.run_until_parked();
+    workspace.update(|s, w, cx| s.select(left, w, cx));
+    prompts.run_until_parked();
+    prompts
+        .background_executor()
+        .advance_clock(Duration::from_secs(5));
+    prompts.run_until_parked();
+    assert!(workspace.read(|s, cx| s.panes[&right].read(cx).bell));
+    workspace.update(|s, w, cx| s.select(right, w, cx));
+    prompts.run_until_parked();
+    prompts
+        .background_executor()
+        .advance_clock(Duration::from_millis(2100));
+    prompts.run_until_parked();
+    assert!(!workspace.read(|s, cx| s.panes[&right].read(cx).bell));
+
+    // Switch picker orders open panes by most recently focused first.
+    workspace.update(|s, w, cx| {
+        s.show(Page::Switch, w, cx);
+        let items = s.picker_items(cx);
+        assert!(matches!(items[0], picker::PickerItem::OpenPane(id) if id == right));
+        assert!(matches!(items[1], picker::PickerItem::OpenPane(id) if id == left));
+        s.select(left, w, cx);
+        s.show(Page::Switch, w, cx);
+        let items = s.picker_items(cx);
+        assert!(matches!(items[0], picker::PickerItem::OpenPane(id) if id == left));
+        assert!(matches!(items[1], picker::PickerItem::OpenPane(id) if id == right));
+        s.select(right, w, cx);
+    });
 
     // Closing an inactive pane must neither arm a drag nor close the selected sibling.
     let close = header_control(&mut workspace, left, 15.);

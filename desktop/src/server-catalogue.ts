@@ -13,6 +13,10 @@ export interface SessionCatalogue {
   errors: string[]
 }
 
+function compareDesktopSessions(a: DesktopSessionChoice, b: DesktopSessionChoice) {
+  return (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) || a.title.localeCompare(b.title)
+}
+
 /** Bounded discovery across independent servers. Only current account results
  * are published, and one target's failure does not hide other sessions. */
 export async function loadSessionCatalogue(
@@ -32,7 +36,9 @@ export async function loadSessionCatalogue(
   const update = () => {
     if (!signal.aborted)
       publish({
-        sessions: [...found].flatMap(([server, sessions]) => (server.current() ? sessions : [])),
+        sessions: [...found]
+          .flatMap(([server, sessions]) => (server.current() ? sessions : []))
+          .sort(compareDesktopSessions),
         errors: [...errors],
       })
   }
@@ -84,6 +90,7 @@ export async function loadSessionCatalogue(
                   title: item.title,
                   detail: item.detail,
                   tool: item.tool,
+                  ...(item.lastUsedAt !== undefined ? { lastUsedAt: item.lastUsedAt } : {}),
                 })
               }
               found.set(server, sessions)

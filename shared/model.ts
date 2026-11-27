@@ -55,6 +55,39 @@ export interface Session extends Omit<SessionRecord, 'conversations'> {
   activity: SessionActivity
 }
 
+/** Most recent usage timestamp for sorting sessions (most recently used first). */
+export function sessionLastUsedAt(session: {
+  lastConnectedAt?: string | null
+  createdAt?: string | null
+  activity?: { updatedAt?: string | null } | null
+}): string {
+  let best = ''
+  for (const candidate of [session.lastConnectedAt, session.activity?.updatedAt, session.createdAt]) {
+    if (typeof candidate === 'string' && candidate > best) best = candidate
+  }
+  return best
+}
+
+/** Sort comparator ordering sessions most-recently-used first, tie-breaking by name. */
+export function compareSessionsByRecency(
+  a: {
+    name: string
+    lastConnectedAt?: string | null
+    createdAt?: string | null
+    activity?: { updatedAt?: string | null } | null
+  },
+  b: {
+    name: string
+    lastConnectedAt?: string | null
+    createdAt?: string | null
+    activity?: { updatedAt?: string | null } | null
+  },
+): number {
+  const recency = sessionLastUsedAt(b).localeCompare(sessionLastUsedAt(a))
+  if (recency !== 0) return recency
+  return a.name.localeCompare(b.name)
+}
+
 export interface ConversationMatch {
   tool: HarnessId
   conversation: string

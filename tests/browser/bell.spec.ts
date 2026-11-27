@@ -161,7 +161,7 @@ test('bells mark the page, chime once per burst, and clear when acknowledged', a
   socket.send(Buffer.from('\x07'))
   await expect(notice).toContainText('rang a bell')
   expect(await page.evaluate(() => window.bellAudio.sounds)).toBe(2)
-  await page.clock.fastForward(4000)
+  await page.clock.fastForward(2000)
   await expect(page).toHaveTitle('Coding session · Dev box · Outpost')
 
   // Suspended audio must not queue old bells to play on the next gesture.

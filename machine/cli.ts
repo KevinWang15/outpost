@@ -5,7 +5,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, wri
 import { homedir, hostname } from 'node:os'
 import { basename, delimiter, isAbsolute, join, resolve } from 'node:path'
 import { harnessIds, harnessLabel, harnesses, isHarnessId, supportsTerminal, type HarnessId } from '../shared/harnesses'
-import type { Session, SessionInput, SessionRecord } from '../shared/model'
+import { compareSessionsByRecency, type Session, type SessionInput, type SessionRecord } from '../shared/model'
 import { encodeOpenSessionOsc } from '../shared/openSessionSignal'
 import { quote } from '../shared/shell'
 import { desktopEntryUrl } from '../shared/desktopAuth'
@@ -408,7 +408,7 @@ export async function runNewCommand(argv: string[], initialCwd: string) {
   }
 
   const registry = readRegistry()
-  const existingSessions = registry.sessions
+  const existingSessions = [...registry.sessions].sort(compareSessionsByRecency)
   const { installed, missing } = detectInstalledTools()
   if (!installed.length) {
     throw new Error(

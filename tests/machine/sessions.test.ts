@@ -201,6 +201,30 @@ test('switching makes an earlier conversation current, but not one that moved', 
   await assert.rejects(switchSession(session.id, 'unknown'), { status: 404 })
 })
 
+test('listSessions sorts sessions most recently used first', async t => {
+  const home = machine(t)
+  const oldest = record(home, 'claude', '11111111-1111-4111-8111-111111111111', {
+    name: 'Oldest',
+    createdAt: '2026-10-01T00:00:00.000Z',
+    lastConnectedAt: '2026-10-02T00:00:00.000Z',
+  })
+  const recentlyConnected = record(home, 'claude', '22222222-1111-4111-8111-111111111111', {
+    name: 'Connected',
+    createdAt: '2026-10-01T00:00:00.000Z',
+    lastConnectedAt: '2026-10-05T00:00:00.000Z',
+  })
+  const newlyCreated = record(home, 'claude', '33333333-1111-4111-8111-111111111111', {
+    name: 'Newest',
+    createdAt: '2026-10-06T00:00:00.000Z',
+    lastConnectedAt: null,
+  })
+  await register(oldest, recentlyConnected, newlyCreated)
+  assert.deepEqual(
+    (await listSessions()).map(session => session.name),
+    ['Newest', 'Connected', 'Oldest'],
+  )
+})
+
 test('a fork is a new session in a new worktree, with the source settings and a new conversation', async t => {
   const { input, home, project, git, repository } = setup(t)
   repository()

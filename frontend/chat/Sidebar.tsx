@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { describeCron } from '../../shared/cron'
 import { sessionKey, type ChannelView, type ChatSession } from '../../shared/chatApi'
+import { compareSessionsByRecency } from '../../shared/model'
 import { isMac } from '../browser'
 import { AppSidebar } from '../ui/AppSidebar'
 import { placeLabel } from '../workspace/labels'
@@ -20,7 +21,6 @@ import { useChat, type Selection } from './context'
 import { MachineLink } from './Dialogs'
 import { needsYou, presence, presenceLabel } from './format'
 
-const working = (session: ChatSession) => presence(session) === 'working'
 const unread = (channel: ChannelView) => Boolean(channel.lastAt && (!channel.readAt || channel.lastAt > channel.readAt))
 
 function SessionRow({ session, active }: { session: ChatSession; active: boolean }) {
@@ -108,19 +108,12 @@ export default function Sidebar({ selection }: { selection: Selection }) {
   const channels = [...client.channels.values()]
     .filter(channel => matches(channel.name))
     .sort((a, b) => a.name.localeCompare(b.name))
-  const attention = sessions.filter(needsYou)
+  const attention = sessions.filter(needsYou).sort(compareSessionsByRecency)
   const activeKey = selection?.kind === 'session' ? sessionKey(selection) : null
   const byTarget = client.targets
     .map(target => ({
       target,
-      sessions: sessions
-        .filter(session => session.targetId === target.id)
-        .sort(
-          (a, b) =>
-            Number(working(b)) - Number(working(a)) ||
-            (b.lastConnectedAt ?? '').localeCompare(a.lastConnectedAt ?? '') ||
-            a.name.localeCompare(b.name),
-        ),
+      sessions: sessions.filter(session => session.targetId === target.id).sort(compareSessionsByRecency),
     }))
     .filter(group => group.sessions.length || !filter)
   const schedules = [...client.schedules.values()]

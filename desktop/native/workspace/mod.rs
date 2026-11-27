@@ -484,6 +484,9 @@ impl Workspace {
         if let Some(i) = self.tabs.iter().position(|t| t.layout.contains(id)) {
             self.current = i;
             self.tabs[i].active = id;
+            if let Some(pane) = self.panes.get(&id) {
+                pane.update(cx, |p, _| p.touch_used());
+            }
             self.strip_scroll_anim = None;
             self.drag.strip.scroll_to_item(i);
             self.show(Page::Terminal, w, cx)

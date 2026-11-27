@@ -147,9 +147,12 @@ impl Pane {
             )
     }
 
-    fn observe_completion(&self, w: &Window) {
-        if self.activity == "finished" && w.is_window_active() && self.focus.is_focused(w) {
-            self.command("observe", json!({}));
+    fn observe_interaction(&mut self, w: &Window, cx: &mut Context<Self>) {
+        if w.is_window_active() && self.focus.is_focused(w) {
+            self.clear_bell(cx);
+            if self.activity == "finished" {
+                self.command("observe", json!({}));
+            }
         }
     }
 
@@ -268,7 +271,7 @@ impl Pane {
     }
 
     pub(super) fn key(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
-        self.observe_completion(w);
+        self.observe_interaction(w, cx);
         if !self.marked.is_empty() {
             return;
         }
@@ -418,7 +421,7 @@ impl Pane {
 
     fn down(&mut self, e: &MouseDownEvent, w: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(w, cx);
-        self.observe_completion(w);
+        self.observe_interaction(w, cx);
         if e.button == MouseButton::Right {
             // Preserve local selection and never let mouse-mode apps swallow the context menu.
             cx.emit(PaneMenu {
@@ -762,7 +765,7 @@ impl EntityInputHandler for Pane {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.observe_completion(w);
+        self.observe_interaction(w, cx);
         self.marked.clear();
         self.user_write(text.as_bytes().to_vec(), cx)
     }

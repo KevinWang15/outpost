@@ -69,6 +69,7 @@ export function sessionCreationServer(summary: { origin: string; account: Deskto
           title: result.title,
           detail: result.detail,
           tool: result.tool,
+          ...(result.lastUsedAt !== undefined ? { lastUsedAt: result.lastUsedAt } : {}),
         }
       } catch (error) {
         if (error instanceof ServerApiError && error.status >= 400 && error.status < 500 && error.status !== 408)

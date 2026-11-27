@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { LoaderCircle, MessagesSquare, Plus, RefreshCw, Search, SquareTerminal } from 'lucide-react'
-import type { Session } from '../../shared/model'
+import { compareSessionsByRecency, type Session } from '../../shared/model'
 import { harnessLabel } from '../../shared/harnesses'
 import { ToolIcon } from '../ui/ToolIcon'
 import ActivityBadge from './ActivityBadge'
@@ -36,11 +36,13 @@ export default function SessionTable({
   onCheck: (session: Session) => void
 }) {
   const [filter, setFilter] = useState('')
-  const visible = (sessions ?? []).filter(session =>
-    `${session.name} ${session.rootDir} ${harnessLabel(session.tool)}`
-      .toLowerCase()
-      .includes(filter.trim().toLowerCase()),
-  )
+  const visible = [...(sessions ?? [])]
+    .sort(compareSessionsByRecency)
+    .filter(session =>
+      `${session.name} ${session.rootDir} ${harnessLabel(session.tool)}`
+        .toLowerCase()
+        .includes(filter.trim().toLowerCase()),
+    )
   return (
     <section className="card sessions">
       <header className="card-header">

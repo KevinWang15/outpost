@@ -119,7 +119,7 @@ export function attachBell(
     playSound()
     showNotification()
     clearTimeout(timer)
-    if (active()) timer = setTimeout(returned, 4000)
+    if (active()) timer = setTimeout(returned, 2000)
   })
   window.addEventListener('click', interact, true)
   window.addEventListener('keydown', interact, true)

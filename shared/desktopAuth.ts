@@ -57,6 +57,8 @@ export interface DesktopSession {
   title: string
   detail: string
   tool: HarnessId
+  /** Epoch milliseconds of most recent session activity/connection/creation. */
+  lastUsedAt?: number
 }
 export interface DesktopSessionReference {
   server: string
@@ -81,7 +83,9 @@ export function validDesktopSession(value: unknown, targetId: string): value is 
     text(session.title, 512) &&
     typeof session.detail === 'string' &&
     session.detail.length <= 4096 &&
-    isHarnessId(session.tool)
+    isHarnessId(session.tool) &&
+    (session.lastUsedAt === undefined ||
+      (typeof session.lastUsedAt === 'number' && Number.isFinite(session.lastUsedAt) && session.lastUsedAt >= 0))
   )
 }
 

@@ -32,6 +32,7 @@ use std::{
     cell::RefCell,
     path::Path,
     rc::Rc,
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -39,6 +40,13 @@ pub(crate) const DEFAULT_HISTORY: usize = 10_000;
 // Alacritty indexes lines with i32 and adds the viewport height when reflowing.
 pub(crate) const MAX_HISTORY: usize = i32::MAX as usize - 200;
 const PANE_RIGHT_MARGIN: f32 = 5.0;
+pub(crate) const BELL_AUTO_HIDE: Duration = Duration::from_secs(2);
+
+static USAGE_SEQ: AtomicU64 = AtomicU64::new(1);
+
+fn next_usage_seq() -> u64 {
+    USAGE_SEQ.fetch_add(1, Ordering::Relaxed)
+}
 
 pub const FAMILY: &str = if cfg!(target_os = "macos") {
     "Menlo"
@@ -117,6 +125,9 @@ pub struct Pane {
     pub font_size: f32,
     scrollback: usize,
     pub bell: bool,
+    bell_background: bool,
+    bell_generation: u64,
+    pub last_used: u64,
     pub activity: String,
     pub activity_blocked_kind: Option<String>,
     pub activity_progress: Option<u8>,
@@ -267,6 +278,9 @@ impl Pane {
             font_size,
             scrollback: DEFAULT_HISTORY,
             bell: false,
+            bell_background: false,
+            bell_generation: 0,
+            last_used: next_usage_seq(),
             activity: String::new(),
             activity_blocked_kind: None,
             activity_progress: None,
@@ -389,8 +403,12 @@ impl Pane {
                 ),
                 AnsiEvent::Bell if !self.restoring => {
                     self.bell = true;
+                    self.bell_background = !self.active;
                     if self.sound {
                         ring_bell();
+                    }
+                    if self.active {
+                        self.schedule_bell_auto_hide(cx);
                     }
                     cx.emit(PaneChanged);
                 }
@@ -468,6 +486,37 @@ impl Pane {
         }
     }
 
+    pub fn touch_used(&mut self) {
+        self.last_used = next_usage_seq();
+    }
+
+    pub fn clear_bell(&mut self, cx: &mut Context<Self>) {
+        self.bell_generation = self.bell_generation.wrapping_add(1);
+        self.bell_background = false;
+        if self.bell {
+            self.bell = false;
+            cx.emit(PaneChanged);
+            cx.notify();
+        }
+    }
+
+    fn schedule_bell_auto_hide(&mut self, cx: &mut Context<Self>) {
+        self.bell_generation = self.bell_generation.wrapping_add(1);
+        let generation = self.bell_generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(BELL_AUTO_HIDE).await;
+            let _ = this.update(cx, |pane, cx| {
+                if pane.bell && pane.bell_generation == generation && pane.active {
+                    pane.bell = false;
+                    pane.bell_background = false;
+                    cx.emit(PaneChanged);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     pub fn focus_terminal(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(w, cx);
         // A newly inserted pane can receive focus before its subscription is installed.
@@ -481,7 +530,16 @@ impl Pane {
         }
         self.active = active;
         if active {
-            self.bell = false;
+            self.touch_used();
+            if self.bell {
+                self.schedule_bell_auto_hide(cx);
+            }
+        } else if self.bell && !self.bell_background {
+            // The bell fired while this pane was already active; leaving it dismisses the flash.
+            self.clear_bell(cx);
+        } else {
+            // Cancel any pending auto-hide so flicking past a background alert keeps it unread.
+            self.bell_generation = self.bell_generation.wrapping_add(1);
         }
         self.command("focus", json!({"active":active}));
         if matches!(self.transport, Transport::Local { .. })

@@ -243,9 +243,16 @@ impl Workspace {
         let mut list = Vec::new();
         let mut matched_open_ids = Vec::new();
 
+        let mut open_ids: Vec<(Id, u64)> = self
+            .panes
+            .iter()
+            .map(|(&id, p)| (id, p.read(cx).last_used))
+            .collect();
+        open_ids.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
+
         if !choose {
-            for (&id, p) in &self.panes {
-                let pane = p.read(cx);
+            for &(id, _) in &open_ids {
+                let pane = self.panes[&id].read(cx);
                 let haystack = format!(
                     "{} {}",
                     pane.title,
@@ -286,8 +293,8 @@ impl Workspace {
         // In Choose mode, keep already-open remote panes visible only if they aren't
         // represented by a catalogue entry (e.g. while offline or before refresh completes).
         if choose {
-            for (&id, p) in &self.panes {
-                let pane = p.read(cx);
+            for &(id, _) in &open_ids {
+                let pane = self.panes[&id].read(cx);
                 if pane.server.is_none() || matched_open_ids.contains(&id) {
                     continue;
                 }

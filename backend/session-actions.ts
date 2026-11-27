@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto'
 import type { DesktopSession } from '../shared/desktopAuth'
 import {
   coreSoftware,
+  sessionLastUsedAt,
   type Session,
   type SessionForkInput,
   type SessionInput,
@@ -166,12 +167,14 @@ export async function terminalLaunch(
 }
 
 export function desktopSession(session: Session, target: { id: string; name: string }): DesktopSession {
+  const parsed = Date.parse(sessionLastUsedAt(session))
   return {
     sessionId: session.id,
     targetId: target.id,
     title: `${session.name} · ${target.name}`,
     detail: `${session.tool} · ${session.rootDir} · ${session.status}`.slice(0, 4096),
     tool: session.tool,
+    lastUsedAt: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
   }
 }
 

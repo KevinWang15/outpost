@@ -58,11 +58,16 @@ let catalogue: DesktopSessionChoice[] = []
 let listing: AbortController | undefined
 
 const ownsSession = (ref: DesktopSessionReference) => accounts.hasAccount(ref.server, ref.accountId)
+const effectiveLastUsedAt = (session: DesktopSessionChoice) =>
+  Math.max(session.lastUsedAt ?? 0, recent.get(session.id)?.lastConnectedAt ?? 0)
 const snapshot = () =>
   emit('accounts', {
     ...accounts.snapshot(),
     recent: recent.list(ownsSession),
-    sessions: catalogue.filter(ownsSession),
+    sessions: catalogue
+      .filter(ownsSession)
+      .map(session => ({ ...session, lastUsedAt: effectiveLastUsedAt(session) }))
+      .sort((a, b) => b.lastUsedAt - a.lastUsedAt || a.title.localeCompare(b.title)),
   })
 
 const refresh = async () => {

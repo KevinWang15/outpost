@@ -6,7 +6,15 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { argsSelectSession, nativeIdHint } from '../shared/harnesses'
-import type { Conversation, Session, LaunchSettings, SessionInput, SessionRecord, SessionUpdate } from '../shared/model'
+import {
+  compareSessionsByRecency,
+  type Conversation,
+  type Session,
+  type LaunchSettings,
+  type SessionInput,
+  type SessionRecord,
+  type SessionUpdate,
+} from '../shared/model'
 import { acknowledgeResting, restingActivity } from './activity'
 import { driverStatus, request, stopDriver } from './drivers'
 import { removeSessionFiles } from './files'
@@ -53,7 +61,8 @@ async function describe(record: SessionRecord, registry: Registry): Promise<Sess
 
 export async function listSessions() {
   const registry = readRegistry()
-  return Promise.all(registry.sessions.map(record => describe(record, registry)))
+  const sessions = await Promise.all(registry.sessions.map(record => describe(record, registry)))
+  return sessions.sort(compareSessionsByRecency)
 }
 
 export async function getSession(id: unknown) {

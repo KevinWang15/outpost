@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 import { Monitor, Pencil, Plus, Search, Server, Trash2 } from 'lucide-react'
 import {
+  compareSessionsByRecency,
   harnessSoftware,
   type ConversationMatch,
   type DirectorySuggestions,
@@ -239,7 +240,7 @@ export default function TargetView({
           beforeFields={!available && <p className="warning">Reconnect this machine to create a session.</p>}
           conversation={panel.conversation}
           directories={directories}
-          copyFrom={(sessions ?? []).map(session => ({
+          copyFrom={[...(sessions ?? [])].sort(compareSessionsByRecency).map(session => ({
             key: session.id,
             label: `${session.name} · ${harnessLabel(session.tool)}`,
             session,

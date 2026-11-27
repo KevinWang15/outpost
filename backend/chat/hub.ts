@@ -2,6 +2,7 @@ import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { sessionKey, type ChannelInput, type ScheduleInput, type SessionRef } from '../../shared/chatApi'
 import { handles } from '../../shared/chatMentions'
+import { compareSessionsByRecency } from '../../shared/model'
 import type { Owner } from '../deployment'
 import type { LogInput } from '../logs/activity'
 import { AgentTools } from './agentTools'
@@ -238,23 +239,25 @@ export class ChatHub implements HubRuntime {
       sessions.map(session => ({ targetId, target: account.machines.get(targetId)?.name ?? targetId, session })),
     )
     const named = handles(items.map(item => ({ ...item, sessionId: item.session.id, name: item.session.name })))
-    account.view = items.map(({ targetId, target, session }) => {
-      const link = this.links.get(linkKey(account.userId, { targetId, sessionId: session.id }))
-      const live = link?.state === 'live' ? link.info : null
-      return {
-        ...session,
-        ...(live
-          ? {
-              activity: live.activity,
-              driver: live.nativeTerminal ? ('terminal' as const) : ('chat' as const),
-              status: live.nativeTerminal ? session.status : ('attached' as const),
-            }
-          : {}),
-        targetId,
-        target,
-        handle: named.get(`${targetId}/${session.id}`)!,
-      }
-    })
+    account.view = items
+      .map(({ targetId, target, session }) => {
+        const link = this.links.get(linkKey(account.userId, { targetId, sessionId: session.id }))
+        const live = link?.state === 'live' ? link.info : null
+        return {
+          ...session,
+          ...(live
+            ? {
+                activity: live.activity,
+                driver: live.nativeTerminal ? ('terminal' as const) : ('chat' as const),
+                status: live.nativeTerminal ? session.status : ('attached' as const),
+              }
+            : {}),
+          targetId,
+          target,
+          handle: named.get(`${targetId}/${session.id}`)!,
+        }
+      })
+      .sort(compareSessionsByRecency)
     account.targets = [...account.machines].map(([id, machine]) => ({
       id,
       ...machine,

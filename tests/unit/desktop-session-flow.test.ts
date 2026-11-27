@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { compareSessionsByRecency, sessionLastUsedAt } from '../../shared/model'
 import {
   desktopEntryUrl,
   desktopSessionId,
@@ -84,6 +85,74 @@ test('catalogue retains failed scopes, replaces successful empty scopes, and dro
   assert.deepEqual(result.sessions, [])
   assert.deepEqual(result.errors, [])
   assert.equal(requests, previousRequests)
+})
+
+test('catalogue and session recency comparators sort most recently used first', async () => {
+  const older = {
+    name: 'Beta',
+    createdAt: '2026-11-20T00:00:00.000Z',
+    lastConnectedAt: '2026-11-21T00:00:00.000Z',
+    activity: { updatedAt: null },
+  }
+  const activeChat = {
+    name: 'Gamma',
+    createdAt: '2026-11-19T00:00:00.000Z',
+    lastConnectedAt: null,
+    activity: { updatedAt: '2026-11-25T12:00:00.000Z' },
+  }
+  const brandNew = {
+    name: 'Alpha',
+    createdAt: '2026-11-26T08:00:00.000Z',
+    lastConnectedAt: null,
+    activity: { updatedAt: null },
+  }
+  assert.equal(sessionLastUsedAt(activeChat), '2026-11-25T12:00:00.000Z')
+  assert.deepEqual(
+    [older, activeChat, brandNew].sort(compareSessionsByRecency).map(item => item.name),
+    ['Alpha', 'Gamma', 'Beta'],
+  )
+
+  let result!: SessionCatalogue
+  const servers = [
+    {
+      origin: 'https://first.example',
+      accountId: 'a1',
+      current: () => true,
+      request: async (path: string) =>
+        path === '/targets'
+          ? [{ id: 't1', name: 'T1' }]
+          : [
+              { sessionId: 'old', targetId: 't1', title: 'Old · T1', detail: '', tool: 'claude', lastUsedAt: 100 },
+              { sessionId: 'mid', targetId: 't1', title: 'Mid · T1', detail: '', tool: 'codex', lastUsedAt: 300 },
+            ],
+    },
+    {
+      origin: 'https://second.example',
+      accountId: 'a2',
+      current: () => true,
+      request: async (path: string) =>
+        path === '/targets'
+          ? [{ id: 't2', name: 'T2' }]
+          : [
+              {
+                sessionId: 'newest',
+                targetId: 't2',
+                title: 'Newest · T2',
+                detail: '',
+                tool: 'claude',
+                lastUsedAt: 500,
+              },
+              { sessionId: 'tie-a', targetId: 't2', title: 'A tie · T2', detail: '', tool: 'claude', lastUsedAt: 300 },
+            ],
+    },
+  ]
+  await loadSessionCatalogue(servers, new AbortController().signal, value => {
+    result = value
+  })
+  assert.deepEqual(
+    result.sessions.map(item => item.sessionId),
+    ['newest', 'tie-a', 'mid', 'old'],
+  )
 })
 
 test('creation capability sends the request identity and validates display metadata', async () => {

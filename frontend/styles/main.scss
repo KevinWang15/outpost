@@ -1218,7 +1218,7 @@ textarea.code,
 }
 .table-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 128px 112px 120px 156px;
+  grid-template-columns: minmax(0, 1fr) 124px minmax(140px, 206px) 112px 148px;
   align-items: center;
   gap: 16px;
   min-height: 64px;
@@ -1274,9 +1274,12 @@ textarea.code,
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
   color: var(--text);
   font-size: 13px;
+  line-height: 1.35;
   i {
+    flex-shrink: 0;
     width: 7px;
     height: 7px;
     border-radius: 50%;
@@ -1304,6 +1307,7 @@ textarea.code,
   font-size: 12px;
   font-weight: 500;
   i {
+    flex-shrink: 0;
     width: 6px;
     height: 6px;
     border-radius: 50%;

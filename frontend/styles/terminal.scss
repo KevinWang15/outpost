@@ -117,6 +117,7 @@
   font-size: 12px;
   white-space: nowrap;
   i {
+    flex-shrink: 0;
     width: 7px;
     height: 7px;
     border-radius: 50%;

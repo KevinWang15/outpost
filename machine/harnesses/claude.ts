@@ -6,7 +6,14 @@ import type { SessionRecord } from '../../shared/model'
 import { shellJoin } from '../../shared/shell'
 import { statePath } from '../state'
 import { glob, isRecord, lines, newest, strings, timestamp, type Scan } from '../stores'
-import { Harness, historyMessage, type Launch, type NativeConversation } from './harness'
+import {
+  Harness,
+  historyMessage,
+  type Launch,
+  type McpServer,
+  type McpStdioServer,
+  type NativeConversation,
+} from './harness'
 
 export class Claude extends Harness {
   readonly id = 'claude' as const
@@ -97,9 +104,9 @@ export class Claude extends Harness {
       )
   }
 
-  async mcp(launch: Launch) {
+  private mcpConfigArgs(list: McpServer[]) {
     const servers = Object.fromEntries(
-      [launch.outpost, ...launch.servers].map(server => [
+      list.map(server => [
         server.name,
         'url' in server
           ? { type: 'http', url: server.url, headers: server.headers }
@@ -108,6 +115,40 @@ export class Claude extends Harness {
     )
     // The launch places other options after these, ending variadic --mcp-config.
     return ['--mcp-config', JSON.stringify({ mcpServers: servers })]
+  }
+
+  async mcp(launch: Launch) {
+    return this.mcpConfigArgs([launch.outpost, ...launch.servers])
+  }
+
+  override isInteractiveInvocation(args: readonly string[]): boolean {
+    if (!super.isInteractiveInvocation(args)) return false
+    if (args.some(arg => arg === '-p' || arg === '--print')) return false
+    const first = args[0]
+    if (
+      first &&
+      ['mcp', 'config', 'update', 'doctor', 'setup-token', 'install', 'migrate-installer', 'plugin', 'auth'].includes(
+        first,
+      )
+    )
+      return false
+    return true
+  }
+
+  override async attachStandaloneMcp(
+    _environment: Record<string, string>,
+    _cwd: string,
+    outpost: McpStdioServer,
+    _hook: string[],
+    userArgs: readonly string[],
+  ): Promise<string[]> {
+    const mcpArgs = this.mcpConfigArgs([outpost])
+    const separator = userArgs.indexOf('--')
+    // Place `--mcp-config` right before `--` (or at the end) so variadic `<configs...>`
+    // never swallows a user's positional prompt argument.
+    return separator >= 0
+      ? [...userArgs.slice(0, separator), ...mcpArgs, ...userArgs.slice(separator)]
+      : [...userArgs, ...mcpArgs]
   }
 
   settings({ session: { config } }: Launch) {

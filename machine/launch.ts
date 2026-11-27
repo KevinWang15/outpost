@@ -22,6 +22,7 @@ import {
   type SessionBinding,
 } from './state'
 import { driverStatus } from './drivers'
+import { installSshHelpers } from './sshBridgeCore'
 
 type Driver = SessionBinding['driver']
 
@@ -76,6 +77,7 @@ export function installHelpers() {
     }
     writeFile(path, content, 0o700)
   }
+  installSshHelpers()
 }
 
 function environmentFor(session: SessionRecord) {

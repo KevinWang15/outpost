@@ -69,9 +69,10 @@ export interface MachineEvents {
   more: boolean
 }
 
-/** An Outpost MCP tool call an agent made on this machine, answered by the server. */
+/** An Outpost MCP tool call an agent made on this machine, answered by the server.
+ * `session` is null for standalone SSH-wrapped agents (restricted to account/machine read tools). */
 export interface AgentCall {
-  session: string
+  session: string | null
   tool: string
   arguments: Record<string, unknown>
 }

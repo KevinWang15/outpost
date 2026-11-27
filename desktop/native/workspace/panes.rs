@@ -1,13 +1,47 @@
 use super::*;
 
+fn activity_state_from_str(activity: &str) -> Option<ActivityState> {
+    match activity {
+        "working" => Some(ActivityState::Working),
+        "waiting" | "finished" => Some(ActivityState::Attention),
+        "error" => Some(ActivityState::Error),
+        "idle" => Some(ActivityState::Idle),
+        "" => None,
+        _ => Some(ActivityState::Unknown),
+    }
+}
+
+fn format_activity_label(pane: &Pane) -> Option<String> {
+    match pane.activity.as_str() {
+        "working" => Some(match pane.activity_progress {
+            Some(pct) => format!("Working · {pct}%"),
+            None => "Working".into(),
+        }),
+        "waiting" => Some(
+            match pane.activity_blocked_kind.as_deref() {
+                Some("permission") => "Needs approval",
+                Some("question") => "Waiting for answer",
+                Some("auth") => "Needs sign-in",
+                _ => "Waiting for you",
+            }
+            .into(),
+        ),
+        "idle" => Some("Idle".into()),
+        "finished" => Some("Needs you".into()),
+        "error" => Some("Error".into()),
+        "unknown" => Some("Unknown".into()),
+        _ => None,
+    }
+}
+
 pub(super) fn pane_activity_state(pane: &Pane) -> Option<ActivityState> {
     if pane.server.is_none() {
-        return if pane.bell {
-            Some(ActivityState::Attention)
-        } else if !pane.status.is_empty() {
+        return if !pane.status.is_empty() {
             Some(ActivityState::Disconnected)
+        } else if pane.bell {
+            Some(ActivityState::Attention)
         } else {
-            None
+            activity_state_from_str(&pane.activity)
         };
     }
     match pane.connection {
@@ -17,27 +51,32 @@ pub(super) fn pane_activity_state(pane: &Pane) -> Option<ActivityState> {
             if pane.bell {
                 return Some(ActivityState::Attention);
             }
-            Some(match pane.activity.as_str() {
-                "working" => ActivityState::Working,
-                "waiting" | "finished" => ActivityState::Attention,
-                "error" => ActivityState::Error,
-                "idle" => ActivityState::Idle,
-                "" => ActivityState::Ready,
-                _ => ActivityState::Unknown,
-            })
+            Some(activity_state_from_str(&pane.activity).unwrap_or(ActivityState::Ready))
         }
     }
 }
 
 pub(super) fn pane_status_label(pane: &Pane) -> String {
     if pane.server.is_none() {
-        return if pane.bell {
-            "Bell rang — needs attention".into()
-        } else if !pane.status.is_empty() {
-            pane.status.clone()
-        } else {
-            "Local terminal".into()
-        };
+        if !pane.status.is_empty() {
+            return pane.status.clone();
+        }
+        let mut parts = vec!["Local terminal".to_owned()];
+        if let Some(label) = format_activity_label(pane) {
+            parts.push(label);
+        }
+        if let Some(detail) = pane.activity_detail.as_deref()
+            && !detail.is_empty()
+        {
+            parts.push(detail.to_owned());
+        }
+        if pane.bell {
+            if parts.len() == 1 {
+                return "Bell rang — needs attention".into();
+            }
+            parts.push("Bell rang — needs attention".into());
+        }
+        return parts.join(" · ");
     }
     let conn = match pane.connection {
         ConnectionState::Connected => "Connected",
@@ -47,27 +86,7 @@ pub(super) fn pane_status_label(pane: &Pane) -> String {
     };
     let mut parts = vec![conn.to_owned()];
     if pane.connection == ConnectionState::Connected {
-        let activity: Option<String> = match pane.activity.as_str() {
-            "working" => Some(match pane.activity_progress {
-                Some(pct) => format!("Working · {pct}%"),
-                None => "Working".into(),
-            }),
-            "waiting" => Some(
-                match pane.activity_blocked_kind.as_deref() {
-                    Some("permission") => "Needs approval",
-                    Some("question") => "Waiting for answer",
-                    Some("auth") => "Needs sign-in",
-                    _ => "Waiting for you",
-                }
-                .into(),
-            ),
-            "idle" => Some("Idle".into()),
-            "finished" => Some("Needs you".into()),
-            "error" => Some("Error".into()),
-            "unknown" => Some("Unknown".into()),
-            _ => None,
-        };
-        if let Some(label) = activity {
+        if let Some(label) = format_activity_label(pane) {
             parts.push(label);
         }
         if let Some(detail) = pane.activity_detail.as_deref()
@@ -150,18 +169,8 @@ pub(super) fn tab_representative<'a>(
         .iter()
         .copied()
         .find(|p| p.server.is_some() && p.connection != ConnectionState::Connected)
-        .or_else(|| {
-            members
-                .iter()
-                .copied()
-                .find(|p| p.server.is_some() && needs_attention(p))
-        })
-        .or_else(|| {
-            members
-                .iter()
-                .copied()
-                .find(|p| p.server.is_some() && p.activity == "working")
-        })
+        .or_else(|| members.iter().copied().find(|p| needs_attention(p)))
+        .or_else(|| members.iter().copied().find(|p| p.activity == "working"))
         .or_else(|| {
             if active.server.is_some() {
                 Some(active)
@@ -169,12 +178,7 @@ pub(super) fn tab_representative<'a>(
                 members.iter().copied().find(|p| p.server.is_some())
             }
         })
-        .or_else(|| {
-            members
-                .iter()
-                .copied()
-                .find(|p| p.bell || !p.status.is_empty())
-        })
+        .or_else(|| members.iter().copied().find(|p| !p.status.is_empty()))
         .unwrap_or(active)
 }
 
@@ -821,7 +825,11 @@ impl Workspace {
                     )
                     .with_shortcut(if mac { "⌘V" } else { "Ctrl+V" }),
                 );
-            if managed {
+            let can_paste_image = self
+                .panes
+                .get(&id)
+                .is_some_and(|p| p.read(cx).can_paste_image());
+            if can_paste_image {
                 menu = menu.entry(MenuEntry::item_with_icon(
                     "Paste image as file path",
                     LucideIcon::ImagePlus,

@@ -11,7 +11,7 @@ import { terminalService } from '../../shared/terminalService'
 import { withRpc } from '../rpc'
 import { locked, machineExecutable, readJson, statePath, writeJson } from '../state'
 import { confined, glob, isRecord, lines, timestamp, type Scan } from '../stores'
-import { Harness, historyMessage, type Launch, type NativeConversation } from './harness'
+import { Harness, historyMessage, type Launch, type McpStdioServer, type NativeConversation } from './harness'
 
 const pluginId = 'outpost'
 const transcriptNames = ['transcript_full.jsonl', 'transcript.jsonl'] as const
@@ -303,11 +303,10 @@ export class Antigravity extends Harness {
   /** One plugin carries the hooks and Outpost's MCP server. It holds no session
    * identity: each server inherits its Antigravity process's binding, and an
    * ordinary `agy` launch, with no binding, sees no Outpost tools. */
-  private async plugin(launch: Launch) {
-    const home = this.storeOf(launch.session)
+  private async installPlugin(home: string, outpost: McpStdioServer, hook: string[]) {
     const root = statePath('integrations', 'antigravity')
     const directory = join(root, pluginId)
-    const command = shellJoin(launch.hook)
+    const command = shellJoin(hook)
     const handler = [{ type: 'command', command, timeout: 2 }]
     const manifest = {
       name: pluginId,
@@ -316,7 +315,7 @@ export class Antigravity extends Harness {
     }
     const mcpConfig = {
       mcpServers: {
-        [launch.outpost.name]: { command: launch.outpost.command, args: launch.outpost.args },
+        [outpost.name]: { command: outpost.command, args: outpost.args },
       },
     }
     const hooksConfig = {
@@ -356,8 +355,27 @@ export class Antigravity extends Harness {
   }
 
   async mcp(launch: Launch) {
-    await this.plugin(launch)
+    await this.installPlugin(this.storeOf(launch.session), launch.outpost, launch.hook)
     return []
+  }
+
+  override isInteractiveInvocation(args: readonly string[]): boolean {
+    if (!super.isInteractiveInvocation(args)) return false
+    if (args.some(arg => arg === '-p' || arg === '--prompt')) return false
+    const first = args[0]
+    if (first && ['acp', 'login', 'logout', 'mcp', 'auth', 'help'].includes(first)) return false
+    return true
+  }
+
+  override async attachStandaloneMcp(
+    environment: Record<string, string>,
+    cwd: string,
+    outpost: McpStdioServer,
+    hook: string[],
+    userArgs: readonly string[],
+  ): Promise<string[]> {
+    await this.installPlugin(this.home(environment, cwd), outpost, hook)
+    return [...userArgs]
   }
 
   async hooks() {

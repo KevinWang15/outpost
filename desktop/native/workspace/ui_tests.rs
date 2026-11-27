@@ -1146,7 +1146,16 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
             s.dismiss_page(w, cx);
             assert!(s.page == Page::Terminal);
 
-            // Verify Reload shortcut reconnects the focused remote pane.
+            // Verify Reload shortcut cleanly resets transient pane state and reconnects.
+            let reload_pane = s.active().unwrap();
+            reload_pane.update(cx, |p, _| {
+                p.connection = ConnectionState::Closed;
+                p.status = "This connection expired.".into();
+                p.sending = true;
+                p.waiting = 3;
+                p.activity = "working".into();
+                p.files = json!([{"id": "stale"}]);
+            });
             let reload_key = if cfg!(target_os = "macos") {
                 "cmd-r"
             } else {
@@ -1161,6 +1170,21 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
                 w,
                 cx,
             );
+            {
+                let p = reload_pane.read(cx);
+                assert_eq!(p.connection, ConnectionState::Connecting);
+                assert!(p.restoring);
+                assert_eq!(p.status, "Connecting…");
+                assert!(!p.sending);
+                assert_eq!(p.waiting, 0);
+                assert!(p.activity.is_empty());
+                assert!(p.files.is_null());
+            }
+            reload_pane.update(cx, |p, _| {
+                p.connection = ConnectionState::Connected;
+                p.restoring = false;
+                p.status.clear();
+            });
 
             s.show(Page::Switch, w, cx);
             // Switch lists 2 open panes (most recently used first) + only the 1 non-open catalogue session (sess-other).
@@ -2266,6 +2290,42 @@ pub fn exercise_workspace() -> anyhow::Result<()> {
         assert!(matches!(items[0], picker::PickerItem::OpenPane(id) if id == left));
         assert!(matches!(items[1], picker::PickerItem::OpenPane(id) if id == right));
         s.select(right, w, cx);
+
+        // Local pane supports OSC 7501 Program Status and OSC 7770 SSH bridge lifecycle.
+        let local_pane = s.panes[&right].clone();
+        local_pane.update(cx, |p, cx| {
+            assert!(!p.can_paste_image());
+            p.feed(
+                b"\x1b]7501;state=working:progress=60:title=QnVpbGRpbmc=\x1b\\",
+                cx,
+            );
+            assert_eq!(p.activity, "working");
+            assert_eq!(p.activity_progress, Some(60));
+            assert_eq!(
+                panes::pane_activity_state(p),
+                Some(ActivityState::Working)
+            );
+            assert_eq!(
+                panes::pane_status_label(p),
+                "Local terminal · Working · 60% · Building"
+            );
+            // `done` latches across a subsequent `idle` report.
+            p.feed(b"\x1b]7501;state=done\x1b\\\x1b]7501;state=idle\x1b\\", cx);
+            assert_eq!(p.activity, "finished");
+            assert_eq!(
+                panes::pane_activity_state(p),
+                Some(ActivityState::Attention)
+            );
+            // SSH bridge `ready` activates image paste; `shell` clears both paste and activity.
+            p.feed(
+                b"\x1b]7770;outpost;ssh;eyJ2IjoxLCJ0IjoicmVhZHkiLCJzZXNzaW9uIjoibm9uY2UxIiwidG9vbCI6ImNsYXVkZSIsImNsaXBib2FyZCI6dHJ1ZX0\x07",
+                cx,
+            );
+            assert!(p.can_paste_image());
+            p.feed(b"\x1b]7770;outpost;ssh;eyJ2IjoxLCJ0Ijoic2hlbGwifQ\x07", cx);
+            assert!(!p.can_paste_image());
+            assert!(p.activity.is_empty());
+        });
     });
 
     // Closing an inactive pane must neither arm a drag nor close the selected sibling.

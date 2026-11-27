@@ -8,7 +8,14 @@ import { terminalService } from '../../shared/terminalService'
 import { withRpc } from '../rpc'
 import { locked, readJson, statePath, writeJson } from '../state'
 import { foldLines, glob, isRecord, newest, strings, timestamp, type Scan } from '../stores'
-import { acpServer, Harness, historyMessage, type Launch, type NativeConversation } from './harness'
+import {
+  acpServer,
+  Harness,
+  historyMessage,
+  type Launch,
+  type McpStdioServer,
+  type NativeConversation,
+} from './harness'
 
 const pluginId = 'outpost'
 
@@ -131,10 +138,9 @@ export class Kimi extends Harness {
   /** One plugin carries the hooks and the MCP servers. It holds no session
    * identity: each server inherits its Kimi process's binding, and an
    * ordinary Kimi launch, with no binding, sees no Outpost tools. */
-  private async plugin(launch: Launch) {
-    const home = this.storeOf(launch.session)
+  private async installPlugin(home: string, outpost: McpStdioServer, hook: string[]) {
     const root = statePath('integrations', 'kimi')
-    const command = shellJoin(launch.hook)
+    const command = shellJoin(hook)
     const manifest = {
       name: pluginId,
       version: '2.0.0',
@@ -143,7 +149,7 @@ export class Kimi extends Harness {
       hooks: ['SessionStart', 'UserPromptSubmit'].map(event => ({ event, command, timeout: 2 })),
       // Plugin commands must be PATH names; env runs the exact executable.
       mcpServers: {
-        [launch.outpost.name]: { command: 'env', args: [launch.outpost.command, ...launch.outpost.args] },
+        [outpost.name]: { command: 'env', args: [outpost.command, ...outpost.args] },
       },
     }
     const registry = join(home, 'plugins', 'installed.json')
@@ -181,8 +187,27 @@ export class Kimi extends Harness {
   }
 
   async mcp(launch: Launch) {
-    await this.plugin(launch)
+    await this.installPlugin(this.storeOf(launch.session), launch.outpost, launch.hook)
     return []
+  }
+
+  override isInteractiveInvocation(args: readonly string[]): boolean {
+    if (!super.isInteractiveInvocation(args)) return false
+    if (args.some(arg => arg === '-p' || arg === '--print')) return false
+    const first = args[0]
+    if (first && ['acp', 'login', 'logout', 'mcp', 'info', 'web', 'term'].includes(first)) return false
+    return true
+  }
+
+  override async attachStandaloneMcp(
+    environment: Record<string, string>,
+    cwd: string,
+    outpost: McpStdioServer,
+    hook: string[],
+    userArgs: readonly string[],
+  ): Promise<string[]> {
+    await this.installPlugin(this.home(environment, cwd), outpost, hook)
+    return [...userArgs]
   }
 
   async hooks() {
@@ -203,7 +228,7 @@ export class Kimi extends Harness {
 
   async chatServers(launch: Launch) {
     // The plugin supplies Outpost's server; ACP must not add a second one.
-    await this.plugin(launch)
+    await this.installPlugin(this.storeOf(launch.session), launch.outpost, launch.hook)
     return launch.servers.map(acpServer)
   }
 }

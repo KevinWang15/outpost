@@ -217,14 +217,12 @@ export const removeSessionFiles = (session: string) =>
 
 let pasted = 0
 
-/** Save a pasted image, keeping each session's newest 20. Names sort by age. */
-export function saveImage(session: string, extension: string, data: Buffer) {
-  findSession(readRegistry(), session)
+/** Save a pasted image inside `directory`, keeping its newest 20 files. */
+export function saveImageInDirectory(directory: string, extension: string, data: Buffer) {
   if (!Object.values(imageExtensions).includes(extension))
     throw new RegistryError('Unsupported image type. Use a PNG, JPEG, GIF, or WebP image.', 400)
   if (!data.length || data.length > maxImageBytes)
     throw new RegistryError('Images must be between 1 byte and 16 MB.', 413)
-  const directory = statePath('clipboard', session)
   const order = `${new Date().toISOString().replace(/[-:.]/g, '')}-${String(++pasted % 1e6).padStart(6, '0')}`
   const name = `${order}-${randomUUID().slice(0, 8)}.${extension}`
   const path = join(directory, name)
@@ -235,4 +233,10 @@ export function saveImage(session: string, extension: string, data: Buffer) {
     .slice(0, -20))
     rmSync(join(directory, stale), { force: true })
   return path
+}
+
+/** Save a pasted image, keeping each session's newest 20. Names sort by age. */
+export function saveImage(session: string, extension: string, data: Buffer) {
+  findSession(readRegistry(), session)
+  return saveImageInDirectory(statePath('clipboard', session), extension, data)
 }

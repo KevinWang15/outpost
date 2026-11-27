@@ -7,6 +7,7 @@ import { authorizeNode, validNodeSocket, watchInstallation, nodeLock, installati
 import { inspectSoftware, installTool } from './software'
 import { allSoftware } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
+import { isStandaloneAgentTool } from '../shared/sshBridgeProtocol'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, mkdirSync, renameSync, rmSync, statSync, watch } from 'node:fs'
 import { createServer, type Socket } from 'node:net'
@@ -43,6 +44,7 @@ import {
   updateSession,
 } from './sessions'
 import { socketAddress, statePath, terminalSocket } from './state'
+import { installSshHelpers } from './sshBridgeCore'
 
 function remoteError(error: unknown): RemoteError {
   if (error instanceof RegistryError) return { message: error.message, status: error.status }
@@ -63,6 +65,11 @@ export async function serveNode(socketName: string) {
   const owner = authorizeNode(socketName)
   return nodeLock(async () => {
     if (installation()?.generation !== owner.generation) throw Error('Ownership changed.')
+    try {
+      installSshHelpers()
+    } catch {
+      /* Optional SSH bridge helpers never block node startup. */
+    }
     const unwatch = watchInstallation(owner, () => process.exit(0))
     process.umask(0o077)
     const writer = new BoundedWriter(process.stdout, 256 * 1024 * 1024, 120_000, () => process.exit(1))
@@ -405,11 +412,11 @@ export async function serveNode(socketName: string) {
           return answer({ ok: false, message: 'Invalid Outpost tool call.' })
         }
         const session = request.session
-        if (
-          typeof session !== 'string' ||
-          !readRegistry().sessions.some(record => record.id === session) ||
-          typeof request.tool !== 'string'
-        )
+        const validSession =
+          session === null
+            ? isStandaloneAgentTool(request.tool)
+            : typeof session === 'string' && readRegistry().sessions.some(record => record.id === session)
+        if (!validSession || typeof request.tool !== 'string')
           return answer({ ok: false, message: 'Reconnect this session in Outpost to use Outpost’s tools.' })
         call('agent', { session, tool: request.tool, arguments: request.arguments ?? {} }).then(
           result => answer({ ok: true, data: result }),

@@ -29,6 +29,9 @@ export interface SessionBinding {
   driver: 'terminal' | 'chat'
 }
 
+/** Binding for `outpost-terminal mcp`: either a managed session or a standalone SSH-wrapped agent. */
+export type McpBinding = SessionBinding | { session: null; driver: 'ssh' }
+
 /** Read the complete launch binding before selecting its state directory. */
 export function useSessionBinding(): SessionBinding | null {
   const session = process.env.OUTPOST_SESSION_ID
@@ -44,6 +47,18 @@ export function useSessionBinding(): SessionBinding | null {
     throw new Error('Run this command inside an Outpost session.')
   state.directory = directory
   return { session, driver }
+}
+
+/** Read an MCP binding (managed session or standalone SSH wrapper). */
+export function useMcpBinding(): McpBinding | null {
+  const session = process.env.OUTPOST_SESSION_ID
+  const driver = process.env.OUTPOST_DRIVER
+  const directory = process.env.OUTPOST_STATE_DIRECTORY
+  if (driver === 'ssh' && session === undefined && directory?.startsWith('/')) {
+    state.directory = directory
+    return { session: null, driver: 'ssh' }
+  }
+  return useSessionBinding()
 }
 
 export const statePath = (...parts: string[]) => join(state.directory, ...parts)

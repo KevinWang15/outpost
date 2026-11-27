@@ -126,6 +126,11 @@ export async function createApp(options: AppOptions) {
         if (!history) throw new Error('Cross-machine history is turned off on this Outpost server.')
         return history.call(owner, call.tool, call.arguments)
       }
+      if (call.session === null) {
+        if (call.tool !== 'list_machines' && call.tool !== 'list_sessions')
+          throw new Error('This tool requires a managed Outpost session.')
+        return hub.agent(owner, { targetId, sessionId: '' }, call.tool, call.arguments)
+      }
       return hub.agent(owner, { targetId, sessionId: call.session }, call.tool, call.arguments)
     },
   })

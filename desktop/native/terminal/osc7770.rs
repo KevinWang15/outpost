@@ -1,10 +1,18 @@
+use crate::ssh_bridge::{self, MAX_SSH_BRIDGE_OSC_BYTES, SshRemoteMessage};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 
 const MAX_OPEN_SESSION_OSC_BYTES: usize = 4096;
-const MAX_OPEN_SESSION_SKIP_BYTES: usize = 65_536;
+const MAX_OSC_7770_PAYLOAD_BYTES: usize = MAX_SSH_BRIDGE_OSC_BYTES;
+const MAX_OPEN_SESSION_SKIP_BYTES: usize = 128 * 1024;
 const OSC_7770_HEADER: &[u8] = b"7770;";
 const OPEN_SESSION_PREFIX: &str = "outpost;open-session;";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Osc7770Event {
+    OpenSession(PaneOpenSession),
+    SshBridge(SshRemoteMessage),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaneOpenSession {
@@ -121,21 +129,26 @@ impl Osc7770Scanner {
         self.clear_payload();
     }
 
-    fn finish_payload(&mut self, found: &mut Vec<PaneOpenSession>) {
+    fn finish_payload(&mut self, found: &mut Vec<Osc7770Event>) {
         if !self.oversized
             && let Ok(text) = std::str::from_utf8(&self.payload)
-            && let Some(req) = parse_open_session_osc_data(text)
         {
-            found.push(req);
+            if let Some(req) = parse_open_session_osc_data(text) {
+                found.push(Osc7770Event::OpenSession(req));
+            } else if ssh_bridge::is_enabled()
+                && let Some(msg) = ssh_bridge::parse_ssh_bridge_osc_data(text)
+            {
+                found.push(Osc7770Event::SshBridge(msg));
+            }
         }
         self.clear_payload();
     }
 
-    /// Filters OSC 7770 open-session requests out of a live PTY byte stream while
-    /// preserving every other byte (including all standard OSC sequences) verbatim.
+    /// Filters private Outpost OSC 7770 requests (`open-session` and `ssh` bridge frames)
+    /// out of a live PTY byte stream while preserving every other byte verbatim.
     /// Returns `None` for the filtered buffer on the fast path when `bytes` can be
     /// passed directly to the VT parser with zero copying.
-    pub(super) fn scan(&mut self, bytes: &[u8]) -> (Option<Vec<u8>>, Vec<PaneOpenSession>) {
+    pub(super) fn scan(&mut self, bytes: &[u8]) -> (Option<Vec<u8>>, Vec<Osc7770Event>) {
         if self.state == Osc7770State::Ground && !bytes.contains(&0x1b) {
             return (None, Vec::new());
         }
@@ -198,7 +211,7 @@ impl Osc7770Scanner {
                     } else if b == 0x18 || b == 0x1a {
                         self.clear_payload();
                         self.state = Osc7770State::Ground;
-                    } else if !self.oversized && self.payload.len() < MAX_OPEN_SESSION_OSC_BYTES {
+                    } else if !self.oversized && self.payload.len() < MAX_OSC_7770_PAYLOAD_BYTES {
                         self.payload.push(b);
                     } else {
                         self.oversized = true;
@@ -238,7 +251,7 @@ impl Osc7770Scanner {
 
 #[cfg(test)]
 mod tests {
-    use super::{Osc7770Scanner, PaneOpenSession, parse_open_session_osc_data};
+    use super::{Osc7770Event, Osc7770Scanner, PaneOpenSession, parse_open_session_osc_data};
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
     #[test]
@@ -287,13 +300,13 @@ mod tests {
         assert_eq!(filtered.as_deref(), Some(b"beforeafter".as_slice()));
         assert_eq!(
             found,
-            vec![PaneOpenSession {
+            vec![Osc7770Event::OpenSession(PaneOpenSession {
                 session_id: sid1.into(),
                 name: Some("my-app".into()),
                 origin: Some("https://outpost.example".into()),
                 target_id: Some("tgt-1".into()),
                 hostname: Some("devbox".into()),
-            }]
+            })]
         );
 
         // Byte-by-byte chunking with ST terminator and minimal SSH payload.
@@ -318,13 +331,13 @@ mod tests {
         assert_eq!(out, b"X\x1bY");
         assert_eq!(
             all_found,
-            vec![PaneOpenSession {
+            vec![Osc7770Event::OpenSession(PaneOpenSession {
                 session_id: sid2.into(),
                 name: None,
                 origin: None,
                 target_id: None,
                 hostname: Some("ssh-host".into()),
-            }]
+            })]
         );
 
         // Invalid UUID, bad origin, wrong version, and oversized payloads are rejected & stripped cleanly.

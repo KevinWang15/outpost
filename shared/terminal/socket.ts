@@ -290,6 +290,8 @@ export class TerminalSocket {
     this.allowStart = true
     this.attempts = 0
     clearTimeout(this.retryTimer)
+    this.retryTimer = undefined
+    this.online = browserOnline() !== false
     this.failPending('The terminal reconnected before Outpost confirmed it. Check the terminal before retrying.')
     this.open()
   }

@@ -10,6 +10,7 @@ mod layout;
 mod menu;
 mod prefs;
 mod pty;
+mod ssh_bridge;
 mod terminal;
 mod workspace;
 

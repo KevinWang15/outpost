@@ -91,6 +91,7 @@ const panes = new PaneRegistry({
   nextId: () => ++serial,
   closing: () => closing,
   ownsSession,
+  launch: (ref, signal) => accounts.launch(ref, signal),
   scrollback: () => prefs.scrollback,
   knownTool: key => (catalogue.find(session => session.id === key) ?? recent.get(key))?.tool,
   rememberSession: entry => run(recent.remember(entry).then(snapshot)),

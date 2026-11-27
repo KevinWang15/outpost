@@ -138,6 +138,22 @@ export abstract class Harness {
   async chatServers(launch: Launch): Promise<acp.McpServer[]> {
     return [launch.outpost, ...launch.servers].map(acpServer)
   }
+
+  /** Whether raw CLI arguments represent an interactive agent launch (not --help/--version/utility subcommands). */
+  isInteractiveInvocation(args: readonly string[]): boolean {
+    return !args.some(arg => arg === '-h' || arg === '--help' || arg === '-V' || arg === '--version')
+  }
+
+  /** Attach Outpost's standalone MCP server for an interactive SSH-wrapped run, returning the final argv. */
+  async attachStandaloneMcp(
+    _environment: Record<string, string>,
+    _cwd: string,
+    _outpost: McpStdioServer,
+    _hook: string[],
+    userArgs: readonly string[],
+  ): Promise<string[]> {
+    return [...userArgs]
+  }
 }
 
 const pairs = (values: Record<string, string>) => Object.entries(values).map(([name, value]) => ({ name, value }))

@@ -19,7 +19,14 @@ import { terminalService } from '../../shared/terminalService'
 import { machineExecutable } from '../state'
 import { withRpc } from '../rpc'
 import { glob, isRecord, lines, strings, timestamp, type Scan } from '../stores'
-import { Harness, historyMessage, type Launch, type NativeConversation } from './harness'
+import {
+  Harness,
+  historyMessage,
+  type Launch,
+  type McpServer,
+  type McpStdioServer,
+  type NativeConversation,
+} from './harness'
 
 /** A new conversation must not inherit another thread's ancestry or identity. */
 const inherited = [
@@ -240,8 +247,8 @@ export class Codex extends Harness {
     return null
   }
 
-  async mcp(launch: Launch) {
-    return [launch.outpost, ...launch.servers].flatMap(server => [
+  private mcpConfigArgs(list: McpServer[]) {
+    return list.flatMap(server => [
       '-c',
       `mcp_servers.${server.name}=${toml(
         'url' in server
@@ -249,6 +256,49 @@ export class Codex extends Harness {
           : { command: server.command, args: server.args, env: server.env },
       )}`,
     ])
+  }
+
+  async mcp(launch: Launch) {
+    return this.mcpConfigArgs([launch.outpost, ...launch.servers])
+  }
+
+  override isInteractiveInvocation(args: readonly string[]): boolean {
+    if (!super.isInteractiveInvocation(args)) return false
+    const first = args[0]
+    if (
+      first &&
+      [
+        'exec',
+        'e',
+        'login',
+        'logout',
+        'mcp',
+        'mcp-server',
+        'app-server',
+        'completion',
+        'features',
+        'sandbox',
+        'execpolicy',
+        'cloud',
+        'debug',
+        'help',
+        'apply',
+        'a',
+        'review',
+      ].includes(first)
+    )
+      return false
+    return true
+  }
+
+  override async attachStandaloneMcp(
+    _environment: Record<string, string>,
+    _cwd: string,
+    outpost: McpStdioServer,
+    _hook: string[],
+    userArgs: readonly string[],
+  ): Promise<string[]> {
+    return [...this.mcpConfigArgs([outpost]), ...userArgs]
   }
 
   settings({ session: { config } }: Launch) {

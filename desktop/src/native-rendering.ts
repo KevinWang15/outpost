@@ -42,6 +42,7 @@ export class NativeRendering implements TerminalRendering {
     this.linkUris.clear()
     this.state = undefined
     this.links = { normal: [], alt: [] }
+    this.live = false
   }
 
   barrier(done: () => void, event = 'barrier', payload: object = {}) {

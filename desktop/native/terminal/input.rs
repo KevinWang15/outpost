@@ -84,22 +84,25 @@ impl Pane {
         let Some(item) = cx.read_from_clipboard() else {
             return;
         };
-        if self.server.is_none() {
+        if !self.can_paste_image() {
             if let Some(text) = item.text() {
                 self.paste(text, cx);
             }
             return;
         }
-        self.paste_managed_item(&item, false, is_held, cx);
+        self.paste_image_or_text(&item, false, is_held, cx);
     }
 
     pub fn paste_image_path(&mut self, cx: &mut Context<Self>) {
+        if !self.can_paste_image() {
+            return;
+        }
         if let Some(item) = cx.read_from_clipboard() {
-            self.paste_managed_item(&item, true, false, cx);
+            self.paste_image_or_text(&item, true, false, cx);
         }
     }
 
-    fn paste_managed_item(
+    fn paste_image_or_text(
         &mut self,
         item: &ClipboardItem,
         as_path: bool,
@@ -111,15 +114,19 @@ impl Pane {
                 if is_held {
                     return;
                 }
-                cx.emit(PaneNotice::sticky("Uploading image…"));
-                self.command(
-                    "image",
-                    json!({
-                        "mime": mime,
-                        "data": STANDARD.encode(bytes),
-                        "mode": if as_path { "path" } else { "attachment" },
-                    }),
-                );
+                if self.server.is_some() {
+                    cx.emit(PaneNotice::sticky("Uploading image…"));
+                    self.command(
+                        "image",
+                        json!({
+                            "mime": mime,
+                            "data": STANDARD.encode(bytes),
+                            "mode": if as_path { "path" } else { "attachment" },
+                        }),
+                    );
+                } else {
+                    self.start_ssh_image_paste(mime, bytes.into_owned(), as_path, cx);
+                }
             }
             Ok(None) if as_path => cx.emit(PasteError("Copy an image first.".into())),
             Ok(None) => {
@@ -151,7 +158,12 @@ impl Pane {
         if w.is_window_active() && self.focus.is_focused(w) {
             self.clear_bell(cx);
             if self.activity == "finished" {
-                self.command("observe", json!({}));
+                if self.server.is_some() {
+                    self.command("observe", json!({}));
+                } else {
+                    self.activity = "idle".into();
+                    cx.emit(super::PaneChanged);
+                }
             }
         }
     }
@@ -211,7 +223,7 @@ impl Pane {
                 }
                 return true;
             }
-            if self.server.is_some() && key == "v" && m == Modifiers::control() {
+            if self.can_paste_image() && key == "v" && m == Modifiers::control() {
                 self.paste_clipboard_key(e.is_held, cx);
                 return true;
             }
@@ -256,7 +268,7 @@ impl Pane {
             return true;
         }
         if m == Modifiers::control() && key == "v" {
-            if self.server.is_some() {
+            if self.can_paste_image() {
                 self.paste_clipboard_key(e.is_held, cx);
             } else if let Some(item) = cx.read_from_clipboard() {
                 if let Some(text) = item.text() {

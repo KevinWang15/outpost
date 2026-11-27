@@ -9,7 +9,8 @@ import { unenroll, ownership, enrollSsh, authorizeNode } from './installation'
 import { enrollOutbound, runOutbound } from './outbound'
 import { serveMcp } from './mcp'
 import { serveNode } from './node'
-import { enterState, useSessionBinding } from './state'
+import { runSshShell, runSshWrap } from './sshBridge'
+import { enterState, useMcpBinding, useSessionBinding } from './state'
 import { serveTerminal } from './terminal'
 
 const usage = `Usage: outpost COMMAND
@@ -37,11 +38,18 @@ const run = async () => {
   // Commands a coding tool runs follow their launch's binding; Outpost's own
   // processes (node, drivers) always use the state directory of their user.
   const sessionCommand = ['mcp', 'hook', 'publish', 'open', 'signal'].includes(role)
-  const binding = sessionCommand ? useSessionBinding() : null
+  const binding = role === 'mcp' ? useMcpBinding() : sessionCommand ? useSessionBinding() : null
   // Every Outpost process works in the state directory, so its sockets have
   // short addresses; a file given on the command line is resolved first.
   if (role === 'publish' && args[0]) args[0] = resolve(args[0])
-  if (role !== 'agent' && role !== '--version' && (!sessionCommand || binding)) enterState()
+  if (
+    role !== 'agent' &&
+    role !== '--version' &&
+    role !== 'ssh-shell' &&
+    role !== 'ssh-wrap' &&
+    (!sessionCommand || binding)
+  )
+    enterState()
   switch (role) {
     case 'new':
     case 'create':
@@ -53,6 +61,10 @@ const run = async () => {
       return runAttachCommand(args)
     case 'install-cli':
       return runInstallCliCommand(args, initialCwd)
+    case 'ssh-shell':
+      return runSshShell(initialCwd)
+    case 'ssh-wrap':
+      return runSshWrap(args[0], args.slice(1), initialCwd)
     case '--version':
       if (args.length) {
         if (args.length !== 2 || args[0] !== '--socket') throw Error(usage)
@@ -102,7 +114,7 @@ const run = async () => {
     case 'publish':
     case 'open':
     case 'signal':
-      if (!binding) throw new Error('Run this command inside an Outpost session.')
+      if (!binding || !binding.session) throw new Error('Run this command inside an Outpost session.')
       return command(role, args, binding)
     case 'agent':
       if (args[0] === 'codex' && args.length === 1) {

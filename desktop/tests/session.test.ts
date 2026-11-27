@@ -619,6 +619,173 @@ test(
   },
 )
 
+test(
+  'explicit reconnect mints a fresh launch token and recovers from expired connections and transient connect errors',
+  { timeout: 20000 },
+  async t => {
+    const { Terminal } = createRequire(import.meta.url)('@xterm/headless') as typeof import('@xterm/headless')
+    const terminal = new Terminal({ allowProposedApi: true, cols: 80, rows: 24, scrollback: 1000 })
+    writeHeadless(terminal, 'freshly reconnected\r\n')
+    const dir = await mkdtemp(join(tmpdir(), 'outpost-reconnect-test-'))
+    const credential = 'op_app_' + 'e'.repeat(43)
+    const login = { account: { id: 'account', name: 'Test', email: null }, expiresAt: Date.now() + 600000 }
+    const session = {
+      targetId: 'machine-1',
+      sessionId: '22222222-3333-4444-8555-666666666666',
+      title: 'Reconnect Fixture',
+      detail: 'ssh',
+      tool: 'codex',
+    }
+    let connectAttempts = 0
+    let failNextConnect = false
+    const issuedTokens = new Set<string>()
+    const consumedTokens = new Set<string>()
+    const server = createServer((req, res) => {
+      if (req.headers.authorization !== 'Bearer ' + credential) {
+        res.writeHead(401).end()
+        return
+      }
+      res.setHeader('Content-Type', 'application/json')
+      if (req.url === '/api/desktop/account') return void res.end(JSON.stringify(login))
+      if (req.url === '/api/desktop/targets') return void res.end(JSON.stringify([{ id: 'machine-1', name: 'Main' }]))
+      if (req.url === '/api/desktop/targets/machine-1/sessions') return void res.end(JSON.stringify([session]))
+      if (req.url === `/api/desktop/targets/machine-1/sessions/${session.sessionId}/connect` && req.method === 'POST') {
+        connectAttempts++
+        if (failNextConnect) {
+          failNextConnect = false
+          res.writeHead(502).end(JSON.stringify({ message: 'Server temporarily unavailable.' }))
+          return
+        }
+        const token = `fresh.launch_${connectAttempts}`
+        issuedTokens.add(token)
+        return void res.end(
+          JSON.stringify({
+            title: session.title,
+            targetId: session.targetId,
+            sessionId: session.sessionId,
+            accountId: login.account.id,
+            loginId: 'desktop:' + randomUUID(),
+            server: origin,
+            token,
+          } satisfies DesktopLaunch),
+        )
+      }
+      res.writeHead(404).end()
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    assert(address && typeof address === 'object')
+    const origin = 'http://127.0.0.1:' + address.port
+    const ws = new WebSocketServer({ server })
+    let wsAttempts = 0
+    const receivedTokens: string[] = []
+    ws.on('connection', (socket, req) => {
+      wsAttempts++
+      const url = new URL(req.url!, origin)
+      const token = url.searchParams.get('token') ?? ''
+      receivedTokens.push(token)
+      const send = (v: ServerMessage) => socket.send(JSON.stringify(v))
+      // Single-use launch token enforcement + first attempt fails as expired.
+      if (!issuedTokens.has(token) || consumedTokens.has(token) || wsAttempts === 1) {
+        consumedTokens.add(token)
+        send({
+          type: 'closed',
+          reason: 'expired',
+          message: 'This connection expired. Click Connect in Outpost to open a new terminal.',
+        })
+        socket.close(1000, 'expired')
+        return
+      }
+      consumedTokens.add(token)
+      assert.equal(url.searchParams.get('start'), '1')
+      send({
+        type: 'hello',
+        resume: 'unused.resume',
+        session: { id: session.sessionId, name: session.title, tool: 'codex' },
+        target: { id: session.targetId, name: 'Main' },
+      })
+      for (const part of checkpoint(terminal, 1000)) send({ type: 'restore', checkpoint: part })
+      send({ type: 'ready' })
+    })
+    const trust = new ServerTrust(join(dir, 'server-trust.json'), async () => true)
+    await trust.ensure(origin)
+    await new ServerLoginStore(join(dir, 'server-logins.json')).put({
+      origin,
+      token: credential,
+      account: login.account,
+      expiresAt: login.expiresAt,
+    })
+    const child = spawn(
+      process.execPath,
+      [fileURLToPath(new URL('../dist/outpost-helper.cjs', import.meta.url)), dir],
+      { stdio: ['pipe', 'pipe', 'inherit'] },
+    )
+    t.after(async () => {
+      child.kill()
+      for (const client of ws.clients) client.terminate()
+      ws.close()
+      server.closeAllConnections()
+      server.close()
+      terminal.dispose()
+      await rm(dir, { recursive: true, force: true })
+    })
+    const events: Array<Record<string, unknown>> = []
+    const waiters: Array<() => void> = []
+    const rl = createInterface({ input: child.stdout })
+    rl.on('line', line => {
+      const parsed = JSON.parse(line) as Record<string, unknown>
+      if (parsed.event === 'barrier') send({ op: 'ack', pane: parsed.pane, seq: parsed.seq })
+      events.push(parsed)
+      for (const wake of waiters.splice(0)) wake()
+    })
+    const send = (cmd: object) => child.stdin.write(JSON.stringify(cmd) + '\n')
+    const waitFor = async (predicate: (e: Record<string, unknown>) => boolean) => {
+      const deadline = Date.now() + 8000
+      while (true) {
+        const idx = events.findIndex(predicate)
+        if (idx !== -1) return events.splice(idx, 1)[0]
+        if (Date.now() > deadline) throw new Error(`Timed out waiting for event; seen: ${JSON.stringify(events)}`)
+        await new Promise<void>(resolve => {
+          waiters.push(resolve)
+          setTimeout(resolve, 100)
+        })
+      }
+    }
+
+    const accounts = await waitFor(e => e.event === 'accounts' && Array.isArray(e.sessions) && e.sessions.length > 0)
+    const choice = (accounts.sessions as Array<{ id: string }>)[0]
+    send({ op: 'choose', value: choice.id })
+    const opened = await waitFor(e => e.event === 'opened')
+    const pane = Number(opened.pane)
+    send({ op: 'resize', pane, cols: 80, rows: 24 })
+    const expired = await waitFor(
+      e => e.event === 'connection' && (e.state as { kind?: string; reason?: string }).reason === 'expired',
+    )
+    assert.equal((expired.state as { kind: string }).kind, 'closed')
+
+    // Transient /connect failure surfaces cleanly on the pane instead of hanging on Connecting.
+    failNextConnect = true
+    send({ op: 'reconnect', pane })
+    const failed = await waitFor(
+      e =>
+        e.event === 'connection' &&
+        (e.state as { kind?: string; message?: string }).kind === 'closed' &&
+        String((e.state as { message?: string }).message).includes('Server temporarily unavailable'),
+    )
+    assert.equal(failed.pane, pane)
+
+    // Subsequent Reconnect mints a brand-new launch token and connects cleanly.
+    send({ op: 'reconnect', pane })
+    await waitFor(e => e.event === 'connection' && (e.state as { kind?: string }).kind === 'connected')
+    assert.equal(connectAttempts, 3)
+    assert.deepEqual(receivedTokens, ['fresh.launch_1', 'fresh.launch_3'])
+
+    child.stdin.end()
+    await once(child, 'exit')
+  },
+)
+
 test('Preferences.load defaults omitted fields and rejects invalid types or extra keys', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'outpost-prefs-test-'))
   t.after(() => rm(dir, { recursive: true, force: true }))

@@ -1,4 +1,5 @@
 mod input;
+mod osc7501;
 mod osc7770;
 mod render;
 mod scrollbar;
@@ -11,6 +12,7 @@ use crate::{
     bridge::Bridge,
     colors,
     pty::{Local, Output},
+    ssh_bridge::{SshBridgeActions, SshBridgePane},
 };
 use alacritty_terminal::{
     event::{Event as AnsiEvent, EventListener, WindowSize},
@@ -23,7 +25,8 @@ use alacritty_terminal::{
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use gpui::*;
-use osc7770::Osc7770Scanner;
+use osc7501::{Osc7501Event, Osc7501Scanner, ProgramStatusReport, ProgramStatusState};
+use osc7770::{Osc7770Event, Osc7770Scanner};
 use render::terminal_font;
 use scrollbar::ScrollbarState;
 use search::SearchState;
@@ -157,6 +160,8 @@ pub struct Pane {
     search: SearchState,
     scrollbar: ScrollbarState,
     osc_scanner: Osc7770Scanner,
+    osc7501_scanner: Osc7501Scanner,
+    ssh_bridge: SshBridgePane,
     last_open_session: Option<(String, Instant)>,
 }
 
@@ -310,6 +315,8 @@ impl Pane {
             search: SearchState::default(),
             scrollbar: ScrollbarState::default(),
             osc_scanner: Osc7770Scanner::default(),
+            osc7501_scanner: Osc7501Scanner::default(),
+            ssh_bridge: SshBridgePane::default(),
             last_open_session: None,
         }
     }
@@ -334,29 +341,213 @@ impl Pane {
         }
     }
 
+    pub fn reconnect(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.transport, Transport::Remote(..)) {
+            return;
+        }
+        // Reset transient pane state to match a freshly opened remote pane,
+        // and resync measured size + focus before the helper mints a fresh launch.
+        self.connection = ConnectionState::Connecting;
+        self.restoring = true;
+        self.status = "Connecting…".into();
+        self.sending = false;
+        self.waiting = 0;
+        self.activity.clear();
+        self.activity_blocked_kind = None;
+        self.activity_progress = None;
+        self.activity_detail = None;
+        self.files = serde_json::Value::Null;
+        self.file_previews = Default::default();
+        self.pending_copy = None;
+        self.dragging = false;
+        self.selection_changed = false;
+        self.mouse_reported_button = None;
+        self.last_mouse_motion = None;
+        self.scroll_remainder = 0.0;
+        self.marked.clear();
+        self.events.0.borrow_mut().clear();
+        self.osc_scanner.reset();
+        if let Some((cols, rows)) = self.desired {
+            self.command("resize", json!({"cols": cols, "rows": rows}));
+        }
+        self.command("focus", json!({"active": self.active}));
+        self.command("reconnect", json!({}));
+        cx.emit(PaneChanged);
+        cx.notify();
+    }
+
+    pub fn can_paste_image(&self) -> bool {
+        self.server.is_some() || self.ssh_bridge.is_active()
+    }
+
+    pub(super) fn clear_local_activity(&mut self, cx: &mut Context<Self>) {
+        if !self.activity.is_empty()
+            || self.activity_blocked_kind.is_some()
+            || self.activity_progress.is_some()
+            || self.activity_detail.is_some()
+        {
+            self.activity.clear();
+            self.activity_blocked_kind = None;
+            self.activity_progress = None;
+            self.activity_detail = None;
+            cx.emit(PaneChanged);
+        }
+    }
+
+    fn apply_local_program_status(
+        &mut self,
+        report: ProgramStatusReport,
+        cx: &mut Context<Self>,
+    ) {
+        // Sub-task reports never override the pane's root turn state.
+        if report.id.is_some() {
+            return;
+        }
+        if report.state == ProgramStatusState::Clear {
+            self.clear_local_activity(cx);
+            return;
+        }
+        // Latch an unacknowledged `finished` state across a subsequent `idle` report,
+        // matching `machine/activity.ts`.
+        if report.state == ProgramStatusState::Idle && self.activity == "finished" {
+            return;
+        }
+        let next_activity = match report.state {
+            ProgramStatusState::Idle => "idle",
+            ProgramStatusState::Working => "working",
+            ProgramStatusState::Done => "finished",
+            ProgramStatusState::Blocked => "waiting",
+            ProgramStatusState::Error => "error",
+            ProgramStatusState::Clear => "",
+        };
+        let next_blocked = if report.state == ProgramStatusState::Blocked {
+            report.kind.clone()
+        } else {
+            None
+        };
+        let next_progress = if matches!(
+            report.state,
+            ProgramStatusState::Working | ProgramStatusState::Blocked
+        ) {
+            report.progress
+        } else {
+            None
+        };
+        let next_detail = report.format_detail();
+        if self.activity != next_activity
+            || self.activity_blocked_kind != next_blocked
+            || self.activity_progress != next_progress
+            || self.activity_detail != next_detail
+        {
+            self.activity = next_activity.into();
+            self.activity_blocked_kind = next_blocked;
+            self.activity_progress = next_progress;
+            self.activity_detail = next_detail;
+            cx.emit(PaneChanged);
+        }
+    }
+
+    fn schedule_ssh_paste_timeout(
+        &mut self,
+        generation: u64,
+        duration: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            let _ = this.update(cx, |pane, cx| {
+                if let Some((cancel_frame, message)) = pane.ssh_bridge.on_timeout(generation) {
+                    if let Some(frame) = cancel_frame {
+                        pane.write(frame, cx);
+                    }
+                    cx.emit(PasteError(message));
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn apply_ssh_bridge_actions(&mut self, actions: SshBridgeActions, cx: &mut Context<Self>) {
+        for frame in actions.send_frames {
+            self.write(frame, cx);
+        }
+        if let Some((generation, duration)) = actions.schedule_timeout {
+            self.schedule_ssh_paste_timeout(generation, duration, cx);
+        }
+        if actions.clear_activity {
+            self.clear_local_activity(cx);
+        }
+        if let Some(notice) = actions.notice {
+            cx.emit(PaneNotice::transient(notice));
+        }
+        if let Some(error) = actions.error {
+            cx.emit(PasteError(error));
+        }
+    }
+
+    pub(super) fn start_ssh_image_paste(
+        &mut self,
+        mime: &str,
+        bytes: Vec<u8>,
+        as_path: bool,
+        cx: &mut Context<Self>,
+    ) {
+        match self.ssh_bridge.begin_paste(mime, bytes, as_path) {
+            Ok((generation, begin_frame)) => {
+                cx.emit(PaneNotice::sticky("Uploading image…"));
+                self.write(begin_frame, cx);
+                self.schedule_ssh_paste_timeout(generation, Duration::from_secs(2), cx);
+            }
+            Err(error) => cx.emit(PasteError(error)),
+        }
+    }
+
     pub fn feed(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        let (filtered, open_requests) = self.osc_scanner.scan(bytes);
-        let feed_bytes = filtered.as_deref().unwrap_or(bytes);
+        let local = matches!(self.transport, Transport::Local { .. });
+        let (filtered_7770, osc7770_events) = self.osc_scanner.scan(bytes);
+        let after_7770 = filtered_7770.as_deref().unwrap_or(bytes);
+        let (filtered_7501, osc7501_events) = if local {
+            self.osc7501_scanner.scan(after_7770)
+        } else {
+            (None, Vec::new())
+        };
+        let feed_bytes = filtered_7501.as_deref().unwrap_or(after_7770);
         if !feed_bytes.is_empty() {
             self.parser.advance(&mut self.term, feed_bytes);
         }
         if self.search.active {
             self.search.dirty = true;
         }
-        if !self.restoring {
-            let now = Instant::now();
-            for req in open_requests {
-                let duplicate = self.last_open_session.as_ref().is_some_and(|(id, at)| {
-                    *id == req.session_id && now.duration_since(*at) < Duration::from_secs(2)
-                });
-                if !duplicate {
-                    self.last_open_session = Some((req.session_id.clone(), now));
-                    cx.emit(req);
+        for event in osc7770_events {
+            match event {
+                Osc7770Event::OpenSession(req) if !self.restoring => {
+                    let now = Instant::now();
+                    let duplicate = self.last_open_session.as_ref().is_some_and(|(id, at)| {
+                        *id == req.session_id && now.duration_since(*at) < Duration::from_secs(2)
+                    });
+                    if !duplicate {
+                        self.last_open_session = Some((req.session_id.clone(), now));
+                        cx.emit(req);
+                    }
+                }
+                Osc7770Event::SshBridge(msg) if local => {
+                    let actions = self.ssh_bridge.handle_remote(msg);
+                    self.apply_ssh_bridge_actions(actions, cx);
+                }
+                _ => {}
+            }
+        }
+        for event in osc7501_events {
+            match event {
+                Osc7501Event::Query { bel } => {
+                    self.write(osc7501::format_query_reply(bel), cx);
+                }
+                Osc7501Event::Report(report) => {
+                    self.apply_local_program_status(report, cx);
                 }
             }
         }
         let events = std::mem::take(&mut *self.events.0.borrow_mut());
-        let local = matches!(self.transport, Transport::Local { .. });
         for e in events {
             match e {
                 AnsiEvent::Title(s) if local => {
@@ -448,10 +639,17 @@ impl Pane {
     pub fn reset(&mut self, cols: u16, rows: u16) {
         self.grid_visible = false;
         self.pending_copy = None;
+        self.dragging = false;
+        self.selection_changed = false;
+        self.mouse_reported_button = None;
         self.last_mouse_motion = None;
         self.scroll_remainder = 0.0;
+        self.marked.clear();
+        self.events.0.borrow_mut().clear();
         self.scrollbar = ScrollbarState::default();
         self.osc_scanner.reset();
+        self.osc7501_scanner.reset();
+        self.ssh_bridge.clear();
         self.term = Term::new(
             Config {
                 scrolling_history: self.scrollback,
@@ -592,6 +790,10 @@ impl Pane {
             self.note_scroll_activity(cx);
         }
         self.term.selection = None;
+        if self.server.is_none() && self.activity == "finished" {
+            self.activity = "idle".into();
+            cx.emit(PaneChanged);
+        }
         self.write(bytes, cx);
         cx.notify()
     }
@@ -741,6 +943,8 @@ impl Pane {
                     .update(cx, |s, cx| match output {
                         Output::Bytes(bytes) => s.feed(&bytes, cx),
                         Output::Closed(reason) => {
+                            s.ssh_bridge.clear();
+                            s.clear_local_activity(cx);
                             s.status = reason;
                             cx.emit(PaneChanged);
                             cx.notify()

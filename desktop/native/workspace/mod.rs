@@ -927,21 +927,35 @@ impl Workspace {
         }
     }
 
+    fn reconnect_remote_pane(&mut self, id: Id, cx: &mut Context<Self>) {
+        let Some(pane) = self.panes.get(&id).cloned() else {
+            return;
+        };
+        if pane.read(cx).server.is_none() {
+            return;
+        }
+        self.clear_pane_sticky_toast(id);
+        if self.active().as_ref() == Some(&pane) && self.files.preview_id.is_some() {
+            self.files.preview_id = None;
+            self.files.preview = None;
+        }
+        pane.update(cx, |p, cx| p.reconnect(cx));
+    }
+
     fn reload_pane(&mut self, id: Id, w: &mut Window, cx: &mut Context<Self>) {
         let Some(pane) = self.panes.get(&id) else {
             return;
         };
         if pane.read(cx).server.is_some() {
-            pane.read(cx).command("reconnect", json!({}));
             if self
                 .tabs
                 .get(self.current)
                 .is_some_and(|t| t.layout.contains(id))
             {
                 self.show(Page::Terminal, w, cx);
-            } else {
-                cx.notify();
             }
+            self.reconnect_remote_pane(id, cx);
+            cx.notify();
             return;
         }
         confirm(
@@ -1182,10 +1196,9 @@ impl Workspace {
                     ("pane-reconnect", id),
                     !pending,
                     cx,
-                    move |s, _, cx| {
-                        if let Some(pane) = s.panes.get(&id) {
-                            pane.read(cx).command("reconnect", json!({}))
-                        }
+                    move |s, w, cx| {
+                        s.select(id, w, cx);
+                        s.reconnect_remote_pane(id, cx);
                     },
                 )
                 .child(

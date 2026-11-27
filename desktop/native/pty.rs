@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{ChildKiller, MasterPty, PtySize, native_pty_system};
 use std::{
     io::{Read, Write},
     path::Path,
@@ -31,11 +31,7 @@ impl Local {
             pixel_width: 0,
             pixel_height: 0,
         })?;
-        let mut command = CommandBuilder::new(shell);
-        command.args(args);
-        command.cwd(dir);
-        command.env("TERM", "xterm-256color");
-        command.env("COLORTERM", "truecolor");
+        let command = crate::ssh_bridge::build_local_command(shell, args, dir);
         let mut reader = pair.master.try_clone_reader()?;
         let mut writer = pair.master.take_writer()?;
         let mut child = pair

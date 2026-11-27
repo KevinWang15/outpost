@@ -162,6 +162,7 @@ pub struct Pane {
     osc_scanner: Osc7770Scanner,
     osc7501_scanner: Osc7501Scanner,
     ssh_bridge: SshBridgePane,
+    ssh_paste_timeout: Option<Task<()>>,
     last_open_session: Option<(String, Instant)>,
 }
 
@@ -317,6 +318,7 @@ impl Pane {
             osc_scanner: Osc7770Scanner::default(),
             osc7501_scanner: Osc7501Scanner::default(),
             ssh_bridge: SshBridgePane::default(),
+            ssh_paste_timeout: None,
             last_open_session: None,
         }
     }
@@ -449,30 +451,33 @@ impl Pane {
 
     fn schedule_ssh_paste_timeout(
         &mut self,
-        generation: u64,
+        token: u64,
         duration: Duration,
         cx: &mut Context<Self>,
     ) {
-        cx.spawn(async move |this, cx| {
+        // Storing the Task cancels any earlier handshake or chunk timer automatically.
+        self.ssh_paste_timeout = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(duration).await;
             let _ = this.update(cx, |pane, cx| {
-                if let Some((cancel_frame, message)) = pane.ssh_bridge.on_timeout(generation) {
+                if let Some((cancel_frame, message)) = pane.ssh_bridge.on_timeout(token) {
+                    pane.ssh_paste_timeout = None;
                     if let Some(frame) = cancel_frame {
                         pane.write(frame, cx);
                     }
                     cx.emit(PasteError(message));
                 }
             });
-        })
-        .detach();
+        }));
     }
 
     fn apply_ssh_bridge_actions(&mut self, actions: SshBridgeActions, cx: &mut Context<Self>) {
         for frame in actions.send_frames {
             self.write(frame, cx);
         }
-        if let Some((generation, duration)) = actions.schedule_timeout {
-            self.schedule_ssh_paste_timeout(generation, duration, cx);
+        if let Some((token, duration)) = actions.schedule_timeout {
+            self.schedule_ssh_paste_timeout(token, duration, cx);
+        } else if !self.ssh_bridge.has_transfer() {
+            self.ssh_paste_timeout = None;
         }
         if actions.clear_activity {
             self.clear_local_activity(cx);
@@ -493,10 +498,10 @@ impl Pane {
         cx: &mut Context<Self>,
     ) {
         match self.ssh_bridge.begin_paste(mime, bytes, as_path) {
-            Ok((generation, begin_frame)) => {
+            Ok((token, begin_frame)) => {
                 cx.emit(PaneNotice::sticky("Uploading image…"));
                 self.write(begin_frame, cx);
-                self.schedule_ssh_paste_timeout(generation, Duration::from_secs(2), cx);
+                self.schedule_ssh_paste_timeout(token, Duration::from_secs(3), cx);
             }
             Err(error) => cx.emit(PasteError(error)),
         }
@@ -650,6 +655,7 @@ impl Pane {
         self.osc_scanner.reset();
         self.osc7501_scanner.reset();
         self.ssh_bridge.clear();
+        self.ssh_paste_timeout = None;
         self.term = Term::new(
             Config {
                 scrolling_history: self.scrollback,
@@ -944,6 +950,7 @@ impl Pane {
                         Output::Bytes(bytes) => s.feed(&bytes, cx),
                         Output::Closed(reason) => {
                             s.ssh_bridge.clear();
+                            s.ssh_paste_timeout = None;
                             s.clear_local_activity(cx);
                             s.status = reason;
                             cx.emit(PaneChanged);

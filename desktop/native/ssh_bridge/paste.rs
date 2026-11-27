@@ -21,7 +21,7 @@ struct ActiveTransfer {
     chunk_size: usize,
     acked: usize,
     sent: usize,
-    generation: u64,
+    timeout_token: u64,
 }
 
 /// Actions produced by the pure state machine for `Pane` to apply to the PTY / UI.
@@ -39,6 +39,7 @@ pub struct SshBridgePane {
     session: Option<ActiveSession>,
     transfer: Option<ActiveTransfer>,
     serial: u64,
+    timeout_serial: u64,
 }
 
 impl SshBridgePane {
@@ -46,9 +47,18 @@ impl SshBridgePane {
         self.session.is_some()
     }
 
+    pub fn has_transfer(&self) -> bool {
+        self.transfer.is_some()
+    }
+
     pub fn clear(&mut self) {
         self.session = None;
         self.transfer = None;
+    }
+
+    fn next_timeout_token(&mut self) -> u64 {
+        self.timeout_serial = self.timeout_serial.wrapping_add(1);
+        self.timeout_serial
     }
 
     pub fn begin_paste(
@@ -64,8 +74,7 @@ impl SshBridgePane {
             return Err("Wait for the previous image to finish.".into());
         }
         self.serial = self.serial.wrapping_add(1);
-        let generation = self.serial;
-        let id = format!("img-{generation}");
+        let id = format!("img-{}", self.serial);
         let size = bytes.len();
         let frame = encode_ssh_bridge_input(&SshDesktopMessage::ImgBegin {
             v: 1,
@@ -75,20 +84,21 @@ impl SshBridgePane {
             size,
             mode: if as_path { "path" } else { "attachment" },
         });
+        let timeout_token = self.next_timeout_token();
         self.transfer = Some(ActiveTransfer {
             id,
             bytes,
             chunk_size: DEFAULT_IMAGE_CHUNK_BYTES,
             acked: 0,
             sent: 0,
-            generation,
+            timeout_token,
         });
-        Ok((generation, frame))
+        Ok((timeout_token, frame))
     }
 
-    pub fn on_timeout(&mut self, generation: u64) -> Option<(Option<Vec<u8>>, String)> {
+    pub fn on_timeout(&mut self, token: u64) -> Option<(Option<Vec<u8>>, String)> {
         let transfer = self.transfer.as_ref()?;
-        if transfer.generation != generation {
+        if transfer.timeout_token != token {
             return None;
         }
         let transfer = self.transfer.take().unwrap();
@@ -178,13 +188,18 @@ impl SshBridgePane {
                     ));
                     transfer.sent = end;
                 }
-                // Refresh timeout for the next ack or final paste completion.
+                // Advance the timeout token so any earlier handshake or chunk timer is invalidated.
                 let timeout = if transfer.sent >= transfer.bytes.len() {
                     std::time::Duration::from_secs(15)
                 } else {
                     std::time::Duration::from_secs(10)
                 };
-                actions.schedule_timeout = Some((transfer.generation, timeout));
+                self.timeout_serial = self.timeout_serial.wrapping_add(1);
+                let next_token = self.timeout_serial;
+                if let Some(transfer) = self.transfer.as_mut() {
+                    transfer.timeout_token = next_token;
+                }
+                actions.schedule_timeout = Some((next_token, timeout));
             }
             SshRemoteMessage::ImgDone {
                 id,
@@ -229,26 +244,47 @@ mod tests {
         assert!(pane.is_active());
 
         let payload = vec![0x89u8; 50_000];
-        let (gen_id, begin_frame) = pane
+        let (handshake_token, begin_frame) = pane
             .begin_paste("image/png", payload.clone(), false)
             .unwrap();
         assert!(begin_frame.starts_with("\u{E077}outpost;ssh;".as_bytes()));
 
         // Initial ack with 16 KiB chunks fills a 4-chunk window (all 4 chunks for 50 KiB).
         let actions = pane.handle_remote(SshRemoteMessage::ImgAck {
-            id: format!("img-{gen_id}"),
+            id: "img-1".into(),
             next: 0,
             chunk_size: Some(16_384),
         });
         assert_eq!(actions.send_frames.len(), 4);
+        let (ack_token, ack_timeout) = actions.schedule_timeout.expect("ack refreshes timeout");
+        assert_ne!(ack_token, handshake_token);
+        assert_eq!(ack_timeout, std::time::Duration::from_secs(15));
+
+        // A stale handshake timeout waking up after ImgAck must never abort the active upload.
+        assert!(pane.on_timeout(handshake_token).is_none());
+        assert!(pane.has_transfer());
 
         let done = pane.handle_remote(SshRemoteMessage::ImgDone {
-            id: format!("img-{gen_id}"),
+            id: "img-1".into(),
             ok: true,
             mode: Some("attachment".into()),
             message: None,
         });
         assert_eq!(done.notice.as_deref(), Some("Image attached"));
+        assert!(!pane.has_transfer());
+
+        // If ImgDone never arrives, only the latest timeout token cancels the transfer.
+        let (hs2, _) = pane.begin_paste("image/png", vec![1; 1024], false).unwrap();
+        let ack2 = pane.handle_remote(SshRemoteMessage::ImgAck {
+            id: "img-2".into(),
+            next: 0,
+            chunk_size: Some(16_384),
+        });
+        let (tok2, _) = ack2.schedule_timeout.unwrap();
+        assert!(pane.on_timeout(hs2).is_none());
+        let (cancel, err) = pane.on_timeout(tok2).expect("current token times out");
+        assert!(cancel.is_some());
+        assert!(err.contains("timed out"));
 
         // Shell prompt clears active wrapper state (SIGKILL recovery).
         let shell = pane.handle_remote(SshRemoteMessage::Shell);

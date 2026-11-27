@@ -9,7 +9,7 @@ import type { Stream } from '../machines'
 import type { SessionService, TargetContext } from '../sessions'
 
 /** A framed byte stream to one chat host. */
-export interface ChatTransport {
+interface ChatTransport {
   send(message: ChatHostRequest): void
   close(reason?: string): void
 }
@@ -316,7 +316,7 @@ export class ChatLink {
   /** Send a request; it waits for the connection while the link starts. `onSent`
    * runs when it is written to a host, with that host's instance. */
   request(
-    message: DistributiveOmit<Exclude<ChatHostRequest, { type: 'hello' | 'status' | 'stop' | 'file' }>, 'id'>,
+    message: DistributiveOmit<Exclude<ChatHostRequest, { type: 'hello' | 'status' | 'file' }>, 'id'>,
     timeoutMs = 30_000,
     onSent?: (instance: string) => void,
   ) {

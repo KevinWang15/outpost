@@ -3,8 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, stat, symlink, writeFile, appendFile, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
-import type { Target } from '../../shared/model.ts'
-import { currentConversation } from '../../shared/model.ts'
+import type { Session, Target } from '../../shared/model.ts'
 import { SessionClient } from '../../backend/sessions.ts'
 import { localMachine } from './helpers.ts'
 
@@ -128,7 +127,7 @@ test(
       [ids.claude],
     )
     assert.equal((await service.search(target, { query: 'HIDDEN_IMAGE_KEYWORD' })).sessions.length, 0)
-    assert.equal((await service.search(target, { query: 'Auth investigation' })).sessions[0].conversation, ids.codex)
+    assert.equal((await service.search(target, { query: ids.codex })).sessions[0].conversation, ids.codex)
     assert.ok(
       !(await readdir(join(home, '.outpost'))).includes('registry.json'),
       'search never initializes a session registry',
@@ -187,7 +186,7 @@ test(
     const { home, root, env, service, put, target } = await fixture(t)
     for (const tool of ['codex', 'kimi', 'claude', 'antigravity'] as const) {
       const created = await service.create(target, { name: tool, tool, rootDir: root })
-      assert.notEqual(currentConversation(created), created.id)
+      assert.notEqual(created.conversation, created.id)
       assert.equal(created.status, 'ready')
       assert.ok(Object.values(created.storage).every(path => path.startsWith(home)))
     }
@@ -204,7 +203,7 @@ test(
     }
     const previousMode = (await stat(history)).mode
     const linked = await service.create(target, input)
-    assert.equal(currentConversation(linked), conversation)
+    assert.equal(linked.conversation, conversation)
     assert.deepEqual(linked.storage, input.storage)
     const found = await service.search(target, { query: 'PRIVATE_CONVERSATION_CONTENT' })
     assert.equal(found.sessions.length, 1)
@@ -223,7 +222,7 @@ test(
       (await stat(join(env.CODEX_HOME, 'sessions', ...new Date().toISOString().slice(0, 10).split('-')))).isDirectory(),
       true,
     )
-    assert.equal(currentConversation(await service.get(target, linked.id)), conversation)
+    assert.equal((await service.get(target, linked.id)).conversation, conversation)
     await service.remove(target, linked.id)
     assert.equal(
       await readFile(history, 'utf8'),
@@ -270,10 +269,10 @@ test(
   { skip: process.platform !== 'linux' },
   async t => {
     const { root, env, service, put, home, target } = await fixture(t)
-    const readMeta = async (session: Parameters<typeof currentConversation>[0]) => {
+    const readMeta = async (session: Session) => {
       const date = new Date().toISOString().slice(0, 10).split('-')
       const directory = join(env.CODEX_HOME, 'sessions', ...date)
-      const name = (await readdir(directory)).find(name => name.endsWith(currentConversation(session) + '.jsonl'))!
+      const name = (await readdir(directory)).find(name => name.endsWith(session.conversation + '.jsonl'))!
       const records = (await readFile(join(directory, name), 'utf8'))
         .trim()
         .split('\n')
@@ -351,8 +350,8 @@ test(
       'native-shape',
       'manager-created or malformed neighbors do not crowd out a real template',
     )
-    assert.equal(meta.id, currentConversation(next))
-    assert.equal(meta.session_id, currentConversation(next))
+    assert.equal(meta.id, next.conversation)
+    assert.equal(meta.session_id, next.conversation)
     assert.equal(meta.model_provider, 'fixture')
     assert.equal(meta.cli_version, '0.159.2-fixture')
     assert.equal(meta.cwd, root)

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import type { AgentCall } from '../../shared/machine'
 import { MachineConnection, MachineError } from '../../backend/machines'
-import type { Command } from '../../backend/process'
+import type { Command } from '../../shared/node/process'
 import type { Transport } from '../../backend/transport'
 
 const fakeNode = fileURLToPath(new URL('../fixtures/fake-node.ts', import.meta.url))

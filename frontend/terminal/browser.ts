@@ -1,6 +1,6 @@
 import { browserUrl } from '../../shared/signals'
 
-export async function openBrowserTab(url: string) {
+export function openBrowserTab(url: string) {
   try {
     url = browserUrl({ url })
   } catch {

@@ -1,6 +1,6 @@
 import { AppError } from '../errors'
 
-export interface AccountEmail {
+interface AccountEmail {
   to: string
   subject: string
   html: string

@@ -1,36 +1,19 @@
 // Kimi Code: wire transcripts, ACP allocation, and one installed Outpost plugin
 // for hooks and MCP (Kimi has no invocation-only configuration).
 import { createHash } from 'node:crypto'
-import { dirname, join, relative, sep } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import type { SessionRecord } from '../../shared/model'
 import { shellJoin } from '../../shared/shell'
+import { terminalService } from '../../shared/terminalService'
 import { withRpc } from '../rpc'
 import { locked, readJson, statePath, writeJson } from '../state'
-import { clean, foldLines, glob, isRecord, lines, newest, promptTitle, strings, timestamp, type Scan } from '../stores'
-import {
-  acpServer,
-  Harness,
-  historyMessage,
-  turnId,
-  type Launch,
-  type Marker,
-  type NativeActivity,
-  type NativeConversation,
-} from './harness'
+import { foldLines, glob, isRecord, lines, newest, strings, timestamp, type Scan } from '../stores'
+import { acpServer, Harness, historyMessage, type Launch, type NativeConversation } from './harness'
 
 const pluginId = 'outpost'
-const ended: Record<string, NativeActivity['state']> = {
-  completed: 'finished',
-  blocked: 'waiting',
-  failed: 'error',
-  cancelled: 'idle',
-}
 
 export class Kimi extends Harness {
   readonly id = 'kimi' as const
-  readonly selectionOptions = ['--session', '-S', '--continue', '-c']
-  // Its plugin hooks report which conversation is current, not turn state.
-  readonly hookStates = false
 
   private index(home: string) {
     return foldLines(
@@ -57,7 +40,6 @@ export class Kimi extends Harness {
     return {
       id,
       root: this.index(home).get(id) ?? '',
-      title: clean(state.title) || promptTitle(state.lastPrompt, 280) || id,
       created: timestamp(state.createdAt),
       updated: timestamp(state.updatedAt),
       history,
@@ -89,59 +71,6 @@ export class Kimi extends Harness {
 
   transcript(session: SessionRecord, conversation: string) {
     return newest(glob(this.storeOf(session), `sessions/*/${conversation}/agents/main/wire.jsonl`))
-  }
-
-  title(session: SessionRecord, conversation: string, scan: Scan) {
-    const transcript = this.transcript(session, conversation)
-    if (!transcript) return null
-    const state = scan.document(join(dirname(dirname(dirname(transcript))), 'state.json'))
-    return clean(state.title, 200) || promptTitle(state.lastPrompt) || null
-  }
-
-  activity(record: Record<string, unknown>): NativeActivity | null {
-    if (record.agentId !== 'main') return null
-    const at = record.time
-    const turn = turnId(record.turnId)
-    switch (record.type) {
-      case 'turn.prompt':
-      case 'turn.steer':
-        return { state: 'working', timestamp: at, turn }
-      case 'turn.ended':
-        return { state: ended[record.reason as string] ?? 'unknown', timestamp: at, turn }
-      case 'interaction.request':
-        return { state: 'waiting', timestamp: at, turn }
-      case 'interaction.resolved':
-        return { state: 'working', timestamp: at, turn }
-      case 'turn.cancel':
-        return record.target === 'queued' ? null : { state: 'idle', timestamp: at, turn }
-    }
-    return null
-  }
-
-  // Resolving one approval must not hide another one still open.
-  marker(records: Iterable<{ record: Record<string, unknown>; offset: number }>) {
-    const resolved = new Set<unknown>()
-    for (const { record, offset } of records) {
-      if (record.agentId !== 'main') continue
-      if (record.type === 'interaction.resolved') {
-        resolved.add(record.id)
-        continue
-      }
-      if (record.type === 'interaction.request' && resolved.has(record.id)) continue
-      const activity = this.activity(record)
-      if (activity) return { activity, offset }
-    }
-    return null
-  }
-
-  update(
-    record: Record<string, unknown>,
-    offset: number,
-    previous: Marker | null,
-    history: () => Iterable<{ record: Record<string, unknown>; offset: number }>,
-  ) {
-    if (record.agentId === 'main' && record.type === 'interaction.resolved') return this.marker(history())
-    return super.update(record, offset, previous, history)
   }
 
   *historyPaths(home: string) {
@@ -204,7 +133,7 @@ export class Kimi extends Harness {
       await rpc.call('initialize', {
         protocolVersion: 1,
         clientCapabilities: {},
-        clientInfo: { name: 'outpost', version: '1.0.0' },
+        clientInfo: { name: 'outpost', version: terminalService.version },
       })
       return rpc.call('session/new', { cwd: root, mcpServers: [] })
     })
@@ -222,7 +151,7 @@ export class Kimi extends Harness {
     const manifest = {
       name: pluginId,
       version: '2.0.0',
-      description: 'Session activity and Outpost tools for Outpost sessions.',
+      description: 'Conversation tracking and Outpost tools for Outpost sessions.',
       interface: { displayName: 'Outpost' },
       hooks: ['SessionStart', 'UserPromptSubmit'].map(event => ({ event, command, timeout: 2 })),
       // Plugin commands must be PATH names; env runs the exact executable.

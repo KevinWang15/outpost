@@ -28,7 +28,6 @@ import { request } from './drivers'
 import { eventsDirectory, readEvents } from './events'
 import { listFiles, readFile, removeFile, StoredFile } from './files'
 import { catalog, readBatch, readMessage } from './history'
-import { terminalSocket } from './launch'
 import { readRegistry, RegistryError, session as findSession } from './registry'
 import { directories, searchConversations } from './search'
 import {
@@ -43,7 +42,7 @@ import {
   terminateSession,
   updateSession,
 } from './sessions'
-import { socketAddress, statePath } from './state'
+import { socketAddress, statePath, terminalSocket } from './state'
 
 function remoteError(error: unknown): RemoteError {
   if (error instanceof RegistryError) return { message: error.message, status: error.status }
@@ -64,7 +63,7 @@ export async function serveNode(socketName: string) {
   const owner = authorizeNode(socketName)
   return nodeLock(async () => {
     if (installation()?.generation !== owner.generation) throw Error('Ownership changed.')
-    watchInstallation(owner, () => process.exit(0))
+    const unwatch = watchInstallation(owner, () => process.exit(0))
     process.umask(0o077)
     const writer = new BoundedWriter(process.stdout, 256 * 1024 * 1024, 120_000, () => process.exit(1))
     const send = (message: MachineMessage) => writer.write(terminalControl(message))
@@ -441,13 +440,21 @@ export async function serveNode(socketName: string) {
         return process.exit(1)
       }
       for (const frame of frames) {
-        if (frame.kind === 'C') receive(JSON.parse(frame.payload.toString('utf8')))
-        else if (frame.kind === 'D')
+        if (frame.kind === 'C') {
+          let message: MachineMessage
+          try {
+            message = JSON.parse(frame.payload.toString('utf8'))
+          } catch {
+            return process.exit(1)
+          }
+          receive(message)
+        } else if (frame.kind === 'D')
           streams.get(frame.payload.readUInt32BE(0))?.data(Buffer.from(frame.payload.subarray(4)))
       }
     })
     // Outpost disconnected: end this node. Sessions keep running.
     const shutdown = () => {
+      unwatch()
       endpoint.close()
       events.close()
       try {

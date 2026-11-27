@@ -1,4 +1,3 @@
-import type { TerminalBroker } from './broker'
 import type { Grant } from './tokens'
 import { randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
@@ -6,12 +5,19 @@ import { parseSessionActivity, unavailableActivity } from '../../shared/activity
 import type { ClientMessage, CloseReason, ServerMessage } from '../../shared/protocol'
 import { maxInputMessage, maxInputQueue, terminalConnectionPolicy } from '../../shared/protocol'
 import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
+import { keyIdRegex } from '../../shared/schemas'
 import { signalValidators } from '../../shared/signals'
 import { sessionFileId, maxSessionFiles } from '../../shared/sessionFiles'
 import { terminalFileChunk, validImagePaste, validImageWrite, validFileRead } from '../../shared/terminalFiles'
 import { terminalSize, validScrollback } from '../../shared/terminalService'
 import { terminalFailure } from './failures'
 import type { Stream } from '../machines'
+
+export interface ConnectionHost {
+  forget(connection: Connection): void
+  logged(connection: Connection, change: 'opened' | 'closed'): void
+  activate(grant: Grant, token: string): boolean
+}
 
 const highWater = 256 * 1024
 export const closedMessages: Record<'ended' | 'expired', string> = {
@@ -47,7 +53,7 @@ export class Connection {
   constructor(
     readonly grant: Grant,
     private socket: WebSocket,
-    private broker: TerminalBroker,
+    private broker: ConnectionHost,
   ) {
     socket.on('message', (data, binary) => this.receive(data as Buffer, binary))
     socket.on('close', () => this.finish())
@@ -269,7 +275,7 @@ export class Connection {
     if (!message || typeof message !== 'object' || Array.isArray(message))
       return this.socket.close(1008, 'Invalid terminal message')
     const id = (message as { id?: unknown }).id
-    if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)))
+    if (id !== undefined && (typeof id !== 'string' || !keyIdRegex.test(id)))
       return this.socket.close(1008, 'Invalid terminal message')
     if (['ping', 'send', 'paste', 'activate', 'acknowledge', 'clear'].includes(message.type) && id === undefined)
       return this.socket.close(1008, 'A terminal request ID is required')

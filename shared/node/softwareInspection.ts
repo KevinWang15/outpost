@@ -3,7 +3,7 @@ import { harnesses } from '../harnesses'
 import type { ExecutionEnvironment, SoftwareId, SoftwareStatus } from '../model'
 import { terminalService } from '../terminalService'
 import chatAgents from '../chatAgents.json' with { type: 'json' }
-import type { CommandResult } from '../../backend/process'
+import type { CommandResult } from './process'
 
 // Read-only, POSIX sh: it must work before Bash is installed.
 export function inspectionScript(ids: readonly SoftwareId[], marker: string, machineSocket?: string) {

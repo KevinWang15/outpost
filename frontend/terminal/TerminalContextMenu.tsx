@@ -2,7 +2,8 @@ import type { ImagePasteMode } from '../../shared/terminalFiles'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { Check, ClipboardPaste, Copy, Eraser, ImagePlus, Search, TextSelect } from 'lucide-react'
-import { clearScreenShortcut } from '../../shared/terminalShortcuts'
+import { isApple, isMac } from '../browser'
+import { clearScreenShortcut } from './shortcuts'
 
 interface Props {
   children: ReactElement
@@ -21,13 +22,13 @@ interface Props {
   controls: { label: string; shown: boolean; onChange: (shown: boolean) => void }[]
 }
 
-/** One menu for both terminal clients. All commands use the existing terminal
+/** Browser terminal context menu. All commands use the existing terminal
  * controllers; opening it never sends a mouse click or key to the remote app. */
 export default function TerminalContextMenu({ children, connected, actions, controls }: Props) {
   const [open, setOpen] = useState(false)
   const [canCopy, setCanCopy] = useState(false)
   const restoreFocus = useRef(true)
-  const clearShortcut = clearScreenShortcut(/Mac|iPhone|iPad|iPod/.test(navigator.platform))
+  const clearShortcut = clearScreenShortcut(isApple())
   useEffect(() => {
     if (!open) return
     const dismiss = () => {
@@ -37,8 +38,6 @@ export default function TerminalContextMenu({ children, connected, actions, cont
     const hidden = () => {
       if (document.hidden) dismiss()
     }
-    // A different desktop pane/window lives outside this document, so Radix
-    // cannot receive its outside click. Never pull focus back from that pane.
     window.addEventListener('blur', dismiss)
     document.addEventListener('visibilitychange', hidden)
     return () => {
@@ -54,7 +53,6 @@ export default function TerminalContextMenu({ children, connected, actions, cont
         setOpen(next)
         if (!next) return
         restoreFocus.current = true
-        // Focus the owning desktop pane before clipboard actions become available.
         actions.focus()
         setCanCopy(actions.canCopy())
       }}
@@ -62,7 +60,7 @@ export default function TerminalContextMenu({ children, connected, actions, cont
       <ContextMenu.Trigger
         asChild
         onMouseDownCapture={event => {
-          const controlClick = event.button === 0 && event.ctrlKey && /Mac/.test(navigator.platform)
+          const controlClick = event.button === 0 && event.ctrlKey && isMac()
           if (event.button !== 2 && !controlClick) return
           // Preserve the selection and keep xterm's mouse reporting out of this gesture.
           event.stopPropagation()
@@ -131,7 +129,7 @@ export default function TerminalContextMenu({ children, connected, actions, cont
             <ImagePlus size={15} /> Paste an image…
           </ContextMenu.Item>
           <ContextMenu.Item className="menu-item" disabled={!connected} onSelect={() => actions.pasteImage('path')}>
-            <ClipboardPaste aria-hidden="true" /> Paste image as file path…
+            <ClipboardPaste size={15} aria-hidden="true" /> Paste image as file path…
           </ContextMenu.Item>
           <ContextMenu.Item
             className="menu-item"

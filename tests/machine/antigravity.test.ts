@@ -146,7 +146,6 @@ test('summaries, full transcripts, composed prompts and subagents are indexed on
   assert.equal(discovered.length, 1, 'subagents are not offered as standalone sessions to resume')
   assert.equal(discovered[0].id, rootId)
   assert.equal(discovered[0].root, work)
-  assert.equal(discovered[0].title, '#ops · Fix 缓存失效')
   assert.equal(discovered[0].created, '2026-11-16T02:01:03.000Z')
   assert.equal(discovered[0].updated, '2026-11-16T02:38:07.218Z')
 
@@ -220,7 +219,7 @@ test('the Outpost plugin is additive, idempotent, and rejects malformed plugins.
       entries: [{ path: '~/my-plugins', exclude: ['draft'] }],
     }),
   )
-  const { adapter, launch } = prepare(created, 'terminal')
+  const { adapter, launch } = await prepare(created, 'terminal')
   await adapter.mcp(launch)
   await adapter.mcp(launch)
   const saved = JSON.parse(readFileSync(pluginsPath, 'utf8'))
@@ -231,6 +230,10 @@ test('the Outpost plugin is additive, idempotent, and rejects malformed plugins.
   ])
   const mcpConfig = readFileSync(statePath('integrations', 'antigravity', 'outpost', 'mcp_config.json'), 'utf8')
   assert.ok(!mcpConfig.includes(created.id), 'plugin holds no session ID')
+  const hooksConfig = JSON.parse(
+    readFileSync(statePath('integrations', 'antigravity', 'outpost', 'hooks.json'), 'utf8'),
+  )
+  assert.deepEqual(Object.keys(hooksConfig.outpost), ['SessionStart', 'PreInvocation'])
 
   writeFileSync(pluginsPath, '{"entries": "bad"}')
   await assert.rejects(() => adapter.mcp(launch), /Invalid Antigravity plugin configuration/)

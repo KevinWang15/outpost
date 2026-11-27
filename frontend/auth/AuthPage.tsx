@@ -40,9 +40,7 @@ export default function AuthPage({ path }: { path: string }) {
     [busy, setBusy] = useState(false)
   const [error, setError] = useState(''),
     [unverified, setUnverified] = useState(false)
-  const [message, setMessage] = useState(
-    parameters.has('created') ? 'Account created. Check your email for a verification link.' : '',
-  )
+  const [message, setMessage] = useState('')
   const [devUrl, setDevUrl] = useState('')
   const [complete, setComplete] = useState(false)
   const titles = {

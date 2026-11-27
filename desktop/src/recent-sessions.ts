@@ -1,8 +1,7 @@
-import { readFile } from 'node:fs/promises'
 import { validDesktopId, desktopSessionId, type DesktopSessionReference } from '../../shared/desktopAuth'
 import { serverOrigin } from '../../shared/serverOrigin'
 import { isHarnessId, type HarnessId } from '../../shared/harnesses'
-import { writeJsonFile } from '../../shared/node/jsonFile'
+import { SerializedJsonStore } from './json-store'
 
 export interface RecentSessionSummary {
   id: string
@@ -13,15 +12,16 @@ export interface RecentSessionSummary {
 }
 export interface RecentSession extends RecentSessionSummary, DesktopSessionReference {}
 
-/** Ten remote sessions, with session references in the app's userData directory. */
+/** Ten remote sessions, with session references in the app's data directory. */
 export class RecentSessions {
-  private entries: RecentSession[] = []
-  private writes = Promise.resolve()
-  constructor(private path: string) {}
+  private store: SerializedJsonStore<RecentSession[]>
 
-  async load() {
-    try {
-      const data: unknown = JSON.parse(await readFile(this.path, 'utf8'))
+  constructor(path: string) {
+    this.store = new SerializedJsonStore<RecentSession[]>(path, [])
+  }
+
+  load() {
+    return this.store.load(data => {
       if (!Array.isArray(data)) throw new Error('Invalid recent sessions.')
       const entries = new Map<string, RecentSession>()
       for (const item of data) {
@@ -49,16 +49,13 @@ export class RecentSessions {
           // Ignore invalid origins without granting trust from this file.
         }
       }
-      this.entries = [...entries.values()].sort((a, b) => b.lastConnectedAt - a.lastConnectedAt).slice(0, 10)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-        throw new Error('Could not read recent sessions.', { cause: error })
-    }
+      return [...entries.values()].sort((a, b) => b.lastConnectedAt - a.lastConnectedAt).slice(0, 10)
+    }, 'Could not read recent sessions.')
   }
 
-  /** The home view needs labels only; connection references stay in the main process. */
+  /** The home view needs labels only; connection references stay in the helper process. */
   list(allowed: (session: RecentSession) => boolean): RecentSessionSummary[] {
-    return this.entries.filter(allowed).map(({ id, server, title, tool, lastConnectedAt }) => ({
+    return this.store.value.filter(allowed).map(({ id, server, title, tool, lastConnectedAt }) => ({
       id,
       server,
       title,
@@ -66,25 +63,20 @@ export class RecentSessions {
       lastConnectedAt,
     }))
   }
+
   get(id: string) {
-    return this.entries.find(entry => entry.id === id)
+    return this.store.value.find(entry => entry.id === id)
   }
+
   remember(entry: RecentSession) {
-    return this.change(entries => [entry, ...entries.filter(item => item.id !== entry.id)].slice(0, 10))
+    return this.store.change(entries => [entry, ...entries.filter(item => item.id !== entry.id)].slice(0, 10))
   }
+
   clear() {
-    return this.change(() => [])
+    return this.store.change(() => [])
   }
+
   retain(allowed: (session: RecentSession) => boolean) {
-    return this.change(entries => entries.filter(allowed))
-  }
-  private change(update: (entries: RecentSession[]) => RecentSession[]) {
-    const write = this.writes.then(async () => {
-      const next = update(this.entries)
-      await writeJsonFile(this.path, next)
-      this.entries = next
-    })
-    this.writes = write.catch(() => {})
-    return write
+    return this.store.change(entries => entries.filter(allowed))
   }
 }

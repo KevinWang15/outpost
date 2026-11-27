@@ -1,10 +1,8 @@
-// Safe React-element Markdown renderer for the User Guide.
-// Supports headings with stable anchor IDs, GitHub-style callouts, fenced code
-// blocks with copy buttons, GFM tables, lists, and in-app guide navigation.
-import { memo, useState, type MouseEvent, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, Check, Copy, Info, Lightbulb, Link as LinkIcon } from 'lucide-react'
-import { createHeadingSlugger, guideHref, resolveGuideLink } from '../../shared/guide'
-import { copyText } from '../api'
+// Safe React-element Markdown renderer shared by Chat and the User Guide.
+// Builds React elements (never HTML strings) and defaults to safe http(s)/mailto links.
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react'
+import { AlertCircle, AlertTriangle, Check, Copy, Info, Lightbulb } from 'lucide-react'
+import { copyText } from '../browser'
 
 type CalloutKind = 'NOTE' | 'TIP' | 'IMPORTANT' | 'WARNING' | 'CAUTION'
 
@@ -16,81 +14,51 @@ const calloutMeta: Record<CalloutKind, { label: string; className: string; Icon:
   CAUTION: { label: 'Caution', className: 'caution', Icon: AlertTriangle },
 }
 
-interface RenderContext {
-  knownSlugs: ReadonlySet<string>
-  onNavigate: (slug: string, hash?: string) => void
-  onAnchor: (hash: string) => void
-  slugger: (text: string) => string
+const safeUrl = (url: string) => {
+  try {
+    const parsed = new URL(url)
+    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol) && !parsed.username && !parsed.password
+      ? parsed.href
+      : null
+  } catch {
+    return null
+  }
 }
 
-function GuideLink({ href, children, ctx }: { href: string; children: ReactNode; ctx: RenderContext }) {
-  const resolved = resolveGuideLink(href, ctx.knownSlugs)
-  if (!resolved) return <>{children}</>
-
-  if (resolved.kind === 'guide') {
-    const targetHref = guideHref(resolved.slug, resolved.hash)
-    const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
-      event.preventDefault()
-      ctx.onNavigate(resolved.slug, resolved.hash)
-    }
-    return (
-      <a href={targetHref} onClick={handleClick}>
-        {children}
-      </a>
-    )
-  }
-
-  if (resolved.kind === 'anchor') {
-    const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
-      event.preventDefault()
-      ctx.onAnchor(resolved.hash)
-    }
-    return (
-      <a href={`#${resolved.hash}`} onClick={handleClick}>
-        {children}
-      </a>
-    )
-  }
-
-  if (resolved.kind === 'app') {
-    return <a href={resolved.href}>{children}</a>
-  }
-
+function defaultLink(href: string, children: ReactNode, key: number): ReactNode {
+  const url = safeUrl(href)
+  if (!url) return <span key={key}>{children}</span>
   return (
-    <a href={resolved.href} target="_blank" rel="noopener noreferrer">
+    <a key={key} href={url} target="_blank" rel="noopener noreferrer">
       {children}
     </a>
   )
 }
 
+interface RenderContext {
+  mentions?: readonly string[]
+  renderLink: (href: string, children: ReactNode, key: number) => ReactNode
+  headingOffset: number
+  renderHeading?: (level: number, raw: string, children: ReactNode, key: number) => ReactNode
+  callouts: boolean
+  softBreaks: boolean
+  defaultCodeLanguage: string
+}
+
+const inlinePatterns: [RegExp, (match: RegExpExecArray, key: number, ctx: RenderContext) => ReactNode][] = [
+  [/(`+)([\s\S]+?)\1/y, (m, key) => <code key={key}>{m[2].trim() || m[2]}</code>],
+  [/\*\*(?=\S)([\s\S]+?\S)\*\*/y, (m, key, ctx) => <strong key={key}>{inline(m[1], ctx)}</strong>],
+  [/__(?=\S)([\s\S]+?\S)__(?!\w)/y, (m, key, ctx) => <strong key={key}>{inline(m[1], ctx)}</strong>],
+  [/\*(?=[^\s*])([^*\n]+?)\*(?!\*)/y, (m, key, ctx) => <em key={key}>{inline(m[1], ctx)}</em>],
+  [/_(?=[^\s_])([^_\n]+?)_(?!\w)/y, (m, key, ctx) => <em key={key}>{inline(m[1], ctx)}</em>],
+  [/~~(?=\S)([\s\S]+?\S)~~/y, (m, key, ctx) => <del key={key}>{inline(m[1], ctx)}</del>],
+  [/\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/y, (m, key, ctx) => ctx.renderLink(m[2], inline(m[1], ctx), key)],
+  [/https?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]]/y, (m, key, ctx) => ctx.renderLink(m[0], m[0], key)],
+]
+
+const baseTriggers = new Set(['`', '*', '_', '~', '[', 'h'])
+
 function inline(text: string, ctx: RenderContext): ReactNode[] {
-  const patterns: [RegExp, (match: RegExpExecArray, key: number) => ReactNode][] = [
-    [/(`+)([\s\S]+?)\1/y, (m, key) => <code key={key}>{m[2].trim() || m[2]}</code>],
-    [/\*\*(?=\S)([\s\S]+?\S)\*\*/y, (m, key) => <strong key={key}>{inline(m[1], ctx)}</strong>],
-    [/__(?=\S)([\s\S]+?\S)__(?!\w)/y, (m, key) => <strong key={key}>{inline(m[1], ctx)}</strong>],
-    [/\*(?=[^\s*])([^*\n]+?)\*(?!\*)/y, (m, key) => <em key={key}>{inline(m[1], ctx)}</em>],
-    [/_(?=[^\s_])([^_\n]+?)_(?!\w)/y, (m, key) => <em key={key}>{inline(m[1], ctx)}</em>],
-    [/~~(?=\S)([\s\S]+?\S)~~/y, (m, key) => <del key={key}>{inline(m[1], ctx)}</del>],
-    [
-      /\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/y,
-      (m, key) => (
-        <GuideLink key={key} href={m[2]} ctx={ctx}>
-          {inline(m[1], ctx)}
-        </GuideLink>
-      ),
-    ],
-    [
-      /https?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]]/y,
-      (m, key) => (
-        <GuideLink key={key} href={m[0]} ctx={ctx}>
-          {m[0]}
-        </GuideLink>
-      ),
-    ],
-  ]
-  const triggers = new Set(['`', '*', '_', '~', '[', 'h'])
   const nodes: ReactNode[] = []
   let plain = ''
   let index = 0
@@ -101,13 +69,35 @@ function inline(text: string, ctx: RenderContext): ReactNode[] {
   while (index < text.length) {
     const char = text[index]
     let matched = false
-    if (triggers.has(char) && (char !== 'h' || !/\w/.test(text[index - 1] ?? ''))) {
-      for (const [pattern, render] of patterns) {
+    if (char === '@' && ctx.mentions !== undefined) {
+      if (!/[\w@./-]/.test(text[index - 1] ?? '')) {
+        const mention = /@([a-z0-9][a-z0-9-]{0,47})/iy
+        mention.lastIndex = index
+        const m = mention.exec(text)
+        if (m) {
+          flush()
+          const handle = m[1].toLowerCase().replace(/-+$/, '')
+          const known = ctx.mentions.includes(handle) || ['all', 'channel', 'here'].includes(handle)
+          nodes.push(
+            known ? (
+              <span key={nodes.length} className="mention">
+                @{handle}
+              </span>
+            ) : (
+              `@${handle}`
+            ),
+          )
+          index += m[0].length
+          matched = true
+        }
+      }
+    } else if (baseTriggers.has(char) && (char !== 'h' || !/\w/.test(text[index - 1] ?? ''))) {
+      for (const [pattern, render] of inlinePatterns) {
         pattern.lastIndex = index
         const m = pattern.exec(text)
         if (m) {
           flush()
-          nodes.push(render(m, nodes.length))
+          nodes.push(render(m, nodes.length, ctx))
           index += m[0].length
           matched = true
           break
@@ -123,22 +113,27 @@ function inline(text: string, ctx: RenderContext): ReactNode[] {
   return nodes
 }
 
-function CodeBlock({ code, language }: { code: string; language: string }) {
+function CodeBlock({ code, language, defaultLanguage }: { code: string; language: string; defaultLanguage: string }) {
   const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
   return (
-    <div className="guide-code-block">
-      <div className="guide-code-bar">
-        <span>{language || 'text'}</span>
+    <div className="code-block">
+      <div className="code-block-bar">
+        <span>{language || defaultLanguage}</span>
         <button
           type="button"
           className="icon-button"
           aria-label="Copy code"
           title="Copy code"
           onClick={() =>
-            void copyText(code).then(() => {
-              setCopied(true)
-              setTimeout(() => setCopied(false), 1500)
-            })
+            void copyText(code)
+              .then(() => {
+                setCopied(true)
+                clearTimeout(timer.current)
+                timer.current = setTimeout(() => setCopied(false), 1500)
+              })
+              .catch(() => {})
           }
         >
           {copied ? <Check size={13} /> : <Copy size={13} />}
@@ -164,7 +159,6 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const out: ReactNode[] = []
   let index = 0
-
   while (index < lines.length) {
     const line = lines[index]
     const key = out.length
@@ -172,8 +166,6 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
       index++
       continue
     }
-
-    // Fenced code block
     const fence = line.match(/^\s*(```+|~~~+)\s*([\w+#.-]*)/)
     if (fence) {
       const marker = fence[1]
@@ -185,68 +177,44 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
         body.push(lines[index++])
       }
       index++
-      out.push(<CodeBlock key={key} code={body.join('\n')} language={fence[2]} />)
+      out.push(
+        <CodeBlock key={key} code={body.join('\n')} language={fence[2]} defaultLanguage={ctx.defaultCodeLanguage} />,
+      )
       continue
     }
-
-    // Headings (H1..H6) with matching deduplicated anchor IDs
     const heading = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/)
     if (heading) {
-      const level = Math.min(6, heading[1].length)
-      const id = ctx.slugger(heading[2])
-      const content = inline(heading[2], ctx)
-      const anchor =
-        level >= 2 && level <= 3 ? (
-          <a
-            className="guide-heading-anchor"
-            href={`#${id}`}
-            aria-label={`Link to ${heading[2]}`}
-            onClick={event => {
-              if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
-              event.preventDefault()
-              ctx.onAnchor(id)
-            }}
-          >
-            <LinkIcon size={14} />
-          </a>
-        ) : null
-      const Tag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
-      out.push(
-        <Tag key={key} id={id} className="guide-heading">
-          <span>{content}</span>
-          {anchor}
-        </Tag>,
-      )
+      const level = Math.min(6, heading[1].length + ctx.headingOffset)
+      const children = inline(heading[2], ctx)
+      if (ctx.renderHeading) {
+        out.push(ctx.renderHeading(level, heading[2], children, key))
+      } else {
+        const Tag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+        out.push(<Tag key={key}>{children}</Tag>)
+      }
       index++
       continue
     }
-
-    // Horizontal rule
     if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
       out.push(<hr key={key} />)
       index++
       continue
     }
-
-    // Blockquote / GitHub-style admonition callout
     if (line.startsWith('>')) {
       const quoted: string[] = []
-      while (index < lines.length && lines[index].startsWith('>')) {
-        quoted.push(lines[index++].replace(/^>\s?/, ''))
-      }
-      const alertMatch = quoted[0]?.trim().match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/)
+      while (index < lines.length && lines[index].startsWith('>')) quoted.push(lines[index++].replace(/^>\s?/, ''))
+      const alertMatch = ctx.callouts ? quoted[0]?.trim().match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/) : null
       if (alertMatch) {
         const kind = alertMatch[1] as CalloutKind
         const meta = calloutMeta[kind]
         const Icon = meta.Icon
-        const inner = quoted.slice(1).join('\n')
         out.push(
           <aside key={key} className={`guide-callout guide-callout-${meta.className}`} role="note">
             <div className="guide-callout-title">
               <Icon size={15} />
               <span>{meta.label}</span>
             </div>
-            <div className="guide-callout-body">{renderBlocks(inner, ctx)}</div>
+            <div className="guide-callout-body">{renderBlocks(quoted.slice(1).join('\n'), ctx)}</div>
           </aside>,
         )
       } else {
@@ -254,8 +222,6 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
       }
       continue
     }
-
-    // GFM Table
     if (
       line.includes('|') &&
       index + 1 < lines.length &&
@@ -267,11 +233,10 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
       )
       index += 2
       const rows: string[][] = []
-      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+      while (index < lines.length && lines[index].includes('|') && lines[index].trim())
         rows.push(tableCells(lines[index++]))
-      }
       out.push(
-        <div key={key} className="guide-table-scroll">
+        <div key={key} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -298,8 +263,6 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
       )
       continue
     }
-
-    // Lists (ordered, unordered, nested, task lists)
     const item = line.match(listItem)
     if (item) {
       const ordered = /\d/.test(item[2])
@@ -314,11 +277,8 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
         } else if (items.length && current.trim() && (/^\s/.test(current) || !blockStart.test(current))) {
           items[items.length - 1].push(current.replace(new RegExp(`^\\s{0,${indent + 4}}`), ''))
           index++
-        } else if (!current.trim() && lines[index + 1]?.match(listItem)) {
-          index++
-        } else {
-          break
-        }
+        } else if (!current.trim() && lines[index + 1]?.match(listItem)) index++
+        else break
       }
       const start = ordered ? Number.parseInt(item[2], 10) : undefined
       const List = ordered ? 'ol' : 'ul'
@@ -339,35 +299,53 @@ function renderBlocks(source: string, ctx: RenderContext): ReactNode[] {
       )
       continue
     }
-
-    // Paragraph
-    const paragraph: string[] = [line]
-    index++
-    while (index < lines.length && lines[index].trim() && !blockStart.test(lines[index])) {
+    const paragraph: string[] = []
+    while (index < lines.length && lines[index].trim() && !(paragraph.length && blockStart.test(lines[index])))
       paragraph.push(lines[index++])
-    }
-    out.push(<p key={key}>{inline(paragraph.join('\n'), ctx)}</p>)
+    out.push(
+      <p key={key}>
+        {ctx.softBreaks
+          ? paragraph.flatMap((text, number) =>
+              number ? [<br key={`br${number}`} />, ...inline(text, ctx)] : inline(text, ctx),
+            )
+          : inline(paragraph.join('\n'), ctx)}
+      </p>,
+    )
   }
-
   return out
 }
 
-export const GuideMarkdown = memo(function GuideMarkdown({
-  content,
-  knownSlugs,
-  onNavigate,
-  onAnchor,
-}: {
-  content: string
-  knownSlugs: ReadonlySet<string>
-  onNavigate: (slug: string, hash?: string) => void
-  onAnchor: (hash: string) => void
-}) {
+export interface MarkdownProps {
+  text: string
+  className?: string
+  mentions?: readonly string[]
+  renderLink?: (href: string, children: ReactNode, key: number) => ReactNode
+  headingOffset?: number
+  createHeadingRenderer?: () => (level: number, raw: string, children: ReactNode, key: number) => ReactNode
+  callouts?: boolean
+  softBreaks?: boolean
+  defaultCodeLanguage?: string
+}
+
+export const Markdown = memo(function Markdown({
+  text,
+  className = 'markdown',
+  mentions,
+  renderLink = defaultLink,
+  headingOffset = 2,
+  createHeadingRenderer,
+  callouts = false,
+  softBreaks = true,
+  defaultCodeLanguage = '',
+}: MarkdownProps) {
   const ctx: RenderContext = {
-    knownSlugs,
-    onNavigate,
-    onAnchor,
-    slugger: createHeadingSlugger(),
+    mentions,
+    renderLink,
+    headingOffset,
+    renderHeading: createHeadingRenderer?.(),
+    callouts,
+    softBreaks,
+    defaultCodeLanguage,
   }
-  return <div className="guide-prose">{renderBlocks(content, ctx)}</div>
+  return <div className={className}>{renderBlocks(text, ctx)}</div>
 })

@@ -1,4 +1,4 @@
-import type { CloseReason } from '../../shared/protocol'
+import type { CloseReason } from '../protocol'
 
 export type TerminalState =
   | { kind: 'connecting' }

@@ -605,7 +605,7 @@ impl Workspace {
                     }
                     return;
                 }
-                self.detach_item(&g.item, placement, w, cx);
+                self.detach_transfer(g.item.transfer_ref(), placement, w, cx);
             }
             Landing::Place(h, dest, _) if AnyWindowHandle::from(h) == w.window_handle() => {
                 if let Destination::Before(at) = dest
@@ -617,24 +617,26 @@ impl Workspace {
                 {
                     return;
                 }
-                if let Some(t) = self.take_item(&g.item) {
+                if let Some(t) = self.take_transfer(g.item.transfer_ref()) {
                     self.receive(t, dest, w, cx);
                 }
             }
-            Landing::Place(h, dest, _) => self.transfer_to(&g.item, h, dest, w, cx),
+            Landing::Place(h, dest, _) => {
+                self.transfer_to(g.item.transfer_ref(), h, dest, w, cx)
+            }
             Landing::Cancel => {}
         }
     }
     pub(super) fn transfer_to(
         &mut self,
-        item: &DragItem,
+        target: TransferRef,
         h: WindowHandle<Self>,
         dest: Destination,
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let moved = h.update(cx, |s, w, cx| {
-            if let Some(t) = self.take_item(item) {
+            if let Some(t) = self.take_transfer(target) {
                 s.receive(t, dest, w, cx);
                 w.activate_window();
                 true
@@ -650,15 +652,15 @@ impl Workspace {
             }
         }
     }
-    pub(super) fn detach_item(
+    pub(super) fn detach_transfer(
         &mut self,
-        item: &DragItem,
+        target: TransferRef,
         placement: Option<(Bounds<Pixels>, Option<DisplayId>)>,
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match crate::open_workspace_at(false, placement, cx) {
-            Ok(h) => self.transfer_to(item, h, Destination::Tab, w, cx),
+            Ok(h) => self.transfer_to(target, h, Destination::Tab, w, cx),
             Err(e) => {
                 self.message = e.to_string();
                 cx.notify()
@@ -1019,13 +1021,16 @@ impl LivePreview {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        Axis, Destination, clamp_drag_badge_origin, drop_hint_for, resolve_tab_strip_drop,
+    };
+    use gpui::{Bounds, Pixels, point, px, size};
 
     fn slot_bounds(x: f32, width: f32) -> Bounds<Pixels> {
         Bounds::new(point(px(x), px(4.)), size(px(width), px(36.)))
     }
 
-    #[::core::prelude::v1::test]
+    #[test]
     fn tab_strip_drop_stays_stable_across_preview_and_adjacent_gaps() {
         // [A (42..252), PREVIEW (254..464), C (466..676)]
         let slots = vec![
@@ -1059,7 +1064,7 @@ mod tests {
         );
     }
 
-    #[::core::prelude::v1::test]
+    #[test]
     fn tab_strip_drop_never_oscillates_after_swap_even_with_variable_widths() {
         // Before swap: [A (42..172, w=130, center=107), PREVIEW (174..414, w=240)]
         let before_left = vec![
@@ -1096,7 +1101,7 @@ mod tests {
         );
     }
 
-    #[::core::prelude::v1::test]
+    #[test]
     fn tab_strip_drop_handles_frame_zero_same_window_and_cross_window() {
         let slots = vec![
             (Some(1), slot_bounds(42., 210.)),
@@ -1138,7 +1143,7 @@ mod tests {
         );
     }
 
-    #[::core::prelude::v1::test]
+    #[test]
     fn tab_strip_drop_handles_multi_tab_jumps_and_empty_strip() {
         let slots = vec![
             (None, slot_bounds(42., 210.)),
@@ -1165,7 +1170,7 @@ mod tests {
         assert_eq!(resolve_tab_strip_drop(px(100.), &[], None), Destination::Tab);
     }
 
-    #[::core::prelude::v1::test]
+    #[test]
     fn drag_badge_clamps_inside_viewport_and_describes_drop_targets() {
         let vp = size(px(800.), px(600.));
 

@@ -1,4 +1,4 @@
-use super::{Page, Workspace, row};
+use super::{Page, Workspace, format_thousands, row};
 use crate::{
     layout::Id,
     terminal::{Pane, SearchStatus},
@@ -9,18 +9,6 @@ use gpui::{
     prelude::*,
     *,
 };
-
-fn format_match_count(n: usize) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, ch) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out.chars().rev().collect()
-}
 
 pub(super) fn format_find_counter(query: &str, status: &SearchStatus) -> Option<(String, bool)> {
     if query.is_empty() {
@@ -35,7 +23,7 @@ pub(super) fn format_find_counter(query: &str, status: &SearchStatus) -> Option<
     let current = status.active.map(|i| i + 1).unwrap_or(0);
     let suffix = if status.truncated { "+" } else { "" };
     Some((
-        format!("{current}/{}{suffix}", format_match_count(status.total)),
+        format!("{current}/{}{suffix}", format_thousands(status.total)),
         false,
     ))
 }
@@ -51,8 +39,8 @@ fn single_line_selection(pane: &Pane) -> Option<String> {
 
 impl Workspace {
     pub(super) fn find_is_focused(&self, w: &Window, cx: &App) -> bool {
-        self.find_focus.contains_focused(w, cx)
-            || self.find_query.read(cx).focus_handle(cx).is_focused(w)
+        self.find.focus.contains_focused(w, cx)
+            || self.find.query.read(cx).focus_handle(cx).is_focused(w)
     }
 
     pub(super) fn open_find(&mut self, w: &mut Window, cx: &mut Context<Self>) {
@@ -66,23 +54,18 @@ impl Workspace {
         if self.page != Page::Terminal {
             self.page = Page::Terminal;
         }
-        self.new_tab_menu_open = false;
-        self.bar_menu_open = false;
-        self.pane_menu = None;
-        self.context_menu = None;
-        self.tab_menu = None;
-        self.tab_rename = None;
-        self.files_menu = None;
+        self.overlay = None;
 
         // Like iTerm2 & VS Code, seed Find from a short single-line terminal selection when present;
         // otherwise keep the previous query ready to refine or step through.
         if let Some(selected) = single_line_selection(pane.read(cx)) {
-            self.find_query
+            self.find
+                .query
                 .update(cx, |input, cx| input.set_value_silent(selected, cx));
         }
-        self.find_open = true;
+        self.find.open = true;
         self.sync_find(true, cx);
-        self.find_query.read(cx).focus_handle(cx).focus(w, cx);
+        self.find.query.read(cx).focus_handle(cx).focus(w, cx);
         cx.notify();
     }
 
@@ -93,35 +76,38 @@ impl Workspace {
         let Some(selected) = single_line_selection(pane.read(cx)) else {
             return;
         };
-        self.find_query
+        self.find
+            .query
             .update(cx, |input, cx| input.set_value_silent(selected, cx));
         if self.page != Page::Terminal {
             self.page = Page::Terminal;
         }
-        self.find_open = true;
+        self.find.open = true;
         self.sync_find(true, cx);
         if self.find_is_focused(w, cx) {
-            self.find_query.read(cx).focus_handle(cx).focus(w, cx);
+            self.find.query.read(cx).focus_handle(cx).focus(w, cx);
         }
         cx.notify();
     }
 
     pub(super) fn close_find(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        let was_open = self.find_open;
-        self.find_open = false;
+        let was_open = self.find.open;
+        self.find.open = false;
         self.clear_find_highlights(cx);
-        self.find_query
+        self.find
+            .query
             .update(cx, |input, cx| input.set_invalid(false, cx));
-        if was_open && self.page == Page::Terminal {
-            if let Some(p) = self.active() {
-                p.update(cx, |p, cx| p.focus_terminal(w, cx));
-            }
+        if was_open
+            && self.page == Page::Terminal
+            && let Some(p) = self.active()
+        {
+            p.update(cx, |p, cx| p.focus_terminal(w, cx));
         }
         cx.notify();
     }
 
     pub(super) fn clear_find_highlights(&mut self, cx: &mut Context<Self>) {
-        if let Some(prev_id) = self.find_pane.take()
+        if let Some(prev_id) = self.find.pane.take()
             && let Some(prev_pane) = self.panes.get(&prev_id).cloned()
         {
             prev_pane.update(cx, |p, cx| p.clear_search(cx));
@@ -132,47 +118,49 @@ impl Workspace {
     }
 
     pub(super) fn sync_find(&mut self, reset_anchor: bool, cx: &mut Context<Self>) {
-        if !self.find_open {
+        if !self.find.open {
             return;
         }
         let target_id = self.tabs.get(self.current).map(|t| t.active);
-        let switched = self.find_pane != target_id;
+        let switched = self.find.pane != target_id;
         if switched
-            && let Some(prev_id) = self.find_pane.take()
+            && let Some(prev_id) = self.find.pane.take()
             && let Some(prev_pane) = self.panes.get(&prev_id).cloned()
         {
             prev_pane.update(cx, |p, cx| p.clear_search(cx));
         }
         let Some(target_id) = target_id else {
-            self.find_open = false;
-            self.find_query
+            self.find.open = false;
+            self.find
+                .query
                 .update(cx, |input, cx| input.set_invalid(false, cx));
             return;
         };
-        self.find_pane = Some(target_id);
+        self.find.pane = Some(target_id);
         let Some(pane) = self.panes.get(&target_id).cloned() else {
             return;
         };
-        let query = self.find_query.read(cx).committed_value();
-        let options = self.find_options;
+        let query = self.find.query.read(cx).committed_value();
+        let options = self.find.options;
         let status = pane.update(cx, |p, cx| {
             p.set_search(&query, options, reset_anchor || switched, cx)
         });
-        self.find_query
+        self.find
+            .query
             .update(cx, |input, cx| input.set_invalid(status.invalid_regex, cx));
         cx.notify();
     }
 
     pub(super) fn step_find(&mut self, next: bool, cx: &mut Context<Self>) {
-        let query = self.find_query.read(cx).committed_value();
+        let query = self.find.query.read(cx).committed_value();
         if query.is_empty() {
             return;
         }
         let Some(target_id) = self.tabs.get(self.current).map(|t| t.active) else {
             return;
         };
-        if !self.find_open || self.find_pane != Some(target_id) {
-            self.find_open = true;
+        if !self.find.open || self.find.pane != Some(target_id) {
+            self.find.open = true;
             self.sync_find(true, cx);
             return;
         }
@@ -185,21 +173,21 @@ impl Workspace {
     }
 
     pub(super) fn toggle_find_case(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        self.find_options.case_sensitive = !self.find_options.case_sensitive;
+        self.find.options.case_sensitive = !self.find.options.case_sensitive;
         self.sync_find(false, cx);
-        self.find_query.read(cx).focus_handle(cx).focus(w, cx);
+        self.find.query.read(cx).focus_handle(cx).focus(w, cx);
     }
 
     pub(super) fn toggle_find_whole_word(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        self.find_options.whole_word = !self.find_options.whole_word;
+        self.find.options.whole_word = !self.find.options.whole_word;
         self.sync_find(false, cx);
-        self.find_query.read(cx).focus_handle(cx).focus(w, cx);
+        self.find.query.read(cx).focus_handle(cx).focus(w, cx);
     }
 
     pub(super) fn toggle_find_regex(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        self.find_options.regex = !self.find_options.regex;
+        self.find.options.regex = !self.find.options.regex;
         self.sync_find(false, cx);
-        self.find_query.read(cx).focus_handle(cx).focus(w, cx);
+        self.find.query.read(cx).focus_handle(cx).focus(w, cx);
     }
 
     pub(super) fn extend_find_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
@@ -221,11 +209,11 @@ impl Workspace {
         pane: &Pane,
         cx: &Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.find_open || self.page != Page::Terminal {
+        if !self.find.open || self.page != Page::Terminal {
             return None;
         }
         let mac = cfg!(target_os = "macos");
-        let query = self.find_query.read(cx).committed_value();
+        let query = self.find.query.read(cx).committed_value();
         let status = pane.search_status();
         let counter = format_find_counter(&query, &status);
         let has_matches = status.total > 0;
@@ -328,7 +316,7 @@ impl Workspace {
         Some(
             row()
                 .id(("terminal-find", pane_id))
-                .track_focus(&self.find_focus)
+                .track_focus(&self.find.focus)
                 .absolute()
                 .top(px(8.))
                 .right(px(16.))
@@ -352,7 +340,7 @@ impl Workspace {
                 .on_scroll(|_, _, cx| cx.stop_propagation())
                 .child(
                     div().w(px(210.)).min_w(px(120.)).flex_shrink_1().child(
-                        input(&self.find_query)
+                        input(&self.find.query)
                             .w_full()
                             .h(px(28.))
                             .text_size(px(12.5))
@@ -380,24 +368,31 @@ impl Workspace {
                     "find-case",
                     LucideIcon::CaseSensitive,
                     case_tip,
-                    self.find_options.case_sensitive,
+                    self.find.options.case_sensitive,
                     Self::toggle_find_case,
                 ))
                 .child(toggle_btn(
                     "find-word",
                     LucideIcon::WholeWord,
                     word_tip,
-                    self.find_options.whole_word,
+                    self.find.options.whole_word,
                     Self::toggle_find_whole_word,
                 ))
                 .child(toggle_btn(
                     "find-regex",
                     LucideIcon::Regex,
                     regex_tip,
-                    self.find_options.regex,
+                    self.find.options.regex,
                     Self::toggle_find_regex,
                 ))
-                .child(div().flex_none().w(px(1.)).h(px(16.)).mx(px(2.)).bg(rgba(0xffffff1a)))
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(1.))
+                        .h(px(16.))
+                        .mx(px(2.))
+                        .bg(rgba(0xffffff1a)),
+                )
                 .child(nav_btn(
                     "find-prev",
                     LucideIcon::ChevronUp,

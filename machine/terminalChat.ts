@@ -4,12 +4,12 @@ import type * as acp from '@agentclientprotocol/sdk'
 import { ChatJournal, chatHost, validChatOrigin, type ChatEntryInput, type ChatInfo } from '../shared/chatHost'
 import type { SessionRecord } from '../shared/model'
 import type { SessionActivity } from '../shared/activity'
+import { keyIdRegex } from '../shared/schemas'
 import { sessionFileId } from '../shared/sessionFiles'
 import { request } from './drivers'
-import { terminalSocket } from './launch'
 import { harness } from './harnesses'
 import { current, readRegistry, session as findSession } from './registry'
-import { readJson, statePath } from './state'
+import { readJson, statePath, terminalSocket } from './state'
 import { lines, reverseRecords, Scan } from './stores'
 import { filesDirectory, listFiles } from './files'
 import type { SessionFile } from '../shared/sessionFiles'
@@ -17,7 +17,6 @@ import type { Delivery } from './delivery'
 import { ViewStream } from './viewStream'
 
 const chatHeader = /^\[Outpost: Chat ([A-Za-z0-9_-]{1,80})\]\n/
-const keyPattern = /^[A-Za-z0-9_-]{1,80}$/
 const textBlock = (text: string) => ({ type: 'text' as const, text })
 const signature = (path: string) => {
   const s = statSync(path, { throwIfNoEntry: false })
@@ -146,8 +145,7 @@ export class TerminalChat extends ViewStream {
       nativeTerminal: { delivery: this.record.delivery },
       error: null,
       agent: null,
-      nativeId: this.conversation,
-      title: this.record.name,
+      nativeId: this.conversation || null,
       modes: null,
       config: [],
       commands: [],
@@ -183,9 +181,11 @@ export class TerminalChat extends ViewStream {
         this.record = findSession(readRegistry(), this.record.id)
         this.registryStamp = registryStamp
       }
-      const { state, updatedAt, completionId, detail, observation } = status.activity
+      const { state, blockedKind, progress, updatedAt, completionId, detail, observation } = status.activity
       const signatureOfActivity = JSON.stringify([
         state,
+        blockedKind,
+        progress,
         updatedAt,
         completionId,
         detail,
@@ -195,8 +195,8 @@ export class TerminalChat extends ViewStream {
       const infoChanged = this.state !== signatureOfActivity
       this.activity = status.activity
       this.state = signatureOfActivity
-      this.conversation = current(this.record).id
-      const changed = this.tail.refresh(this.conversation)
+      this.conversation = current(this.record)?.id ?? ''
+      const changed = this.conversation ? this.tail.refresh(this.conversation) : false
       const queue = statePath('deliveries', this.record.id + '.json')
       const stamp = signature(queue),
         queueChanged = stamp !== this.queueStamp
@@ -320,7 +320,7 @@ export class TerminalChat extends ViewStream {
         }, 750).unref()
       return
     }
-    if (typeof m.id !== 'string' || !keyPattern.test(m.id)) throw Error('Invalid chat request.')
+    if (typeof m.id !== 'string' || !keyIdRegex.test(m.id)) throw Error('Invalid chat request.')
     const result = (ok: boolean, message?: string, data?: unknown) =>
       this.control({ type: 'result', id: m.id, ok, message, data })
     try {
@@ -344,7 +344,7 @@ export class TerminalChat extends ViewStream {
       )
         return result(false, 'Invalid message or attachments.')
       const key = m.key === null ? randomUUID() : m.key
-      if (typeof key !== 'string' || !keyPattern.test(key)) return result(false, 'Invalid message key.')
+      if (typeof key !== 'string' || !keyIdRegex.test(key)) return result(false, 'Invalid message key.')
       const body = m.prompt.map((b: acp.TextContent) => b.text).join('\n')
       if (!body.trim() && !m.files.length) return result(false, 'Write a message first.')
       const reply = await request(this.socket, {

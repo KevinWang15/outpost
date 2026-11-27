@@ -60,7 +60,6 @@ export async function searchService() {
       session,
       revision: 1,
       conversation,
-      problem: null,
       command: [
         'python3',
         '-u',

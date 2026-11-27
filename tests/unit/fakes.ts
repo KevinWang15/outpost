@@ -91,6 +91,7 @@ export class FakeSessions implements SessionService {
   }
   async create(context: TargetContext, input: SessionInput) {
     const now = new Date().toISOString()
+    const conversation = input.conversation ?? crypto.randomUUID()
     const session: Session = {
       id: crypto.randomUUID(),
       name: input.name,
@@ -109,13 +110,15 @@ export class FakeSessions implements SessionService {
         args: input.args ?? '',
         env: input.env ?? {},
       },
-      conversations: [{ id: input.conversation ?? crypto.randomUUID(), title: '', startedAt: now, movedTo: null }],
-      title: '',
+      conversation,
+      conversations: [{ id: conversation, tool: input.tool, startedAt: now, movedTo: null }],
       status: 'ready',
       driver: null,
       runningRevision: null,
       activity: {
         state: 'idle',
+        blockedKind: null,
+        progress: null,
         updatedAt: null,
         completionId: null,
         detail: null,
@@ -129,10 +132,23 @@ export class FakeSessions implements SessionService {
   async update(context: TargetContext, id: string, update: SessionUpdate) {
     const session = this.find(context, id)
     if (update.revision !== session.config.revision) throw new AppError('The session changed since.', 409)
-    const { revision, name, delivery, ...config } = update
+    const { revision, name, delivery, tool, rootDir, conversation, ...config } = update
     if (name) session.name = name
     if (delivery) session.delivery = delivery
-    if (Object.keys(config).length) session.config = { ...session.config, ...config, revision: revision + 1 }
+    let changed = Object.keys(config).length > 0
+    if (tool !== undefined && tool !== session.tool) {
+      session.tool = tool
+      changed = true
+    }
+    if (rootDir !== undefined && rootDir !== session.rootDir) {
+      session.rootDir = rootDir
+      changed = true
+    }
+    if (conversation !== undefined && conversation !== session.conversation) {
+      session.conversation = conversation
+      changed = true
+    }
+    if (changed) session.config = { ...session.config, ...config, revision: revision + 1 }
     return session
   }
   async switch(context: TargetContext, id: string) {
@@ -140,9 +156,11 @@ export class FakeSessions implements SessionService {
   }
   async newConversation(context: TargetContext, id: string) {
     const session = this.find(context, id)
+    const next = crypto.randomUUID()
+    session.conversation = next
     session.conversations.push({
-      id: crypto.randomUUID(),
-      title: '',
+      id: next,
+      tool: session.tool,
       startedAt: new Date().toISOString(),
       movedTo: null,
     })

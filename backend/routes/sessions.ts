@@ -1,22 +1,40 @@
 import type { FastifyInstance } from 'fastify'
+import Type from 'typebox'
 import type { ConversationSearch, SessionForkInput, SessionInput, SessionUpdate } from '../../shared/model'
-import { withRequestSignal } from '../request'
-import type { ChatHub } from '../chat/hub'
-import type { Services } from '../services'
-import { createSession, forkSession, terminalLaunch } from '../session-actions'
 import {
   acknowledgeInput,
   conversationSearch,
   directoryQuery,
-  sessionInput,
   sessionForkInput,
+  sessionInput,
   sessionUpdate,
 } from '../../shared/schemas'
-import Type from 'typebox'
+import type { ChatHub } from '../chat/hub'
+import { withRequestSignal } from '../request'
+import type { Services } from '../services'
+import {
+  createSession,
+  deleteSession,
+  forkSession,
+  newSessionConversation,
+  switchSession,
+  terminalLaunch,
+  terminateSession,
+  updateSession,
+} from '../session-actions'
+
+const emptyBody = Type.Object({}, { additionalProperties: false })
+const switchBody = Type.Object(
+  {
+    conversation: Type.String({ minLength: 1, maxLength: 128 }),
+    reclaim: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+)
 
 type Params = { targetId: string; sessionId: string }
 export function sessionRoutes(app: FastifyInstance, services: Services, hub: ChatHub) {
-  const { sessions, broker } = services
+  const { sessions } = services
   const base = '/api/targets/:targetId/sessions'
   app.get<{ Params: Params }>(base, async (request, reply) =>
     withRequestSignal(reply, async signal =>
@@ -40,29 +58,25 @@ export function sessionRoutes(app: FastifyInstance, services: Services, hub: Cha
       return reply.code(201).send(await forkSession(services, context, request.params.sessionId, request.body))
     },
   )
-  // Name changes apply at once; launch settings when the session next starts.
+  // Name and delivery apply at once; harness, directory, conversation and launch settings when the session next starts.
   app.patch<{ Params: Params; Body: SessionUpdate }>(
     `${base}/:sessionId`,
     { schema: { body: sessionUpdate } },
     async request =>
-      sessions.update(await services.context(request, request.params.targetId), request.params.sessionId, request.body),
+      updateSession(
+        services,
+        await services.context(request, request.params.targetId),
+        request.params.sessionId,
+        request.body,
+      ),
   )
   // Make an earlier conversation of the session current again (or reclaim a moved one).
   app.post<{ Params: Params; Body: { conversation: string; reclaim?: boolean } }>(
     `${base}/:sessionId/switch`,
-    {
-      schema: {
-        body: Type.Object(
-          {
-            conversation: Type.String({ minLength: 1, maxLength: 128 }),
-            reclaim: Type.Optional(Type.Boolean()),
-          },
-          { additionalProperties: false },
-        ),
-      },
-    },
+    { schema: { body: switchBody } },
     async request =>
-      sessions.switch(
+      switchSession(
+        services,
         await services.context(request, request.params.targetId),
         request.params.sessionId,
         request.body.conversation,
@@ -70,32 +84,25 @@ export function sessionRoutes(app: FastifyInstance, services: Services, hub: Cha
       ),
   )
   // Allocate a brand-new conversation for a stopped session.
-  app.post<{ Params: Params }>(
-    `${base}/:sessionId/conversations`,
-    {
-      schema: { body: { type: 'object', additionalProperties: false } },
-    },
-    async request =>
-      sessions.newConversation(await services.context(request, request.params.targetId), request.params.sessionId),
+  app.post<{ Params: Params }>(`${base}/:sessionId/conversations`, { schema: { body: emptyBody } }, async request =>
+    newSessionConversation(
+      services,
+      await services.context(request, request.params.targetId),
+      request.params.sessionId,
+    ),
   )
   app.delete<{ Params: Params }>(`${base}/:sessionId`, async (request, reply) => {
     const context = await services.context(request, request.params.targetId)
-    await sessions.remove(context, request.params.sessionId)
-    broker.closeTarget(context.owner, context.target.id, request.params.sessionId)
-    await hub.sessionDeleted(context.owner, request.params)
+    await deleteSession(services, context, request.params.sessionId, hub)
     return reply.code(204).send()
   })
   app.post<{ Params: Params }>(`${base}/:sessionId/terminate`, async request => {
     const context = await services.context(request, request.params.targetId)
-    const session = await sessions.terminate(context, request.params.sessionId)
-    broker.closeTarget(context.owner, context.target.id, request.params.sessionId)
-    return session
+    return terminateSession(services, context, request.params.sessionId)
   })
   app.post<{ Params: Params; Body: { completionId: string } }>(
     `${base}/:sessionId/acknowledge`,
-    {
-      schema: { body: acknowledgeInput },
-    },
+    { schema: { body: acknowledgeInput } },
     async request =>
       sessions.acknowledge(
         await services.context(request, request.params.targetId),
@@ -103,22 +110,15 @@ export function sessionRoutes(app: FastifyInstance, services: Services, hub: Cha
         request.body.completionId,
       ),
   )
-  app.post<{ Params: Params }>(
-    `${base}/:sessionId/connect`,
-    {
-      schema: { body: { type: 'object', additionalProperties: false } },
-    },
-    async (request, reply) =>
-      withRequestSignal(reply, async signal => {
-        const context = await services.context(request, request.params.targetId)
-        return (await terminalLaunch(services, context, request.params.sessionId, signal)).launch
-      }),
+  app.post<{ Params: Params }>(`${base}/:sessionId/connect`, { schema: { body: emptyBody } }, async (request, reply) =>
+    withRequestSignal(reply, async signal => {
+      const context = await services.context(request, request.params.targetId)
+      return (await terminalLaunch(services, context, request.params.sessionId, signal)).launch
+    }),
   )
   app.post<{ Params: Params; Body: ConversationSearch }>(
     '/api/targets/:targetId/conversations/search',
-    {
-      schema: { body: conversationSearch },
-    },
+    { schema: { body: conversationSearch } },
     async (request, reply) =>
       withRequestSignal(reply, async signal =>
         sessions.search(await services.context(request, request.params.targetId), request.body, signal),
@@ -126,9 +126,7 @@ export function sessionRoutes(app: FastifyInstance, services: Services, hub: Cha
   )
   app.get<{ Params: Params; Querystring: { path: string } }>(
     '/api/targets/:targetId/directories',
-    {
-      schema: { querystring: directoryQuery },
-    },
+    { schema: { querystring: directoryQuery } },
     async (request, reply) =>
       withRequestSignal(reply, async signal =>
         sessions.directories(await services.context(request, request.params.targetId), request.query.path, signal),

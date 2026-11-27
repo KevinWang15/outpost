@@ -1,4 +1,6 @@
-import { terminalChoices, type TerminalChoice } from '../../shared/terminals'
+/** The browser and native terminals attach to the same persistent sessions. */
+export const terminalChoices = ['web', 'desktop'] as const
+export type TerminalChoice = (typeof terminalChoices)[number]
 
 // A browser preference for this Outpost origin, independent of login credentials.
 const key = 'outpost.connection.terminal'

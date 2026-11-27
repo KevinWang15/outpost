@@ -1,18 +1,33 @@
 import {
   validDesktopLogin,
   type DesktopEntry,
+  type DesktopLogin,
   type DesktopSessionReference,
   type DesktopSessionChoice,
 } from '../../shared/desktopAuth'
 import { serverOrigin } from '../../shared/serverOrigin'
 import type { ServerTrust } from './server-trust'
-import type { ServerAccountsSnapshot, ServerConnection } from './server-accounts-api'
 import { ServerApiError, serverRequest, requestQueue, revokeDesktopLogin } from './server-api'
 import { parseDesktopLaunch } from './launch'
 import { ServerLoginStore, type SavedServerLogin } from './server-login-store'
-import { ServerSignIn } from './server-sign-in'
+import { ServerSignIn, type ServerSignInSummary } from './server-sign-in'
 import { loadSessionCatalogue, type SessionCatalogue } from './server-catalogue'
 import { sessionCreationServer } from './server-session-creation'
+
+export type ServerConnection = 'checking' | 'connected' | 'offline' | 'expired' | 'signing-out'
+
+/** Only saved logins appear in this list. No trust data or credentials cross IPC. */
+export interface ServerAccountSummary extends DesktopLogin {
+  origin: string
+  canCreate: boolean
+  status: ServerConnection
+  error: string | null
+}
+
+export interface ServerAccountsSnapshot {
+  accounts: ServerAccountSummary[]
+  signIns: ServerSignInSummary[]
+}
 
 interface Host {
   openBrowser(url: string): Promise<void>
@@ -103,7 +118,7 @@ export class ServerAccounts {
     if (!this.current(entry)) throw new Error('The server account changed. Connect again.')
     if (!this.valid(entry)) {
       this.connection(entry, 'expired')
-      throw new ServerApiError('Sign in to this server from the Outpost tab.', 401)
+      throw new ServerApiError('Sign in to this server from Outpost Desktop.', 401)
     }
   }
   hasAccount(server: string, accountId: string) {

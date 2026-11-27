@@ -1,6 +1,7 @@
 // The machine's sessions (~/.outpost/registry.json). Every writer holds the
 // registry lock and replaces the file atomically; readers need no lock.
 import { Value } from 'typebox/value'
+import type { HarnessId } from '../shared/harnesses'
 import type { SessionRecord } from '../shared/model'
 import { sessionRecord } from '../shared/schemas'
 import { harness } from './harnesses'
@@ -24,8 +25,42 @@ export class RegistryError extends Error {
 }
 
 const path = () => statePath('registry.json')
-const key = (session: SessionRecord, conversation: string) =>
-  JSON.stringify([session.tool, Object.values(session.storage)[0], conversation])
+
+const key = (tool: HarnessId, storage: string | null, conversation: string) =>
+  JSON.stringify([tool, storage, conversation])
+
+/** The native store directory a session uses for `tool` (pinned for its active
+ * harness, or resolved from its launch environment for an earlier harness). */
+export function sessionStorageFor(session: SessionRecord, tool: HarnessId): string {
+  if (session.tool === tool) return Object.values(session.storage)[0]
+  const env = { ...(process.env as Record<string, string>), ...session.config.env }
+  return harness(tool).home(env, session.rootDir)
+}
+
+/** Whether `session` currently owns (non-moved) `conversationId` in `(tool, storageHome)`. */
+export function ownsConversation(
+  session: SessionRecord,
+  tool: HarnessId,
+  storageHome: string,
+  conversationId: string,
+): boolean {
+  return (
+    sessionStorageFor(session, tool) === storageHome &&
+    session.conversations.some(item => item.tool === tool && item.id === conversationId && !item.movedTo)
+  )
+}
+
+export function findConversationOwner(
+  sessions: readonly SessionRecord[],
+  tool: HarnessId,
+  storageHome: string,
+  conversationId: string,
+  exceptSessionId?: string,
+): SessionRecord | undefined {
+  return sessions.find(
+    candidate => candidate.id !== exceptSessionId && ownsConversation(candidate, tool, storageHome, conversationId),
+  )
+}
 
 function validate(data: unknown): Registry {
   const invalid = (detail: string) =>
@@ -49,15 +84,22 @@ function validate(data: unknown): Registry {
       throw invalid(`a session's ${error?.instancePath || 'record'}: ${error?.message ?? 'invalid'}`)
     }
     const adapter = harness(session.tool)
+    if (session.conversation !== null) {
+      if (!adapter.validId(session.conversation)) throw invalid('conversation ID')
+      if (!session.conversations.some(item => item.id === session.conversation && item.tool === session.tool))
+        throw invalid('active conversation missing from timeline')
+    }
     if (ids.has(session.id) || names.has(session.name.toLowerCase())) throw invalid('duplicate session')
     ids.add(session.id)
     names.add(session.name.toLowerCase())
+    const storage = Object.values(session.storage)[0]
     for (const conversation of session.conversations) {
-      if (!adapter.validId(conversation.id)) throw invalid('conversation ID')
-      if (conversation.movedTo) continue
-      // A conversation belongs to at most one session.
-      if (active.has(key(session, conversation.id))) throw invalid('conversation in two sessions')
-      active.add(key(session, conversation.id))
+      if (!harness(conversation.tool).validId(conversation.id)) throw invalid('conversation ID')
+      if (conversation.movedTo || conversation.tool !== session.tool) continue
+      // An active conversation on the session's current harness belongs to at most one session.
+      const k = key(conversation.tool, storage, conversation.id)
+      if (active.has(k)) throw invalid('conversation in two sessions')
+      active.add(k)
     }
   }
   for (const [request, receipt] of Object.entries(registry.creations))
@@ -91,25 +133,50 @@ export function withSessionLock<T>(id: unknown, action: (record: SessionRecord) 
   return locked('session-' + record.id, () => action(session(readRegistry(), record.id)), 60_000)
 }
 
-export const current = (session: SessionRecord) => session.conversations.at(-1)!
+/** The active conversation for `session.tool`, or null when the session starts fresh. */
+export function current(session: SessionRecord): SessionRecord['conversations'][number] | null {
+  if (session.conversation === null) return null
+  for (let i = session.conversations.length - 1; i >= 0; i--) {
+    const item = session.conversations[i]!
+    if (item.id === session.conversation && item.tool === session.tool) return item
+  }
+  return null
+}
 
-/** The tool made `conversation` current in this session (new, clear, resume).
- * If another session held it, it moves here. `replacing` drops the current
- * conversation, which never started. */
+/** The newest non-moved remembered conversation for `tool` on this session, if any. */
+export function latestConversationFor(session: SessionRecord, tool: HarnessId) {
+  for (let i = session.conversations.length - 1; i >= 0; i--) {
+    const item = session.conversations[i]!
+    if (item.tool === tool && !item.movedTo) return item
+  }
+  return null
+}
+
+/** The tool made `conversation` current in this session (new, clear, resume, or edit).
+ * If another session held it on the same harness/store, it moves here. `replacing`
+ * drops the current conversation, which never started. */
 export function switchConversation(registry: Registry, sessionId: string, conversation: string, replacing = false) {
   const target = session(registry, sessionId)
   if (!harness(target.tool).validId(conversation))
     throw new RegistryError('The coding tool reported an invalid conversation ID.')
   const latest = current(target)
-  if (latest.id === conversation && !latest.movedTo) return false
+  if (latest && latest.id === conversation && !latest.movedTo && target.conversation === conversation) return false
   target.conversations = target.conversations.filter(
-    item => item.id !== conversation && !(replacing && item === latest),
+    item => !(item.id === conversation && item.tool === target.tool) && !(replacing && latest && item === latest),
   )
-  target.conversations.push({ id: conversation, startedAt: now(), movedTo: null })
+  target.conversations.push({ id: conversation, tool: target.tool, startedAt: now(), movedTo: null })
   target.conversations = target.conversations.slice(-200)
+  target.conversation = conversation
+  const targetStorage = Object.values(target.storage)[0]
   for (const other of registry.sessions)
     if (other !== target)
       for (const item of other.conversations)
-        if (!item.movedTo && key(other, item.id) === key(target, conversation)) item.movedTo = target.id
+        if (
+          !item.movedTo &&
+          item.tool === target.tool &&
+          item.id === conversation &&
+          sessionStorageFor(other, target.tool) === targetStorage
+        )
+          item.movedTo = target.id
   return true
 }

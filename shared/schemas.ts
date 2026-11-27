@@ -5,11 +5,19 @@ import Type from 'typebox'
 import { harnesses, harnessIds } from './harnesses'
 
 const strict = { additionalProperties: false } as const
+export const uuidPattern = '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
+export const uuidRegex = new RegExp(uuidPattern)
+export const uuidRegexCaseInsensitive = new RegExp(uuidPattern, 'i')
+export const uuidSchema = Type.String({ pattern: uuidPattern })
+export const keyIdPattern = '^[A-Za-z0-9_-]{1,80}$'
+export const keyIdRegex = new RegExp(keyIdPattern)
+export const keyIdSchema = Type.String({ pattern: keyIdPattern })
+export const targetIdSchema = Type.String({ minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
 const text = (maxLength: number) => Type.String({ minLength: 1, maxLength, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
 const absolutePath = Type.String({ minLength: 1, maxLength: 4096, pattern: '^/[^\\u0000-\\u001f\\u007f]*$' })
 
 export const name = Type.String({ minLength: 1, maxLength: 80, pattern: '^(?=.*\\S)[^\\u0000-\\u001f\\u007f]+$' })
-export const harnessId = Type.Enum(harnessIds)
+const harnessId = Type.Enum(harnessIds)
 
 // Targets ---------------------------------------------------------------------
 const sshAddress = {
@@ -131,9 +139,14 @@ export const sessionConfig = Type.Object({ revision: Type.Integer({ minimum: 1 }
 /** How messages from other sessions, channels and schedules reach a terminal:
  * typed in when the agent is idle, or held until you deliver them. */
 const delivery = Type.Union([Type.Literal('auto'), Type.Literal('manual')])
+/** The harness conversation ID to resume on start, or null to start fresh automatically. */
+const conversationChoice = Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()])
 
 /** Everything about a session you can edit, as Edit source shows it. */
-export const sessionSettings = Type.Object({ name, delivery, ...launch }, strict)
+export const sessionSettings = Type.Object(
+  { name, tool: harnessId, rootDir, conversation: conversationChoice, delivery, ...launch },
+  strict,
+)
 
 /** An edit names the revision it was based on; a concurrent edit is refused. */
 export const sessionUpdate = Type.Object(
@@ -141,21 +154,23 @@ export const sessionUpdate = Type.Object(
   { ...strict, minProperties: 2 },
 )
 
-/** One native conversation in a session's timeline. `movedTo` names the
- * session that resumed it since; it then belongs there. */
-export const sessionConversation = Type.Object(
+/** One native conversation in a session's timeline. `tool` records which harness
+ * owns it; `movedTo` names the session that resumed it since. */
+const sessionConversation = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
+    tool: harnessId,
     startedAt: text(80),
     movedTo: Type.Union([Type.String(), Type.Null()]),
   },
   strict,
 )
 
-/** A session as its machine stores it. The last conversation is the current one. */
+/** A session as its machine stores it. `conversation` is the active ID for `tool`
+ * (or null to start fresh automatically). */
 export const sessionRecord = Type.Object(
   {
-    id: Type.String({ pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' }),
+    id: uuidSchema,
     name,
     tool: harnessId,
     rootDir: absolutePath,
@@ -164,7 +179,8 @@ export const sessionRecord = Type.Object(
     storage,
     delivery,
     config: sessionConfig,
-    conversations: Type.Array(sessionConversation, { minItems: 1, maxItems: 200 }),
+    conversation: conversationChoice,
+    conversations: Type.Array(sessionConversation, { minItems: 0, maxItems: 200 }),
   },
   { ...strict, allOf: perHarness(false) },
 )
@@ -194,7 +210,7 @@ export const directoryQuery = Type.Object(
 
 // Software ----------------------------------------------------------------------
 export const softwareIds = ['bash', 'outpost-terminal', ...harnessIds, 'claude-agent-acp'] as const
-export const softwareId = Type.Enum(softwareIds)
+const softwareId = Type.Enum(softwareIds)
 export const installationInput = Type.Object(
   {
     software: Type.Optional(Type.Array(softwareId, { minItems: 1, maxItems: softwareIds.length, uniqueItems: true })),

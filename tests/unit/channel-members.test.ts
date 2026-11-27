@@ -127,7 +127,7 @@ test('channels keep offline members and remove deleted sessions once across chan
       ),
     ),
   )
-  assert.match(schedule.lastRun?.message ?? '', /session not found/i)
+  assert.match(schedule.lastRun?.message ?? '', /session was deleted/i)
   assert.deepEqual(
     (await hub.attach(client)).hello.channels.map(channel => channel.members),
     [[], []],

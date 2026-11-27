@@ -10,8 +10,8 @@ import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
 import { terminalFileChunk, type ImagePasteMode } from '../../shared/terminalFiles'
 import { ChatTerminal, pasteChatImage } from '../../machine/chatTerminal'
 import { harness } from '../../machine/harnesses'
-import { chatSocket } from '../../machine/launch'
-import { socketAddress, statePath } from '../../machine/state'
+import { chatSocket, socketAddress, statePath } from '../../machine/state'
+import { clipboardOsc52 } from '../../machine/clipboardOsc52'
 import { pasteTerminalImage, TerminalFileRequests, type TerminalClipboard } from '../../machine/terminalFileRequests'
 import type { TerminalImage } from '../../machine/terminalImages'
 import { machine, record, register, uuid } from './fixtures'
@@ -153,10 +153,8 @@ test('pasteTerminalImage prefers clipboard when available and falls back to file
 
 async function startChatTerminal(t: TestContext, imagesEnabled: boolean) {
   const home = machine(t)
-  const previousCwd = process.cwd()
   mkdirSync(statePath('chats'), { recursive: true })
   process.chdir(statePath())
-  t.after(() => process.chdir(previousCwd))
   const session = record(home, 'claude', uuid, {
     rootDir: '/workspace',
     storage: harness('claude').storage('/workspace/claude'),
@@ -176,6 +174,8 @@ async function startChatTerminal(t: TestContext, imagesEnabled: boolean) {
               info: {
                 activity: {
                   state: 'idle',
+                  blockedKind: null,
+                  progress: null,
                   completionId: null,
                   observation: 'current',
                   detail: null,
@@ -326,6 +326,8 @@ test(
   'ChatTerminal attaches inline images when supported and automatically falls back to file path otherwise',
   { skip: process.platform === 'win32' && 'Unix domain sockets require POSIX' },
   async t => {
+    const previousCwd = process.cwd()
+    t.after(() => process.chdir(previousCwd))
     // Agent without image support -> automatic file path fallback.
     const withoutImages = await startChatTerminal(t, false)
     assert.deepEqual(await withoutImages.paste(png, 'attachment', 'no-images'), {
@@ -362,3 +364,24 @@ test(
     assert.ok(oversizedPath.startsWith(join(withImages.home, '.outpost', 'clipboard', withImages.session.id)))
   },
 )
+
+test('clipboardOsc52 validates and wraps base64 clipboard payloads for OSC 52 forwarding', () => {
+  const hello = Buffer.from('hello from codex 你好\n', 'utf8').toString('base64')
+  assert.equal(clipboardOsc52(hello)?.toString('ascii'), `\x1b]52;c;${hello}\x07`)
+
+  // Boundary: exact 1 MiB raw payload is accepted; 1 MiB + 1 byte is rejected.
+  const exactLimit = Buffer.alloc(1024 * 1024, 0x61).toString('base64')
+  assert.equal(clipboardOsc52(exactLimit)?.length, `\x1b]52;c;${exactLimit}\x07`.length)
+  const overLimit = Buffer.alloc(1024 * 1024 + 1, 0x61).toString('base64')
+  assert.equal(clipboardOsc52(overLimit), null)
+
+  // Reject empty, non-string, malformed base64, and control-character injection attempts.
+  assert.equal(clipboardOsc52(''), null)
+  assert.equal(clipboardOsc52(null), null)
+  assert.equal(clipboardOsc52(123), null)
+  assert.equal(clipboardOsc52('abc'), null)
+  assert.equal(clipboardOsc52('===='), null)
+  assert.equal(clipboardOsc52('aGVs\x07\x1b[2J'), null)
+  assert.equal(clipboardOsc52('aGVs;bG8='), null)
+  assert.equal(clipboardOsc52('?'), null)
+})

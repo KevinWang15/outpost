@@ -4,11 +4,11 @@
 import { useContext, useEffect, useRef } from 'react'
 import { Download, Files, X } from 'lucide-react'
 import type { SessionFile } from '../../shared/sessionFiles'
-import { FileActions } from '../terminal/FileActions'
-import { FileThumbnail } from '../terminal/FileThumbnail'
-import { FileViewer } from '../terminal/FileViewer'
-import { fileSize, type SessionFiles } from '../terminal/sessionFiles'
-import { useSessionFiles, type SessionFilesState } from '../terminal/useSessionFiles'
+import { FileActions } from '../files/FileActions'
+import { FileThumbnail } from '../files/FileThumbnail'
+import { FileViewer } from '../files/FileViewer'
+import { fileSize, type SessionFiles } from '../files/sessionFiles'
+import { useSessionFiles, type SessionFilesState } from '../files/useSessionFiles'
 import { FilesContext } from './context'
 
 /** A file where its turn or channel message shows it. */

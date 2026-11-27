@@ -1,36 +1,38 @@
-import { readFile } from 'node:fs/promises'
 import { serverOrigin } from '../../shared/serverOrigin'
-import { writeJsonFile } from '../../shared/node/jsonFile'
+import { SerializedJsonStore } from './json-store'
 
 /** Persistent first-use trust, separate from app logins and terminal grants. */
 export class ServerTrust {
-  private servers = new Set<string>()
-  private writes = Promise.resolve()
+  private store: SerializedJsonStore<Set<string>>
   private prompts = new Map<string, Promise<boolean>>()
+
   constructor(
-    private path: string,
+    path: string,
     private prompt: (origin: string) => Promise<boolean>,
-  ) {}
-  async load() {
-    try {
-      const data: unknown = JSON.parse(await readFile(this.path, 'utf8'))
+  ) {
+    this.store = new SerializedJsonStore(path, new Set<string>(), servers => [...servers])
+  }
+
+  load() {
+    return this.store.load(data => {
       if (!Array.isArray(data)) throw new Error('Invalid server preferences.')
+      const servers = new Set<string>()
       for (const origin of data) {
         if (typeof origin !== 'string') continue
         try {
-          this.servers.add(serverOrigin(origin))
+          servers.add(serverOrigin(origin))
         } catch {
           /* Ignore invalid entries. */
         }
       }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-        throw new Error('Could not read trusted server preferences.', { cause: error })
-    }
+      return servers
+    }, 'Could not read trusted server preferences.')
   }
+
   has(origin: string) {
-    return this.servers.has(origin)
+    return this.store.value.has(origin)
   }
+
   ensure(value: string) {
     const origin = serverOrigin(value)
     if (this.has(origin)) return Promise.resolve(true)
@@ -45,18 +47,17 @@ export class ServerTrust {
     this.prompts.set(origin, work)
     return work
   }
+
   forget(origin: string) {
     return this.setTrusted(origin, false)
   }
+
   private setTrusted(origin: string, trusted: boolean) {
-    const write = this.writes.then(async () => {
-      const next = new Set(this.servers)
+    return this.store.change(servers => {
+      const next = new Set(servers)
       if (trusted) next.add(origin)
       else next.delete(origin)
-      await writeJsonFile(this.path, [...next])
-      this.servers = next
+      return next
     })
-    this.writes = write.catch(() => {})
-    return write
   }
 }

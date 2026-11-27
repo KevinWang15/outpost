@@ -2,16 +2,16 @@
 // so an enclosing Outpost Desktop or Web terminal can automatically open the session.
 // Standard terminals silently ignore unknown OSC numbers.
 import { isHarnessId, type HarnessId } from './harnesses'
+import { uuidRegexCaseInsensitive } from './schemas'
 import { serverOrigin } from './serverOrigin'
 
 export const OPEN_SESSION_OSC = 7770
 export const OPEN_SESSION_PREFIX = 'outpost;open-session;'
 export const MAX_OPEN_SESSION_OSC_BYTES = 4096
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const desktopIdPattern = /^[A-Za-z0-9_-]{1,128}$/
 
-export interface OpenSessionRequest {
+interface OpenSessionRequest {
   v: 1
   sessionId: string
   name?: string
@@ -92,7 +92,7 @@ export function parseOpenSessionOscData(data: string): OpenSessionRequest | null
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
   const raw = parsed as Record<string, unknown>
   if (raw.v !== 1) return null
-  if (typeof raw.sessionId !== 'string' || !uuidPattern.test(raw.sessionId)) return null
+  if (typeof raw.sessionId !== 'string' || !uuidRegexCaseInsensitive.test(raw.sessionId)) return null
 
   let origin: string | undefined
   if (raw.origin !== undefined) {

@@ -12,8 +12,8 @@ import {
 import type { SessionRecord } from '../shared/model'
 import type { Harness } from './harnesses/harness'
 import { allHarnesses } from './harnesses'
-import { RegistryError } from './registry'
-import { clean, confined, decode, maxLine, Scan, SearchLimit } from './stores'
+import { findConversationOwner, RegistryError } from './registry'
+import { confined, decode, maxLine, Scan, SearchLimit } from './stores'
 
 const maxText = 1024 * 1024
 const digest = (data: string | Buffer) => createHash('sha256').update(data).digest('hex')
@@ -48,15 +48,16 @@ function open(adapter: Harness, path: string) {
       close() {},
     }
   }
-  const info = statSync(path)
+  const info = statSync(path, { bigint: true })
+  const size = Number(info.size)
   const descriptor = openSync(path, 'r')
   return {
-    size: info.size,
-    sourceSize: info.size,
-    modified: statSync(path, { bigint: true }).mtimeNs.toString(),
+    size,
+    sourceSize: size,
+    modified: info.mtimeNs.toString(),
     incomplete: false,
     read(position: number, length: number) {
-      const buffer = Buffer.alloc(Math.max(0, Math.min(length, info.size - position)))
+      const buffer = Buffer.alloc(Math.max(0, Math.min(length, size - position)))
       readSync(descriptor, buffer, 0, buffer.length, position)
       return buffer
     },
@@ -70,34 +71,32 @@ function describe(
   path: string,
   scan: Scan,
   cache: Map<string, unknown>,
-): HistorySource {
+): { source: HistorySource; format: string } {
   confined(home, path)
   const conversation = adapter.historySession(path, home, scan, cache)
-  const info = statSync(path)
+  const info = statSync(path, { bigint: true })
   return {
-    id: digest(`${adapter.id}\0${home}\0${path}`),
-    tool: adapter.id,
-    nativeId: conversation.id,
-    home,
-    path,
-    title: clean(conversation.title, 200),
-    cwd: conversation.root,
-    forkedFrom: conversation.forkedFrom ?? null,
-    size: info.size,
-    modified: statSync(path, { bigint: true }).mtimeNs.toString(),
+    source: {
+      id: digest(`${adapter.id}\0${home}\0${path}`),
+      tool: adapter.id,
+      nativeId: conversation.id,
+      home,
+      path,
+      title: conversation.id,
+      cwd: conversation.root,
+      forkedFrom: conversation.forkedFrom ?? null,
+      managedSessionId: null,
+      size: Number(info.size),
+      modified: info.mtimeNs.toString(),
+    },
     format: conversation.format,
   }
 }
 
 /** Attribute a source to the Outpost session whose timeline holds it. */
 function managed(sessions: SessionRecord[], source: HistorySource) {
-  const owner = sessions.find(
-    session =>
-      session.tool === source.tool &&
-      Object.values(session.storage).includes(source.home) &&
-      session.conversations.some(item => item.id === source.nativeId && !item.movedTo),
-  )
-  if (owner) Object.assign(source, { nativeTitle: source.title, title: owner.name, managedSessionId: owner.id })
+  const owner = findConversationOwner(sessions, source.tool, source.home, source.nativeId)
+  if (owner) Object.assign(source, { title: owner.name, managedSessionId: owner.id })
   return source
 }
 
@@ -121,7 +120,7 @@ export function catalog(sessions: SessionRecord[], after: unknown, limit: unknow
   const page = candidates.slice(0, limit)
   for (const { key, adapter, home, path } of page) {
     try {
-      sources.push(managed(sessions, describe(adapter, home, path, scan, cache)))
+      sources.push(managed(sessions, describe(adapter, home, path, scan, cache).source))
     } catch (error) {
       if (error instanceof SearchLimit) {
         warnings.push('History metadata scan reached its limit; the next refresh continues this page.')
@@ -145,7 +144,7 @@ function sourceFor(value: unknown, allowed: ReturnType<typeof roots>, scan: Scan
   return {
     adapter: root.adapter,
     path: source.path,
-    source: describe(root.adapter, root.home, source.path, scan, cache),
+    ...describe(root.adapter, root.home, source.path, scan, cache),
   }
 }
 
@@ -173,7 +172,7 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
   for (const item of sources as { source: unknown; checkpoint: HistoryCheckpoint | null }[]) {
     if (total >= 8 * 1024 * 1024 || performance.now() >= deadline) break
     try {
-      const { adapter, path, source } = sourceFor(item.source, allowed, scan, cache)
+      const { adapter, path, source, format } = sourceFor(item.source, allowed, scan, cache)
       managed(sessions, source)
       const previous = item.checkpoint
       let offset = previous?.offset ?? 0
@@ -243,7 +242,7 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
           const record = decode(line)
           if (!record) continue
           try {
-            for (const message of adapter.historyMessages(record, source.format ?? '')) {
+            for (const message of adapter.historyMessages(record, format)) {
               if (!message.text.trim()) continue
               const prefix = historyMessagePage(message.text, 0, maxText)
               if (prefix.nextOffset !== null)
@@ -294,7 +293,7 @@ export function readBatch(sessions: SessionRecord[], sources: unknown): HistoryB
 }
 
 export function readMessage(sessions: SessionRecord[], request: Record<string, unknown>) {
-  const { adapter, path, source } = sourceFor(request.source, roots(sessions), new Scan(5), new Map())
+  const { adapter, path, format } = sourceFor(request.source, roots(sessions), new Scan(5), new Map())
   const position = request.position
   const offset = request.offset ?? 0
   const limit = request.limit ?? 8000
@@ -315,7 +314,7 @@ export function readMessage(sessions: SessionRecord[], request: Record<string, u
     reader.close()
   }
   const record = decode(line)
-  for (const entry of record ? adapter.historyMessages(record, source.format ?? '') : []) {
+  for (const entry of record ? adapter.historyMessages(record, format) : []) {
     if (digest(entry.text) !== request.contentHash) continue
     return historyMessagePage(entry.text, offset as number, limit as number)
   }

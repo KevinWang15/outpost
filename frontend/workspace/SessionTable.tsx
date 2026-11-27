@@ -104,7 +104,10 @@ export default function SessionTable({
           {visible.map(session => {
             const main = primary(session)
             const pending = session.runningRevision !== null && session.runningRevision !== session.config.revision
-            const moved = session.conversations.at(-1)!.movedTo
+            const activeConv = session.conversation
+              ? session.conversations.find(c => c.id === session.conversation && c.tool === session.tool)
+              : null
+            const moved = activeConv?.movedTo ?? null
             return (
               <div className="table-row" role="row" key={session.id}>
                 <div className="session-name" role="cell">
@@ -115,11 +118,6 @@ export default function SessionTable({
                       {harnessLabel(session.tool)}
                     </span>
                   </div>
-                  {session.title && session.title !== session.name && (
-                    <span className="session-title" title={session.title}>
-                      {session.title}
-                    </span>
-                  )}
                   <code title={session.rootDir}>{session.rootDir}</code>
                   {pending && (
                     <span className="session-pending">

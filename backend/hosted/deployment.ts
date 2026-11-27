@@ -1,14 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import Type from 'typebox'
 import type { AccountUser } from '../../shared/auth'
-import { isLoopbackAddress } from '../../shared/loopback'
+import { isLoopbackAddress, isLoopbackName, parseHostHeader, parseOriginHeader } from '../loopback'
 import type { Caller, Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
 import { Workspace } from '../workspace'
 import { AccountStore, type AccountSession } from './store'
 import { AccountSshKeys } from './keys'
 import { accountEmail, engageLabMailer, type AccountMailer } from './email'
-import { hashPassword, validatePassword, verifyPassword } from './passwords'
+import { hashPassword, verifyPassword } from './passwords'
 import { RateLimit } from '../rate-limit'
 
 const COOKIE = 'outpost_session'
@@ -18,19 +19,13 @@ const normalizedName = (value: string) => {
   if (!name) throw new AppError('Name is required.', 400)
   return name
 }
-const emailField = { type: 'string', minLength: 3, maxLength: 254, pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$' }
-const passwordField = { type: 'string', minLength: 8, maxLength: 1024 }
-const tokenField = { type: 'string', pattern: '^[A-Za-z0-9_-]{43}$' }
-const nameField = { type: 'string', minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001f\\u007f]+$' }
-const body = (properties: Record<string, unknown>) => ({
-  type: 'object',
-  additionalProperties: false,
-  required: Object.keys(properties),
-  properties,
-})
-const loopbackName = (hostname: string) =>
-  hostname === 'localhost' || isLoopbackAddress(hostname.replace(/^\[|\]$/g, ''))
-
+const emailField = Type.String({ minLength: 3, maxLength: 254, pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$' })
+const passwordField = Type.String({ minLength: 8, maxLength: 1024 })
+const nonEmptyPassword = Type.String({ minLength: 1, maxLength: 1024 })
+const tokenField = Type.String({ pattern: '^[A-Za-z0-9_-]{43}$' })
+const nameField = Type.String({ minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
+const body = <T extends Record<string, Type.TSchema>>(properties: T) =>
+  Type.Object(properties, { additionalProperties: false })
 interface HostedOptions {
   directory: string
   publicUrl: string
@@ -68,7 +63,7 @@ export class HostedDeployment implements Deployment {
     ) {
       throw new Error('PUBLIC_APP_URL must be an HTTP(S) origin without credentials, a path, or a query.')
     }
-    const production = options.production ?? (process.env.NODE_ENV === 'production' || !loopbackName(origin.hostname))
+    const production = options.production ?? (process.env.NODE_ENV === 'production' || !isLoopbackName(origin.hostname))
     if (production && origin.protocol !== 'https:')
       throw new Error('Hosted production mode requires an HTTPS PUBLIC_APP_URL.')
     const mailer = options.mailer === undefined ? engageLabMailer() : options.mailer
@@ -91,25 +86,16 @@ export class HostedDeployment implements Deployment {
   }
 
   private allowsHost(host: string) {
-    try {
-      const url = new URL(`${this.publicUrl.protocol}//${host}`)
-      if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) return false
-      return url.host === this.publicUrl.host || (!this.production && loopbackName(url.hostname))
-    } catch {
-      return false
-    }
+    const url = parseHostHeader(host, this.publicUrl.protocol)
+    return Boolean(url && (url.host === this.publicUrl.host || (!this.production && isLoopbackName(url.hostname))))
   }
   private allowsOrigin(origin: string) {
-    try {
-      const url = new URL(origin)
-      if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) return false
-      return (
-        url.origin === this.publicUrl.origin ||
-        (!this.production && ['http:', 'https:'].includes(url.protocol) && loopbackName(url.hostname))
-      )
-    } catch {
-      return false
-    }
+    const url = parseOriginHeader(origin)
+    return Boolean(
+      url &&
+      (url.origin === this.publicUrl.origin ||
+        (!this.production && ['http:', 'https:'].includes(url.protocol) && isLoopbackName(url.hostname))),
+    )
   }
   admits(request: Caller) {
     // Simulated development email stays on loopback.
@@ -230,7 +216,7 @@ export class HostedDeployment implements Deployment {
     app.post<{ Body: { email: string; password: string } }>(
       '/api/auth/login',
       {
-        schema: { body: body({ email: emailField, password: { type: 'string', minLength: 1, maxLength: 1024 } }) },
+        schema: { body: body({ email: emailField, password: nonEmptyPassword }) },
         preHandler: limited('login'),
       },
       async (request, reply) => {
@@ -306,7 +292,7 @@ export class HostedDeployment implements Deployment {
       '/api/account/password',
       {
         schema: {
-          body: body({ currentPassword: { type: 'string', minLength: 1, maxLength: 1024 }, password: passwordField }),
+          body: body({ currentPassword: nonEmptyPassword, password: passwordField }),
         },
         preHandler: limited('password'),
       },
@@ -315,7 +301,6 @@ export class HostedDeployment implements Deployment {
         const user = this.store.byId(account.user.id)!
         if (!(await verifyPassword(request.body.currentPassword, user.passwordHash)))
           throw new AppError('Current password is incorrect.', 400)
-        validatePassword(request.body.password)
         const newHash = await hashPassword(request.body.password)
         this.session(request)
         this.store.changePassword(user.id, newHash, user.passwordHash)

@@ -7,7 +7,6 @@ pub(super) const HARNESSES: &[(&str, &str, &str)] = &[
     ("claude", "Claude Code", "claude"),
     ("codex", "Codex", "codex"),
     ("kimi", "Kimi Code", "kimi"),
-    ("deepseek", "DeepSeek Harness", "dsh"),
     ("antigravity", "Antigravity CLI", "agy"),
 ];
 
@@ -52,19 +51,6 @@ fn valid_env_name(name: &str) -> bool {
     name.len() <= MAX_ENV_KEY_LEN
         && (first.is_ascii_alphabetic() || first == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-fn create_card() -> Div {
-    col()
-        .w_full()
-        .rounded(px(10.))
-        .bg(rgb(0x131313))
-        .border_1()
-        .border_color(rgb(0x252525))
-}
-
-fn card_divider() -> Div {
-    div().w_full().h(px(1.)).bg(rgb(0x202020))
 }
 
 fn field_label(label: &'static str) -> Div {
@@ -118,6 +104,39 @@ fn subtle_action(
     }
 }
 
+fn warning_banner(
+    button_id: &'static str,
+    message: impl Into<SharedString>,
+    url: String,
+    cx: &Context<Workspace>,
+) -> Div {
+    row()
+        .w_full()
+        .justify_between()
+        .gap(px(12.))
+        .p(px(10.))
+        .rounded(px(8.))
+        .bg(rgb(0x1f190e))
+        .border_1()
+        .border_color(rgb(0x4a3816))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(12.))
+                .text_color(rgb(0xfcd34d))
+                .child(message.into()),
+        )
+        .child(subtle_action(
+            button_id,
+            LucideIcon::ExternalLink,
+            "Open machine",
+            true,
+            cx,
+            move |_, _, cx| cx.open_url(&url),
+        ))
+}
+
 fn styled_select<T: Clone + PartialEq + 'static>(state: &Entity<ComboBoxState<T>>) -> ComboBox<T> {
     combo_box(state).rounded(px(8.))
 }
@@ -137,6 +156,14 @@ struct EnvRow {
 type DirReply = async_channel::Sender<Result<PathSuggestions, SharedString>>;
 
 pub(super) struct CreateForm {
+    pub(super) origin: String,
+    pub(super) account_id: String,
+    pub(super) target: String,
+    pub(super) tool: String,
+    pub(super) targets: Value,
+    pub(super) options: Value,
+    pub(super) creating: bool,
+    pub(super) name: Entity<InputState>,
     server_select: Entity<ComboBoxState<String>>,
     machine_select: Entity<ComboBoxState<String>>,
     tool_select: Entity<ComboBoxState<String>>,
@@ -147,11 +174,18 @@ pub(super) struct CreateForm {
     args: Entity<InputState>,
     env_rows: Vec<EnvRow>,
     next_env_id: u64,
-    _subscriptions: [Subscription; 4],
+    _subscriptions: [Subscription; 5],
 }
 
 impl CreateForm {
-    pub(super) fn new(cx: &mut Context<Workspace>) -> Self {
+    pub(super) fn new(w: &mut Window, cx: &mut Context<Workspace>) -> Self {
+        let name = cx.new(|cx| InputState::new(cx).placeholder("Refactor billing"));
+        let name_sub = cx.subscribe_in(&name, w, |s: &mut Workspace, _, event: &InputEvent, w, cx| {
+            if matches!(event, InputEvent::Submit(_)) && s.page == Page::Create {
+                s.submit(w, cx);
+            }
+        });
+
         let server_select = cx.new(|cx| {
             ComboBoxState::new(Vec::new(), cx)
                 .placeholder("Search or select a server…")
@@ -165,7 +199,7 @@ impl CreateForm {
                 if let ComboBoxEvent::Change(values) = event
                     && let Some(key) = values.first()
                     && let Some((origin, account_id)) = parse_server_key(key)
-                    && (s.origin != origin || s.account_id != account_id)
+                    && (s.create.origin != origin || s.create.account_id != account_id)
                 {
                     s.switch_create_server(origin, account_id, cx);
                 }
@@ -184,7 +218,7 @@ impl CreateForm {
             |s: &mut Workspace, _, event: &ComboBoxEvent<String>, cx| {
                 if let ComboBoxEvent::Change(values) = event
                     && let Some(id) = values.first()
-                    && s.target != *id
+                    && s.create.target != *id
                 {
                     s.select_target(id.clone(), cx);
                     cx.notify();
@@ -204,8 +238,8 @@ impl CreateForm {
             |s: &mut Workspace, _, event: &ComboBoxEvent<String>, cx| {
                 if let ComboBoxEvent::Change(values) = event {
                     let next = values.first().cloned().unwrap_or_default();
-                    if s.tool != next {
-                        s.tool = next;
+                    if s.create.tool != next {
+                        s.create.tool = next;
                         cx.notify();
                     }
                 }
@@ -227,9 +261,9 @@ impl CreateForm {
                 .upgrade()
                 .map(|entity| {
                     let s = entity.read(cx);
-                    if s.origin.is_empty()
-                        || s.account_id.is_empty()
-                        || s.target.is_empty()
+                    if s.create.origin.is_empty()
+                        || s.create.account_id.is_empty()
+                        || s.create.target.is_empty()
                         || s.bridge.is_none()
                     {
                         return false;
@@ -237,9 +271,9 @@ impl CreateForm {
                     s.call(json!({
                         "op": "directories",
                         "id": req_id,
-                        "origin": s.origin,
-                        "accountId": s.account_id,
-                        "target": s.target,
+                        "origin": s.create.origin,
+                        "accountId": s.create.account_id,
+                        "target": s.create.target,
                         "path": prefix,
                     }));
                     true
@@ -251,7 +285,10 @@ impl CreateForm {
                     pending_cleanup.borrow_mut().remove(&req_id);
                     return Ok(PathSuggestions::empty());
                 }
-                let result = rx.recv().await.unwrap_or_else(|_| Ok(PathSuggestions::empty()));
+                let result = rx
+                    .recv()
+                    .await
+                    .unwrap_or_else(|_| Ok(PathSuggestions::empty()));
                 pending_cleanup.borrow_mut().remove(&req_id);
                 result
             })
@@ -288,6 +325,14 @@ impl CreateForm {
         });
 
         Self {
+            origin: String::new(),
+            account_id: String::new(),
+            target: String::new(),
+            tool: String::new(),
+            targets: Value::Null,
+            options: Value::Null,
+            creating: false,
+            name,
             server_select,
             machine_select,
             tool_select,
@@ -298,7 +343,7 @@ impl CreateForm {
             args,
             env_rows: Vec::new(),
             next_env_id: 1,
-            _subscriptions: [server_sub, machine_sub, tool_sub, dir_sub],
+            _subscriptions: [name_sub, server_sub, machine_sub, tool_sub, dir_sub],
         }
     }
 
@@ -426,6 +471,11 @@ impl CreateForm {
     }
 
     #[cfg(feature = "ui-tests")]
+    pub(super) fn clear_env(&mut self) {
+        self.env_rows.clear();
+    }
+
+    #[cfg(feature = "ui-tests")]
     pub(super) fn push_env(&mut self, key: &str, val: &str, cx: &mut Context<Workspace>) {
         self.add_env_row(cx);
         if let Some(row) = self.env_rows.last() {
@@ -463,9 +513,9 @@ impl Workspace {
         let Some(tx) = self.create.pending_dirs.borrow_mut().remove(&req_id) else {
             return;
         };
-        if self.origin != e["origin"]
-            || self.account_id != e["accountId"]
-            || self.target != e["target"]
+        if self.create.origin != e["origin"]
+            || self.create.account_id != e["accountId"]
+            || self.create.target != e["target"]
         {
             return;
         }
@@ -498,7 +548,8 @@ impl Workspace {
                 opt
             })
             .collect();
-        let selected = (!self.origin.is_empty()).then(|| server_key(&self.origin, &self.account_id));
+        let selected = (!self.create.origin.is_empty())
+            .then(|| server_key(&self.create.origin, &self.create.account_id));
         let disabled = options.is_empty();
         self.create.server_select.update(cx, |cb, cx| {
             cb.set_options(options, cx);
@@ -508,8 +559,8 @@ impl Workspace {
     }
 
     pub(super) fn sync_machine_select(&mut self, cx: &mut Context<Self>) {
-        let loading = self.targets.is_null() && self.message.is_empty();
-        let target_list = items(&self.targets);
+        let loading = self.create.targets.is_null() && self.message.is_empty();
+        let target_list = items(&self.create.targets);
         let options: Vec<ComboBoxOption<String>> = target_list
             .iter()
             .map(|t| {
@@ -518,7 +569,7 @@ impl Workspace {
                 ComboBoxOption::new(id, name).icon(LucideIcon::Server)
             })
             .collect();
-        let selected = (!self.target.is_empty()).then(|| self.target.clone());
+        let selected = (!self.create.target.is_empty()).then(|| self.create.target.clone());
         let placeholder = if loading {
             "Loading machines…"
         } else if options.is_empty() {
@@ -536,15 +587,18 @@ impl Workspace {
     }
 
     pub(super) fn sync_tool_select(&mut self, cx: &mut Context<Self>) {
-        let checking = !self.target.is_empty() && self.options.is_null() && self.message.is_empty();
-        let failed = !self.target.is_empty() && self.options.is_null() && !self.message.is_empty();
-        let available_ids: Vec<&str> = items(&self.options["tools"])
+        let checking =
+            !self.create.target.is_empty() && self.create.options.is_null() && self.message.is_empty();
+        let failed = !self.create.target.is_empty()
+            && self.create.options.is_null()
+            && !self.message.is_empty();
+        let available_ids: Vec<&str> = items(&self.create.options["tools"])
             .iter()
             .filter_map(Value::as_str)
             .collect();
 
         let mut options = Vec::new();
-        if self.options.is_object() {
+        if self.create.options.is_object() {
             for &id in &available_ids {
                 let cmd = HARNESSES
                     .iter()
@@ -559,9 +613,10 @@ impl Workspace {
             }
         }
 
-        let selected = (!self.tool.is_empty() && available_ids.contains(&self.tool.as_str()))
-            .then(|| self.tool.clone());
-        let placeholder = if self.target.is_empty() {
+        let selected = (!self.create.tool.is_empty()
+            && available_ids.contains(&self.create.tool.as_str()))
+        .then(|| self.create.tool.clone());
+        let placeholder = if self.create.target.is_empty() {
             "Select a machine first"
         } else if checking {
             "Checking installed coding tools…"
@@ -572,7 +627,7 @@ impl Workspace {
         } else {
             "Search or select a coding tool…"
         };
-        let disabled = self.target.is_empty() || checking || failed || options.is_empty();
+        let disabled = self.create.target.is_empty() || checking || failed || options.is_empty();
 
         self.create.tool_select.update(cx, |cb, cx| {
             cb.set_options(options, cx);
@@ -588,23 +643,29 @@ impl Workspace {
         account_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.origin != origin || self.account_id != account_id {
-            self.name.update(cx, |s, cx| s.set_value_silent("", cx));
+        if self.create.origin != origin || self.create.account_id != account_id {
+            self.create
+                .name
+                .update(cx, |s, cx| s.set_value_silent("", cx));
             self.create.reset_inputs(cx);
         }
-        self.origin = origin;
-        self.account_id = account_id;
-        self.target.clear();
-        self.tool.clear();
-        self.targets = Value::Null;
-        self.options = Value::Null;
-        self.creating = false;
+        self.create.origin = origin;
+        self.create.account_id = account_id;
+        self.create.target.clear();
+        self.create.tool.clear();
+        self.create.targets = Value::Null;
+        self.create.options = Value::Null;
+        self.create.creating = false;
         self.message.clear();
         self.create.cancel_directory_lookups(true, cx);
         self.sync_server_select(cx);
         self.sync_machine_select(cx);
         self.sync_tool_select(cx);
-        self.call(json!({"op":"targets","origin":self.origin,"accountId":self.account_id}));
+        self.call(json!({
+            "op": "targets",
+            "origin": self.create.origin,
+            "accountId": self.create.account_id,
+        }));
         cx.notify();
     }
 
@@ -612,7 +673,7 @@ impl Workspace {
         if !self.creation_ready() {
             return;
         }
-        let name = self.name.read(cx).value().trim().to_owned();
+        let name = self.create.name.read(cx).value().trim().to_owned();
         let dir = self.create.directory.read(cx).value(cx).trim().to_owned();
         if name.is_empty() || dir.is_empty() {
             self.message = "Enter a session name and working directory.".into();
@@ -626,7 +687,8 @@ impl Workspace {
         }
         let args = self.create.args.read(cx).value().to_owned();
         if args.len() > MAX_ARGS_LEN || args.contains('\0') {
-            self.message = "Program arguments exceed the allowed length or contain invalid characters.".into();
+            self.message =
+                "Program arguments exceed the allowed length or contain invalid characters.".into();
             cx.notify();
             return;
         }
@@ -665,7 +727,7 @@ impl Workspace {
         let mut input = serde_json::Map::new();
         input.insert("name".into(), json!(name));
         input.insert("rootDir".into(), json!(dir));
-        input.insert("tool".into(), json!(self.tool));
+        input.insert("tool".into(), json!(self.create.tool));
         if self.create.create_directory {
             input.insert("createDirectory".into(), json!(true));
         }
@@ -676,13 +738,13 @@ impl Workspace {
             input.insert("env".into(), Value::Object(env_map));
         }
 
-        self.creating = true;
+        self.create.creating = true;
         self.message = "Creating session…".into();
         self.call(json!({
             "op": "create",
-            "origin": self.origin,
-            "accountId": self.account_id,
-            "target": self.target,
+            "origin": self.create.origin,
+            "accountId": self.create.account_id,
+            "target": self.create.target,
             "input": Value::Object(input),
         }));
         cx.notify();
@@ -690,12 +752,12 @@ impl Workspace {
 
     pub(super) fn create_view(&self, cx: &Context<Self>) -> Div {
         let servers = self.creatable_accounts();
-        let target_list = items(&self.targets);
-        let missing: Vec<&str> = items(&self.options["missing"])
+        let target_list = items(&self.create.targets);
+        let missing: Vec<&str> = items(&self.create.options["missing"])
             .iter()
             .filter_map(Value::as_str)
             .collect();
-        let available_tools: Vec<&str> = items(&self.options["tools"])
+        let available_tools: Vec<&str> = items(&self.create.options["tools"])
             .iter()
             .filter_map(Value::as_str)
             .collect();
@@ -703,10 +765,10 @@ impl Workspace {
             .iter()
             .filter(|&&(id, _, _)| !available_tools.contains(&id))
             .count();
-        let tool_name = if self.tool.is_empty() {
+        let tool_name = if self.create.tool.is_empty() {
             "the coding tool"
         } else {
-            harness_label(&self.tool)
+            harness_label(&self.create.tool)
         };
 
         let header = col()
@@ -720,7 +782,7 @@ impl Workspace {
             ));
 
         // Card 1: Destination (Server, Machine, Coding tool — all searchable selects)
-        let mut target_card = create_card();
+        let mut target_card = card();
         if servers.len() > 1 {
             target_card = target_card
                 .child(
@@ -731,7 +793,7 @@ impl Workspace {
                         .child(styled_select(&self.create.server_select)),
                 )
                 .child(card_divider());
-        } else if !self.origin.is_empty() {
+        } else if !self.create.origin.is_empty() {
             target_card = target_card
                 .child(
                     row()
@@ -744,7 +806,7 @@ impl Workspace {
                                 .text_color(rgb(0x7c7c7c)),
                         )
                         .child(text(
-                            picker::display_server(&self.origin).to_owned(),
+                            picker::display_server(&self.create.origin).to_owned(),
                             12.,
                             0x9a9a9a,
                         )),
@@ -758,8 +820,8 @@ impl Workspace {
                 .w_full()
                 .justify_between()
                 .child(field_label("Machine"));
-            if !self.origin.is_empty() && !target_list.is_empty() {
-                let url = format!("{}/?add=1", self.origin);
+            if !self.create.origin.is_empty() && !target_list.is_empty() {
+                let url = format!("{}/?add=1", self.create.origin);
                 label_row = label_row.child(subtle_action(
                     "add-machine-link",
                     LucideIcon::ExternalLink,
@@ -771,8 +833,8 @@ impl Workspace {
             }
             body = body.child(label_row);
 
-            if self.targets.is_array() && target_list.is_empty() {
-                let url = format!("{}/?add=1", self.origin);
+            if self.create.targets.is_array() && target_list.is_empty() {
+                let url = format!("{}/?add=1", self.create.origin);
                 body = body.child(
                     row()
                         .w_full()
@@ -809,7 +871,7 @@ impl Workspace {
                 row()
                     .gap(px(8.))
                     .child(field_label("Coding tool"))
-                    .when(!self.tool.is_empty() && missing.is_empty(), |r| {
+                    .when(!self.create.tool.is_empty() && missing.is_empty(), |r| {
                         r.child(
                             row()
                                 .gap(px(5.))
@@ -824,9 +886,9 @@ impl Workspace {
                         )
                     }),
             );
-            if !self.target.is_empty() {
-                let target_id = self.target.clone();
-                let url = format!("{}/?target={}", self.origin, self.target);
+            if !self.create.target.is_empty() {
+                let target_id = self.create.target.clone();
+                let url = format!("{}/?target={}", self.create.origin, self.create.target);
                 label_row = label_row.child(
                     row()
                         .gap(px(6.))
@@ -856,67 +918,25 @@ impl Workspace {
                 .child(styled_select(&self.create.tool_select));
 
             if !missing.is_empty() {
-                let url = format!("{}/?target={}", self.origin, self.target);
-                body = body.child(
-                    row()
-                        .w_full()
-                        .justify_between()
-                        .gap(px(12.))
-                        .p(px(10.))
-                        .rounded(px(8.))
-                        .bg(rgb(0x1f190e))
-                        .border_1()
-                        .border_color(rgb(0x4a3816))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_size(px(12.))
-                                .text_color(rgb(0xfcd34d))
-                                .child(format!(
-                                    "Set up {} on this machine before creating a session.",
-                                    missing.join(", ")
-                                )),
-                        )
-                        .child(subtle_action(
-                            "open-machine-missing",
-                            LucideIcon::ExternalLink,
-                            "Open machine",
-                            true,
-                            cx,
-                            move |_, _, cx| cx.open_url(&url),
-                        )),
-                );
-            } else if self.options.is_object() && available_tools.is_empty() {
-                let url = format!("{}/?target={}", self.origin, self.target);
-                body = body.child(
-                    row()
-                        .w_full()
-                        .justify_between()
-                        .gap(px(12.))
-                        .p(px(10.))
-                        .rounded(px(8.))
-                        .bg(rgb(0x1f190e))
-                        .border_1()
-                        .border_color(rgb(0x4a3816))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_size(px(12.))
-                                .text_color(rgb(0xfcd34d))
-                                .child("No coding tools detected on this machine yet. Set one up from its machine page."),
-                        )
-                        .child(subtle_action(
-                            "open-machine-empty",
-                            LucideIcon::ExternalLink,
-                            "Open machine",
-                            true,
-                            cx,
-                            move |_, _, cx| cx.open_url(&url),
-                        )),
-                );
-            } else if self.options.is_object() && unavailable_count > 0 {
+                let url = format!("{}/?target={}", self.create.origin, self.create.target);
+                body = body.child(warning_banner(
+                    "open-machine-missing",
+                    format!(
+                        "Set up {} on this machine before creating a session.",
+                        missing.join(", ")
+                    ),
+                    url,
+                    cx,
+                ));
+            } else if self.create.options.is_object() && available_tools.is_empty() {
+                let url = format!("{}/?target={}", self.create.origin, self.create.target);
+                body = body.child(warning_banner(
+                    "open-machine-empty",
+                    "No coding tools detected on this machine yet. Set one up from its machine page.",
+                    url,
+                    cx,
+                ));
+            } else if self.create.options.is_object() && unavailable_count > 0 {
                 body = body.child(text(
                     format!(
                         "{} of {} coding tools available on this machine. Unavailable tools can be installed via Set up tools.",
@@ -936,13 +956,13 @@ impl Workspace {
             .child(tool_section);
 
         // Card 2: Session details (Name + live-autocompleting Working directory)
-        let details_card = create_card()
+        let details_card = card()
             .child(
                 col()
                     .gap(px(7.))
                     .p(px(16.))
                     .child(field_label("Session name"))
-                    .child(field(&self.name)),
+                    .child(field(&self.create.name)),
             )
             .child(card_divider())
             .child(
@@ -1028,7 +1048,7 @@ impl Workspace {
                 )
             });
 
-        let mut launch_card = create_card().child(launch_header);
+        let mut launch_card = card().child(launch_header);
         if launch_open {
             let mut env_section = col()
                 .gap(px(8.))
@@ -1051,7 +1071,12 @@ impl Workspace {
                     row()
                         .w_full()
                         .gap(px(8.))
-                        .child(div().w(px(190.)).flex_none().child(mono_field(&env_row.name)))
+                        .child(
+                            div()
+                                .w(px(190.))
+                                .flex_none()
+                                .child(mono_field(&env_row.name)),
+                        )
                         .child(text("=", 13., 0x6e6e6e))
                         .child(div().flex_1().min_w_0().child(mono_field(&env_row.value)))
                         .child(
@@ -1131,17 +1156,17 @@ impl Workspace {
         }
 
         // Action bar (unified monochrome button UI)
-        let disabled_reason = if self.creating {
+        let disabled_reason = if self.create.creating {
             Some("Creating session…")
-        } else if self.targets.is_null() && self.message.is_empty() {
+        } else if self.create.targets.is_null() && self.message.is_empty() {
             Some("Loading machines…")
-        } else if self.target.is_empty() {
+        } else if self.create.target.is_empty() {
             Some("Select a machine to continue.")
-        } else if self.options.is_null() && self.message.is_empty() {
+        } else if self.create.options.is_null() && self.message.is_empty() {
             Some("Checking installed coding tools…")
         } else if !missing.is_empty() {
             Some("Set up machine software first.")
-        } else if self.tool.is_empty() {
+        } else if self.create.tool.is_empty() {
             Some("Install a coding tool on this machine first.")
         } else {
             None
@@ -1153,7 +1178,7 @@ impl Workspace {
             .child(
                 Button::new("create-session")
                     .primary()
-                    .label(if self.creating {
+                    .label(if self.create.creating {
                         "Creating…"
                     } else {
                         "Create and open"

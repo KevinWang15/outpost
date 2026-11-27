@@ -4,7 +4,7 @@ import { readFileSync, readdirSync, rmSync } from 'node:fs'
 import { connect } from 'node:net'
 import type { SessionActivity } from '../shared/activity'
 import { FrameDecoder, terminalControl } from '../shared/node/terminalFrames'
-import { machineExecutable, socketAddress, statePath } from './state'
+import { chatSocket, machineExecutable, socketAddress, statePath, terminalSocket } from './state'
 
 interface DriverStatus {
   version: string
@@ -73,10 +73,7 @@ async function probeDriver(socket: string): Promise<DriverStatus | null> {
 }
 
 export async function driverStatus(session: string) {
-  const [terminal, chat] = await Promise.all([
-    probeDriver(`terminals/${session}.sock`),
-    probeDriver(`chats/${session}.sock`),
-  ])
+  const [terminal, chat] = await Promise.all([probeDriver(terminalSocket(session)), probeDriver(chatSocket(session))])
   return { terminal, chat }
 }
 
@@ -133,8 +130,8 @@ export async function endTree(root: number) {
  * process tree is ended after checking that the PID really is that driver. */
 export async function stopDriver(session: string) {
   for (const [socket, role] of [
-    [`terminals/${session}.sock`, 'serve'],
-    [`chats/${session}.sock`, 'chat-serve'],
+    [terminalSocket(session), 'serve'],
+    [chatSocket(session), 'chat-serve'],
   ] as const) {
     let status: DriverStatus | null
     try {

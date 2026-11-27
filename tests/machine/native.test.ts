@@ -1,5 +1,6 @@
-// The real coding tools' hooks and transcripts drive a session's activity. Only
-// the model is faked, by a loopback provider. Opt in with OUTPOST_TEST_NATIVE_ACTIVITY=1.
+// Opt-in smoke tests against real installed coding tools with a loopback model
+// fixture: session-switch hooks, MCP/settings wiring, and ACP chat.
+// Enable with OUTPOST_TEST_NATIVE_ACTIVITY=1.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -14,9 +15,9 @@ import { FrameDecoder, terminalControl } from '../../shared/node/terminalFrames'
 import { TerminalActivity } from '../../machine/activity'
 import { harness } from '../../machine/harnesses'
 import { toml } from '../../machine/harnesses/codex'
-import { prepare, terminalSocket, which } from '../../machine/launch'
+import { prepare, which } from '../../machine/launch'
 import { JsonRpcProcess } from '../../machine/rpc'
-import { socketAddress, statePath } from '../../machine/state'
+import { socketAddress, statePath, terminalSocket } from '../../machine/state'
 import { machine, record, register } from './fixtures'
 
 const enabled = process.env.OUTPOST_TEST_NATIVE_ACTIVITY === '1'
@@ -140,7 +141,7 @@ async function session(
   created.config = { ...created.config, ...config }
   mkdirSync(Object.values(created.storage)[0], { recursive: true })
   await register(created)
-  const { adapter, launch } = prepare(created, 'terminal')
+  const { adapter, launch } = await prepare(created, 'terminal')
   launch.environment.HOME = home
   const activity = new TerminalActivity(created, conversation, adapter, () => {})
   const events: string[] = []
@@ -151,8 +152,8 @@ async function session(
       for (const frame of decoder.feed(bytes)) {
         const message = JSON.parse(frame.payload.toString())
         if (message.type === 'hook') {
-          events.push(message.payload.hook_event_name)
-          void activity.hookEvent(message.payload)
+          events.push(message.payload.hook_event_name ?? message.payload.hookEventName)
+          void activity.sessionEvent(message.payload)
         }
         socket.end(terminalControl({ type: 'result', ok: true }))
       }
@@ -163,50 +164,32 @@ async function session(
     activity.exited()
     server.close()
   })
-  const state = async (expected: string) => {
-    await until(() => (activity.refresh(), activity.current.state === expected), `${tool} ${expected}`).catch(error => {
-      throw new Error(`${error.message}; was ${JSON.stringify(activity.current)}; hooks ${events.join(', ')}`)
-    })
-    return activity.current
-  }
-  return { home, root, record: created, adapter, launch, activity, events, state }
+  return { home, root, record: created, adapter, launch, activity, events }
 }
 
-test('Claude Code: launch settings report the main turn, its reply and a failure', { skip: !enabled }, async t => {
-  for (const failure of [false, true])
-    await t.test(failure ? 'failure' : 'reply', async t => {
-      const id = crypto.randomUUID()
-      const fixture = await session(t, 'claude', id)
-      if (!fixture) return t.skip('claude is not installed')
-      const model = await provider(t)
-      model.state.fail = failure
-      const options = [...(await fixture.adapter.mcp(fixture.launch)), ...(await fixture.adapter.hooks(fixture.launch))]
-      const child = spawn(fixture.launch.executable, ['--print', '--session-id', id, ...options, 'hook test'], {
-        cwd: fixture.root,
-        env: {
-          ...fixture.launch.environment,
-          ANTHROPIC_BASE_URL: model.url,
-          ANTHROPIC_API_KEY: 'test-key',
-          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-          API_TIMEOUT_MS: '1000',
-        },
-        stdio: 'ignore',
-      })
-      t.after(() => child.kill('SIGKILL'))
-      await fixture.state('working')
-      assert.ok(fixture.events.includes('UserPromptSubmit'))
-      await until(model.requested, 'the model request')
-      model.release()
-      // Some authentication failures exit without StopFailure; the transcript records the error.
-      const done = await fixture.state(failure ? 'error' : 'finished')
-      if (!failure) {
-        fixture.activity.acknowledge(done.completionId!)
-        assert.equal(fixture.activity.current.state, 'idle')
-      }
-    })
+test('Claude Code: launch SessionStart hook reports the native conversation', { skip: !enabled }, async t => {
+  const id = crypto.randomUUID()
+  const fixture = await session(t, 'claude', id)
+  if (!fixture) return t.skip('claude is not installed')
+  const model = await provider(t)
+  model.release()
+  const options = [...(await fixture.adapter.mcp(fixture.launch)), ...(await fixture.adapter.hooks(fixture.launch))]
+  const child = spawn(fixture.launch.executable, ['--print', '--session-id', id, ...options, 'hook test'], {
+    cwd: fixture.root,
+    env: {
+      ...fixture.launch.environment,
+      ANTHROPIC_BASE_URL: model.url,
+      ANTHROPIC_API_KEY: 'test-key',
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      API_TIMEOUT_MS: '1000',
+    },
+    stdio: 'ignore',
+  })
+  t.after(() => child.kill('SIGKILL'))
+  await until(() => fixture.events.includes('SessionStart'), 'the SessionStart hook')
 })
 
-test('Kimi Code: its plugin reports the conversation; the wire reports turns', { skip: !enabled }, async t => {
+test('Kimi Code: its plugin reports the conversation', { skip: !enabled }, async t => {
   const fixture = await session(t, 'kimi', 'session_placeholder')
   if (!fixture) return t.skip('kimi is not installed')
   const model = await provider(t)
@@ -237,92 +220,73 @@ test('Kimi Code: its plugin reports the conversation; the wire reports turns', {
     prompt: [{ type: 'text', text: 'hook test' }],
   })
   assert.equal(response.stopReason, 'end_turn')
-  const done = await fixture.state('finished')
-  fixture.activity.acknowledge(done.completionId!)
-  assert.equal(fixture.activity.current.state, 'idle')
-  model.state.fail = true
-  await rpc
-    .call('session/prompt', { sessionId: native, prompt: [{ type: 'text', text: 'failure test' }] })
-    .catch(() => {}) // ACP may report the turn's error in its response too.
-  await fixture.state('error')
 })
 
-test(
-  'Codex: only its launch hooks are trusted; they report the conversation and its turns',
-  { skip: !enabled },
-  async t => {
-    const fixture = await session(t, 'codex', crypto.randomUUID())
-    if (!fixture) return t.skip('codex is not installed')
-    const model = await provider(t)
-    const store = Object.values(fixture.record.storage)[0]
-    const config = join(store, 'config.toml')
-    // A user's own hook stays untrusted; Outpost never grants blanket trust.
-    writeFileSync(config, 'hooks.Stop = [{hooks=[{type="command",command="echo user-hook"}]}]\n')
-    const options = [
-      ...(await fixture.adapter.mcp(fixture.launch)),
-      ...(await fixture.adapter.hooks(fixture.launch)),
-      '-c',
-      'model_provider="activity_test"',
-      '-c',
-      `model_providers.activity_test=${toml({
-        name: 'Test',
-        base_url: model.url,
-        wire_api: 'responses',
-        requires_openai_auth: false,
-        request_max_retries: 0,
-        stream_max_retries: 0,
-      })}`,
-    ]
-    const start = async () => {
-      const rpc = new JsonRpcProcess(
-        [fixture.launch.executable, 'app-server', ...options],
-        fixture.launch.environment,
-        fixture.root,
-        60_000,
-      )
-      t.after(() => rpc.close())
-      await rpc.call('initialize', {
-        clientInfo: { name: 'outpost_native_test', version: '1.0' },
-        capabilities: { experimentalApi: true },
-      })
-      rpc.send({ method: 'initialized', params: {} })
-      const listed = await rpc.call('hooks/list', { cwds: [fixture.root] })
-      const hooks = (listed.data as { hooks: Record<string, string>[] }[]).flatMap(entry => entry.hooks)
-      return { rpc, hooks }
-    }
-    const { rpc, hooks } = await start()
-    const own = hooks.filter(hook => hook.source === 'sessionFlags')
-    assert.ok(own.length > 0 && own.every(hook => hook.trustStatus === 'trusted'), JSON.stringify(own))
-    const user = hooks.find(hook => hook.command === 'echo user-hook')!
-    assert.equal(user.trustStatus, 'untrusted')
-    const thread = ((await rpc.call('thread/start', { cwd: fixture.root })).thread as { id: string }).id
-    // Codex reports SessionStart with the first submitted turn.
-    await rpc.call('turn/start', { threadId: thread, input: [{ type: 'text', text: 'hook test' }] })
-    await until(() => fixture.activity.currentConversation === thread, 'the conversation from hooks')
-    await until(model.requested, 'the model request')
-    await fixture.state('working')
-    model.release()
-    const done = await fixture.state('finished')
-    fixture.activity.acknowledge(done.completionId!)
-    assert.equal(fixture.activity.current.state, 'idle')
-    model.state.fail = true
-    const other = ((await rpc.call('thread/start', { cwd: fixture.root })).thread as { id: string }).id
-    await rpc.call('turn/start', { threadId: other, input: [{ type: 'text', text: 'failure test' }] })
-    await fixture.state('error')
-    assert.equal(fixture.activity.currentConversation, other)
-    rpc.close()
-    assert.ok(!readFileSync(config, 'utf8').includes('outpost'), "the user's configuration is not changed")
-    // Trust the user granted themselves is kept.
-    const saved = `${readFileSync(config, 'utf8')}\n[hooks.state]\n${toml(user.key)}=${toml({ enabled: true, trusted_hash: user.currentHash })}\n`
-    writeFileSync(config, saved)
-    const again = await start()
-    assert.ok(
-      again.hooks.every(hook => hook.trustStatus === 'trusted'),
-      JSON.stringify(again.hooks),
+test('Codex: only its SessionStart hook is trusted and reports conversation switches', { skip: !enabled }, async t => {
+  const fixture = await session(t, 'codex', crypto.randomUUID())
+  if (!fixture) return t.skip('codex is not installed')
+  const model = await provider(t)
+  const store = Object.values(fixture.record.storage)[0]
+  const config = join(store, 'config.toml')
+  // A user's own hook stays untrusted; Outpost never grants blanket trust.
+  writeFileSync(config, 'hooks.Stop = [{hooks=[{type="command",command="echo user-hook"}]}]\n')
+  const options = [
+    ...(await fixture.adapter.mcp(fixture.launch)),
+    ...(await fixture.adapter.hooks(fixture.launch)),
+    '-c',
+    'model_provider="activity_test"',
+    '-c',
+    `model_providers.activity_test=${toml({
+      name: 'Test',
+      base_url: model.url,
+      wire_api: 'responses',
+      requires_openai_auth: false,
+      request_max_retries: 0,
+      stream_max_retries: 0,
+    })}`,
+  ]
+  const start = async () => {
+    const rpc = new JsonRpcProcess(
+      [fixture.launch.executable, 'app-server', ...options],
+      fixture.launch.environment,
+      fixture.root,
+      60_000,
     )
-    assert.equal(readFileSync(config, 'utf8'), saved)
-  },
-)
+    t.after(() => rpc.close())
+    await rpc.call('initialize', {
+      clientInfo: { name: 'outpost_native_test', version: '1.0' },
+      capabilities: { experimentalApi: true },
+    })
+    rpc.send({ method: 'initialized', params: {} })
+    const listed = await rpc.call('hooks/list', { cwds: [fixture.root] })
+    const hooks = (listed.data as { hooks: Record<string, string>[] }[]).flatMap(entry => entry.hooks)
+    return { rpc, hooks }
+  }
+  const { rpc, hooks } = await start()
+  const own = hooks.filter(hook => hook.source === 'sessionFlags')
+  assert.ok(own.length === 1 && own.every(hook => hook.trustStatus === 'trusted'), JSON.stringify(own))
+  const user = hooks.find(hook => hook.command === 'echo user-hook')!
+  assert.equal(user.trustStatus, 'untrusted')
+  model.release()
+  const thread = ((await rpc.call('thread/start', { cwd: fixture.root })).thread as { id: string }).id
+  // Codex reports SessionStart with the first submitted turn.
+  await rpc.call('turn/start', { threadId: thread, input: [{ type: 'text', text: 'hook test' }] })
+  await until(() => fixture.activity.currentConversation === thread, 'the conversation from hooks')
+  const other = ((await rpc.call('thread/start', { cwd: fixture.root })).thread as { id: string }).id
+  await rpc.call('turn/start', { threadId: other, input: [{ type: 'text', text: 'second thread' }] })
+  await until(() => fixture.activity.currentConversation === other, 'the switched conversation')
+  rpc.close()
+  assert.ok(!readFileSync(config, 'utf8').includes('outpost'), "the user's configuration is not changed")
+  // Trust the user granted themselves is kept.
+  const saved = `${readFileSync(config, 'utf8')}\n[hooks.state]\n${toml(user.key)}=${toml({ enabled: true, trusted_hash: user.currentHash })}\n`
+  writeFileSync(config, saved)
+  const again = await start()
+  assert.ok(
+    again.hooks.every(hook => hook.trustStatus === 'trusted'),
+    JSON.stringify(again.hooks),
+  )
+  assert.equal(readFileSync(config, 'utf8'), saved)
+})
 
 test(
   'Claude Code and Codex start with the session instructions, model and MCP servers',
@@ -430,30 +394,14 @@ test(
     })
     t.after(() => child.kill('SIGKILL'))
     await until(() => fixture.activity.currentConversation !== placeholder, 'the SessionStart hook')
-    await fixture.state('working')
     await until(model.requested, 'the model request')
     model.release()
-    const done = await fixture.state('finished')
-    fixture.activity.acknowledge(done.completionId!)
-    assert.equal(fixture.activity.current.state, 'idle')
-    assert.ok(
-      model.bodies.some(body => body.includes('search_history')),
-      "Outpost's plugin MCP tools reach the terminal launch",
-    )
-
-    model.state.fail = true
-    const failing = spawn(
-      fixture.launch.executable,
-      ['-p', 'failure test', '--conversation', fixture.activity.currentConversation],
-      { cwd: fixture.root, env, stdio: 'ignore' },
-    )
-    t.after(() => failing.kill('SIGKILL'))
-    await fixture.state('error')
+    await until(() => model.bodies.some(body => body.includes('search_history')), 'MCP tools reaching the model')
 
     // ACP wrapper pins `--gemini-dir`, maps `systemPrompt` append, and advertises HTTP MCP support.
     model.state.fail = false
     model.bodies.length = 0
-    const chatLaunch = prepare(fixture.record, 'chat').launch
+    const chatLaunch = (await prepare(fixture.record, 'chat')).launch
     const chat = fixture.adapter.chat(chatLaunch.executable)
     const rpc = new JsonRpcProcess(
       chat.command,

@@ -1,22 +1,23 @@
 import { randomUUID } from 'node:crypto'
-import { Ajv } from 'ajv'
 import type { FastifyInstance } from 'fastify'
 import type { Environment, InstallationInput, Target, TargetInput, TargetUpdate } from '../../shared/model'
 import { machineSetupLabels } from '../../shared/model'
+import type { Owner } from '../deployment'
 import { AppError } from '../errors'
 import { withRequestSignal } from '../request'
 import type { Services } from '../services'
 import { installationInput, targetInput, targetUpdate } from '../../shared/schemas'
 import { inspectTargetSoftware } from '../session-actions'
+import { compileSchema } from '../validate'
 
-const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false })
-const validInstallationInput = ajv.compile<InstallationInput>(installationInput)
+const validInstallationInput = compileSchema(installationInput)
 type Params = { targetId: string }
 
 export function workspaceRoutes(
   app: FastifyInstance,
   services: Services,
-  forgetEnrollment: (targetId: string) => void,
+  forgetEnrollment: (targetId: string) => Promise<void>,
+  onTargetRemoved: (owner: Owner, targetId: string) => Promise<void>,
 ) {
   const { deployment, installations, log } = services
   app.get('/api/environment', async request => {
@@ -68,9 +69,10 @@ export function workspaceRoutes(
   app.delete<{ Params: Params }>('/api/targets/:targetId', async (request, reply) => {
     const { owner, workspace, target } = await services.context(request, request.params.targetId)
     await installations.removeTarget(owner, target.id, () => workspace.remove(target.id))
-    if (target.kind === 'outbound') forgetEnrollment(target.id)
+    if (target.kind === 'outbound') await forgetEnrollment(target.id)
     services.broker.closeTarget(owner, target.id)
     services.machines.forget(owner, target.id)
+    await onTargetRemoved(owner, target.id)
     log.record(owner, {
       kind: 'machine',
       type: 'removed',

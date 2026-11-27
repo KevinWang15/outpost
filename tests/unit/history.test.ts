@@ -34,6 +34,8 @@ function source(id: string, tool: HistorySource['tool'] = 'codex'): HistorySourc
     cwd: '/projects/outpost',
     size: 1000,
     modified: '1000',
+    forkedFrom: null,
+    managedSessionId: null,
   }
 }
 /** Messages are unique to their conversation unless `identities` says otherwise. */
@@ -449,10 +451,6 @@ test('history: the durable embedding queue counts shared chunks once and survive
     first.ingest(machines[0], batch(source('one'), ['shared', 'shared']))
     await first.embedPending(['alpha'])
     first.ingest(machines[1], batch(source('two'), ['shared', 'unique']))
-    // Rebuild just the materialized queue from the intact messages and vectors.
-    first.db.exec(
-      'DROP TRIGGER machine_chunks_insert; DROP TRIGGER machine_chunks_delete; DROP TRIGGER source_messages_delete; DROP TABLE machine_chunks',
-    )
   } finally {
     first.close()
   }

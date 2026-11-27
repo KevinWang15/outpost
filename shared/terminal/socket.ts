@@ -1,11 +1,11 @@
-import type { ImagePasteMode } from '../../shared/terminalFiles'
-import type { Scrollback } from '../../shared/terminalService'
-import { terminalFileChunk, type TerminalFileReader } from '../../shared/terminalFiles'
-import { maxSessionFiles, parseSessionFile } from '../../shared/sessionFiles'
-import type { ClientMessage, ServerMessage } from '../../shared/protocol'
-import { maxInputMessage, maxInputQueue, protocolVersion, terminalConnectionPolicy } from '../../shared/protocol'
-import { imageProblem } from '../../shared/images'
-import type { SessionActivity } from '../../shared/activity'
+import type { ImagePasteMode } from '../terminalFiles'
+import type { Scrollback } from '../terminalService'
+import { terminalFileChunk, type TerminalFileReader } from '../terminalFiles'
+import { maxSessionFiles, parseSessionFile } from '../sessionFiles'
+import type { ClientMessage, ServerMessage } from '../protocol'
+import { maxInputMessage, maxInputQueue, protocolVersion, terminalConnectionPolicy } from '../protocol'
+import { imageProblem } from '../images'
+import type { SessionActivity } from '../activity'
 import type { TerminalRendering } from './rendering'
 import type { TerminalState } from './connection'
 
@@ -24,8 +24,20 @@ interface Handlers {
 const INPUT_COALESCE_MS = 10
 const RESIZE_COALESCE_MS = 25
 
-/** The web client of the terminal protocol (shared/protocol.ts). Reconnects
- * with the resume token after drops; an ended session requires explicit reconnect. */
+function browserOnline(): boolean | undefined {
+  const nav = (globalThis as { navigator?: { onLine?: unknown } }).navigator
+  return typeof nav?.onLine === 'boolean' ? nav.onLine : undefined
+}
+
+function browserHref(): string {
+  const root = globalThis as { window?: { location?: { href?: unknown } }; location?: { href?: unknown } }
+  const href = root.window?.location?.href ?? root.location?.href
+  if (typeof href === 'string') return href
+  throw new Error('TerminalSocket requires an endpoint origin outside a browser.')
+}
+
+/** Client of the terminal protocol (shared/protocol.ts), shared by browser and desktop.
+ * Reconnects with the resume token after drops; an ended session requires explicit reconnect. */
 export class TerminalSocket {
   private scrollback?: Scrollback
   setScrollback(lines: Scrollback) {
@@ -48,7 +60,7 @@ export class TerminalSocket {
   private fileReads = Array.from({ length: 3 }, () => Promise.resolve())
   private readyAt = 0
   private receivedAt = 0
-  private online = typeof navigator === 'undefined' || navigator.onLine !== false
+  private online = browserOnline() !== false
   private requestedSize: { cols: number; rows: number } | null = null
   private pendingResize: { cols: number; rows: number } | null = null
   private resizeTimer: ReturnType<typeof setTimeout> | undefined
@@ -93,7 +105,7 @@ export class TerminalSocket {
     this.detach()
     this.handlers.activity(null)
     const { cols, rows } = size
-    const url = new URL('/api/terminal', this.endpoint?.origin ?? window.location.href)
+    const url = new URL('/api/terminal', this.endpoint?.origin ?? browserHref())
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     url.search = new URLSearchParams({
       token: this.token,
@@ -285,7 +297,8 @@ export class TerminalSocket {
   /** A suspended page may still think its old socket is open. Probe before replacing a healthy connection. */
   resume() {
     if (!this.started || this.stopped) return
-    if (typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean') this.online = navigator.onLine
+    const online = browserOnline()
+    if (online !== undefined) this.online = online
     if (!this.socket) {
       this.open()
       return
@@ -622,32 +635,14 @@ export class TerminalSocket {
       () => controller.abort(new Error('Image upload timed out. Try attaching it again.')),
       150_000,
     )
-    const send = async (requested: ImagePasteMode): Promise<ImagePasteMode> => {
+    try {
       const transfer = await this.uploadOnSocket(file, controller.signal)
       controller.signal.throwIfAborted()
       if (!this.connected || this.socket !== socket)
         throw new Error('The terminal changed before the image was pasted. Attach it again.')
-      const result = await this.request({ type: 'image-paste', id: crypto.randomUUID(), transfer, mode: requested })
+      const result = await this.request({ type: 'image-paste', id: crypto.randomUUID(), transfer, mode })
       if (!result.ok) throw new Error(result.message)
-      return result.mode === 'attachment' || result.mode === 'path' ? result.mode : requested
-    }
-    try {
-      try {
-        return await send(mode)
-      } catch (error) {
-        // Older machine binaries reject unsupported attachment modes instead of
-        // falling back internally; retry once as a file path on the same socket.
-        if (
-          mode === 'attachment' &&
-          error instanceof Error &&
-          /Use [“"]Paste image as file path[”"]/.test(error.message) &&
-          !controller.signal.aborted &&
-          this.connected &&
-          this.socket === socket
-        )
-          return await send('path')
-        throw error
-      }
+      return result.mode === 'attachment' || result.mode === 'path' ? result.mode : mode
     } finally {
       clearTimeout(timeout)
       if (this.upload === controller) this.upload = null

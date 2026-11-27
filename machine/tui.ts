@@ -1,10 +1,10 @@
 // Zero-dependency ANSI raw-mode interactive TUI for `outpost new`.
 // Runs in the alternate screen buffer and always restores terminal state on exit.
 import { existsSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
 import { harnessLabel, type HarnessId } from '../shared/harnesses'
 import type { LaunchSettings, SessionRecord } from '../shared/model'
+import { expandHomePath } from './state'
 
 export interface NewSessionDraft {
   name: string
@@ -63,9 +63,8 @@ const INVERT_ACCENT = `${ESC}[1;30;48;5;75m`
 function resolveDir(raw: string, cwd: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return ''
-  if (trimmed === '~') return homedir()
-  if (trimmed.startsWith('~/')) return homedir() + trimmed.slice(1)
-  return isAbsolute(trimmed) ? trimmed : resolve(cwd, trimmed)
+  const expanded = expandHomePath(trimmed)
+  return isAbsolute(expanded) ? expanded : resolve(cwd, expanded)
 }
 
 function dirExists(raw: string, cwd: string): boolean {
@@ -558,6 +557,11 @@ export async function runNewSessionTui(options: NewSessionTuiOptions): Promise<N
       applyCopyFrom(choices[(idx + delta + choices.length) % choices.length])
     }
 
+    const onTextChanged = (field: FieldId) => {
+      if (field === 'name') nameTouched = true
+      if (field === 'rootDir') syncFromDir()
+    }
+
     const insertText = (
       field: 'name' | 'rootDir' | 'instructions' | 'model' | 'mode' | 'args' | 'envText' | 'mcpText',
       text: string,
@@ -569,8 +573,7 @@ export async function runNewSessionTui(options: NewSessionTuiOptions): Promise<N
       chars.splice(pos, 0, ...inserted)
       draft[field] = chars.join('')
       cursors[field] = pos + inserted.length
-      if (field === 'name') nameTouched = true
-      if (field === 'rootDir') syncFromDir()
+      onTextChanged(field)
     }
 
     const onData = (buf: Buffer | string) => {
@@ -647,27 +650,23 @@ export async function runNewSessionTui(options: NewSessionTuiOptions): Promise<N
               chars.splice(pos - 1, 1)
               draft[focused] = chars.join('')
               cursors[focused] = pos - 1
-              if (focused === 'name') nameTouched = true
-              if (focused === 'rootDir') syncFromDir()
+              onTextChanged(focused)
             }
           } else if (key.type === 'delete') {
             if (pos < chars.length) {
               chars.splice(pos, 1)
               draft[focused] = chars.join('')
-              if (focused === 'name') nameTouched = true
-              if (focused === 'rootDir') syncFromDir()
+              onTextChanged(focused)
             }
           } else if (key.type === 'ctrl-u') {
             chars.splice(0, pos)
             draft[focused] = chars.join('')
             cursors[focused] = 0
-            if (focused === 'name') nameTouched = true
-            if (focused === 'rootDir') syncFromDir()
+            onTextChanged(focused)
           } else if (key.type === 'ctrl-k') {
             chars.splice(pos)
             draft[focused] = chars.join('')
-            if (focused === 'name') nameTouched = true
-            if (focused === 'rootDir') syncFromDir()
+            onTextChanged(focused)
           } else if (key.type === 'ctrl-w') {
             let cut = pos
             while (cut > 0 && chars[cut - 1] === ' ') cut--
@@ -675,8 +674,7 @@ export async function runNewSessionTui(options: NewSessionTuiOptions): Promise<N
             chars.splice(cut, pos - cut)
             draft[focused] = chars.join('')
             cursors[focused] = cut
-            if (focused === 'name') nameTouched = true
-            if (focused === 'rootDir') syncFromDir()
+            onTextChanged(focused)
           } else if (key.type === 'char' && key.text) {
             insertText(focused, key.text)
           } else if (key.type === 'paste' && key.text) {

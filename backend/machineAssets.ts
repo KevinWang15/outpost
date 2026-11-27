@@ -13,7 +13,7 @@ export function platformName(value: string) {
   if (!platformPattern.test(value)) throw new AppError('Unsupported Linux machine architecture or libc.', 400)
   return value
 }
-export interface Asset {
+interface Asset {
   path: string
   sha256: string
 }

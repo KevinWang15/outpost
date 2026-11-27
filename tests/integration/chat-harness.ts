@@ -61,18 +61,22 @@ export async function chatHarness(names: string[], options: { idleMs?: number; t
   /** Faults: the connection stays open but nothing arrives from the host. */
   const frozen = new Set<string>()
 
-  const created: SessionRecord[] = names.map(name => ({
-    id: randomUUID(),
-    name,
-    tool: 'claude',
-    rootDir: directory,
-    createdAt: new Date().toISOString(),
-    lastConnectedAt: null,
-    storage: { CLAUDE_CONFIG_DIR: home },
-    delivery: 'auto',
-    config: { revision: 1, instructions: null, model: null, mode: null, mcpServers: {}, args: '', env: {} },
-    conversations: [{ id: randomUUID(), startedAt: new Date().toISOString(), movedTo: null }],
-  }))
+  const created: SessionRecord[] = names.map(name => {
+    const conversation = randomUUID()
+    return {
+      id: randomUUID(),
+      name,
+      tool: 'claude',
+      rootDir: directory,
+      createdAt: new Date().toISOString(),
+      lastConnectedAt: null,
+      storage: { CLAUDE_CONFIG_DIR: home },
+      delivery: 'auto',
+      config: { revision: 1, instructions: null, model: null, mode: null, mcpServers: {}, args: '', env: {} },
+      conversation,
+      conversations: [{ id: conversation, tool: 'claude', startedAt: new Date().toISOString(), movedTo: null }],
+    }
+  })
   await changeRegistry(registry => void registry.sessions.push(...created))
 
   function startHost(session: SessionRecord) {

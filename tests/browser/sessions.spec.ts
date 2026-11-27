@@ -27,21 +27,26 @@ test('a chat session follows its conversations, resumes an earlier one, and appl
   const timeline = page.getByRole('dialog', { name: 'Conversations in Planner' })
   const entries = timeline.getByRole('list', { name: 'Conversations' }).getByRole('listitem')
   await expect(entries).toHaveCount(2)
-  await expect(entries.first()).toContainText('Second topic')
   await expect(entries.first()).toContainText('Current')
-  await timeline.getByRole('button', { name: 'Resume First topic' }).click()
+  await entries
+    .last()
+    .getByRole('button', { name: /^Resume/ })
+    .click()
   await expect(timeline).toBeHidden()
   await expect(page.locator('.transcript')).toContainText('Fixture reply to: First topic')
   await expect(page.locator('.transcript')).not.toContainText('Second topic')
 
-  // The name changes now; instructions apply when the chat next starts.
+  // The name changes now; launch edits prompt to close and restart immediately.
   await actions.click()
   await page.getByRole('menuitem', { name: 'Edit session' }).click()
   const settings = page.getByRole('dialog', { name: 'Edit Planner' })
   await settings.getByLabel('Name').fill('Release planner')
   await settings.getByLabel('Instructions').fill('Be brief.')
   await settings.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(settings).toBeHidden()
+  const restartDialog = page.getByRole('dialog', { name: 'Restart Release planner?' })
+  await expect(restartDialog).toBeVisible()
+  await restartDialog.getByRole('button', { name: 'Later' }).click()
+  await expect(restartDialog).toBeHidden()
   await expect(page.getByRole('heading', { name: 'Release planner', level: 1 })).toBeVisible()
   const pending = page.locator('.status-card', { hasText: 'Changes apply at the next start.' })
   await expect(pending).toBeVisible()
@@ -113,8 +118,9 @@ test('Edit source edits every setting as JSON, and a new session can copy them',
   await settings.getByRole('button', { name: 'Edit source' }).click()
   const source = settings.getByRole('textbox', { name: 'Settings source' })
   const shown = JSON.parse(await source.inputValue())
-  expect(shown).toEqual({
+  expect(shown).toMatchObject({
     name: 'Reviewer',
+    tool: 'claude',
     delivery: 'auto',
     instructions: 'You review pull requests.',
     model: null,
@@ -123,6 +129,8 @@ test('Edit source edits every setting as JSON, and a new session can copy them',
     args: '',
     env: {},
   })
+  expect(typeof shown.rootDir).toBe('string')
+  expect(typeof shown.conversation).toBe('string')
   // Mistakes are explained before anything is saved.
   await source.fill(JSON.stringify({ ...shown, extra: true }))
   await settings.getByRole('button', { name: 'Edit as form' }).click()
@@ -163,8 +171,17 @@ test('Edit source edits every setting as JSON, and a new session can copy them',
   await page.getByRole('menuitem', { name: 'Edit session' }).click()
   const second = page.getByRole('dialog', { name: 'Edit Second reviewer' })
   await second.getByRole('button', { name: 'Edit source' }).click()
-  expect(JSON.parse(await second.getByRole('textbox', { name: 'Settings source' }).inputValue())).toEqual({
-    ...edited,
+  const secondShown = JSON.parse(await second.getByRole('textbox', { name: 'Settings source' }).inputValue())
+  expect(secondShown).toMatchObject({
     name: 'Second reviewer',
+    tool: edited.tool,
+    delivery: edited.delivery,
+    instructions: edited.instructions,
+    model: edited.model,
+    mode: edited.mode,
+    mcpServers: edited.mcpServers,
+    args: edited.args,
+    env: edited.env,
   })
+  expect(secondShown.conversation).not.toBe(edited.conversation)
 })

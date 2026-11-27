@@ -3,7 +3,6 @@
 // there is more and every minute, so a machine that was away catches up. It
 // also notices when a machine stops answering, and when it is back.
 import { join } from 'node:path'
-import { Ajv } from 'ajv'
 import Type, { type Static } from 'typebox'
 import type { MachineEvent, MachineEvents } from '../../shared/machine'
 import type { Session } from '../../shared/model'
@@ -11,6 +10,7 @@ import { writeJsonFile } from '../../shared/node/jsonFile'
 import type { Deployment, Owner } from '../deployment'
 import type { TargetContext } from '../sessions'
 import { readStateFile } from '../stateFile'
+import { compileSchema } from '../validate'
 import type { LogInput } from './activity'
 
 interface Dependencies {
@@ -34,7 +34,7 @@ const cursorFile = Type.Object(
   },
   { additionalProperties: false },
 )
-const validFile = new Ajv().compile<Static<typeof cursorFile>>(cursorFile)
+const validFile = compileSchema(cursorFile)
 interface AccountCursors {
   file: Static<typeof cursorFile>
   saving: Promise<void>
@@ -74,6 +74,17 @@ export class MachineEventLog {
   }
   close() {
     if (this.timer) clearInterval(this.timer)
+  }
+
+  async forgetTarget(owner: Owner, targetId: string) {
+    this.machines.delete(`${owner.userId}\0${targetId}`)
+    const loaded = this.loaded.get(owner.userId)
+    if (!loaded) return
+    const cursors = await loaded.catch(() => null)
+    if (!cursors || !(targetId in cursors.file.cursors)) return
+    delete cursors.file.cursors[targetId]
+    cursors.saving = cursors.saving.catch(() => {}).then(() => writeJsonFile(this.cursorsPath(owner), cursors.file))
+    await cursors.saving.catch(() => {})
   }
 
   private cursorsPath(owner: Owner) {

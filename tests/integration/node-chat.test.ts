@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { streamWindow, type AgentCall } from '../../shared/machine'
 import { chatHost, type ChatEntry, type ChatHostMessage, type ChatHostRequest } from '../../shared/chatHost'
-import { currentConversation, type SessionInput, type Target } from '../../shared/model'
+import type { SessionInput, Target } from '../../shared/model'
 import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
 import type { Stream } from '../../backend/machines'
 import { SessionFileClient } from '../../backend/sessionFiles'
@@ -121,10 +121,12 @@ function terminalViewer(stream: Stream) {
 async function machine(t: TestContext) {
   const { home, machines, context, streams } = await localMachine(t, 'outpost-node-chat-', settings)
   const calls: AgentCall[] = []
-  machines.agent = async (_owner, _target, call) => {
-    calls.push(call)
-    return { sessions: [{ name: 'Other', handle: '@other' }] }
-  }
+  machines.configure({
+    agent: async (_owner, _target, call) => {
+      calls.push(call)
+      return { sessions: [{ name: 'Other', handle: '@other' }] }
+    },
+  })
   const sessions = new SessionClient()
   const project = join(home, 'project')
   const create = (input: Partial<SessionInput> = {}) =>
@@ -149,7 +151,7 @@ test(
     assert.equal(await readFile(join(project, 'system-prompt.txt'), 'utf8'), 'append:Be brief.')
     // The chat host records the agent's new conversation in the session before any prompt runs.
     const listed = await sessions.get(context, session.id)
-    assert.equal(currentConversation(listed), ready.info.nativeId)
+    assert.equal(listed.conversation, ready.info.nativeId)
     assert.deepEqual([listed.driver, listed.status], ['chat', 'attached'])
 
     chat.prompt('p1', 'Check with permission', [], 'k1')
@@ -334,7 +336,7 @@ test('files sent to the agent are stored, and linked where its own tools read th
 test('DeepSeek resumes the same conversation from either view', { timeout: 120_000 }, async t => {
   const { context, sessions, create, open, project } = await machine(t)
   const session = await create({ name: 'DeepSeek named session', tool: 'deepseek' })
-  const native = currentConversation(session)
+  const native = session.conversation
   const chat = await open(session.id)
   assert.equal((await chat.ready()).info.nativeId, native)
   chat.prompt('d1', 'publish deepseek-result.txt')
@@ -401,7 +403,7 @@ test(
     const chat = await open(session.id)
     const ready = await chat.ready()
     assert.equal(ready.info.instructions, 'unsupported')
-    assert.equal(ready.info.nativeId, currentConversation(session))
+    assert.equal(ready.info.nativeId, session.conversation)
     const entries = [
       ...(ready.type === 'welcome' ? ready.journal.entries : []),
       ...chat.messages.flatMap(message => (message.type === 'entry' ? [message.entry] : [])),
@@ -432,7 +434,7 @@ test(
       instructions: 'Keep it concise.',
       mcpServers,
     })
-    const native = currentConversation(session)
+    const native = session.conversation
     const chat = await open(session.id)
     const ready = await chat.ready()
     assert.equal(ready.info.instructions, 'applied')

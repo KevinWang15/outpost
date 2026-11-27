@@ -1,7 +1,15 @@
 import { spawn } from 'node:child_process'
 import { Readable } from 'node:stream'
 import { StringDecoder } from 'node:string_decoder'
-import { AppError } from './errors'
+
+export class ProcessError extends Error {
+  constructor(
+    message: string,
+    public statusCode = 502,
+  ) {
+    super(message)
+  }
+}
 
 export interface CommandResult {
   code: number | null
@@ -17,6 +25,7 @@ export interface Command {
    * The executable, input bytes, environment and deadline remain unchanged. */
   retry?: { args: string[]; when(result: CommandResult): boolean }
 }
+
 interface CommandOptions {
   signal?: AbortSignal
   env?: NodeJS.ProcessEnv
@@ -56,8 +65,8 @@ function runCommandOnce(
   options: CommandOptions,
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    const aborted = () => new AppError(`${command.label} operation aborted`, 502)
-    const timedOut = () => new AppError(`${command.label} operation timed out. Check the machine and retry.`, 504)
+    const aborted = () => new ProcessError(`${command.label} operation aborted`, 502)
+    const timedOut = () => new ProcessError(`${command.label} operation timed out. Check the machine and retry.`, 504)
     if (options.signal?.aborted) return reject(aborted())
     const timeoutMs = options.timeoutMs ?? 30_000
     if (timeoutMs <= 0) return reject(timedOut())
@@ -86,7 +95,7 @@ function runCommandOnce(
         child.kill('SIGKILL')
       }
     }
-    const fail = (error: AppError) => {
+    const fail = (error: ProcessError) => {
       if (settled) return
       settled = true
       cleanup()
@@ -108,7 +117,7 @@ function runCommandOnce(
       else {
         size += chunk.length
         if (size > (options.maxOutputBytes ?? 4_000_000))
-          fail(new AppError('The machine’s response exceeded the size limit.', 502))
+          fail(new ProcessError('The machine’s response exceeded the size limit.', 502))
         else stdout.push(chunk)
       }
     })
@@ -117,7 +126,7 @@ function runCommandOnce(
       if (options.onOutput) options.onOutput(chunk)
       else stderr = (stderr + chunk).slice(-16_000)
     })
-    child.on('error', error => fail(new AppError(`Could not launch ${command.label}: ${error.message}`, 502)))
+    child.on('error', error => fail(new ProcessError(`Could not launch ${command.label}: ${error.message}`, 502)))
     child.stdin.on('error', () => {})
     child.on('close', code => {
       if (settled) return
@@ -128,7 +137,7 @@ function runCommandOnce(
     })
     if (input instanceof Readable) {
       input.once('error', error =>
-        fail(new AppError('Could not read the installation artifact: ' + error.message, 502)),
+        fail(new ProcessError('Could not read the installation artifact: ' + error.message, 502)),
       )
       input.pipe(child.stdin)
     } else child.stdin.end(input)

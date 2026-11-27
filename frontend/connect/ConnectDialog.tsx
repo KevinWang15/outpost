@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { AppWindow, ArrowRight, Monitor } from 'lucide-react'
 import { pagePaths } from '../../shared/pages'
-import type { TerminalChoice } from '../../shared/terminals'
 import type { Target } from '../../shared/model'
 import { Dialog } from '../ui/Dialog'
-import { preferredTerminal } from './preference'
+import { preferredTerminal, type TerminalChoice } from './preference'
 import type { ConnectionState } from './useConnect'
 
 /** Presentation for the shared connection flow; launches stay in click handlers. */

@@ -1,4 +1,4 @@
-import type { SessionActivity } from '../../shared/activity'
+import type { SessionActivity } from '../activity'
 import type { TerminalSocket } from './socket'
 
 /** Acknowledge the completion visible on activation, never a later turn.
@@ -56,11 +56,6 @@ export class TerminalActivity {
         if (generation !== this.generation) return
         this.pending.delete(token)
         const reason = error instanceof Error ? error.message : String(error)
-        if (reason === 'Already seen.') {
-          this.checked.add(token)
-          if (this.checked.size > 32) this.checked.delete(this.checked.values().next().value!)
-          return
-        }
         this.notice(`Could not mark this completion as seen: ${reason}`)
       },
     )

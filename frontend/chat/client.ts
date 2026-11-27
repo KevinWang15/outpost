@@ -3,6 +3,7 @@
 import { fileRequest, listSessionFiles, sessionFileBlob } from './fileRequests'
 import {
   chatProtocol,
+  parseSessionKey,
   sessionKey,
   type ChannelMessage,
   type ChannelView,
@@ -18,7 +19,7 @@ import {
 import { ChatJournal, type ChatInfo } from '../../shared/chatHost'
 import { transcript, type Transcript } from '../../shared/chatTranscript'
 import { parseSessionFile } from '../../shared/sessionFiles'
-import { SessionFiles } from '../terminal/sessionFiles'
+import { SessionFiles } from '../files/sessionFiles'
 
 interface Conversation {
   journal: ChatJournal | null
@@ -58,10 +59,13 @@ export const newKey = () => crypto.randomUUID().replace(/-/g, '')
 /** Exactly the reference fields; the server rejects unknown properties. */
 export const plainRef = ({ targetId, sessionId }: SessionRef): SessionRef => ({ targetId, sessionId })
 
+type ClosedReason = Extract<ChatServerMessage, { type: 'closed' }>['reason']
+
 export class ChatClient {
   version = 0
   status: Status = 'connecting'
   closedMessage: string | null = null
+  private closedReason: ClosedReason | null = null
   sessions: ChatSession[] = []
   targets: ChatTarget[] = []
   sessionsLoaded = false
@@ -152,9 +156,10 @@ export class ChatClient {
 
   // Connection ------------------------------------------------------------------------------
 
-  async connect() {
+  connect() {
     this.disposed = false
     this.status = 'connecting'
+    this.closedReason = null
     this.changed()
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
     const socket = new WebSocket(`${scheme}://${location.host}/api/chat?protocol=${chatProtocol}`)
@@ -167,14 +172,14 @@ export class ChatClient {
         socket.close()
       }
     }
-    socket.onclose = () => {
+    socket.onclose = event => {
       if (this.socket !== socket) return
       this.socket = null
-      this.lost(this.closedMessage)
+      this.lost(this.closedMessage, this.closedReason, event.code)
     }
   }
 
-  private lost(message: string | null) {
+  private lost(message: string | null, reason: ClosedReason | null, code: number) {
     for (const resolve of this.pending.values())
       resolve({ ok: false, message: 'The connection was lost. Check before retrying.' })
     this.pending.clear()
@@ -184,13 +189,13 @@ export class ChatClient {
     // never apply live entries to it; the reconnect sends a new snapshot.
     for (const conversation of this.conversations.values()) conversation.link = 'starting'
     this.changed()
-    if (this.disposed || message === 'Outpost was updated. Reload this page.') return
-    if (message === 'Sign in to continue.') {
+    if (this.disposed || reason === 'outdated' || code === 1008) return
+    if (reason === 'unauthorized') {
       window.dispatchEvent(new Event('outpost:unauthorized'))
       return
     }
     const delay = Math.min(30_000, 1000 * 2 ** this.attempts++) * (0.5 + Math.random() / 2)
-    this.retry = setTimeout(() => void this.connect(), delay)
+    this.retry = setTimeout(() => this.connect(), delay)
   }
 
   /** Reconnect at once, e.g. when the page becomes visible again. */
@@ -198,7 +203,7 @@ export class ChatClient {
     if (this.status !== 'closed' || this.disposed) return
     if (this.retry) clearTimeout(this.retry)
     this.retry = null
-    void this.connect()
+    this.connect()
   }
 
   /** Close the connection; connect() may start it again (React remounts effects). */
@@ -206,6 +211,12 @@ export class ChatClient {
     this.disposed = true
     if (this.retry) clearTimeout(this.retry)
     this.retry = null
+    if (this.frame) cancelAnimationFrame(this.frame)
+    this.frame = 0
+    for (const resolve of this.pending.values()) resolve({ ok: false, message: 'The connection was closed.' })
+    this.pending.clear()
+    for (const files of this.sessionFiles.values()) files.clear()
+    this.sessionFiles.clear()
     const socket = this.socket
     this.socket = null
     socket?.close()
@@ -238,6 +249,7 @@ export class ChatClient {
       case 'hello':
         this.status = 'live'
         this.closedMessage = null
+        this.closedReason = null
         this.attempts = 0
         this.token = message.token
         this.channels = new Map(message.channels.map(channel => [channel.id, channel]))
@@ -247,7 +259,8 @@ export class ChatClient {
         // tool; only an open that did not reach the server keeps its intent.
         for (const [key, conversation] of this.conversations)
           if (conversation.wanted > 0) {
-            this.send({ type: 'open', id: newKey(), ...refOf(key), start: conversation.start })
+            const ref = parseSessionKey(key)
+            if (ref) this.send({ type: 'open', id: newKey(), ...ref, start: conversation.start })
             conversation.start = false
           }
         for (const [channelId, state] of this.channelMessages)
@@ -273,7 +286,13 @@ export class ChatClient {
         const conversation = this.conversations.get(sessionKey(message))
         if (!conversation?.journal || conversation.link !== 'live') break
         if (!conversation.journal.accept(message.entry))
-          this.send({ type: 'open', id: newKey(), ...refOf(sessionKey(message)), start: false })
+          this.send({
+            type: 'open',
+            id: newKey(),
+            targetId: message.targetId,
+            sessionId: message.sessionId,
+            start: false,
+          })
         break
       }
       case 'info':
@@ -288,10 +307,14 @@ export class ChatClient {
       case 'channel':
         this.channels.set(message.channel.id, message.channel)
         break
-      case 'channel-removed':
+      case 'channel-removed': {
         this.channels.delete(message.channelId)
         this.channelMessages.delete(message.channelId)
+        const filesKey = `channel:${message.channelId}`
+        this.sessionFiles.get(filesKey)?.clear()
+        this.sessionFiles.delete(filesKey)
         break
+      }
       case 'message': {
         const { message: item } = message
         const channel = this.channels.get(item.channelId)
@@ -318,6 +341,7 @@ export class ChatClient {
       }
       case 'closed':
         this.closedMessage = message.message
+        this.closedReason = message.reason
         break
     }
     this.changed()
@@ -398,14 +422,9 @@ export class ChatClient {
     this.changed()
   }
 
-  async readChannel(channelId: string) {
+  readChannel(channelId: string) {
     const channel = this.channels.get(channelId)
     if (!channel || (channel.readAt && channel.lastAt && channel.readAt >= channel.lastAt)) return
     this.send({ type: 'channel-read', channelId })
   }
-}
-
-const refOf = (key: string): SessionRef => {
-  const index = key.lastIndexOf('/')
-  return { targetId: key.slice(0, index), sessionId: key.slice(index + 1) }
 }

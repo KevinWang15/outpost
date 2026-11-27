@@ -1,7 +1,5 @@
-import { readFile } from 'node:fs/promises'
-import { writeJsonFile } from '../../shared/node/jsonFile'
-
 import { terminalService, validScrollback, type Scrollback } from '../../shared/terminalService'
+import { SerializedJsonStore } from './json-store'
 
 interface TerminalPreferences {
   fontSize: number
@@ -10,14 +8,15 @@ interface TerminalPreferences {
   unlimitedScrollback: boolean
 }
 
-export const defaultPreferences: TerminalPreferences = {
+const defaultPreferences: TerminalPreferences = {
   fontSize: 13.5,
   sound: true,
   scrollbackLines: terminalService.scrollback,
   unlimitedScrollback: false,
 }
-export function validPreferences(value: unknown): value is TerminalPreferences {
-  if (!value || typeof value !== 'object') return false
+
+function validPreferences(value: unknown): value is TerminalPreferences {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const item = value as TerminalPreferences
   return (
     Number.isFinite(item.fontSize) &&
@@ -33,8 +32,10 @@ export function validPreferences(value: unknown): value is TerminalPreferences {
 interface StoredPreferences extends TerminalPreferences {
   localShell: string | null
 }
+
 const validShell = (value: unknown): value is string | null =>
   value === null || (typeof value === 'string' && /^[a-z-]{1,32}$/.test(value))
+
 function validStoredPreferences(value: unknown): value is StoredPreferences {
   return (
     validPreferences(value) &&
@@ -46,38 +47,50 @@ function validStoredPreferences(value: unknown): value is StoredPreferences {
 
 /** Presentation only. Credentials, terminal content and drafts are never persisted. */
 export class Preferences {
-  value = { ...defaultPreferences }
-  localShell: string | null = null
-  private writes = Promise.resolve()
-  constructor(private path: string) {}
+  private store: SerializedJsonStore<StoredPreferences>
+
+  constructor(path: string) {
+    this.store = new SerializedJsonStore<StoredPreferences>(path, { ...defaultPreferences, localShell: null })
+  }
+
+  get value(): TerminalPreferences {
+    const { localShell: _, ...preferences } = this.store.value
+    return preferences
+  }
+
+  get localShell(): string | null {
+    return this.store.value.localShell
+  }
+
   get scrollback(): Scrollback {
-    return this.value.unlimitedScrollback ? 'unlimited' : this.value.scrollbackLines
+    return this.store.value.unlimitedScrollback ? 'unlimited' : this.store.value.scrollbackLines
   }
-  async load() {
-    try {
-      const value: unknown = {
-        scrollbackLines: defaultPreferences.scrollbackLines,
-        unlimitedScrollback: defaultPreferences.unlimitedScrollback,
-        ...JSON.parse(await readFile(this.path, 'utf8')),
+
+  load() {
+    return this.store.load(raw => {
+      if (!validStoredPreferences(raw))
+        throw new Error(
+          `Invalid terminal preferences. Remove ${this.store.path} to reset settings, then restart Outpost.`,
+        )
+      return {
+        fontSize: raw.fontSize,
+        sound: raw.sound,
+        scrollbackLines: raw.scrollbackLines,
+        unlimitedScrollback: raw.unlimitedScrollback,
+        localShell: raw.localShell,
       }
-      if (!validStoredPreferences(value))
-        throw new Error(`Invalid terminal preferences. Remove ${this.path} to reset settings, then restart Outpost.`)
-      const { localShell, ...preferences } = value
-      this.value = preferences
-      this.localShell = localShell
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
+    })
   }
+
   set(value: TerminalPreferences, localShell = this.localShell) {
     if (!validPreferences(value) || !validShell(localShell)) throw new Error('Invalid terminal preferences.')
-    const next = { ...value }
-    const write = this.writes.then(async () => {
-      await writeJsonFile(this.path, { ...next, localShell })
-      this.value = next
-      this.localShell = localShell
-    })
-    this.writes = write.catch(() => {})
-    return write
+    const next: StoredPreferences = {
+      fontSize: value.fontSize,
+      sound: value.sound,
+      scrollbackLines: value.scrollbackLines,
+      unlimitedScrollback: value.unlimitedScrollback,
+      localShell,
+    }
+    return this.store.change(() => next)
   }
 }

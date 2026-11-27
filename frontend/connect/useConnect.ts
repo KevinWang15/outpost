@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Session, Target } from '../../shared/model'
 import { pagePaths } from '../../shared/pages'
-import type { TerminalChoice } from '../../shared/terminals'
 import { standaloneBrowser } from '../browser'
 import { useDesktopEntry } from '../desktop/useDesktopEntry'
 import { useToast } from '../ui/toast-context'
-import { preferredTerminal, setPreferredTerminal } from './preference'
+import { preferredTerminal, setPreferredTerminal, type TerminalChoice } from './preference'
 import { observeDesktopHandoff } from './desktopHandoff'
 
 export interface ConnectionState {

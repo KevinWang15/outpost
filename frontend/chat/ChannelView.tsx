@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowLeft, ChevronRight, Hash, Info, LoaderCircle, Settings2, TriangleAlert } from 'lucide-react'
 import {
   sessionKey,
@@ -8,6 +8,7 @@ import {
   type Delivery,
   type SessionRef,
 } from '../../shared/chatApi'
+import { Markdown } from '../ui/Markdown'
 import { Avatar, UserAvatar } from './Avatar'
 import { FileCard, SessionFileViewer } from './Files'
 import { transcriptOf } from './client'
@@ -15,8 +16,8 @@ import { mentions } from '../../shared/chatMentions'
 import Composer from './Composer'
 import { clock, day, elapsed } from './format'
 import { MentionHandlesContext, useChat } from './context'
-import { Markdown } from './Markdown'
 import { Reply } from './Turn'
+import { usePinnedScroll } from './usePinnedScroll'
 
 /** A member's steps for one turn, from its own chat. Opening it never starts a coding tool. */
 function MemberSteps({ member, turn }: { member: { targetId: string; sessionId: string }; turn: string }) {
@@ -81,6 +82,7 @@ function Message({
   onOpenFile(owner: SessionRef | { channelId: string }, id: string): void
 }) {
   const { client, select } = useChat()
+  const handles = useContext(MentionHandlesContext)
   const [steps, setSteps] = useState(false)
   const { author } = message
   if (author.kind === 'outpost')
@@ -122,7 +124,7 @@ function Message({
             <time dateTime={message.at}>{clock(message.at)}</time>
           </div>
         )}
-        <Markdown text={message.text} />
+        <Markdown text={message.text} mentions={handles} />
         {message.files.length > 0 && (
           <div className="file-cards">
             {message.files.map(file => (
@@ -151,36 +153,35 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
   const { client, open } = useChat()
   const channel = client.channels.get(channelId)
   const state = client.channelMessages.get(channelId)
-  const scroller = useRef<HTMLDivElement>(null)
-  const pinned = useRef(true)
-  const [behind, setBehind] = useState(false)
   const handles = useMemo(() => channel?.members.map(member => member.handle) ?? [], [channel])
   const [viewing, setViewing] = useState<{ owner: SessionRef | { channelId: string }; id: string } | null>(null)
-
-  useEffect(() => {
-    pinned.current = true
-    if (client.status === 'live') void client.loadChannel(channelId, true)
-  }, [client, channelId, client.status])
-  const last = state?.messages.at(-1)?.id
-  useEffect(() => {
-    if (!last) return
-    const read = () => document.visibilityState === 'visible' && void client.readChannel(channelId)
-    read()
-    document.addEventListener('visibilitychange', read)
-    return () => document.removeEventListener('visibilitychange', read)
-  }, [client, channelId, last])
   const working = [...client.deliveries.values()].filter(
     delivery =>
       delivery.source.kind === 'channel' &&
       delivery.source.channelId === channelId &&
       (delivery.state === 'pending' || delivery.state === 'sent' || delivery.state === 'running'),
   )
-  useLayoutEffect(() => {
-    const element = scroller.current
-    if (!element) return
-    if (pinned.current) element.scrollTop = element.scrollHeight
-    else setBehind(true)
-  }, [state?.messages, working.length])
+  const { scroller, behind, onScroll, jumpToLatest, pin } = usePinnedScroll(
+    [state?.messages, working.length],
+    element => {
+      if (element.scrollTop < 40 && state?.more && !state.loading) void client.loadChannel(channelId)
+    },
+  )
+
+  useEffect(() => {
+    pin()
+    if (client.status === 'live') void client.loadChannel(channelId, true)
+  }, [client, channelId, client.status, pin])
+  const last = state?.messages.at(-1)?.id
+  useEffect(() => {
+    if (!last) return
+    const read = () => {
+      if (document.visibilityState === 'visible') client.readChannel(channelId)
+    }
+    read()
+    document.addEventListener('visibilitychange', read)
+    return () => document.removeEventListener('visibilitychange', read)
+  }, [client, channelId, last])
 
   if (!channel)
     return (
@@ -231,16 +232,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
             <Settings2 size={16} />
           </button>
         </header>
-        <div
-          className="transcript"
-          ref={scroller}
-          onScroll={event => {
-            const element = event.currentTarget
-            pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80
-            if (pinned.current) setBehind(false)
-            if (element.scrollTop < 40 && state?.more && !state.loading) void client.loadChannel(channelId)
-          }}
-        >
+        <div className="transcript" ref={scroller} onScroll={onScroll}>
           <div className="transcript-inner channel-messages">
             {state?.more && (
               <button
@@ -294,15 +286,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
           </div>
         </div>
         {behind && (
-          <button
-            className="jump"
-            onClick={() => {
-              const element = scroller.current
-              if (element) element.scrollTop = element.scrollHeight
-              pinned.current = true
-              setBehind(false)
-            }}
-          >
+          <button className="jump" onClick={jumpToLatest}>
             <ArrowDown size={14} /> Latest
           </button>
         )}
@@ -331,7 +315,7 @@ export default function ChannelView({ channelId, onBack }: { channelId: string; 
                 : `No one is mentioned, so no session will reply. Mention one, like @${handles[0] ?? 'name'}, or @all.`
             }}
             onSend={async (text, files, key) => {
-              pinned.current = true
+              pin()
               await client.call({ type: 'channel-post', channelId, key, text, files })
             }}
           />

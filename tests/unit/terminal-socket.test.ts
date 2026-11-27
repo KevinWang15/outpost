@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
-import { TerminalSocket } from '../../frontend/terminal/socket'
-import type { TerminalState } from '../../frontend/terminal/connection'
+import { TerminalSocket } from '../../shared/terminal/socket'
+import type { TerminalState } from '../../shared/terminal/connection'
 import type { ServerMessage } from '../../shared/protocol'
 import { terminalConnectionPolicy } from '../../shared/protocol'
 
@@ -407,42 +407,18 @@ test('image paste returns the effective mode reported by the machine', async t =
   assert.equal(await pasted, 'path')
 })
 
-test('image paste falls back to file path when an older machine rejects attachment mode', async t => {
+test('image paste surfaces operational errors without retrying', async t => {
   const { client, socket } = setup(t)
   readyForImages(socket)
-  const pasted = client.pasteImage(screenshot())
-  await new Promise<void>(resolve => setImmediate(resolve))
-  const firstWrite = socket.requests().filter(m => m.type === 'image-write')[0]
-  socket.message({ type: 'result', id: firstWrite.id, ok: true })
-  await settle()
-  const firstPaste = socket.requests().filter(m => m.type === 'image-paste')[0]
-  assert.equal(firstPaste.mode, 'attachment')
-  socket.message({
-    type: 'result',
-    id: firstPaste.id,
-    ok: false,
-    message: 'This tool has no supported clipboard shortcut. Use “Paste image as file path”.',
-  })
-  await new Promise<void>(resolve => setImmediate(resolve))
-  const secondWrite = socket.requests().filter(m => m.type === 'image-write')[1]
-  assert.ok(secondWrite)
-  socket.message({ type: 'result', id: secondWrite.id, ok: true })
-  await settle()
-  const secondPaste = socket.requests().filter(m => m.type === 'image-paste')[1]
-  assert.equal(secondPaste.mode, 'path')
-  socket.message({ type: 'result', id: secondPaste.id, ok: true })
-  assert.equal(await pasted, 'path')
-
-  // Operational errors do not silently retry as a file path.
   const failed = client.pasteImage(screenshot())
   await new Promise<void>(resolve => setImmediate(resolve))
-  const thirdWrite = socket.requests().filter(m => m.type === 'image-write')[2]
-  socket.message({ type: 'result', id: thirdWrite.id, ok: true })
+  const write = socket.requests().find(m => m.type === 'image-write')!
+  socket.message({ type: 'result', id: write.id, ok: true })
   await settle()
-  const thirdPaste = socket.requests().filter(m => m.type === 'image-paste')[2]
-  socket.message({ type: 'result', id: thirdPaste.id, ok: false, message: 'The coding tool exited.' })
+  const paste = socket.requests().find(m => m.type === 'image-paste')!
+  socket.message({ type: 'result', id: paste.id, ok: false, message: 'The coding tool exited.' })
   await assert.rejects(failed, /coding tool exited/)
-  assert.equal(socket.requests().filter(m => m.type === 'image-paste').length, 3)
+  assert.equal(socket.requests().filter(m => m.type === 'image-paste').length, 1)
 })
 
 test('a disconnected image upload cannot paste into a replacement attachment', async t => {
@@ -535,11 +511,8 @@ test('rapid resize bursts coalesce to the latest geometry and flush before focus
   // Focus flushes a pending resize immediately so geometry arrives before focus.
   dims.cols = 190
   client.setActive(true)
-  assert.deepEqual(
-    socket.requests().slice(-2),
-    [
-      { type: 'resize', cols: 190, rows: 24 },
-      { type: 'focus', active: true },
-    ],
-  )
+  assert.deepEqual(socket.requests().slice(-2), [
+    { type: 'resize', cols: 190, rows: 24 },
+    { type: 'focus', active: true },
+  ])
 })

@@ -1,5 +1,6 @@
 // Outpost's state directory on a machine (~/.outpost) and the primitives every
 // writer uses: owner-only atomic files and a cross-process lock.
+import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
   chmodSync,
@@ -17,6 +18,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
 import { dirname, join, relative } from 'node:path'
 
+// Keep machine/state.ts free of non-node imports so raw Node subprocesses can import it directly.
+const uuidRegex = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/
+
 /** The execution account's Outpost directory, or the directory bound to a session command. */
 export const state = { directory: join(homedir(), '.outpost') }
 
@@ -33,7 +37,7 @@ export function useSessionBinding(): SessionBinding | null {
   if (session === undefined && driver === undefined && directory === undefined) return null
   if (
     !session ||
-    !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(session) ||
+    !uuidRegex.test(session) ||
     (driver !== 'terminal' && driver !== 'chat') ||
     !directory?.startsWith('/')
   )
@@ -41,7 +45,44 @@ export function useSessionBinding(): SessionBinding | null {
   state.directory = directory
   return { session, driver }
 }
+
 export const statePath = (...parts: string[]) => join(state.directory, ...parts)
+export const terminalSocket = (session: string) => `terminals/${session}.sock`
+export const chatSocket = (session: string) => `chats/${session}.sock`
+
+export function expandHomePath(path: string): string {
+  if (path === '~') return homedir()
+  if (path.startsWith('~/')) return homedir() + path.slice(1)
+  return path
+}
+
+/** Validate shell argument syntax with `bash -n`. Returns an error message or null. */
+export function validateBashArgs(args: string, bash = 'bash'): { missing?: boolean; error?: string } | null {
+  const syntax = spawnSync(bash, ['-n', '-c', `exec "$1" ${args}`], { encoding: 'utf8' })
+  if (syntax.error) return { missing: true }
+  if (syntax.status !== 0) return { error: syntax.stderr.trim() }
+  return null
+}
+
+/** Flush a file or directory descriptor to durable storage. */
+export function syncDirectory(path: string) {
+  const descriptor = openSync(path, 'r')
+  try {
+    fsyncSync(descriptor)
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+/** Read a bounded JSON launch configuration piped to stdin by the node. */
+export async function readLaunchConfig(): Promise<unknown> {
+  let config = ''
+  for await (const chunk of process.stdin) {
+    config += chunk.toString()
+    if (config.length > 1024 * 1024) throw new Error('Launch configuration is too large')
+  }
+  return JSON.parse(config)
+}
 
 /** Work in the state directory (created on first use). */
 export function enterState() {

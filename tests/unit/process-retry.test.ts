@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
-import { AppError } from '../../backend/errors'
-import { runCommand, type Command } from '../../backend/process'
+import { ProcessError, runCommand, type Command } from '../../shared/node/process'
 import type { TargetContext } from '../../backend/sessions'
 import { Workspace } from '../../backend/workspace'
 
@@ -107,7 +106,7 @@ async function fixture(
   return { command, records, waitFor, context }
 }
 
-const status = (code: number) => (error: unknown) => error instanceof AppError && error.statusCode === code
+const status = (code: number) => (error: unknown) => error instanceof ProcessError && error.statusCode === code
 
 test('recovery replays the exact stdin and environment once', async t => {
   const { command, records } = await fixture(t)

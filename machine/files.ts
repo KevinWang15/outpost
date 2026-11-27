@@ -32,22 +32,13 @@ import {
 } from '../shared/sessionFiles'
 import { imageExtensions, maxImageBytes } from '../shared/images'
 import { readRegistry, RegistryError, session as findSession } from './registry'
-import { locked, statePath, writeFile } from './state'
+import { locked, statePath, syncDirectory, writeFile } from './state'
 
 const maxTotalBytes = 256 * 1024 * 1024
 
 export const filesDirectory = (session: string) => statePath('files', session)
 export const contentPath = (session: string, file: SessionFile) =>
   join(filesDirectory(session), file.id, 'content', file.name)
-
-function syncDirectory(path: string) {
-  const descriptor = openSync(path, 'r')
-  try {
-    fsyncSync(descriptor)
-  } finally {
-    closeSync(descriptor)
-  }
-}
 
 export function listFiles(session: string): SessionFile[] {
   let names: string[]

@@ -104,16 +104,12 @@ export default function TargetView({
     else connect(session)
   }
 
-  /** Stop the session and start it again in the same conversation with its current settings. */
+  /** Stop the session and start it again with its current settings. */
   async function restart(session: Session) {
-    try {
-      await api(`${sessionPath(session)}/terminate`, 'POST')
-      if (session.driver === 'chat') inChat(session, { start: true })
-      else connect(session)
-      await refresh()
-    } catch (problem) {
-      toast((problem as Error).message, 'error')
-    }
+    await api(`${sessionPath(session)}/terminate`, 'POST')
+    if (opensInChat(session)) inChat(session, { start: true })
+    else connect(session)
+    await refresh()
   }
 
   // A conversation found on this machine opens its session; linking one starts in the dialog above.
@@ -122,7 +118,16 @@ export default function TargetView({
   const failed = useEffectEvent((problem: Error) => toast(problem.message, 'error'))
   useEffect(() => {
     if (!opening) return
-    api<Session>(`/targets/${target.id}/sessions/${opening}`).then(openFound, failed)
+    const controller = new AbortController()
+    void api<Session>(`/targets/${target.id}/sessions/${opening}`, 'GET', undefined, controller.signal).then(
+      session => {
+        if (!controller.signal.aborted) openFound(session)
+      },
+      problem => {
+        if (!controller.signal.aborted) failed(problem as Error)
+      },
+    )
+    return () => controller.abort()
   }, [opening, target.id])
 
   async function check(session: Session) {
@@ -216,7 +221,7 @@ export default function TargetView({
               stop: () => setPanel({ kind: 'stop', session }),
               remove: () => setPanel({ kind: 'delete', session }),
             })}
-            onRestart={session => void restart(session)}
+            onRestart={session => void restart(session).catch(problem => toast((problem as Error).message, 'error'))}
             onConversations={session => setPanel({ kind: 'conversations', session })}
             onCheck={session => void check(session)}
           />
@@ -264,12 +269,15 @@ export default function TargetView({
       {panel?.kind === 'settings' && (
         <SessionSettingsDialog
           session={panel.session}
+          tools={ready ? tools : undefined}
+          directories={directories}
           onClose={close}
           onSave={async (update: SessionUpdate) => {
-            await api<Session>(sessionPath(panel.session), 'PATCH', update)
+            const updated = await api<Session>(sessionPath(panel.session), 'PATCH', update)
             await refresh()
+            return updated
           }}
-          onRestart={() => restart(panel.session)}
+          onRestart={updated => restart(updated)}
         />
       )}
       {panel?.kind === 'conversations' && (

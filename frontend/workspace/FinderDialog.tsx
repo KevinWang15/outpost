@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type FormEvent } from 'react'
 import { ArrowRight, Link, LoaderCircle, Search } from 'lucide-react'
 import type { ConversationMatch, ConversationResults, ConversationSearch } from '../../shared/model'
 import { harnesses, harnessLabel, type HarnessId } from '../../shared/harnesses'
@@ -12,6 +12,39 @@ interface FinderMachine {
 }
 interface Found extends ConversationMatch {
   machine: FinderMachine
+}
+
+interface FinderResults {
+  found: Found[]
+  truncated: boolean
+  warnings: string[]
+}
+
+async function runFinderSearch(
+  term: string,
+  selectedTool: HarnessId | '',
+  targets: FinderMachine[],
+  search: (machineId: string, input: ConversationSearch, signal: AbortSignal) => Promise<ConversationResults>,
+  signal: AbortSignal,
+): Promise<FinderResults> {
+  const input = { query: term, ...(selectedTool ? { tool: selectedTool } : {}) }
+  const settled = await Promise.allSettled(targets.map(item => search(item.id, input, signal)))
+  const found: Found[] = []
+  const warnings: string[] = []
+  let truncated = false
+  settled.forEach((outcome, index) => {
+    const item = targets[index]
+    const prefix = targets.length > 1 ? `${item.name}: ` : ''
+    if (outcome.status === 'rejected') {
+      warnings.push(`${prefix}${(outcome.reason as Error).message}`)
+      return
+    }
+    found.push(...outcome.value.sessions.map(match => ({ ...match, machine: item })))
+    warnings.push(...outcome.value.warnings.map(warning => `${prefix}${warning}`))
+    truncated ||= outcome.value.truncated
+  })
+  found.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
+  return { found, truncated, warnings }
 }
 
 /** Search the coding tools' history on the user's machines, including
@@ -39,49 +72,46 @@ export default function FinderDialog({
   const [query, setQuery] = useState(initialQuery),
     [machine, setMachine] = useState(machines.some(item => item.id === initialMachine) ? initialMachine : ''),
     [tool, setTool] = useState<HarnessId | ''>('')
-  const [results, setResults] = useState<{ found: Found[]; truncated: boolean; warnings: string[] } | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [results, setResults] = useState<FinderResults | null>(null)
+  const [busy, setBusy] = useState(() => Boolean(initialQuery.trim()))
   const request = useRef<AbortController | null>(null)
-  useEffect(() => () => request.current?.abort(), [])
   const scope = machine ? machines.filter(item => item.id === machine) : machines
 
-  async function run(event?: FormEvent) {
+  function run(event?: FormEvent) {
     event?.preventDefault()
-    if (!query.trim()) return
+    const term = query.trim()
+    if (!term) return
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
     setBusy(true)
     setResults(null)
-    const input = { query: query.trim(), ...(tool ? { tool } : {}) }
-    const settled = await Promise.allSettled(scope.map(item => search(item.id, input, controller.signal)))
-    if (controller.signal.aborted) return
-    request.current = null
-    const found: Found[] = [],
-      warnings: string[] = []
-    let truncated = false
-    settled.forEach((outcome, index) => {
-      const item = scope[index]
-      const prefix = scope.length > 1 ? `${item.name}: ` : ''
-      if (outcome.status === 'rejected') {
-        warnings.push(`${prefix}${(outcome.reason as Error).message}`)
-        return
-      }
-      found.push(...outcome.value.sessions.map(match => ({ ...match, machine: item })))
-      warnings.push(...outcome.value.warnings.map(warning => `${prefix}${warning}`))
-      truncated ||= outcome.value.truncated
+    void runFinderSearch(term, tool, scope, search, controller.signal).then(outcome => {
+      if (controller.signal.aborted) return
+      if (request.current === controller) request.current = null
+      setResults(outcome)
+      setBusy(false)
     })
-    found.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
-    setResults({ found, truncated, warnings })
-    setBusy(false)
   }
-  // A query handed over from another search box runs at once.
-  const ran = useRef(false)
+
+  // A query handed over from another search box runs on mount (including StrictMode remount).
+  const searchInitial = useEffectEvent((term: string, signal: AbortSignal) =>
+    runFinderSearch(term, tool, scope, search, signal),
+  )
   useEffect(() => {
-    if (ran.current || !initialQuery.trim()) return
-    ran.current = true
-    void run()
-  })
+    const term = initialQuery.trim()
+    if (!term) return () => request.current?.abort()
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
+    void searchInitial(term, controller.signal).then(outcome => {
+      if (controller.signal.aborted) return
+      if (request.current === controller) request.current = null
+      setResults(outcome)
+      setBusy(false)
+    })
+    return () => controller.abort()
+  }, [initialQuery])
 
   return (
     <Dialog
@@ -170,7 +200,7 @@ export default function FinderDialog({
                         <ToolIcon tool={match.tool} size={11} />
                         {harnessLabel(match.tool)}
                       </span>
-                      <strong>{match.title}</strong>
+                      <code>{match.conversation}</code>
                       {managed && <span className="chip accent">In Outpost</span>}
                     </div>
                     {match.excerpt && <p className="excerpt">{match.excerpt}</p>}

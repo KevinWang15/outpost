@@ -1,13 +1,12 @@
 // Markdown-backed User Guide parser, catalog builder, search, and link resolver.
-// Shared between the Vite frontend and Node unit tests (no Node-only builtins).
 
-export interface GuideHeading {
+interface GuideHeading {
   level: 2 | 3
   text: string
   id: string
 }
 
-export interface GuidePageDoc {
+interface GuidePageDoc {
   slug: string
   title: string
   section: string
@@ -18,25 +17,25 @@ export interface GuidePageDoc {
   sourcePath: string
 }
 
-export interface GuideSection {
+interface GuideSection {
   title: string
   pages: GuidePageDoc[]
 }
 
-export interface GuideCatalog {
+interface GuideCatalog {
   pages: GuidePageDoc[]
   sections: GuideSection[]
   bySlug: Map<string, GuidePageDoc>
 }
 
-export interface GuideSearchHit {
+interface GuideSearchHit {
   page: GuidePageDoc
   score: number
   snippet: string
   matchedHeading?: GuideHeading
 }
 
-export type ResolvedGuideLink =
+type ResolvedGuideLink =
   | { kind: 'guide'; slug: string; hash?: string }
   | { kind: 'anchor'; hash: string }
   | { kind: 'app'; href: string }
@@ -127,7 +126,7 @@ export function extractHeadings(body: string): GuideHeading[] {
   return headings
 }
 
-export function slugFromPath(filePath: string): string {
+function slugFromPath(filePath: string): string {
   const filename = filePath.replace(/\\/g, '/').split('/').pop() ?? filePath
   return filename
     .replace(/\.md$/i, '')

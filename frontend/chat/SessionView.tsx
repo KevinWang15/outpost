@@ -1,6 +1,6 @@
 import { useConnect } from '../connect/useConnect'
 import ConnectDialog from '../connect/ConnectDialog'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type * as acp from '@agentclientprotocol/sdk'
 import {
   ArrowDown,
@@ -15,11 +15,12 @@ import {
   SquareTerminal,
   Trash2,
 } from 'lucide-react'
-import { sessionKey, type ChatSession, type SessionRef } from '../../shared/chatApi'
+import { activityLabel } from '../../shared/activity'
+import { sessionKey, type SessionRef } from '../../shared/chatApi'
 import { linkedFile, type ChatInfo } from '../../shared/chatHost'
 import { harnessLabel } from '../../shared/harnesses'
-import { FileViewer } from '../terminal/FileViewer'
-import { useSessionFiles } from '../terminal/useSessionFiles'
+import { FileViewer } from '../files/FileViewer'
+import { useSessionFiles } from '../files/useSessionFiles'
 import { SessionMenu } from '../workspace/SessionMenu'
 import { MachineLink } from './Dialogs'
 import { FilesPanel } from './Files'
@@ -29,20 +30,9 @@ import Composer from './Composer'
 import { presence, presenceLabel } from './format'
 import { ConversationContext, FilesContext, useChat, type ConversationActions } from './context'
 import { Turn } from './Turn'
+import { usePinnedScroll } from './usePinnedScroll'
 
 const page = 60
-
-/** Turns compare their avatar by identity: one element per session look. */
-const avatars = new Map<string, ReactNode>()
-function avatarFor(session: ChatSession) {
-  const key = `${session.id}\n${session.name}\n${session.tool}`
-  let avatar = avatars.get(key)
-  if (!avatar) {
-    avatar = <Avatar id={session.id} name={session.name} tool={session.tool} />
-    avatars.set(key, avatar)
-  }
-  return avatar
-}
 
 function flatOptions(option: acp.SessionConfigOption) {
   if (option.type !== 'select') return []
@@ -118,9 +108,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const view = journal ? transcriptOf(journal) : null
   const terminal = info ? !!info.nativeTerminal : session?.driver === 'terminal'
   const [limit, setLimit] = useState(page)
-  const scroller = useRef<HTMLDivElement>(null)
-  const pinned = useRef(true)
-  const [behind, setBehind] = useState(false)
+  const { scroller, behind, onScroll, jumpToLatest, pin } = usePinnedScroll([view, info?.state])
 
   // Follow the session while this view shows it. Viewing never starts the coding
   // tool; Start or sending a message does. (Views are keyed by session, so scroll
@@ -140,13 +128,6 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
     document.addEventListener('visibilitychange', mark)
     return () => document.removeEventListener('visibilitychange', mark)
   }, [client, target, completion])
-
-  useLayoutEffect(() => {
-    const element = scroller.current
-    if (!element) return
-    if (pinned.current) element.scrollTop = element.scrollHeight
-    else setBehind(true)
-  }, [view, info?.state])
 
   // Session files: listed over HTTP, refreshed when the agent publishes one or a
   // message attaches some.
@@ -192,11 +173,13 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
   const running = view?.running !== null && view?.running !== undefined
   const turns = (view?.turns ?? []).filter(turn => turn.status !== 'queued' && turn.status !== 'removed')
   const shown = turns.slice(-limit)
-  const avatar = avatarFor(session)
   const starting = link === 'starting' || info?.state === 'starting'
   const stopped = link === 'stopped' || info?.state === 'exited' || info?.state === 'failed'
   const usage = info?.usage
-  const moved = session.conversations.at(-1)!.movedTo
+  const activeConv = session.conversation
+    ? session.conversations.find(c => c.id === session.conversation && c.tool === session.tool)
+    : null
+  const moved = activeConv?.movedTo ?? null
   const pending = session.runningRevision !== null && session.runningRevision !== session.config.revision
   return (
     <ConversationContext.Provider value={actions}>
@@ -209,11 +192,6 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
             <Avatar id={session.id} name={session.name} tool={session.tool} session={session} size={32} />
             <div className="conversation-title">
               <h1>{session.name}</h1>
-              {session.title && session.title !== session.name && (
-                <p className="conversation-tool-title" title={session.title}>
-                  {session.title}
-                </p>
-              )}
               <p>
                 <span className={`presence-label ${state}`}>{presenceLabel[state]}</span>
                 {' · '}
@@ -259,15 +237,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               }}
             />
           </header>
-          <div
-            className="transcript"
-            ref={scroller}
-            onScroll={event => {
-              const element = event.currentTarget
-              pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80
-              if (pinned.current) setBehind(false)
-            }}
-          >
+          <div className="transcript" ref={scroller} onScroll={onScroll}>
             <div className="transcript-inner">
               {view?.truncated && (
                 <p className="transcript-note">Earlier steps of this chat are no longer kept here.</p>
@@ -287,7 +257,13 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                 </div>
               )}
               {shown.map(turn => (
-                <Turn key={turn.id} turn={turn} avatar={avatar} />
+                <Turn
+                  key={turn.id}
+                  turn={turn}
+                  sessionId={session.id}
+                  sessionName={session.name}
+                  sessionTool={session.tool}
+                />
               ))}
               {actionError && (
                 <div className="status-card error" role="alert">
@@ -338,7 +314,12 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                 <div className="status-card">
                   <SquareTerminal size={18} />
                   <div>
-                    <strong>The coding tool needs your input in Terminal.</strong>
+                    <strong>
+                      {info.activity.blockedKind
+                        ? `${activityLabel(info.activity)} in Terminal.`
+                        : 'The coding tool needs your input in Terminal.'}
+                    </strong>
+                    {info.activity.detail && <p>{info.activity.detail}</p>}
                   </div>
                   <button className="button small" onClick={() => connector.connect(session)}>
                     Open Terminal
@@ -380,15 +361,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
             </div>
           </div>
           {behind && (
-            <button
-              className="jump"
-              onClick={() => {
-                const element = scroller.current
-                if (element) element.scrollTop = element.scrollHeight
-                pinned.current = true
-                setBehind(false)
-              }}
-            >
+            <button className="jump" onClick={jumpToLatest}>
               <ArrowDown size={14} /> Latest
             </button>
           )}
@@ -406,7 +379,12 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
                   <li key={turn.id}>
                     <span>
                       {turn.prompt
-                        .map(block => (block.type === 'text' ? block.text : '[image]'))
+                        .map(block => {
+                          if (block.type === 'text') return block.text
+                          const file = linkedFile(block)
+                          if (file) return `[${file.name}]`
+                          return block.type === 'image' ? '[image]' : '[file]'
+                        })
                         .join(' ')
                         .slice(0, 140)}
                     </span>
@@ -431,7 +409,7 @@ export default function SessionView({ target: selected, onBack }: { target: Sess
               running={running}
               disabled={link === 'unavailable' ? 'This chat is unavailable.' : null}
               onSend={async (text, files, key) => {
-                pinned.current = true
+                pin()
                 await client.prompt(target, text, files, key)
               }}
               onStop={terminal ? undefined : () => void client.request({ type: 'cancel', ...target })}

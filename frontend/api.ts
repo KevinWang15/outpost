@@ -43,8 +43,9 @@ export async function streamInstallation(
     headers: { 'x-outpost-request': '1' },
   })
   if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: response.statusText }))
     unauthorized('/targets', response.status)
-    throw new ApiError((await response.json()).message, response.status)
+    throw new ApiError(error.message, response.status, error.code)
   }
   if (!response.body) throw new Error('Installation output stream is unavailable')
   const reader = response.body.getReader(),
@@ -71,5 +72,3 @@ export async function streamInstallation(
     reader.releaseLock()
   }
 }
-
-export const copyText = (text: string) => navigator.clipboard.writeText(text)

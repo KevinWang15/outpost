@@ -7,10 +7,11 @@ import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import type { SessionRecord } from '../../shared/model'
 import { shellJoin } from '../../shared/shell'
+import { terminalService } from '../../shared/terminalService'
 import { withRpc } from '../rpc'
 import { locked, machineExecutable, readJson, statePath, writeJson } from '../state'
-import { clean, confined, foldLines, glob, isRecord, promptTitle, timestamp, type Scan } from '../stores'
-import { Harness, historyMessage, type Launch, type NativeActivity, type NativeConversation } from './harness'
+import { confined, glob, isRecord, lines, timestamp, type Scan } from '../stores'
+import { Harness, historyMessage, type Launch, type NativeConversation } from './harness'
 
 const pluginId = 'outpost'
 const transcriptNames = ['transcript_full.jsonl', 'transcript.jsonl'] as const
@@ -18,7 +19,6 @@ const transcriptNames = ['transcript_full.jsonl', 'transcript.jsonl'] as const
 interface SummaryRow {
   id: string
   root: string
-  title: string
   created: string | null
   updated: string | null
   parent: string | null
@@ -57,7 +57,6 @@ function workspaceRoot(raw: unknown): string {
 
 export class Antigravity extends Harness {
   readonly id = 'antigravity' as const
-  readonly selectionOptions = ['--conversation', '--continue', '-c']
 
   private summaries(home: string): Map<string, SummaryRow> {
     const result = new Map<string, SummaryRow>()
@@ -73,7 +72,7 @@ export class Antigravity extends Harness {
       connection = new DatabaseSync(database, { readOnly: true, timeout: 100 })
       const rows = connection
         .prepare(
-          'SELECT conversation_id, title, preview, last_modified_time, workspace_uris, parent_conversation_id, nesting_depth, last_user_input_time FROM conversation_summaries',
+          'SELECT conversation_id, last_modified_time, workspace_uris, parent_conversation_id, nesting_depth, last_user_input_time FROM conversation_summaries',
         )
         .all() as Record<string, unknown>[]
       for (const row of rows) {
@@ -83,7 +82,6 @@ export class Antigravity extends Harness {
         result.set(id, {
           id,
           root: workspaceRoot(row.workspace_uris),
-          title: clean(row.title, 200) || promptTitle(row.preview, 200),
           created: agyTimestamp(row.last_user_input_time),
           updated: agyTimestamp(row.last_modified_time),
           parent,
@@ -124,19 +122,16 @@ export class Antigravity extends Harness {
     return null
   }
 
-  private transcriptSummary(path: string) {
-    return foldLines(
-      `antigravity-summary:${path}`,
-      path,
-      () => ({ root: '', title: '', created: null as string | null }),
-      (value, record) => {
-        if (!value.root && typeof record.cwd === 'string') value.root = record.cwd
-        value.created ??= agyTimestamp(record.created_at)
-        if (!value.title && record.type === 'USER_INPUT' && typeof record.content === 'string')
-          value.title = promptTitle(unwrapUserInput(record.content))
-        return value
-      },
-    )
+  private transcriptMetadata(path: string) {
+    let root = ''
+    let created: string | null = null
+    for (const { record } of lines(path)) {
+      if (!record) continue
+      if (!root && typeof record.cwd === 'string') root = record.cwd
+      created ??= agyTimestamp(record.created_at)
+      if (root && created) break
+    }
+    return { root, created }
   }
 
   private conversation(
@@ -148,9 +143,7 @@ export class Antigravity extends Harness {
     const summary = summaries.get(id)
     const main = history[0]
     const fromTranscript =
-      main && (!summary?.root || !summary.title || !summary.created)
-        ? this.transcriptSummary(main)
-        : { root: '', title: '', created: null }
+      main && (!summary?.root || !summary.created) ? this.transcriptMetadata(main) : { root: '', created: null }
     let updated = summary?.updated ?? null
     if (!updated && main)
       try {
@@ -161,7 +154,6 @@ export class Antigravity extends Harness {
     return {
       id,
       root: summary?.root || fromTranscript.root,
-      title: summary?.title || fromTranscript.title || id,
       created: fromTranscript.created ?? summary?.created ?? null,
       updated,
       history,
@@ -229,60 +221,16 @@ export class Antigravity extends Harness {
     return this.transcriptIn(this.storeOf(session), conversation)
   }
 
-  title(session: SessionRecord, conversation: string) {
-    const home = this.storeOf(session)
-    const summary = this.summaries(home).get(conversation)
-    if (summary?.title) return summary.title
-    const path = this.transcriptIn(home, conversation)
-    return path ? this.transcriptSummary(path).title || null : null
-  }
-
-  activity(record: Record<string, unknown>): NativeActivity | null {
-    const at = record.created_at
-    if (record.type === 'ERROR_MESSAGE' || record.status === 'ERROR')
-      return { state: 'error', timestamp: at, turn: null }
-    if (record.status === 'WAITING') return { state: 'waiting', timestamp: at, turn: null }
-    if (record.status === 'CANCELED' || record.status === 'INTERRUPTED')
-      return { state: 'idle', timestamp: at, turn: null }
-    if (record.type === 'USER_INPUT') return { state: 'working', timestamp: at, turn: null }
-    if (record.type === 'PLANNER_RESPONSE') {
-      const hasTools = Array.isArray(record.tool_calls) && record.tool_calls.length > 0
-      return { state: !hasTools && record.status === 'DONE' ? 'finished' : 'working', timestamp: at, turn: null }
-    }
-    if (record.type === 'GENERIC') return { state: 'working', timestamp: at, turn: null }
-    return null
-  }
-
   hookPayload(session: SessionRecord, payload: Record<string, unknown>): Record<string, unknown> | null {
-    if ('session_id' in payload && 'hook_event_name' in payload) return payload
     const native = payload.conversationId
     const rawEvent = payload.hookEventName
     if (!this.validId(native) || typeof rawEvent !== 'string') return null
-    // Subagents never receive a direct user input step; ignore their lifecycle hooks.
+    // Subagents never receive a direct user input step; ignore their hooks.
     if ('hasUserInput' in payload && !payload.hasUserInput) return null
     if (this.summaries(this.storeOf(session)).get(native)?.subagent) return null
-    let mapped: string | null = null
-    switch (rawEvent) {
-      case 'SessionStart':
-        mapped = 'SessionStart'
-        break
-      case 'PreInvocation':
-        mapped = 'UserPromptSubmit'
-        break
-      case 'PreToolUse':
-        mapped = 'PreToolUse'
-        break
-      case 'PostToolUse':
-      case 'PostInvocation':
-        mapped = 'PostToolUse'
-        break
-      case 'Stop':
-        if (payload.terminationReason === 'ERROR') mapped = 'StopFailure'
-        else if (payload.terminationReason === 'USER_CANCELED') mapped = 'Interrupt'
-        else mapped = 'Stop'
-        break
-    }
-    return mapped ? { session_id: native, hook_event_name: mapped } : null
+    if (rawEvent === 'SessionStart') return { session_id: native, hook_event_name: 'SessionStart' }
+    if (rawEvent === 'PreInvocation') return { session_id: native, hook_event_name: 'UserPromptSubmit' }
+    return null
   }
 
   *historyPaths(home: string) {
@@ -338,7 +286,7 @@ export class Antigravity extends Harness {
         await rpc.call('initialize', {
           protocolVersion: 1,
           clientCapabilities: {},
-          clientInfo: { name: 'outpost', version: '1.0.0' },
+          clientInfo: { name: 'outpost', version: terminalService.version },
         })
         const result = await rpc.call('session/new', { cwd: root, mcpServers: [] })
         if (!this.validId(result.sessionId)) throw new Error('Antigravity CLI returned an invalid session ID')
@@ -364,7 +312,7 @@ export class Antigravity extends Harness {
     const manifest = {
       name: pluginId,
       version: '2.0.0',
-      description: 'Session activity and Outpost tools for Outpost sessions.',
+      description: 'Conversation tracking and Outpost tools for Outpost sessions.',
     }
     const mcpConfig = {
       mcpServers: {
@@ -375,10 +323,6 @@ export class Antigravity extends Harness {
       [pluginId]: {
         SessionStart: handler,
         PreInvocation: handler,
-        PostInvocation: handler,
-        PreToolUse: [{ matcher: '*', hooks: handler }],
-        PostToolUse: [{ matcher: '*', hooks: handler }],
-        Stop: handler,
       },
     }
     const registry = join(home, 'config', 'plugins.json')

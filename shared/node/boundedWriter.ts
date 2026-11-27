@@ -22,7 +22,7 @@ export class BoundedWriter {
   write(data: Buffer) {
     if (this.disposed) return false
     if (!this.stream.writable || this.bytes + this.stream.writableLength + data.length > this.limit) {
-      this.fail('Terminal input is backed up. Check the terminal before reconnecting; unsent input is not retried.')
+      this.fail('Outbound write queue is backed up. Check the connection before reconnecting.')
       return false
     }
     if (this.blocked) {
@@ -36,7 +36,7 @@ export class BoundedWriter {
     if (this.stream.write(data)) return
     this.blocked = true
     this.timer = setTimeout(
-      () => this.fail('The machine stopped accepting input. Check the terminal before reconnecting.'),
+      () => this.fail('The remote peer stopped accepting data. Check the connection before reconnecting.'),
       this.stallMs,
     )
     this.timer.unref()

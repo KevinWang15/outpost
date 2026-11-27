@@ -1,12 +1,12 @@
 // Read-only lookups for creating sessions: native conversations matching a
 // keyword, and directories under a typed path.
 import { readdirSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import type { ConversationMatch, ConversationResults, DirectorySuggestions } from '../shared/model'
 import { isHarnessId } from '../shared/harnesses'
 import type { SessionRecord } from '../shared/model'
 import { allHarnesses, harness } from './harnesses'
-import { RegistryError } from './registry'
+import { ownsConversation, RegistryError } from './registry'
+import { expandHomePath } from './state'
 import { clean, Scan, SearchLimit } from './stores'
 
 const controlCharacters = (value: string) => [...value].some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
@@ -44,27 +44,18 @@ export function searchConversations(query: unknown, tool: unknown, sessions: Ses
                 excerpt = clean(text.slice(Math.max(0, at - 70), at + needle.length + 180))
                 break search
               }
-          if (
-            excerpt === null &&
-            !conversation.title.toLowerCase().includes(needle) &&
-            !conversation.id.toLowerCase().includes(needle)
-          )
-            continue
+          if (excerpt === null && !conversation.id.toLowerCase().includes(needle)) continue
           results.push({
             tool: adapter.id,
             conversation: conversation.id,
             storage: conversation.storage,
             rootDir: conversation.root,
-            title: clean(conversation.title, 160),
             createdAt: conversation.created,
             updatedAt: conversation.updated,
             excerpt,
             managedSessionIds: sessions
-              .filter(
-                session =>
-                  session.tool === adapter.id &&
-                  JSON.stringify(session.storage) === JSON.stringify(conversation.storage) &&
-                  session.conversations.some(item => item.id === conversation.id && !item.movedTo),
+              .filter(session =>
+                ownsConversation(session, adapter.id, Object.values(conversation.storage)[0], conversation.id),
               )
               .map(session => session.id),
           })
@@ -98,7 +89,7 @@ export function directories(prefix: unknown): DirectorySuggestions {
   const slash = typed.lastIndexOf('/')
   const parent = typed.slice(0, slash + 1)
   const name = typed.slice(slash + 1)
-  const directory = parent.startsWith('~/') ? homedir() + parent.slice(1) : parent
+  const directory = expandHomePath(parent)
   let entries: string[]
   try {
     entries = readdirSync(directory)

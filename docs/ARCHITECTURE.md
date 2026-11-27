@@ -705,76 +705,48 @@ A session's driver owns its activity: the terminal service for a terminal, the
 chat host for a chat. The session list asks a running driver (its `status`
 reply) and viewers receive `activity` messages as it changes; with no driver,
 the last saved state is shown. `shared/activity.ts` defines `working | waiting |
-idle | finished | error | unknown`, display labels, attention semantics, and the
-bounded wire parser. `finished` means an unread completion; `waiting` means
-native approval/input is required. Only completions are dismissible. Terminal
-output rate, silence and keyboard input never infer whether the agent is working.
+idle | finished | error | unknown`, optional `blockedKind` (`permission |
+question | auth`) and `progress` (`0..100`), display labels, attention
+semantics, and the bounded wire parser. `finished` means an unread completion;
+`waiting` means user approval, an answer, or sign-in is required. Only
+completions are dismissible. Terminal output rate, silence and keyboard input
+never infer whether the agent is working.
 
-**Hooks.** Every terminal launch configures the tool's own lifecycle hooks to
-run `outpost-terminal hook`, which passes only the fields activity reads
-(`session_id`, `hook_event_name`, `agent_id`, `isSidechain`, `source`, `turn_id`,
-`notification_type`, `is_interrupt`) to the session's terminal service. Hooks
-never block or fail the tool: they emit no output or decisions, and a hook with
-no running service does nothing. Each harness adapter (`machine/harnesses/`)
-owns its native configuration:
+**OSC 7501 Program Status Protocol.** Terminal sessions track turn activity
+directly from the PTY stream via the standard OSC 7501 protocol
+(`shared/programStatus.ts`), following Ghostty's specification and limits:
 
-- Claude uses invocation-only `--settings` hooks for selection, submission, tools,
-  permission/elicitation waits, completion and failure. An interrupted tool means
-  Idle; an ordinary tool failure leaves the turn Working.
-- Codex uses invocation-only `-c` hooks. A short-lived app-server reads
-  `hooks/list` to obtain the native identities and hashes, then the launch
-  trusts exactly these generated commands. It does not change config.toml,
-  grant blanket hook trust, start a thread, or invoke a model.
-- Kimi uses an additive local plugin in its installed-plugin registry, preserving
-  other entries and leaving config.toml alone. Its hooks only select the main
-  conversation; they are inert outside an Outpost launch. Main-agent wire records
-  determine state because Kimi's generic turn hooks do not reliably identify
-  subagents. Pending interactions remain Waiting until all are resolved; failed
-  turns become Error.
-- Antigravity CLI uses an additive local plugin registered in `.gemini/config/plugins.json`,
-  preserving user entries and `inherits`. Its camelCase hooks map root-conversation
-  starts, invocations, tools, cancellations and errors, ignoring subagent hooks
-  that carry no direct user input.
-- DeepSeek Harness provides an ACP agent. Outpost renders its journal in either Chat or Terminal.
+- When a program probes support with `OSC 7501 ; ? ST` (or `BEL`), the terminal
+  service answers immediately in stream order — before any trailing DA1 query
+  reaches `@xterm/headless` — with
+  `OSC 7501 ; ?:states=idle,working,done,blocked,error:kinds=permission,question,auth`
+  using the same terminator.
+- Status reports (`state`, `kind`, `progress`, `id`, `app`, base64 `title` and
+  `msg`) are strictly validated (UTF-8 byte limits, valid `id` paths, canonical
+  base64, safe UTF-8 with no C0/DEL/C1 control characters) and stripped before
+  bytes are forwarded to headless xterm or viewers.
+- Root reports (`id` omitted) drive `TerminalActivity`: `working` → `working`
+  (+ `progress`), `blocked` → `waiting` (+ `blockedKind` & `progress`),
+  `done` → `finished` (with a unique `completionId`), `error` → `error`,
+  `idle` → `idle`, `clear` → clears root and child records to `idle`.
+- Child reports (`id` present) are tracked independently (capped at 255, cleared
+  hierarchically by prefix) and never alter root turn state.
+- When the tool exits, `working` and `waiting` become `idle` while an unread
+  completion or an error persists.
 
-A failed hook setup is shown on the session and does not prevent the terminal
-starting. Hooks use no model calls, additional context, prompts or MCP tools.
+**Conversation identity hooks.** Terminal launches configure minimal
+session-selection hooks (`SessionStart`, plus `PreInvocation` for Antigravity
+and `UserPromptSubmit` for Kimi) running `outpost-terminal hook` solely to keep
+`registry.json` updated when the user runs `/new` or `/resume` inside a running
+tool. Hooks never alter turn activity, never block the tool, and a failed hook
+setup is silently ignored so terminals always start cleanly. Subagent hooks and
+compaction's `SessionStart` are ignored.
 
-**Conversation identity.** SessionStart and prompt submission name the tool's
-current native conversation. When it differs from the session's (the user ran
-new, clear or resume inside the tool), it becomes the session's current
-conversation in the session timeline; if another session held it, it moves
-here and that session shows where it went. Later events from the conversation
-left behind are ignored, as are subagent events and compaction's SessionStart.
-Neither terminal text nor another conversation's modification time can select
-a conversation.
-
-**Transcripts.** The service also follows the current conversation's native
-transcript, which the adapter locates inside the session's pinned store:
-Claude's newest `projects/*/<id>.jsonl`, the rollout Codex's `state_5.sqlite`
-names for the thread, Kimi's main-agent `wire.jsonl`, Antigravity's
-`antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl`. Paths that leave the
-store or symlinks are not read. The first read walks backwards from the last
-complete line to the newest state marker; later reads, every second, consume
-only appended complete lines. A replaced or truncated file is read again from
-its end. Records over 8 MiB are skipped in both directions. Claude orders by
-native timestamp, because it can flush an older prompt after its reply; Kimi
-keeps an approval Waiting until every open one is resolved; Codex's review mode
-is Unknown until it exits.
-
-**Precedence.** For Claude and Codex, hooks are the primary source. A newer
-transcript end (idle, finished or error) in the same turn recovers a missed hook
-only while the hooks still say Working or Waiting, so the transcript's late copy
-of a reply already seen is not a new completion. For Kimi the transcript alone
-determines state. A marker present at launch, or when the conversation changes,
-is not new activity: an old reply counts as seen, an old prompt as Idle. When
-the tool exits, Working and Waiting become Idle while an unread completion or
-an error stays.
-
-**Completions.** A completion's ID is a hash of the session, the conversation
-and its source (the hook event or the transcript record). The driver saves the
-last state and the IDs the user has seen (newest 64) in
-`~/.outpost/activity/<session>.json`; that file is derived and holds no
+**Completions.** A completion's ID is a SHA-256 hash of the session, the
+conversation, the driver instance, and a monotonic completion counter. Repeated
+`done` reports for the same completion share the same ID so redraws never
+re-alert. The driver saves the last state and the IDs the user has seen (newest
+64) in `~/.outpost/activity/<session>.json`; that file is derived and holds no
 conversation content. Typing into the terminal, sending a draft or a paste, and
 an explicit acknowledgement mark the displayed completion seen; focus reports
 and attaching do not. An acknowledgement names its completion, so an old one
@@ -790,12 +762,9 @@ automatically acknowledged. Later completions require a new interaction.
 The app and list share all states. Unknown has a diagnostic; `null` means no
 observation yet. The clients render terminal bells independently of agent state. Local shell tabs have no coding-agent badge.
 
-Tests in `tests/machine/activity.test.ts` drive the activity model with native
-records and hook payloads. `OUTPOST_TEST_NATIVE_ACTIVITY=1 node --import tsx
---test tests/machine/native.test.ts` runs the installed Claude Code, Codex and
-Kimi Code in disposable homes against a local HTTP model fixture, exercising
-their real hooks and transcripts without paid model calls or touching the
-user's native stores.
+Tests in `tests/unit/program-status.test.ts` and `tests/machine/activity.test.ts`
+verify Ghostty's OSC 7501 validation vectors, stream framing/ordering, root vs
+child record isolation, completion persistence, and conversation-switch hooks.
 
 ### Terminal search
 

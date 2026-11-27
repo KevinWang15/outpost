@@ -15,21 +15,12 @@ import { join, relative, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { SessionRecord } from '../../shared/model'
 import { shellJoin } from '../../shared/shell'
+import { terminalService } from '../../shared/terminalService'
 import { machineExecutable } from '../state'
 import { withRpc } from '../rpc'
-import { clean, foldLines, glob, isRecord, lines, strings, timestamp, type Scan } from '../stores'
-import { Harness, historyMessage, turnId, type Launch, type NativeActivity, type NativeConversation } from './harness'
+import { glob, isRecord, lines, strings, timestamp, type Scan } from '../stores'
+import { Harness, historyMessage, type Launch, type NativeConversation } from './harness'
 
-const hookEvents = [
-  'SessionStart',
-  'UserPromptSubmit',
-  'PreToolUse',
-  'PostToolUse',
-  'PermissionRequest',
-  'Stop',
-  'SessionEnd',
-  'Interrupt',
-]
 /** A new conversation must not inherit another thread's ancestry or identity. */
 const inherited = [
   'git',
@@ -59,21 +50,6 @@ export function toml(value: unknown): string {
 
 export class Codex extends Harness {
   readonly id = 'codex' as const
-  readonly selectionOptions = ['--last']
-
-  /** Thread names from Codex's session index; the last entry for an ID wins. */
-  private titles(home: string) {
-    return foldLines(
-      `codex-titles:${home}`,
-      join(home, 'session_index.jsonl'),
-      () => new Map<string, string>(),
-      (titles, record) => {
-        if (typeof record.id === 'string' && typeof record.thread_name === 'string')
-          titles.set(record.id, clean(record.thread_name, 200))
-        return titles
-      },
-    )
-  }
 
   private meta(path: string) {
     for (const { record } of lines(path)) {
@@ -94,7 +70,6 @@ export class Codex extends Harness {
     return {
       id,
       root: typeof meta.cwd === 'string' ? meta.cwd : '',
-      title: this.titles(home).get(id) || `Codex conversation ${id.slice(0, 8)}`,
       created: timestamp(meta.timestamp),
       updated,
       history: [path],
@@ -147,32 +122,6 @@ export class Codex extends Harness {
     return path
   }
 
-  title(session: SessionRecord, conversation: string) {
-    return this.titles(this.storeOf(session)).get(conversation) || null
-  }
-
-  activity(record: Record<string, unknown>): NativeActivity | null {
-    const payload = record.payload
-    if (record.type !== 'event_msg' || !isRecord(payload)) return null
-    const at = record.timestamp
-    const turn = turnId(payload.turn_id)
-    switch (payload.type) {
-      case 'task_started':
-        return { state: 'working', timestamp: at, turn }
-      case 'task_complete':
-        return { state: payload.error ? 'error' : 'finished', timestamp: at, turn }
-      case 'turn_aborted':
-        return { state: 'idle', timestamp: at, turn }
-    }
-    const item = payload.type === 'item_completed' && isRecord(payload.item) ? payload.item.type : null
-    // /review starts delegated work without a parent task_started.
-    if (payload.type === 'entered_review_mode' || item === 'EnteredReviewMode')
-      return { state: 'unknown', timestamp: at, turn }
-    if (payload.type === 'exited_review_mode' || item === 'ExitedReviewMode')
-      return { state: 'idle', timestamp: at, turn }
-    return null
-  }
-
   *historyPaths(home: string) {
     for (const folder of ['sessions', 'archived_sessions']) yield* glob(home, `${folder}/**/rollout-*.jsonl`)
   }
@@ -217,7 +166,7 @@ export class Codex extends Harness {
   async create(root: string, environment: Record<string, string>, executable: string) {
     const home = this.home(environment, root)
     const started = await withRpc([executable, 'app-server'], environment, root, async rpc => {
-      await rpc.call('initialize', { clientInfo: { name: 'outpost', version: '1.0.0' } })
+      await rpc.call('initialize', { clientInfo: { name: 'outpost', version: terminalService.version } })
       rpc.send({ method: 'initialized', params: {} })
       return rpc.call('thread/start', { cwd: root })
     })
@@ -314,17 +263,14 @@ export class Codex extends Harness {
    * hashes of exactly these hooks, and trust only them, never user hooks. */
   async hooks(launch: Launch) {
     const command = shellJoin(launch.hook)
-    const options = hookEvents.flatMap(name => [
-      '-c',
-      `hooks.${name}=${toml([{ hooks: [{ type: 'command', command, timeout: 2 }] }])}`,
-    ])
+    const options = ['-c', `hooks.SessionStart=${toml([{ hooks: [{ type: 'command', command, timeout: 2 }] }])}`]
     const listed = await withRpc(
       [launch.executable, 'app-server', ...options],
       launch.environment,
       launch.session.rootDir,
       async rpc => {
         await rpc.call('initialize', {
-          clientInfo: { name: 'outpost_activity', version: '1.0.0' },
+          clientInfo: { name: 'outpost', version: terminalService.version },
           capabilities: { experimentalApi: true },
         })
         rpc.send({ method: 'initialized', params: {} })
@@ -343,8 +289,7 @@ export class Codex extends Harness {
             throw new Error('Codex returned invalid hook metadata')
           trusted[hook.key] = { enabled: true, trusted_hash: hook.currentHash }
         }
-    if (Object.keys(trusted).length !== hookEvents.length)
-      throw new Error('This Codex version does not expose the required lifecycle hooks')
+    if (Object.keys(trusted).length !== 1) throw new Error('This Codex version does not expose the SessionStart hook')
     // Dotted -c keys are not parsed as TOML keys, and hook IDs contain dots.
     return [...options, '-c', `hooks.state=${toml(trusted)}`]
   }

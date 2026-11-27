@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,6 +15,7 @@ import { checkpoint, writeHeadless } from '../../shared/terminalCheckpoint'
 import { desktopEntryUrl, type DesktopLaunch } from '../../shared/desktopAuth'
 import { scrollbackLines } from '../../shared/terminalService'
 import { protocolVersion, type ServerMessage } from '../../shared/protocol'
+import { Preferences } from '../src/preferences'
 import { ServerAccounts } from '../src/server-accounts'
 import { ServerTrust } from '../src/server-trust'
 import { ServerLoginStore } from '../src/server-login-store'
@@ -118,6 +119,8 @@ async function exerciseSession(t: TestContext, quitDuringSave: boolean) {
     type: 'activity',
     activity: {
       state: 'finished',
+      blockedKind: null,
+      progress: null,
       completionId: id,
       observation: 'current',
       detail: null,
@@ -615,3 +618,48 @@ test(
     await once(child, 'exit')
   },
 )
+
+test('Preferences.load rejects non-objects, arrays, extra keys and partial legacy JSON', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'outpost-prefs-test-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const path = join(dir, 'preferences.json')
+
+  // Missing file falls back to defaults.
+  const missing = new Preferences(path)
+  await missing.load()
+  assert.equal(missing.value.fontSize, 13.5)
+  assert.equal(missing.localShell, null)
+
+  // Valid stored preferences load cleanly.
+  const valid = {
+    fontSize: 15,
+    sound: false,
+    scrollbackLines: 25000,
+    unlimitedScrollback: true,
+    localShell: 'bash',
+  }
+  await writeFile(path, JSON.stringify(valid), 'utf8')
+  const loaded = new Preferences(path)
+  await loaded.load()
+  assert.deepEqual(loaded.value, {
+    fontSize: 15,
+    sound: false,
+    scrollbackLines: 25000,
+    unlimitedScrollback: true,
+  })
+  assert.equal(loaded.localShell, 'bash')
+
+  // Reject malformed shapes and partial legacy payloads.
+  const invalidPayloads: unknown[] = [
+    null,
+    'string',
+    [],
+    { fontSize: 14, sound: true },
+    { fontSize: 14, sound: true, scrollbackLines: 10000, unlimitedScrollback: false },
+    { ...valid, extra: true },
+  ]
+  for (const payload of invalidPayloads) {
+    await writeFile(path, JSON.stringify(payload), 'utf8')
+    await assert.rejects(() => new Preferences(path).load(), /Invalid terminal preferences/)
+  }
+})

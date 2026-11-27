@@ -8,6 +8,7 @@ mod instance;
 mod keys;
 mod layout;
 mod menu;
+mod prefs;
 mod pty;
 mod terminal;
 mod workspace;

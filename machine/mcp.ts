@@ -4,6 +4,7 @@
 import { connect } from 'node:net'
 import { createInterface } from 'node:readline'
 import historyTools from '../shared/historyTools.json' with { type: 'json' }
+import { terminalService } from '../shared/terminalService'
 import { filesChanged } from './commands'
 import { parseSessionFile } from '../shared/sessionFiles'
 import { contentPath, publish } from './files'
@@ -207,7 +208,7 @@ export async function serveMcp(bound: SessionBinding | null) {
       reply({
         protocolVersion: '2025-06-18',
         capabilities: { tools: {} },
-        serverInfo: { name: 'outpost', version: '1.0.0' },
+        serverInfo: { name: 'outpost', version: terminalService.version },
         instructions: bound ? instructions : 'No Outpost session is attached. No tools are available.',
       })
     } else if (request.method === 'ping') reply({})

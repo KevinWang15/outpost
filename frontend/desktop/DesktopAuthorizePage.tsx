@@ -82,7 +82,7 @@ export default function DesktopAuthorizePage({ requestId }: { requestId: string 
             </p>
             {user && (
               <button
-                className="button secondary"
+                className="button"
                 disabled={busy}
                 onClick={() => void signOut().catch(error => setError(error.message))}
               >
@@ -91,11 +91,11 @@ export default function DesktopAuthorizePage({ requestId }: { requestId: string 
             )}
             {ready && (
               <div className="authorization-actions">
-                <button className="button secondary" disabled={busy} onClick={() => void decide(false)}>
+                <button className="button" disabled={busy} onClick={() => void decide(false)}>
                   Cancel
                 </button>
-                <button className="button" disabled={busy || mismatch} onClick={() => void decide(true)}>
-                  {busy ? <LoaderCircle className="loading-spinner" /> : null} Connect app
+                <button className="button primary" disabled={busy || mismatch} onClick={() => void decide(true)}>
+                  {busy ? <LoaderCircle className="spin" size={15} /> : null} Connect app
                 </button>
               </div>
             )}
@@ -103,7 +103,7 @@ export default function DesktopAuthorizePage({ requestId }: { requestId: string 
           </>
         )}
         {problem && (
-          <p role="alert" className="error-text">
+          <p role="alert" className="error">
             {problem}
           </p>
         )}

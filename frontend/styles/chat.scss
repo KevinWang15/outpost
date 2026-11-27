@@ -21,7 +21,7 @@
   color: var(--muted);
   &:focus-within {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px #2563eb1f;
+    box-shadow: 0 0 0 3px var(--focus-shadow);
   }
   input {
     min-height: 32px;
@@ -334,10 +334,6 @@
   }
   code {
     font-size: 11.5px;
-  }
-  .conversation-tool-title {
-    color: var(--ink);
-    font-size: 13px;
   }
 }
 .session-settings {
@@ -808,17 +804,14 @@
   max-height: 360px;
   padding: 8px 10px;
   overflow: auto;
+  border: 1px solid var(--border);
   border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--ink);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.step-input,
-.step-output {
-  border: 1px solid var(--border);
-  background: var(--surface-muted);
-  color: var(--ink);
 }
 .step-output {
   color: var(--text);
@@ -1164,7 +1157,7 @@
   box-shadow: 0 1px 3px #0f172a12;
   &:focus-within {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px #2563eb1f;
+    box-shadow: 0 0 0 3px var(--focus-shadow);
   }
   textarea {
     flex: 1;
@@ -1342,12 +1335,18 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    &::before {
+    &:not(.hint)::before {
       content: 'Queued';
       color: var(--muted);
       font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
+    }
+    &.hint {
+      border: 0;
+      padding: 0 2px;
+      color: var(--muted);
+      font-size: 12px;
     }
   }
 }
@@ -1526,7 +1525,7 @@
   border-radius: 7px;
   &:focus-within {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px #2563eb1f;
+    box-shadow: 0 0 0 3px var(--focus-shadow);
   }
   > span {
     padding-left: 10px;

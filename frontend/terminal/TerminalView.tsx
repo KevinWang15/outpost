@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
+import '../styles/terminal.scss'
 import { type CloseReason } from '../../shared/protocol'
 import { imageMediaTypes } from '../../shared/images'
 import { harnessLabel, type HarnessId } from '../../shared/harnesses'
@@ -31,7 +32,7 @@ import { useTerminalSearch } from './useTerminalSearch'
 import { touchInput as touch } from '../browser'
 import { useTerminalViewport } from './viewport'
 import type { TerminalModifiers } from './keys'
-import type { TerminalState } from './connection'
+import type { TerminalState } from '../../shared/terminal/connection'
 import { TerminalSession } from './session'
 import { notificationLabels, useBellNotifications } from './useBellNotifications'
 
@@ -378,10 +379,8 @@ export default function TerminalView({ token, title, onClose }: Props) {
               <button
                 className="button small primary"
                 onClick={() => {
-                  void openBrowserTab(blockedLink).then(opened => {
-                    if (opened) setBlockedLink(null)
-                    else notify('Allow pop-ups for Outpost, then try again, or copy the link into your browser.', true)
-                  })
+                  if (openBrowserTab(blockedLink)) setBlockedLink(null)
+                  else notify('Allow pop-ups for Outpost, then try again, or copy the link into your browser.', true)
                 }}
               >
                 Open link

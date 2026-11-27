@@ -1,6 +1,7 @@
 import type { Terminal } from '@xterm/xterm'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { browserUrl } from '../../shared/signals'
+import { isMac } from '../browser'
 import { openBrowserTab } from './browser'
 
 /** Own both OSC 8 hyperlinks and detected URLs. A link gesture must not also
@@ -8,10 +9,9 @@ import { openBrowserTab } from './browser'
  * before the user answers the hyperlink confirmation. */
 export function attachTerminalLinks(terminal: Terminal, blocked: (url: string) => void) {
   const screen = terminal.element!.querySelector<HTMLElement>('.xterm-screen')!
-  const mac = /Mac/.test(navigator.platform)
+  const mac = isMac()
   let hovered: string | null = null
   let ownedGesture = false
-  let disposed = false
   const forceSelection = (event: MouseEvent) =>
     event.shiftKey || (mac && terminal.options.macOptionClickForcesSelection && event.altKey)
   const hover = (_event: MouseEvent, uri: string) => {
@@ -34,9 +34,7 @@ export function attachTerminalLinks(terminal: Terminal, blocked: (url: string) =
     // OSC 8 can display a label unrelated to its destination. Show the actual
     // URL and return on cancellation, without calling either browser opener.
     if (confirm && !window.confirm(`Do you want to navigate to ${url}?`)) return
-    void openBrowserTab(url).then(opened => {
-      if (!disposed && !opened) blocked(url)
-    })
+    if (!openBrowserTab(url)) blocked(url)
   }
   const previous = terminal.options.linkHandler
   terminal.options.linkHandler = { activate: (event, uri) => activate(event, uri, true), hover, leave }
@@ -68,7 +66,6 @@ export function attachTerminalLinks(terminal: Terminal, blocked: (url: string) =
   window.addEventListener('mouseup', end)
   window.addEventListener('blur', end)
   return () => {
-    disposed = true
     screen.removeEventListener('mousedown', down)
     screen.removeEventListener('mousemove', move)
     window.removeEventListener('mouseup', end)

@@ -14,7 +14,7 @@ async function key(password: string, salt: Buffer): Promise<Buffer> {
     running--
   }
 }
-export function validatePassword(password: string) {
+function validatePassword(password: string) {
   if (password.length < 8 || password.length > 1024)
     throw new AppError('Password must be between 8 and 1024 characters.', 400)
 }

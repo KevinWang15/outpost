@@ -58,15 +58,15 @@ fn action(id: &'static str, glyph: LucideIcon, hint: &'static str) -> Button {
 impl Workspace {
     pub(super) fn open_files(&mut self, id: Id, w: &mut Window, cx: &mut Context<Self>) {
         self.select(id, w, cx);
-        self.files_menu = Some(id);
+        self.overlay = Some(OverlayMenu::Files(id));
         self.focus.focus(w, cx);
         self.panes[&id].read(cx).command("files", json!({}));
         cx.notify();
     }
     fn view_file(&mut self, id: Id, file: &Value, cx: &mut Context<Self>) {
-        self.files_menu = None;
-        self.preview_id = Some(strval(file, "id"));
-        self.preview = self.panes[&id]
+        self.overlay = None;
+        self.files.preview_id = Some(strval(file, "id"));
+        self.files.preview = self.panes[&id]
             .read(cx)
             .file_previews
             .most_recent
@@ -74,7 +74,7 @@ impl Workspace {
             .filter(|(key, _)| file["id"] == *key)
             .map(|(_, image)| image.clone());
         self.message.clear();
-        if self.preview.is_none() && supported(file) {
+        if self.files.preview.is_none() && supported(file) {
             self.request_preview(id, file, cx);
         }
         cx.notify();
@@ -179,9 +179,12 @@ impl Workspace {
         }
     }
     fn close_viewer(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        self.preview_id = None;
-        self.preview = None;
-        self.files_menu = self.tabs.get(self.current).map(|tab| tab.active);
+        self.files.preview_id = None;
+        self.files.preview = None;
+        self.overlay = self
+            .tabs
+            .get(self.current)
+            .map(|tab| OverlayMenu::Files(tab.active));
         self.focus.focus(w, cx);
         cx.notify();
     }
@@ -190,7 +193,7 @@ impl Workspace {
         let files = items(&p.read(cx).files);
         if let Some(index) = files
             .iter()
-            .position(|f| f["id"].as_str() == self.preview_id.as_deref())
+            .position(|f| f["id"].as_str() == self.files.preview_id.as_deref())
             && files.len() > 1
         {
             let next = (index as isize + delta).rem_euclid(files.len() as isize) as usize;
@@ -204,14 +207,15 @@ impl Workspace {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.preview_id.is_some() {
+        if self.files.preview_id.is_some() {
             match e.keystroke.key.as_str() {
                 "escape" => self.close_viewer(w, cx),
                 "left" => self.browse_file(-1, cx),
                 "right" => self.browse_file(1, cx),
                 _ => {}
             }
-        } else if self.files_menu.is_some() && e.keystroke.key == "escape" {
+        } else if matches!(self.overlay, Some(OverlayMenu::Files(_))) && e.keystroke.key == "escape"
+        {
             self.show(Page::Terminal, w, cx);
         } else {
             return false;
@@ -261,7 +265,9 @@ impl Workspace {
             )
     }
     pub(super) fn prefetch_thumbnail(&self, cx: &mut Context<Self>) {
-        let Some(id) = self.files_menu else { return };
+        let Some(OverlayMenu::Files(id)) = self.overlay else {
+            return;
+        };
         let Some(pane) = self.panes.get(&id) else {
             return;
         };
@@ -297,7 +303,7 @@ impl Workspace {
         pane: &Pane,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
-        let open = self.files_menu == Some(id);
+        let open = self.overlay == Some(OverlayMenu::Files(id));
         let files = items(&pane.files);
         let trigger = Button::new(("files-trigger", id))
             .outline()
@@ -307,7 +313,7 @@ impl Workspace {
             .tooltip_text("Session files")
             .bg(rgb(0x191919))
             .on_click(cx.listener(move |s, _, w, cx| {
-                if s.files_menu == Some(id) {
+                if s.overlay == Some(OverlayMenu::Files(id)) {
                     s.show(Page::Terminal, w, cx);
                 } else {
                     s.open_files(id, w, cx);
@@ -327,7 +333,7 @@ impl Workspace {
             .p(px(8.))
             .bg(rgb(0x191919))
             .on_close(cx.listener(move |s, _, w, cx| {
-                if s.files_menu == Some(id)
+                if s.overlay == Some(OverlayMenu::Files(id))
                     && !badge
                         .bounds()
                         .is_some_and(|b| b.contains(&w.mouse_position()))
@@ -412,13 +418,13 @@ impl Workspace {
         })
     }
     pub(super) fn file_viewer(&self, cx: &Context<Self>) -> Option<AnyElement> {
-        let key = self.preview_id.as_deref()?;
+        let key = self.files.preview_id.as_deref()?;
         let id = self.tabs.get(self.current)?.active;
         let pane = self.panes.get(&id)?.read(cx);
         let files = items(&pane.files);
         let idx = files.iter().position(|f| f["id"] == key)?;
         let file = &files[idx];
-        let stage = if let Some(image) = &self.preview {
+        let stage = if let Some(image) = &self.files.preview {
             img(image.clone())
                 .size_full()
                 .object_fit(ObjectFit::Contain)

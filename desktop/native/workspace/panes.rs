@@ -22,7 +22,6 @@ pub(super) fn pane_activity_state(pane: &Pane) -> Option<ActivityState> {
                 "waiting" | "finished" => ActivityState::Attention,
                 "error" => ActivityState::Error,
                 "idle" => ActivityState::Idle,
-                "unknown" => ActivityState::Unknown,
                 "" => ActivityState::Ready,
                 _ => ActivityState::Unknown,
             })
@@ -48,17 +47,28 @@ pub(super) fn pane_status_label(pane: &Pane) -> String {
     };
     let mut parts = vec![conn.to_owned()];
     if pane.connection == ConnectionState::Connected {
-        let activity = match pane.activity.as_str() {
-            "working" => Some("Working"),
-            "waiting" => Some("Waiting for you"),
-            "idle" => Some("Idle"),
-            "finished" => Some("Needs you"),
-            "error" => Some("Error"),
-            "unknown" => Some("Unknown"),
+        let activity: Option<String> = match pane.activity.as_str() {
+            "working" => Some(match pane.activity_progress {
+                Some(pct) => format!("Working · {pct}%"),
+                None => "Working".into(),
+            }),
+            "waiting" => Some(
+                match pane.activity_blocked_kind.as_deref() {
+                    Some("permission") => "Needs approval",
+                    Some("question") => "Waiting for answer",
+                    Some("auth") => "Needs sign-in",
+                    _ => "Waiting for you",
+                }
+                .into(),
+            ),
+            "idle" => Some("Idle".into()),
+            "finished" => Some("Needs you".into()),
+            "error" => Some("Error".into()),
+            "unknown" => Some("Unknown".into()),
             _ => None,
         };
         if let Some(label) = activity {
-            parts.push(label.to_owned());
+            parts.push(label);
         }
         if let Some(detail) = pane.activity_detail.as_deref()
             && !detail.is_empty()
@@ -214,13 +224,40 @@ impl Workspace {
     fn toggle_pane_menu(&mut self, id: Id, open: bool, w: &mut Window, cx: &mut Context<Self>) {
         if open {
             self.select(id, w, cx);
-            self.context_menu = None;
-            self.tab_menu = None;
-            self.pane_menu = Some(id);
-        } else if self.pane_menu == Some(id) {
-            self.pane_menu = None;
+            self.overlay = Some(OverlayMenu::Pane(id));
+        } else if self.overlay == Some(OverlayMenu::Pane(id)) {
+            self.overlay = None;
         }
         cx.notify();
+    }
+
+    fn move_to_window_entries(
+        &self,
+        cx: &Context<Self>,
+        on_pick: impl Fn(&mut Self, WindowHandle<Self>, &mut Window, &mut Context<Self>)
+            + Copy
+            + 'static,
+    ) -> Vec<MenuEntry> {
+        let mut entries = Vec::new();
+        for other in cx.windows().into_iter().filter(|h| *h != self.handle) {
+            let Some(target) = other.downcast::<Workspace>() else {
+                continue;
+            };
+            let Ok(workspace) = target.read(cx) else {
+                continue;
+            };
+            let title = workspace
+                .active()
+                .map(|p| p.read(cx).title.clone())
+                .unwrap_or_else(|| "Outpost".into());
+            let label = format!("Move to window {} · {title}", workspace.id);
+            entries.push(MenuEntry::item_with_icon(
+                label,
+                LucideIcon::AppWindow,
+                cx.listener(move |s, _, w, cx| on_pick(s, target, w, cx)),
+            ));
+        }
+        entries
     }
 
     pub(super) fn pane_header(
@@ -231,7 +268,7 @@ impl Workspace {
         cx: &Context<Self>,
     ) -> Stateful<Div> {
         let zoomed = self.tabs[self.current].zoom;
-        let open = self.pane_menu == Some(id);
+        let open = self.overlay == Some(OverlayMenu::Pane(id));
         let dragging = self.drag.dragged_pane() == Some(id);
         let zoom_label = if zoomed {
             "Restore split panes"
@@ -396,39 +433,22 @@ impl Workspace {
             item(
                 "Move pane to its own tab",
                 LucideIcon::PanelTop,
-                |s, _, w, cx| s.place_selected(false, Destination::Tab, w, cx),
+                |s, _, w, cx| s.place_selected_pane(Destination::Tab, w, cx),
             ),
             item(
                 "Move pane to new window",
                 LucideIcon::AppWindow,
-                |s, _, w, cx| s.detach(false, w, cx),
+                |s, _, w, cx| s.detach_selected_pane(w, cx),
             ),
         ];
-        for other in cx.windows().into_iter().filter(|h| *h != self.handle) {
-            let Some(target) = other.downcast::<Workspace>() else {
-                continue;
-            };
-            let Ok(workspace) = target.read(cx) else {
-                continue;
-            };
-            let title = workspace
-                .active()
-                .map(|p| p.read(cx).title.clone())
-                .unwrap_or_else(|| "Outpost".into());
-            let label = format!("Move to window {} · {title}", workspace.id);
-            entries.push(MenuEntry::item_with_icon(
-                label,
-                LucideIcon::AppWindow,
-                cx.listener(move |s, _, w, cx| {
-                    if s.panes.contains_key(&id) {
-                        s.select(id, w, cx);
-                        if let Some(item) = s.selected_item(false, cx) {
-                            s.transfer_to(&item, target, Destination::Tab, w, cx);
-                        }
-                    }
-                }),
-            ));
-        }
+        entries.extend(self.move_to_window_entries(cx, move |s, target, w, cx| {
+            if s.panes.contains_key(&id) {
+                s.select(id, w, cx);
+                if let Some(transfer) = s.selected_pane_ref() {
+                    s.transfer_to(transfer, target, Destination::Tab, w, cx);
+                }
+            }
+        }));
         entries.extend([
             MenuEntry::Separator,
             item("Find in terminal…", LucideIcon::Search, |s, _, w, cx| {
@@ -459,12 +479,7 @@ impl Workspace {
             self.current = i;
             self.tabs[i].active = id;
         }
-        self.new_tab_menu_open = false;
-        self.bar_menu_open = false;
-        self.pane_menu = None;
-        self.tab_menu = None;
-        self.files_menu = None;
-        self.context_menu = Some((id, position));
+        self.overlay = Some(OverlayMenu::Context(id, position));
         cx.notify();
     }
 
@@ -477,12 +492,7 @@ impl Workspace {
         if !self.tabs.iter().any(|t| t.id == tab_id) {
             return;
         }
-        self.new_tab_menu_open = false;
-        self.bar_menu_open = false;
-        self.pane_menu = None;
-        self.context_menu = None;
-        self.files_menu = None;
-        self.tab_menu = Some((tab_id, position));
+        self.overlay = Some(OverlayMenu::Tab(tab_id, position));
         cx.notify();
     }
 
@@ -496,13 +506,7 @@ impl Workspace {
             return;
         };
         let current = tab.name.clone();
-        self.new_tab_menu_open = false;
-        self.bar_menu_open = false;
-        self.pane_menu = None;
-        self.context_menu = None;
-        self.tab_menu = None;
-        self.files_menu = None;
-        self.tab_rename = Some(tab_id);
+        self.overlay = Some(OverlayMenu::TabRename(tab_id));
         self.tab_rename_input
             .update(cx, |s, cx| s.set_value_silent(&current, cx));
         self.tab_rename_input.read(cx).focus_handle(cx).focus(w, cx);
@@ -510,31 +514,35 @@ impl Workspace {
     }
 
     pub(super) fn close_tab_rename(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        if self.tab_rename.take().is_some() {
+        if matches!(self.overlay, Some(OverlayMenu::TabRename(_))) {
+            self.overlay = None;
             self.restore_focus(w, cx);
             cx.notify();
         }
     }
 
     pub(super) fn commit_tab_rename(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        if let Some(tab_id) = self.tab_rename.take()
-            && let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id)
-        {
-            tab.name = self
-                .tab_rename_input
-                .read(cx)
-                .value()
-                .trim()
-                .chars()
-                .take(120)
-                .collect();
+        if let Some(OverlayMenu::TabRename(tab_id)) = self.overlay {
+            self.overlay = None;
+            if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.name = self
+                    .tab_rename_input
+                    .read(cx)
+                    .value()
+                    .trim()
+                    .chars()
+                    .take(120)
+                    .collect();
+            }
         }
         self.restore_focus(w, cx);
         cx.notify();
     }
 
     pub(super) fn tab_rename_overlay(&self, cx: &Context<Self>) -> Option<AnyElement> {
-        let tab_id = self.tab_rename?;
+        let Some(OverlayMenu::TabRename(tab_id)) = self.overlay else {
+            return None;
+        };
         let tab = self.tabs.iter().find(|t| t.id == tab_id)?;
         let default_title = self
             .panes
@@ -610,16 +618,19 @@ impl Workspace {
     }
 
     pub(super) fn tab_context_menu_overlay(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
-        let active = self.tab_menu.and_then(|(tab_id, pos)| {
-            let idx = self.tabs.iter().position(|t| t.id == tab_id)?;
-            let tab = &self.tabs[idx];
-            Some((tab_id, idx, tab.active, pos))
-        });
+        let active = match self.overlay {
+            Some(OverlayMenu::Tab(tab_id, pos)) => self.tabs.iter().position(|t| t.id == tab_id).map(|idx| {
+                let tab = &self.tabs[idx];
+                (tab_id, idx, tab.active, pos)
+            }),
+            _ => None,
+        };
         let position = active.map(|(_, _, _, pos)| pos);
         let mut menu = popup_menu("tab-context-menu", position)
             .min_width(px(244.))
             .on_close(cx.listener(|s, _, _, cx| {
-                if s.tab_menu.take().is_some() {
+                if matches!(s.overlay, Some(OverlayMenu::Tab(..))) {
+                    s.overlay = None;
                     cx.notify();
                 }
             }));
@@ -713,52 +724,40 @@ impl Workspace {
                     "Move beside active tab",
                     LucideIcon::PanelRight,
                     cx.listener(move |s, _, w, cx| {
-                        if let Some(item) = s.tab_drag_item(tab_id, cx)
-                            && let Some(transfer) = s.take_item(&item)
+                        if let Some(target) = s.tab_transfer_ref(tab_id)
+                            && let Some(transfer) = s.take_transfer(target)
                         {
-                            s.receive(transfer, Destination::Split(dest, Axis::Across, false), w, cx);
+                            s.receive(
+                                transfer,
+                                Destination::Split(dest, Axis::Across, false),
+                                w,
+                                cx,
+                            );
                         }
                     }),
                 ));
             }
 
-            menu = menu.entry(MenuEntry::item_with_icon(
-                "Move tab to new window",
-                LucideIcon::AppWindow,
-                cx.listener(move |s, _, w, cx| s.detach_tab(tab_id, w, cx)),
-            ));
-
-            for other in cx.windows().into_iter().filter(|h| *h != self.handle) {
-                let Some(target) = other.downcast::<Workspace>() else {
-                    continue;
-                };
-                let Ok(workspace) = target.read(cx) else {
-                    continue;
-                };
-                let title = workspace
-                    .active()
-                    .map(|p| p.read(cx).title.clone())
-                    .unwrap_or_else(|| "Outpost".into());
-                let label = format!("Move to window {} · {title}", workspace.id);
-                menu = menu.entry(MenuEntry::item_with_icon(
-                    label,
+            menu = menu
+                .entry(MenuEntry::item_with_icon(
+                    "Move tab to new window",
                     LucideIcon::AppWindow,
-                    cx.listener(move |s, _, w, cx| {
-                        if let Some(item) = s.tab_drag_item(tab_id, cx) {
-                            s.transfer_to(&item, target, Destination::Tab, w, cx);
-                        }
-                    }),
-                ));
-            }
-
-            menu = menu.entry(MenuEntry::Separator).entry(
-                MenuEntry::destructive_item(
-                    "Close tab",
-                    Some(LucideIcon::X),
-                    cx.listener(move |s, _, w, cx| s.close_tab(pane_id, w, cx)),
-                )
-                .with_shortcut(if mac { "⌘⌥W" } else { "Ctrl+Alt+W" }),
-            );
+                    cx.listener(move |s, _, w, cx| s.detach_tab(tab_id, w, cx)),
+                ))
+                .entries(self.move_to_window_entries(cx, move |s, target, w, cx| {
+                    if let Some(transfer) = s.tab_transfer_ref(tab_id) {
+                        s.transfer_to(transfer, target, Destination::Tab, w, cx);
+                    }
+                }))
+                .entry(MenuEntry::Separator)
+                .entry(
+                    MenuEntry::destructive_item(
+                        "Close tab",
+                        Some(LucideIcon::X),
+                        cx.listener(move |s, _, w, cx| s.close_tab(pane_id, w, cx)),
+                    )
+                    .with_shortcut(if mac { "⌘⌥W" } else { "Ctrl+Alt+W" }),
+                );
 
             if tab_count > 1 {
                 menu = menu.entry(MenuEntry::destructive_item(
@@ -773,14 +772,18 @@ impl Workspace {
     }
 
     pub(super) fn context_menu_overlay(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
-        let active = self.context_menu.and_then(|(id, pos)| {
-            self.panes.get(&id).map(|pane| (id, pos, pane.read(cx)))
-        });
+        let active = match self.overlay {
+            Some(OverlayMenu::Context(id, pos)) => {
+                self.panes.get(&id).map(|pane| (id, pos, pane.read(cx)))
+            }
+            _ => None,
+        };
         let position = active.map(|(_, pos, _)| pos);
         let mut menu = popup_menu("terminal-context-menu", position)
             .min_width(px(232.))
             .on_close(cx.listener(|s, _, _, cx| {
-                if s.context_menu.take().is_some() {
+                if matches!(s.overlay, Some(OverlayMenu::Context(..))) {
+                    s.overlay = None;
                     cx.notify();
                 }
             }));

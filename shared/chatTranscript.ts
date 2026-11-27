@@ -45,7 +45,7 @@ export type TurnItem =
   | { type: 'compaction'; key: string; status: string; error: string | null }
   | { type: 'file'; key: string; file: SessionFile }
 
-export type TurnStatus = 'queued' | 'running' | 'done' | 'cancelled' | 'error' | 'removed' | 'history'
+type TurnStatus = 'queued' | 'running' | 'done' | 'cancelled' | 'error' | 'removed' | 'history'
 export interface TurnView {
   id: string
   /** null for history replayed from the agent's own store. */
@@ -85,8 +85,12 @@ function labelOf(origin: ChatOrigin | null, prompt: acp.ContentBlock[]) {
   return match ? match[1] : null
 }
 
-function toolView(update: acp.ToolCall | acp.ToolCallUpdate, at: string): ToolView {
+function toolTerminal(update: acp.ToolCall | acp.ToolCallUpdate): string | null {
   const meta = record(update._meta) && record(update._meta.outpost) ? update._meta.outpost : null
+  return typeof meta?.output === 'string' ? meta.output : null
+}
+
+function toolView(update: acp.ToolCall | acp.ToolCallUpdate, at: string): ToolView {
   return {
     type: 'tool',
     key: `tool:${update.toolCallId}`,
@@ -98,13 +102,12 @@ function toolView(update: acp.ToolCall | acp.ToolCallUpdate, at: string): ToolVi
     output: update.rawOutput,
     content: update.content ?? [],
     locations: update.locations ?? [],
-    terminal: typeof meta?.output === 'string' ? meta.output : null,
+    terminal: toolTerminal(update),
     startedAt: at,
   }
 }
 
-function mergeToolView(view: ToolView, update: acp.ToolCallUpdate, at: string): ToolView {
-  const next = toolView({ ...update, title: update.title ?? view.title }, at)
+function mergeToolView(view: ToolView, update: acp.ToolCallUpdate): ToolView {
   return {
     ...view,
     title: update.title || update.name || view.title,
@@ -114,7 +117,7 @@ function mergeToolView(view: ToolView, update: acp.ToolCallUpdate, at: string): 
     output: update.rawOutput !== undefined ? update.rawOutput : view.output,
     content: update.content ?? view.content,
     locations: update.locations ?? view.locations,
-    terminal: next.terminal ?? view.terminal,
+    terminal: toolTerminal(update) ?? view.terminal,
   }
 }
 
@@ -156,7 +159,7 @@ function applyUpdate(turn: TurnView, update: acp.SessionUpdate, live: boolean, a
     case 'tool_call':
     case 'tool_call_update': {
       const index = turn.items.findIndex(item => item.type === 'tool' && item.id === update.toolCallId)
-      if (index >= 0) turn.items[index] = mergeToolView(turn.items[index] as ToolView, update, at)
+      if (index >= 0) turn.items[index] = mergeToolView(turn.items[index] as ToolView, update)
       else turn.items.push(toolView(update, at))
       return
     }

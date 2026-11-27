@@ -297,7 +297,7 @@
   }
 }
 
-.guide-code-block {
+.guide-prose .code-block {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -312,7 +312,7 @@
   }
 }
 
-.guide-code-bar {
+.guide-prose .code-block-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -329,7 +329,7 @@
   }
 }
 
-.guide-table-scroll {
+.guide-prose .table-scroll {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);

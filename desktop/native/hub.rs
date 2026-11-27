@@ -1,11 +1,11 @@
-use crate::{bridge::Bridge, workspace::Workspace};
+use crate::{bridge::Bridge, prefs::Preferences, workspace::Workspace};
 use gpui::*;
 use serde_json::{Value, json};
 
 /// All windows share the same login store, connection registry and link handler.
 pub struct Hub {
     pub bridge: Option<Bridge>,
-    pub prefs: Value,
+    pub prefs: Option<Preferences>,
     pub accounts: Value,
     pub error: String,
 }
@@ -55,7 +55,7 @@ impl Hub {
         .detach();
         cx.set_global(Self {
             bridge,
-            prefs: Value::Null,
+            prefs: None,
             accounts: Value::Null,
             error,
         });
@@ -70,7 +70,7 @@ impl Hub {
         if kind == "prefs" || kind == "accounts" {
             let hub = cx.global_mut::<Self>();
             if kind == "prefs" {
-                hub.prefs = e.clone()
+                hub.prefs = Some(Preferences::from_event(&e));
             } else {
                 hub.accounts = e.clone()
             }

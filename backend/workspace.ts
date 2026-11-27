@@ -1,21 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { access, chmod, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Ajv } from 'ajv'
 import type { ExecutionEnvironment, Target, TargetUpdate } from '../shared/model'
 import Type from 'typebox'
 import { targetRecord } from '../shared/schemas'
 import { AppError } from './errors'
 import { readStateFile } from './stateFile'
+import { compileSchema } from './validate'
 import { writeJsonFile } from '../shared/node/jsonFile'
 
 interface WorkspaceFile {
   version: 3
   targets: Target[]
 }
-const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false })
-const validTarget = ajv.compile<Target>(targetRecord)
-const validFile = ajv.compile<WorkspaceFile>(
+const validTarget = compileSchema(targetRecord)
+const validFile = compileSchema(
   Type.Object({ version: Type.Literal(3), targets: Type.Array(targetRecord) }, { additionalProperties: false }),
 )
 

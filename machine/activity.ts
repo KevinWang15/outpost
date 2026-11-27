@@ -1,17 +1,17 @@
 // A session's activity, owned by its driver while it runs. The terminal service
-// keeps it from the tool's hooks and its transcript; the chat host from ACP.
-// Both save the last state and the completions already seen, so an unread
-// reply is still reported after the driver exits.
-import { createHash } from 'node:crypto'
-import { closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
-import type { ActivityState, SessionActivity } from '../shared/activity'
+// reads OSC 7501 Program Status reports directly from the PTY; the chat host
+// derives it from ACP. Both persist the last state and seen completions so an
+// unread reply or error survives after the driver exits.
+import { createHash, randomUUID } from 'node:crypto'
+import { lstatSync } from 'node:fs'
+import { parseSessionActivity, type ActivityState, type SessionActivity } from '../shared/activity'
 import type { SessionRecord } from '../shared/model'
-import type { Harness, Marker } from './harnesses/harness'
-import { turnId } from './harnesses/harness'
+import type { BlockedKind, ProgramStatusReport, ProgramStatusState } from '../shared/programStatus'
+import type { Harness } from './harnesses/harness'
 import { recordEvent } from './events'
 import { changeRegistry, switchConversation } from './registry'
 import { readJson, statePath, writeJson } from './state'
-import { lines, reverseRecords, timestamp } from './stores'
+import { reverseRecords, Scan } from './stores'
 
 interface ActivityRecord {
   /** The current conversation when it was saved. */
@@ -21,15 +21,34 @@ interface ActivityRecord {
   seen: string[]
 }
 
+interface ProgramRecord {
+  state: Exclude<ProgramStatusState, 'clear'>
+  kind: BlockedKind | null
+  progress: number | null
+  app: string | null
+  title: string | null
+  msg: string | null
+  at: string
+}
+
 const recordPath = (session: string) => statePath('activity', `${session}.json`)
 
 export function readActivity(session: string): ActivityRecord | null {
   try {
-    return readJson<ActivityRecord | null>(recordPath(session), null)
+    const raw = readJson<ActivityRecord | null>(recordPath(session), null)
+    if (!raw || typeof raw !== 'object' || typeof raw.conversation !== 'string' || !Array.isArray(raw.seen)) return null
+    const last = parseSessionActivity(raw.last)
+    if (!last) return null
+    return {
+      conversation: raw.conversation,
+      last,
+      seen: raw.seen.filter((id): id is string => typeof id === 'string'),
+    }
   } catch {
-    return null // Derived state; a damaged file reads as no record.
+    return null // Derived state; a damaged or outdated file reads as no record.
   }
 }
+
 /** Save the session's activity; a change of state is also recorded for Outpost. */
 export function saveActivity(session: string, record: ActivityRecord) {
   const previous = readActivity(session)?.last.state ?? null
@@ -40,14 +59,38 @@ export function saveActivity(session: string, record: ActivityRecord) {
 
 export function activity(
   state: ActivityState,
-  updatedAt: string | null = null,
-  completionId: string | null = null,
-  detail: string | null = null,
+  options: {
+    blockedKind?: BlockedKind | null
+    progress?: number | null
+    updatedAt?: string | null
+    observedAt?: string | null
+    completionId?: string | null
+    detail?: string | null
+  } = {},
 ): SessionActivity {
-  return { state, updatedAt, completionId, detail, observation: 'current', observedAt: new Date().toISOString() }
+  return {
+    state,
+    blockedKind: state === 'waiting' ? (options.blockedKind ?? null) : null,
+    progress: state === 'working' || state === 'waiting' ? (options.progress ?? null) : null,
+    updatedAt: options.updatedAt ?? null,
+    completionId: state === 'finished' ? (options.completionId ?? null) : null,
+    detail: options.detail ? options.detail.slice(0, 4096) : null,
+    observation: 'current',
+    observedAt: options.observedAt ?? new Date().toISOString(),
+  }
 }
 
-/** What a session with no running driver shows: its unread reply, if any. */
+export function sameActivity(a: SessionActivity, b: SessionActivity): boolean {
+  return (
+    a.state === b.state &&
+    a.blockedKind === b.blockedKind &&
+    a.progress === b.progress &&
+    a.completionId === b.completionId &&
+    a.detail === b.detail
+  )
+}
+
+/** What a session with no running driver shows: its unread reply or error, if any. */
 export function restingActivity(session: string): SessionActivity {
   const record = readActivity(session)
   const last = record?.last
@@ -63,197 +106,120 @@ export function acknowledgeResting(session: string, completionId: string) {
   saveActivity(session, { ...record, seen: [...record.seen, completionId] })
 }
 
-const hookStates: Record<string, ActivityState> = {
-  UserPromptSubmit: 'working',
-  PreToolUse: 'working',
-  PostToolUse: 'working',
-  ElicitationResult: 'working',
-  PermissionRequest: 'waiting',
-  Elicitation: 'waiting',
-  StopFailure: 'error',
-  Stop: 'finished',
-  Interrupt: 'idle',
-  SessionEnd: 'idle',
+const programToActivity: Record<Exclude<ProgramStatusState, 'clear'>, ActivityState> = {
+  idle: 'idle',
+  working: 'working',
+  done: 'finished',
+  blocked: 'waiting',
+  error: 'error',
 }
 
-function hookState(event: string, payload: Record<string, unknown>): ActivityState | null {
-  if (event === 'PostToolUseFailure')
-    // A cancelled tool ends the turn; an ordinary failure is handled within it.
-    return payload.is_interrupt === true ? 'idle' : 'working'
-  if (event === 'Notification')
-    return ['permission_prompt', 'elicitation_dialog'].includes(payload.notification_type as string) ? 'waiting' : null
-  return hookStates[event] ?? null
+function formatDetail(title: string | null, msg: string | null): string | null {
+  if (title && msg && title !== msg) return `${title}: ${msg}`
+  return msg ?? title
 }
 
-interface Observation {
-  state: ActivityState
-  at: number
-  turn: string | null
-  /** Identifies a completion, so seeing it once clears it. */
-  source: string
-}
-
-/** The terminal service's view of its session's turn state. */
+/** The terminal service's view of its session's turn state, driven by OSC 7501. */
 export class TerminalActivity {
+  private readonly instance = randomUUID()
   private conversation: string
-  private hook: Observation | null = null
-  /** The transcript being followed: how far it was read, and its latest marker. */
-  private followed: { path: string; identity: string; end: number; marker: Marker | null } | null = null
-  /** Unchanged since launch: an old prompt or reply is not new activity. */
-  private baseline: string | null = null
+  private root: ProgramRecord | null = null
+  private doneSeq = 0
+  private completion: string | null = null
   private seen: string[]
   private running = true
   private value: SessionActivity
-  private transcriptAt = 0
-  private transcriptPath: string | null = null
-  private timer: NodeJS.Timeout
 
   constructor(
     private session: SessionRecord,
     conversation: string,
     private harness: Harness,
     private changed: (value: SessionActivity) => void,
-    private problem: string | null = null,
   ) {
     this.conversation = conversation
     this.seen = readActivity(session.id)?.seen ?? []
-    this.read()
-    this.settleBaseline()
-    this.value = this.derive()
-    this.timer = setInterval(() => this.refresh(), 1000)
-    this.timer.unref()
+    this.value = activity('idle')
   }
 
   get current() {
     return this.value
   }
+
   get currentConversation() {
     return this.conversation
   }
 
-  /** A turn already finished at launch, or when switching to a conversation, was seen before. */
-  private settleBaseline() {
-    const marker = this.followed?.marker
-    this.baseline = marker ? this.markerSource(marker) : null
-    if (marker?.activity.state === 'finished') this.see(this.markerSource(marker))
+  private completionId(seq: number) {
+    return createHash('sha256').update(`${this.session.id}:${this.conversation}:${this.instance}:${seq}`).digest('hex')
   }
 
-  private markerSource(marker: Marker) {
-    return `transcript:${this.followed!.identity}:${marker.offset}`
-  }
+  /** Apply one validated OSC 7501 program status report. */
+  reportStatus(report: ProgramStatusReport) {
+    // Sub-task reports (with an `id`) never affect the session's root turn state.
+    if (report.id !== null) return
 
-  private see(source: string) {
-    const id = this.completionId(source)
-    if (!this.seen.includes(id)) this.seen = [...this.seen, id].slice(-64)
-  }
+    if (report.state === 'clear') {
+      this.root = null
+      this.completion = null
+      this.publish()
+      return
+    }
 
-  private completionId(source: string) {
-    return createHash('sha256').update(`${this.session.id}:${this.conversation}:${source}`).digest('hex')
-  }
-
-  /** Follow the current transcript: a full backwards read when it is new or
-   * replaced, then only the records appended since. */
-  private read() {
-    const now = performance.now()
-    if (!this.transcriptPath || now - this.transcriptAt > 10_000) {
-      try {
-        this.transcriptPath = this.harness.transcript(this.session, this.conversation)
-      } catch {
-        this.transcriptPath = null
+    if (report.state === 'done') {
+      // Repeated `done` reports for the same completion keep the same completionId.
+      if (this.root?.state !== 'done') {
+        this.doneSeq++
+        this.completion = this.completionId(this.doneSeq)
       }
-      this.transcriptAt = now
+    } else {
+      this.completion = null
     }
-    const path = this.transcriptPath
-    if (!path) return
-    let size: number, identity: string
-    try {
-      const info = lstatSync(path)
-      size = info.size
-      identity = `${info.dev}:${info.ino}`
-    } catch {
-      return
-    }
-    const followed = this.followed
-    if (!followed || followed.path !== path || followed.identity !== identity || followed.end > size) {
-      const end = completeEnd(path, size)
-      this.followed = { path, identity, end, marker: this.harness.marker(reverseRecords(path, end)) }
-      return
-    }
-    for (const { record, end } of lines(path, followed.end)) {
-      if (record) followed.marker = this.harness.update(record, end, followed.marker, () => reverseRecords(path, end))
-      followed.end = end
-    }
-  }
 
-  private derive(): SessionActivity {
-    const marker = this.followed?.marker
-    const fromMarker: Observation | null = marker
-      ? {
-          state: marker.activity.state,
-          at: Date.parse(timestamp(marker.activity.timestamp) ?? '') || 0,
-          turn: marker.activity.turn,
-          source: this.markerSource(marker),
-        }
-      : null
-    let chosen: Observation | null = this.harness.hookStates ? this.hook : null
-    if (!chosen) chosen = fromMarker
-    else if (
-      fromMarker &&
-      (chosen.state === 'working' || chosen.state === 'waiting') &&
-      ['idle', 'finished', 'error'].includes(fromMarker.state) &&
-      fromMarker.at > chosen.at &&
-      (chosen.turn === null || fromMarker.turn === chosen.turn)
-    )
-      // Recover a missed completion or interruption from a newer native record.
-      chosen = fromMarker
-    let state = chosen?.state ?? 'idle'
-    // An old prompt left in the transcript is not a turn in progress.
-    if (
-      chosen === fromMarker &&
-      chosen &&
-      chosen.source === this.baseline &&
-      (state === 'working' || state === 'waiting')
-    )
-      state = 'idle'
-    if (!this.running && (state === 'working' || state === 'waiting')) state = 'idle'
-    const updated = chosen?.at ? new Date(chosen.at).toISOString() : null
-    if (state === 'finished') {
-      const id = this.completionId(chosen!.source)
-      if (this.seen.includes(id)) return activity('idle', updated, null, this.problem)
-      return activity('finished', updated, id, this.problem)
-    }
-    return activity(
-      state,
-      updated,
-      null,
-      state === 'unknown' ? 'The coding tool is in a state Outpost cannot track.' : this.problem,
-    )
-  }
-
-  /** Read what the tool wrote since; also runs every second. */
-  refresh() {
-    try {
-      this.read()
-    } catch {
-      /* The next tick rereads; a missing transcript is not an error. */
+    this.root = {
+      state: report.state,
+      kind: report.kind,
+      progress: report.progress,
+      app: report.app,
+      title: report.title,
+      msg: report.msg,
+      at: new Date().toISOString(),
     }
     this.publish()
   }
 
-  private publish() {
-    const next = this.derive()
-    const same = (a: SessionActivity, b: SessionActivity) =>
-      a.state === b.state && a.completionId === b.completionId && a.detail === b.detail && a.updatedAt === b.updatedAt
-    const changed = !same(next, this.value)
-    this.value = next
-    if (changed) {
-      saveActivity(this.session.id, { conversation: this.conversation, last: next, seen: this.seen })
-      this.changed(next)
+  private derive(): SessionActivity {
+    const root = this.root
+    if (!root) return activity('idle')
+    const state = programToActivity[root.state]
+    if (!this.running && (state === 'working' || state === 'waiting')) return activity('idle', { updatedAt: root.at })
+    if (state === 'finished') {
+      if (!this.completion || this.seen.includes(this.completion)) return activity('idle', { updatedAt: root.at })
+      return activity('finished', {
+        updatedAt: root.at,
+        completionId: this.completion,
+        detail: formatDetail(root.title, root.msg),
+      })
     }
+    return activity(state, {
+      blockedKind: root.kind,
+      progress: root.progress,
+      updatedAt: root.at,
+      detail: formatDetail(root.title, root.msg),
+    })
   }
 
-  /** A hook from the tool, relayed by `outpost-terminal hook`. */
-  async hookEvent(raw: Record<string, unknown>) {
+  private publish() {
+    const next = this.derive()
+    if (sameActivity(next, this.value)) return
+    this.value = next
+    saveActivity(this.session.id, { conversation: this.conversation, last: next, seen: this.seen })
+    this.changed(next)
+  }
+
+  /** Minimal session-identity hook relayed by `outpost-terminal hook`. Updates
+   * which native conversation this session resumes if the user ran `/new` or
+   * `/resume` inside the tool; never alters turn activity. */
+  async sessionEvent(raw: Record<string, unknown>) {
     const payload = this.harness.hookPayload(this.session, raw)
     if (!payload) return
     const native = payload.session_id
@@ -263,59 +229,24 @@ export class TerminalActivity {
       (payload.agent_id !== undefined && payload.agent_id !== null && payload.agent_id !== 'main') ||
       payload.isSidechain
     )
-      return // Subagents are not the main turn.
-    const binding = event === 'SessionStart' || event === 'UserPromptSubmit'
-    if (native !== this.conversation && !binding) return // A late event from another conversation.
+      return
+    if (event !== 'SessionStart' && event !== 'UserPromptSubmit') return
     if (event === 'SessionStart' && payload.source === 'compact') return
-    const state = this.harness.hookStates ? hookState(event, payload) : null
-    if (state === null && !binding) return
-    const previous = this.hook?.state
-    if (event === 'SessionEnd' && (previous === 'finished' || previous === 'error')) return
-    if (state === 'finished' && previous === 'finished') return // A late Stop for the same reply.
-    if (native !== this.conversation) {
-      // New, clear or resume selected another conversation in the tool.
-      this.conversation = native
-      this.hook = null
-      this.followed = null
-      this.transcriptPath = null
-      await changeRegistry(registry => switchConversation(registry, this.session.id, native)).catch(() => {})
-      try {
-        this.read()
-      } catch {
-        /* Read again on the next tick. */
-      }
-      this.settleBaseline()
-    } else if (event === 'SessionStart') this.hook = null
-    const turn = turnId(payload.turn_id)
-    if (
-      turn &&
-      this.hook?.turn &&
-      turn !== this.hook.turn &&
-      (state === 'finished' || state === 'idle' || state === 'error')
-    )
-      return // The end of an older turn.
-    if (state !== null) {
-      const at = Date.now()
-      this.hook = {
-        state,
-        at,
-        turn: turn ?? (event === 'UserPromptSubmit' ? null : (this.hook?.turn ?? null)),
-        source: `hook:${at}`,
-      }
-    } else if (event === 'SessionStart')
-      this.hook = { state: 'idle', at: Date.now(), turn: null, source: `hook:${Date.now()}` }
-    this.publish()
+    if (native === this.conversation) return
+    this.conversation = native
+    await changeRegistry(registry => switchConversation(registry, this.session.id, native)).catch(() => {})
   }
 
-  /** The agent's newest message in the current conversation, from its transcript. */
+  /** The agent's newest message in the current conversation, read on demand
+   * from its transcript when a delivered message finishes. */
   lastReply(limit = 16_000) {
-    // The turn may have ended before the transcript was next read (a new one appears with its first prompt).
+    if (!this.conversation) return null
+    let path: string | null
     try {
-      this.read()
+      path = this.harness.transcript(this.session, this.conversation)
     } catch {
-      /* Read what was found before. */
+      return null
     }
-    const path = this.followed?.path
     if (!path) return null
     let size: number
     try {
@@ -323,10 +254,16 @@ export class TerminalActivity {
     } catch {
       return null
     }
+    let format = ''
+    try {
+      format = this.harness.historySession(path, this.harness.storeOf(this.session), new Scan(), new Map()).format
+    } catch {
+      /* Fall back to default format if metadata is not yet present. */
+    }
     let records = 0
-    for (const { record } of reverseRecords(path, completeEnd(path, size))) {
+    for (const { record } of reverseRecords(path, size)) {
       if (++records > 2000) break
-      for (const message of this.harness.historyMessages(record, ''))
+      for (const message of this.harness.historyMessages(record, format))
         if (message.role === 'assistant' && message.kind === 'message' && message.text.trim())
           return message.text.slice(0, limit)
     }
@@ -348,29 +285,9 @@ export class TerminalActivity {
   exited() {
     this.running = false
     this.publish()
-    clearInterval(this.timer)
   }
 }
 
 /** Keys the user typed, as opposed to a focus report the terminal sends by itself. */
 export const isUserInput = (data: Buffer) =>
   data.length > 0 && !data.equals(Buffer.from('\x1b[I')) && !data.equals(Buffer.from('\x1b[O'))
-
-/** The end of the last complete line, skipping a record still being written. */
-function completeEnd(path: string, size: number) {
-  const descriptor = openSync(path, 'r')
-  try {
-    let position = Math.min(size, fstatSync(descriptor).size)
-    const block = Buffer.alloc(64 * 1024)
-    while (position > 0) {
-      const length = Math.min(block.length, position)
-      readSync(descriptor, block, 0, length, position - length)
-      const newline = block.subarray(0, length).lastIndexOf(10)
-      if (newline >= 0) return position - length + newline + 1
-      position -= length
-    }
-    return 0
-  } finally {
-    closeSync(descriptor)
-  }
-}

@@ -1,4 +1,4 @@
-import { buildGuideCatalog } from '../../shared/guide'
+import { buildGuideCatalog } from './guide'
 
 const markdownFiles = import.meta.glob<string>('../../docs/guide/*.md', {
   query: '?raw',

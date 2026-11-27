@@ -1,6 +1,7 @@
 import type { Static } from 'typebox'
 import type { SessionActivity } from './activity'
-import { harnesses, harnessIds, type HarnessId } from './harnesses'
+import { harnessDefinition, harnesses, type HarnessId } from './harnesses'
+import { softwareIds } from './schemas'
 import type * as schemas from './schemas'
 
 // Inputs and stored records are derived from their validation schemas.
@@ -20,7 +21,7 @@ export type SessionCreationRequest = Static<typeof schemas.desktopSessionCreatio
 export type SessionInput = Static<typeof schemas.sessionInput>
 export type SessionForkInput = Static<typeof schemas.sessionForkInput>
 export type ConversationSearch = Static<typeof schemas.conversationSearch>
-export type SoftwareId = (typeof schemas.softwareIds)[number]
+export type SoftwareId = (typeof softwareIds)[number]
 export type InstallationInput = Static<typeof schemas.installationInput>
 export interface Environment {
   mode: 'local' | 'hosted'
@@ -28,41 +29,37 @@ export interface Environment {
 }
 
 export type SessionUpdate = Static<typeof schemas.sessionUpdate>
-export type SessionConfig = Static<typeof schemas.sessionConfig>
+type SessionConfig = Static<typeof schemas.sessionConfig>
 /** What a session's coding tool starts with: its configuration, less the revision. */
 export type LaunchSettings = Omit<SessionConfig, 'revision'>
 export type SessionSettings = Static<typeof schemas.sessionSettings>
 export type SessionRecord = Static<typeof schemas.sessionRecord>
-export type SessionStatus = 'ready' | 'attached' | 'detached' | 'stopped'
-/** A conversation in a session's timeline, with the coding tool's own title for it. */
+type SessionStatus = 'ready' | 'attached' | 'detached' | 'stopped'
+/** A conversation in a session's timeline. */
 export interface Conversation {
   id: string
+  tool: HarnessId
   startedAt: string
   /** The session that resumed this conversation since; it belongs there now. */
   movedTo: { id: string; name: string } | null
-  title: string | null
 }
-/** A session as Outpost shows it: its stored record, the coding tool's view, and what runs it now. */
+/** A session as Outpost shows it: its stored record and what runs it now. */
 export interface Session extends Omit<SessionRecord, 'conversations'> {
-  /** Oldest first; the last is the current conversation. */
+  /** Remembered conversations across harnesses, oldest first. */
   conversations: Conversation[]
-  /** The tool's title for the current conversation. */
-  title: string | null
   status: SessionStatus
-  /** What drives the current conversation now: a terminal, chat, or nothing. */
+  /** What drives the current session now: a terminal, chat, or nothing. */
   driver: 'terminal' | 'chat' | null
   /** The configuration revision the running driver started with. */
   runningRevision: number | null
   activity: SessionActivity
 }
-export const currentConversation = (session: { conversations: { id: string }[] }) => session.conversations.at(-1)!.id
 
 export interface ConversationMatch {
   tool: HarnessId
   conversation: string
   storage: Record<string, string>
   rootDir: string
-  title: string
   createdAt: string | null
   updatedAt: string | null
   excerpt: string | null
@@ -82,13 +79,17 @@ export interface DirectorySuggestions {
 export const coreSoftware: readonly SoftwareId[] = ['bash', 'outpost-terminal']
 
 /** Every software component Outpost inspects on a machine. */
-export const allSoftware: readonly SoftwareId[] = ['bash', 'outpost-terminal', ...harnessIds, 'claude-agent-acp']
+export const allSoftware: readonly SoftwareId[] = softwareIds
 
-/** Components installed when setting up a coding harness. Outpost Chat runs
- * Claude Code through its official ACP adapter; Codex's is bundled in Outpost
- * machine service; Kimi Code, DeepSeek Harness and Antigravity CLI serve ACP themselves. */
-export const harnessSoftware = (id: HarnessId): SoftwareId[] =>
-  id === 'claude' ? ['claude', 'claude-agent-acp'] : [id]
+/** Components installed when setting up a coding harness. */
+export const harnessSoftware = (id: HarnessId): SoftwareId[] => {
+  const adapter = harnessDefinition(id).chatAdapter
+  return adapter ? [id, adapter] : [id]
+}
+
+/** Filter out bundled helper adapters when their parent harness is already listed. */
+export const visibleSoftware = (ids: readonly SoftwareId[]): SoftwareId[] =>
+  ids.filter(id => !harnesses.some(h => h.chatAdapter === id && ids.includes(h.id)))
 
 /** Deduplicated software IDs ensured by a setup run: always core requirements, plus any requested items. */
 export const setupTargets = (requested?: readonly SoftwareId[]): SoftwareId[] => [

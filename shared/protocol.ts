@@ -3,6 +3,7 @@
 // these JSON messages. See docs/ARCHITECTURE.md → "Terminal protocol".
 import type { Scrollback } from './terminalService'
 import type { FileRead, ImagePaste, ImagePasteMode, ImageWrite } from './terminalFiles'
+import type { SessionFile } from './sessionFiles'
 import type { SessionActivity } from './activity'
 import type { HarnessId } from './harnesses'
 import type { Checkpoint } from './terminalState'
@@ -10,7 +11,7 @@ import type { Checkpoint } from './terminalState'
 // Clients send ?protocol=<version>. The server accepts only its own version and
 // closes others with `outdated`. Only the current protocol is supported;
 // a stale terminal page must reload after a breaking server update.
-export const protocolVersion = 20
+export const protocolVersion = 21
 export const maxInputMessage = 64 * 1024
 // Interactive input queue. Files use bounded transfer requests on the attachment.
 export const maxInputQueue = 2 * 1024 * 1024
@@ -48,7 +49,7 @@ export type ClientMessage =
 
 // Only `error` is transient. Other reasons require an explicit user action.
 export type CloseReason = 'ended' | 'expired' | 'outdated' | 'unavailable' | 'error'
-export interface SignalMessage {
+interface SignalMessage {
   type: string
   payload: unknown
 }
@@ -72,7 +73,7 @@ export type ServerMessage =
       ok: boolean
       message?: string
       chunk?: string
-      files?: unknown
+      files?: SessionFile[]
       mode?: ImagePasteMode
     }
   | { type: 'signal'; signal: SignalMessage }

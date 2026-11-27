@@ -2,11 +2,14 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import program from './clipboard.py' with { type: 'text' }
+import { clipboardOsc52 } from './clipboardOsc52'
 import type { TerminalImage } from './terminalImages'
+
+export { clipboardOsc52 }
 
 /** One authenticated, local-only display per agent. Its owner exits on stdin EOF,
  * including if the worker dies. The remote workstation's clipboard is never opened. */
-export async function openTerminalClipboard(env: Record<string, string>) {
+export async function openTerminalClipboard(env: Record<string, string>, onCopy?: (osc52: Buffer) => void) {
   const runner = Bun.which('xvfb-run', { PATH: env.PATH })
   const python = Bun.which('python3', { PATH: '/usr/bin:/bin' })
   if (!runner || !python) return null
@@ -45,6 +48,9 @@ export async function openTerminalClipboard(env: Record<string, string>) {
       if (reply.state === 'offered') pending.offered()
       else if (reply.state === 'read') pending.finish(true)
       else if (reply.state === 'error') pending.finish(false)
+    } else if (reply.state === 'copied') {
+      const sequence = clipboardOsc52(reply.data)
+      if (sequence) onCopy?.(sequence)
     }
   })
   const timeout = setTimeout(() => startup.resolve(null), 4000)

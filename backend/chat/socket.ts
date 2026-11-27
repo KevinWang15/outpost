@@ -1,4 +1,3 @@
-import { Ajv } from 'ajv'
 import type { FastifyRequest } from 'fastify'
 import { WebSocket } from 'ws'
 import type * as acp from '@agentclientprotocol/sdk'
@@ -14,19 +13,23 @@ import { sessionCreationOptions } from '../../shared/sessionCreation'
 import type { Owner } from '../deployment'
 import { AppError } from '../errors'
 import type { Services } from '../services'
-import { createSession, forkSession, inspectTargetSoftware } from '../session-actions'
+import {
+  createSession,
+  deleteSession,
+  forkSession,
+  inspectTargetSoftware,
+  newSessionConversation,
+  switchSession,
+  terminateSession,
+  updateSession,
+} from '../session-actions'
+import { compileSchema } from '../validate'
 import type { ChatClient, ChatHub } from './hub'
 import type { LinkEvent } from './links'
 import type { ChatTokens } from './tokens'
 
-const ajv = new Ajv({
-  allErrors: false,
-  coerceTypes: false,
-  removeAdditional: false,
-  useDefaults: false,
-  strict: false,
-})
-const validMessage = ajv.compile<ChatClientMessage>(chatClientMessage)
+const validMessage = compileSchema(chatClientMessage)
+type CloseReason = Extract<ChatServerMessage, { type: 'closed' }>['reason']
 /** One chat page's socket. */
 class Connection implements ChatClient {
   private subscriptions = new Map<string, () => void>()
@@ -43,13 +46,14 @@ class Connection implements ChatClient {
   send(message: ChatServerMessage) {
     if (this.closed || this.socket.readyState !== WebSocket.OPEN) return
     // A page that stops reading resynchronizes on reconnect instead of growing memory.
-    if (this.socket.bufferedAmount > 32 * 1024 * 1024) return this.close('This page fell behind. Reconnecting…')
+    if (this.socket.bufferedAmount > 32 * 1024 * 1024)
+      return this.close('error', 'This page fell behind. Reconnecting…')
     this.socket.send(JSON.stringify(message))
   }
 
-  close(message: string) {
+  close(reason: CloseReason, message: string) {
     if (this.closed) return
-    this.send({ type: 'closed', message })
+    this.send({ type: 'closed', reason, message })
     this.closed = true
     this.socket.close(1000)
     this.finish()
@@ -188,19 +192,20 @@ class Connection implements ChatClient {
       }
       case 'stop': {
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
-        await this.server.services.sessions.terminate(context, ref!.sessionId)
+        await terminateSession(this.server.services, context, ref!.sessionId)
         await hub.refreshFor(this.owner)
         return { ok: true }
       }
       case 'session-update': {
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
-        const session = await this.server.services.sessions.update(context, ref!.sessionId, message.update)
+        const session = await updateSession(this.server.services, context, ref!.sessionId, message.update)
         await hub.refreshFor(this.owner)
         return { ok: true, data: session }
       }
       case 'session-switch': {
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
-        const session = await this.server.services.sessions.switch(
+        const session = await switchSession(
+          this.server.services,
           context,
           ref!.sessionId,
           message.conversation,
@@ -217,9 +222,7 @@ class Connection implements ChatClient {
       }
       case 'session-delete': {
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
-        await this.server.services.sessions.remove(context, ref!.sessionId)
-        this.server.services.broker.closeTarget(this.owner, context.target.id, ref!.sessionId)
-        await hub.sessionDeleted(this.owner, ref!)
+        await deleteSession(this.server.services, context, ref!.sessionId, hub)
         return { ok: true }
       }
       case 'new-conversation': {
@@ -230,7 +233,7 @@ class Connection implements ChatClient {
           return result
         }
         const context = await this.server.services.resolve(this.owner, ref!.targetId)
-        const session = await this.server.services.sessions.newConversation(context, ref!.sessionId)
+        const session = await newSessionConversation(this.server.services, context, ref!.sessionId)
         await hub.refreshFor(this.owner)
         return { ok: true, data: session }
       }
@@ -302,7 +305,8 @@ export class ChatServer {
   ) {
     this.sweep = setInterval(() => {
       for (const connection of this.connections)
-        if (!services.active(connection.owner)) connection.close('Sign-in ended. Sign in again to continue.')
+        if (!services.active(connection.owner))
+          connection.close('unauthorized', 'Sign-in ended. Sign in again to continue.')
     }, 5000)
     this.sweep.unref()
   }
@@ -312,31 +316,32 @@ export class ChatServer {
   }
 
   async accept(socket: WebSocket, request: FastifyRequest<{ Querystring: { protocol?: string } }>) {
-    const reject = (message: string) => {
-      socket.send(JSON.stringify({ type: 'closed', message } satisfies ChatServerMessage))
+    const reject = (reason: CloseReason, message: string) => {
+      socket.send(JSON.stringify({ type: 'closed', reason, message } satisfies ChatServerMessage))
       socket.close(1000)
     }
-    if (request.query.protocol !== String(chatProtocol)) return reject('Outpost was updated. Reload this page.')
+    if (request.query.protocol !== String(chatProtocol))
+      return reject('outdated', 'Outpost was updated. Reload this page.')
     let owner: Owner | null = null
     try {
       owner = this.services.deployment.owner(request)
     } catch {
       owner = null
     }
-    if (!owner || !this.services.active(owner)) return reject('Sign in to continue.')
+    if (!owner || !this.services.active(owner)) return reject('unauthorized', 'Sign in to continue.')
     if ([...this.connections].filter(item => item.owner.userId === owner.userId).length >= 16)
-      return reject('Too many open chat pages. Close one and try again.')
+      return reject('error', 'Too many open chat pages. Close one and try again.')
     const connection = new Connection(owner, socket, this)
     this.connections.add(connection)
     try {
       await connection.start()
     } catch (error) {
-      connection.close((error as Error).message)
+      connection.close('error', (error as Error).message)
     }
   }
 
   close() {
     clearInterval(this.sweep)
-    for (const connection of this.connections) connection.close('Outpost is restarting. Reconnecting…')
+    for (const connection of this.connections) connection.close('error', 'Outpost is restarting. Reconnecting…')
   }
 }

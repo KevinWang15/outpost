@@ -1,6 +1,6 @@
 import Type, { type Static } from 'typebox'
 import type { HarnessId } from './harnesses'
-export type HistoryMode = 'keyword' | 'substring' | 'semantic' | 'mixed'
+type HistoryMode = 'keyword' | 'substring' | 'semantic' | 'mixed'
 
 export interface HistoryMachine {
   id: string
@@ -17,11 +17,9 @@ export interface HistorySource {
   cwd: string
   size: number
   modified: string
-  format?: string
   /** The native conversation this one was forked from, where the tool records it. */
-  forkedFrom?: string | null
-  nativeTitle?: string
-  managedSessionId?: string
+  forkedFrom: string | null
+  managedSessionId: string | null
 }
 const count = Type.Integer({ minimum: 0 })
 const nullableText = Type.Union([Type.String(), Type.Null()])
@@ -61,7 +59,7 @@ export const historyMessage = Type.Object(
   },
   { additionalProperties: false },
 )
-export type HistoryMessage = Static<typeof historyMessage>
+type HistoryMessage = Static<typeof historyMessage>
 export interface HistoryCatalog {
   sources: HistorySource[]
   next: string | null

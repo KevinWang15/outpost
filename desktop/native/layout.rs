@@ -84,6 +84,14 @@ impl Layout {
             Self::Split { first, second, .. } => first.contains(needle) || second.contains(needle),
         }
     }
+    pub fn contains_split(&self, needle: Id) -> bool {
+        match self {
+            Self::Pane(_) => false,
+            Self::Split {
+                id, first, second, ..
+            } => *id == needle || first.contains_split(needle) || second.contains_split(needle),
+        }
+    }
     pub fn split(&mut self, at: Id, id: Id, axis: Axis, other: Layout) -> bool {
         self.insert_at(at, id, axis, other, false)
     }

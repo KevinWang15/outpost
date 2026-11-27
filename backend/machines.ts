@@ -17,7 +17,7 @@ import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/ter
 import { terminalService } from '../shared/terminalService'
 import type { Owner } from './deployment'
 import { AppError } from './errors'
-import type { Command } from './process'
+import type { Command } from '../shared/node/process'
 import type { Transport } from './transport'
 
 const magic = Buffer.from(nodeMagic, 'latin1')
@@ -144,6 +144,11 @@ export class MachineConnection {
 
   get connected() {
     return this.started && !this.closed
+  }
+
+  /** Replace the transport used for future reconnects (e.g. after updating the target's shell). */
+  setTransport(transport: Transport | null) {
+    this.transport = transport
   }
 
   /** Authenticate the outbound node handshake before starting work on its stream. */
@@ -453,17 +458,23 @@ export function machineSocket(secret: string, owner: Pick<Owner, 'userId'>, targ
 
 export class Machines {
   private connections = new Map<string, MachineConnection>()
-  /** Answers agents' tool calls; set once the hubs exist. */
-  agent: (owner: Owner, targetId: string, call: AgentCall) => Promise<unknown> = async () => {
+  private onAgent: (owner: Owner, targetId: string, call: AgentCall) => Promise<unknown> = async () => {
     throw new Error('Outpost is starting. Try again shortly.')
   }
-  /** Reads a machine's events when it has some; set once the activity log exists. */
-  events: (owner: Owner, targetId: string) => void = () => {}
+  private onEvents: (owner: Owner, targetId: string) => void = () => {}
 
   constructor(
     private secret: string,
     private env?: NodeJS.ProcessEnv,
   ) {}
+
+  configure(handlers: {
+    agent?: (owner: Owner, targetId: string, call: AgentCall) => Promise<unknown>
+    events?: (owner: Owner, targetId: string) => void
+  }) {
+    if (handlers.agent) this.onAgent = handlers.agent
+    if (handlers.events) this.onEvents = handlers.events
+  }
 
   get(owner: Owner, targetId: string, transport: Transport | null) {
     const key = `${owner.userId}\0${targetId}`
@@ -473,10 +484,12 @@ export class Machines {
       const socket = machineSocket(this.secret, owner, targetId)
       connection = new MachineConnection(socket, transport, {
         env: this.env,
-        agent: call => this.agent(owner, targetId, call),
-        events: () => this.events(owner, targetId),
+        agent: call => this.onAgent(owner, targetId, call),
+        events: () => this.onEvents(owner, targetId),
       })
       this.connections.set(key, connection)
+    } else {
+      connection.setTransport(transport)
     }
     return connection
   }

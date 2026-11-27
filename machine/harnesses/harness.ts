@@ -1,27 +1,17 @@
 // The coding harness adapter contract. Each harness (machine/harnesses/<id>.ts)
-// owns its native identity, store format, launch integration and activity
-// records; nothing outside an adapter branches on harness names.
+// owns its native identity, store format, and launch integration; nothing
+// outside an adapter branches on harness names.
 import type * as acp from '@agentclientprotocol/sdk'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
-import type { ActivityState } from '../../shared/activity'
 import { harnesses, type HarnessId } from '../../shared/harnesses'
 import type { SessionRecord } from '../../shared/model'
 import type { Scan } from '../stores'
-
-/** A lifecycle record from the tool's own transcript; no prompt or tool content. */
-export interface NativeActivity {
-  state: ActivityState
-  timestamp: unknown
-  turn: string | null
-}
-export type Marker = { activity: NativeActivity; offset: number }
 
 export interface NativeConversation {
   id: string
   /** The directory the conversation runs in, as the tool recorded it. */
   root: string
-  title: string
   created: string | null
   updated: string | null
   /** Transcript files holding its messages (the main one first). */
@@ -61,16 +51,12 @@ export interface Launch {
   outpost: McpStdioServer
   /** The session's own servers. */
   servers: McpServer[]
-  /** argv of the activity hook; it reads the binding from its environment. */
+  /** argv of the session-selection hook; it reads the binding from its environment. */
   hook: string[]
 }
 
 export abstract class Harness {
   abstract readonly id: HarnessId
-  /** Arguments that would select another conversation; Outpost owns that choice. */
-  readonly selectionOptions: readonly string[] = []
-  /** Whether hooks report turn state, or only which conversation is current. */
-  readonly hookStates: boolean = true
 
   get definition() {
     return harnesses.find(harness => harness.id === this.id)!
@@ -79,8 +65,7 @@ export abstract class Harness {
     return this.definition.command
   }
   get terminal() {
-    const definition = this.definition
-    return !('terminal' in definition && definition.terminal === false)
+    return this.definition.terminal
   }
   validId(value: unknown): value is string {
     return typeof value === 'string' && new RegExp(this.definition.nativeId).test(value)
@@ -100,20 +85,6 @@ export abstract class Harness {
     return Object.values(session.storage)[0]
   }
 
-  selectsSession(tokens: string[]) {
-    for (const token of tokens) {
-      if (token === '--') break
-      if (
-        this.selectionOptions.some(
-          option =>
-            token === option || token.startsWith(`${option}=`) || (option.length === 2 && token.startsWith(option)),
-        )
-      )
-        return true
-    }
-    return false
-  }
-
   // Conversations ------------------------------------------------------------------
 
   /** Allocate a conversation the tool will use, without a model request. */
@@ -124,36 +95,15 @@ export abstract class Harness {
   abstract text(record: Record<string, unknown>): Iterable<string>
   /** The newest main transcript of a conversation in the session's store. */
   abstract transcript(session: SessionRecord, conversation: string): string | null
-  /** The tool's own title for a conversation, or null. */
-  abstract title(session: SessionRecord, conversation: string, scan: Scan): string | null
 
   find(conversation: string, environment: Record<string, string>, cwd: string, scan: Scan) {
     for (const found of this.discover(environment, scan, cwd)) if (found.id === conversation) return found
     return null
   }
 
-  // Activity -----------------------------------------------------------------------
+  // Hooks --------------------------------------------------------------------------
 
-  abstract activity(record: Record<string, unknown>): NativeActivity | null
-  /** The current lifecycle marker, from records read newest first. */
-  marker(records: Iterable<{ record: Record<string, unknown>; offset: number }>): Marker | null {
-    for (const { record, offset } of records) {
-      const activity = this.activity(record)
-      if (activity) return { activity, offset }
-    }
-    return null
-  }
-  /** Fold an appended record; `history` rereads newest first from its end. */
-  update(
-    record: Record<string, unknown>,
-    offset: number,
-    previous: Marker | null,
-    _history: () => Iterable<{ record: Record<string, unknown>; offset: number }>,
-  ): Marker | null {
-    const activity = this.activity(record)
-    return activity ? { activity, offset } : previous
-  }
-  /** Translate a native hook's fields into the common hook payload, or null to ignore it. */
+  /** Translate a native session-selection hook into `{ session_id, hook_event_name }`, or null to ignore it. */
   hookPayload(_session: SessionRecord, payload: Record<string, unknown>): Record<string, unknown> | null {
     return payload
   }
@@ -174,7 +124,7 @@ export abstract class Harness {
   /** Options that add the session's instructions (where the registry says
    * terminals apply them) and select its model. */
   abstract settings(launch: Launch): string[]
-  /** Options that install activity hooks. A failure is reported, never fatal. */
+  /** Options that install conversation-switch hooks. A failure is ignored, never fatal. */
   abstract hooks(launch: Launch): Promise<string[]>
   /** Arguments that open exactly this conversation. */
   abstract resume(session: SessionRecord, conversation: string): string[]
@@ -213,10 +163,4 @@ export function historyMessage(
     kind,
     identity: typeof identity === 'string' && identity && identity.length <= 200 ? identity : null,
   }
-}
-
-/** A hook or record's turn identity, bounded. */
-export function turnId(value: unknown) {
-  if ((typeof value === 'string' || typeof value === 'number') && String(value)) return String(value).slice(0, 160)
-  return null
 }

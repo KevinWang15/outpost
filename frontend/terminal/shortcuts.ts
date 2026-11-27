@@ -1,8 +1,7 @@
-/** One definition for native menus, the shortcut guide and terminal key handling. */
+/** One definition for the terminal context menu and key handling. */
 export function clearScreenShortcut(mac: boolean) {
   return {
     label: 'Clear screen',
-    accelerator: mac ? 'Cmd+K' : 'Ctrl+Shift+K',
     keys: mac ? '⌘K' : 'Ctrl+Shift+K',
     matches(event: {
       key: string

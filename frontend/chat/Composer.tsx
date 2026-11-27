@@ -9,8 +9,10 @@ import {
 } from 'react'
 import { ArrowUp, FileText, LoaderCircle, Paperclip, Square, X } from 'lucide-react'
 import { chatHost } from '../../shared/chatHost'
+import { imageMediaTypes } from '../../shared/images'
 import { maxSessionFileBytes } from '../../shared/sessionFiles'
-import { fileSize } from '../terminal/sessionFiles'
+import { touchInput } from '../browser'
+import { fileSize } from '../files/sessionFiles'
 import { newKey } from './client'
 
 interface Suggestion {
@@ -21,8 +23,6 @@ interface Suggestion {
 
 /** Unsent text, per conversation, for this page. */
 const drafts = new Map<string, string>()
-const imageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-const coarse = () => window.matchMedia?.('(pointer: coarse)').matches
 
 export default function Composer({
   draftKey,
@@ -55,6 +55,16 @@ export default function Composer({
   const [text, setText] = useState(() => drafts.get(draftKey) ?? '')
   /** `url` previews an image. */
   const [files, setFiles] = useState<{ file: File; url: string | null }[]>([])
+  const filesRef = useRef(files)
+  useEffect(() => {
+    filesRef.current = files
+  }, [files])
+  useEffect(
+    () => () => {
+      for (const item of filesRef.current) if (item.url) URL.revokeObjectURL(item.url)
+    },
+    [],
+  )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [active, setActive] = useState(0)
@@ -71,7 +81,7 @@ export default function Composer({
 
   // Each conversation mounts its own composer (keyed views), so this runs per draft.
   useEffect(() => {
-    if (!coarse()) input.current?.focus()
+    if (!touchInput()) input.current?.focus()
   }, [])
   useEffect(() => {
     if (text) drafts.set(draftKey, text)
@@ -115,16 +125,21 @@ export default function Composer({
   }
 
   function attach(list: Iterable<File>) {
-    const added: { file: File; url: string | null }[] = []
+    const valid: File[] = []
     for (const file of list) {
       if (file.size > maxSessionFileBytes) {
         setError(`${file.name} is larger than ${maxSessionFileBytes / 1024 / 1024} MB.`)
         continue
       }
-      added.push({ file, url: imageTypes.includes(file.type) ? URL.createObjectURL(file) : null })
+      valid.push(file)
     }
-    if (files.length + added.length > chatHost.maxFiles) setError(`Attach at most ${chatHost.maxFiles} files at once.`)
-    setFiles(current => [...current, ...added].slice(0, chatHost.maxFiles))
+    const remaining = Math.max(0, chatHost.maxFiles - files.length)
+    if (valid.length > remaining) setError(`Attach at most ${chatHost.maxFiles} files at once.`)
+    const accepted = valid.slice(0, remaining).map(file => ({
+      file,
+      url: (imageMediaTypes as readonly string[]).includes(file.type) ? URL.createObjectURL(file) : null,
+    }))
+    if (accepted.length) setFiles(current => [...current, ...accepted])
   }
 
   function detach(item: { file: File; url: string | null }) {
@@ -190,7 +205,7 @@ export default function Composer({
         return
       }
     }
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !coarse()) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !touchInput()) {
       event.preventDefault()
       void send()
     } else if (event.key === 'Escape' && running && onStop) {

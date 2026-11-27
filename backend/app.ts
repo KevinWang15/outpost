@@ -19,7 +19,6 @@ import { TerminalBroker } from './terminal/broker'
 import { ConnectTokens } from './terminal/tokens'
 import { sessionRoutes } from './routes/sessions'
 import { terminalRoutes } from './routes/terminal'
-import { sessionFileDownloads } from './routes/sessionFiles'
 import { enrollmentRoutes } from './enrollment'
 import { workspaceRoutes } from './routes/workspace'
 import { pagePaths } from '../shared/pages'
@@ -34,7 +33,6 @@ import { HistoryHub, type HistoryOptions } from './history/hub'
 import { MachineConnectionError, Machines } from './machines'
 import { ActivityLog, logViewerMount } from './logs/activity'
 import { MachineEventLog } from './logs/machines'
-import { loggedSessions } from './logs/sessions'
 import { logRoutes } from './routes/logs'
 import historyToolDefinitions from '../shared/historyTools.json' with { type: 'json' }
 
@@ -69,7 +67,7 @@ export async function createApp(options: AppOptions) {
 
   const machines = new Machines(deployment.secret, options.env)
   const log = new ActivityLog(deployment, header => app.parseCookie(header))
-  const sessions = loggedSessions(options.sessions ?? new SessionClient(), log)
+  const sessions = options.sessions ?? new SessionClient()
   const assets = new MachineAssets(deployment.directory, options.env)
   const software = options.software ?? new SoftwareClient(assets, options.env)
   const resolveTarget = targetResolver(deployment, machines, options.multiplex ?? true)
@@ -119,16 +117,18 @@ export async function createApp(options: AppOptions) {
     list: async context => (await sessions.list(context)).sessions,
     log,
   })
-  machines.events = (owner, targetId) => void machineEvents.read(owner, targetId)
-  // Agents' Outpost tool calls arrive on their machine's connection.
   const historyTools = new Set(historyToolDefinitions.map(tool => tool.name))
-  machines.agent = async (owner, targetId, call) => {
-    if (historyTools.has(call.tool)) {
-      if (!history) throw new Error('Cross-machine history is turned off on this Outpost server.')
-      return history.call(owner, call.tool, call.arguments)
-    }
-    return hub.agent(owner, { targetId, sessionId: call.session }, call.tool, call.arguments)
-  }
+  machines.configure({
+    events: (owner, targetId) => void machineEvents.read(owner, targetId),
+    // Agents' Outpost tool calls arrive on their machine's connection.
+    agent: async (owner, targetId, call) => {
+      if (historyTools.has(call.tool)) {
+        if (!history) throw new Error('Cross-machine history is turned off on this Outpost server.')
+        return history.call(owner, call.tool, call.arguments)
+      }
+      return hub.agent(owner, { targetId, sessionId: call.session }, call.tool, call.arguments)
+    },
+  })
   const chat = new ChatServer(hub, new ChatTokens(deployment.secret), services)
   await hub.start()
   await history?.start()
@@ -210,11 +210,14 @@ export async function createApp(options: AppOptions) {
   )
   deployment.register(app)
   desktopRoutes(app, services, desktop)
-  workspaceRoutes(app, services, enrollmentRoutes(app, services))
+  workspaceRoutes(app, services, enrollmentRoutes(app, services), async (owner, targetId) => {
+    await hub.targetDeleted(owner, targetId)
+    await machineEvents.forgetTarget(owner, targetId)
+    history?.forgetTarget(owner, targetId)
+  })
   sessionRoutes(app, services, hub)
-  const download = sessionFileDownloads(services)
   terminalRoutes(app, services)
-  chatRoutes(app, services, chat, download)
+  chatRoutes(app, services, chat)
   logRoutes(app, services)
   await app.register(async viewer => {
     // The viewer reads its own request bodies.

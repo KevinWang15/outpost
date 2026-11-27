@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { describeCron } from '../../shared/cron'
 import { sessionKey, type ChannelView, type ChatSession } from '../../shared/chatApi'
+import { isMac } from '../browser'
 import { AppSidebar } from '../ui/AppSidebar'
 import { placeLabel } from '../workspace/labels'
 import { Avatar } from './Avatar'
@@ -145,7 +146,7 @@ export default function Sidebar({ selection }: { selection: Selection }) {
             <X size={13} />
           </button>
         ) : (
-          <kbd>{navigator.platform.startsWith('Mac') ? '⌘K' : 'Ctrl K'}</kbd>
+          <kbd>{isMac() ? '⌘K' : 'Ctrl K'}</kbd>
         )}
       </label>
       <div className="chat-lists">

@@ -5,6 +5,7 @@ import {
   coreSoftware,
   harnessSoftware,
   softwareLabel,
+  visibleSoftware,
   type SoftwareId,
   type SoftwareStatus,
   type Target,
@@ -15,7 +16,7 @@ import InstallDialog from './InstallDialog'
 import { shortVersion } from './labels'
 
 function describeSetup(ids: readonly SoftwareId[]) {
-  const visible = ids.filter(id => !(id === 'claude-agent-acp' && ids.includes('claude')))
+  const visible = visibleSoftware(ids)
   if (!visible.length || visible.every(id => coreSoftware.includes(id))) return 'machine software'
   return visible.map(softwareLabel).join(', ')
 }
@@ -238,7 +239,6 @@ export default function SoftwarePanel({
           onClose={() => {
             setShowLog(false)
             void refresh()
-            onInstalled()
           }}
         />
       )}

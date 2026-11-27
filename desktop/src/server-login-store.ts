@@ -1,7 +1,6 @@
-import { readFile } from 'node:fs/promises'
 import { validDesktopCredential, type DesktopCredential } from '../../shared/desktopAuth'
 import { serverOrigin } from '../../shared/serverOrigin'
-import { writeJsonFile } from '../../shared/node/jsonFile'
+import { SerializedJsonStore } from './json-store'
 
 export interface SavedServerLogin extends DesktopCredential {
   origin: string
@@ -9,58 +8,52 @@ export interface SavedServerLogin extends DesktopCredential {
 
 /** Serialized, atomic credential persistence. Publish in memory only after disk commit. */
 export class ServerLoginStore {
-  private records = new Map<string, SavedServerLogin>()
-  private writes = Promise.resolve()
-  constructor(private path: string) {}
+  private store: SerializedJsonStore<Map<string, SavedServerLogin>>
+
+  constructor(path: string) {
+    this.store = new SerializedJsonStore(path, new Map<string, SavedServerLogin>(), records => [...records.values()])
+  }
+
   list() {
-    return [...this.records.values()]
+    return [...this.store.value.values()]
   }
+
   get(origin: string) {
-    return this.records.get(origin)
+    return this.store.value.get(origin)
   }
-  async load(allowed: (origin: string) => boolean) {
-    let raw: unknown
-    try {
-      raw = JSON.parse(await readFile(this.path, 'utf8'))
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-      throw new Error('Could not read app server logins.', { cause: error })
-    }
-    if (!Array.isArray(raw)) throw new Error('Invalid app server login file.')
-    for (const entry of raw) {
-      if (!validDesktopCredential(entry) || !('origin' in entry) || typeof entry.origin !== 'string') continue
-      try {
-        const origin = serverOrigin(entry.origin)
-        if (allowed(origin))
-          this.records.set(origin, {
-            origin,
-            token: entry.token,
-            expiresAt: entry.expiresAt,
-            account: { id: entry.account.id, name: entry.account.name, email: entry.account.email },
-          })
-      } catch {
-        // Ignore malformed origins without loading a credential for them.
+
+  load(allowed: (origin: string) => boolean) {
+    return this.store.load(raw => {
+      if (!Array.isArray(raw)) throw new Error('Invalid app server login file.')
+      const records = new Map<string, SavedServerLogin>()
+      for (const entry of raw) {
+        if (!validDesktopCredential(entry) || !('origin' in entry) || typeof entry.origin !== 'string') continue
+        try {
+          const origin = serverOrigin(entry.origin)
+          if (allowed(origin))
+            records.set(origin, {
+              origin,
+              token: entry.token,
+              expiresAt: entry.expiresAt,
+              account: { id: entry.account.id, name: entry.account.name, email: entry.account.email },
+            })
+        } catch {
+          // Ignore malformed origins without loading a credential for them.
+        }
       }
-    }
+      return records
+    }, 'Could not read app server logins.')
   }
+
   put(entry: SavedServerLogin) {
-    return this.change(records => {
-      records.set(entry.origin, entry)
-    })
+    return this.store.change(records => new Map(records).set(entry.origin, entry))
   }
+
   remove(entry: SavedServerLogin) {
-    return this.change(records => {
-      if (records.get(entry.origin) === entry) records.delete(entry.origin)
+    return this.store.change(records => {
+      const next = new Map(records)
+      if (next.get(entry.origin) === entry) next.delete(entry.origin)
+      return next
     })
-  }
-  private change(update: (records: Map<string, SavedServerLogin>) => void) {
-    const work = this.writes.then(async () => {
-      const next = new Map(this.records)
-      update(next)
-      await writeJsonFile(this.path, [...next.values()])
-      this.records = next
-    })
-    this.writes = work.catch(() => {})
-    return work
   }
 }

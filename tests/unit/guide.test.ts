@@ -11,7 +11,7 @@ import {
   searchGuide,
   slugFromPathname,
   slugifyHeading,
-} from '../../shared/guide'
+} from '../../frontend/guide/guide'
 
 test('parseFrontmatter handles YAML key/values, quotes, CRLF, and plain markdown without frontmatter', () => {
   const { meta, body } = parseFrontmatter(

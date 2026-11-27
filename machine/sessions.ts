@@ -4,51 +4,46 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
+import { argsSelectSession, nativeIdHint } from '../shared/harnesses'
 import type { Conversation, Session, LaunchSettings, SessionInput, SessionRecord, SessionUpdate } from '../shared/model'
 import { acknowledgeResting, restingActivity } from './activity'
 import { driverStatus, request, stopDriver } from './drivers'
 import { removeSessionFiles } from './files'
 import { harness } from './harnesses'
-import { chatSocket, terminalSocket, which } from './launch'
+import { which } from './launch'
 import {
   changeRegistry,
+  current,
+  findConversationOwner,
+  latestConversationFor,
   readRegistry,
   RegistryError,
   session as findSession,
+  sessionStorageFor,
   switchConversation,
   withSessionLock,
   type Registry,
 } from './registry'
-import { locked, now, statePath } from './state'
+import { chatSocket, expandHomePath, locked, now, statePath, terminalSocket, validateBashArgs } from './state'
 import { Scan } from './stores'
 
 async function describe(record: SessionRecord, registry: Registry): Promise<Session> {
   const { terminal, chat } = await driverStatus(record.id)
   const running = terminal ?? chat
-  const adapter = harness(record.tool)
-  const scan = new Scan(2, 16 * 1024 * 1024)
-  const title = (id: string) => {
-    try {
-      return adapter.title(record, id, scan)
-    } catch {
-      return null
-    }
-  }
   const conversations: Conversation[] = record.conversations.map(item => {
     const owner = item.movedTo ? registry.sessions.find(session => session.id === item.movedTo) : null
     return {
       id: item.id,
+      tool: item.tool,
       startedAt: item.startedAt,
       movedTo: item.movedTo ? { id: item.movedTo, name: owner?.name ?? 'another session' } : null,
-      title: title(item.id),
     }
   })
   return {
     ...record,
+    conversation: current(record)?.id ?? null,
     conversations,
-    title: conversations.at(-1)!.title,
     status: running ? (running.clients ? 'attached' : 'detached') : record.lastConnectedAt ? 'stopped' : 'ready',
     driver: terminal ? 'terminal' : chat ? 'chat' : null,
     runningRevision: running?.revision ?? null,
@@ -69,10 +64,10 @@ export async function getSession(id: unknown) {
 function validLaunch({ env, args, mcpServers }: LaunchSettings) {
   if (Buffer.byteLength(JSON.stringify({ env, args, mcpServers })) > 32 * 1024)
     throw new RegistryError('Environment variables, arguments and MCP servers must fit within 32 KiB.', 400)
-  const syntax = spawnSync('bash', ['-n', '-c', `exec "$1" ${args}`], { encoding: 'utf8' })
-  if (syntax.error)
+  const problem = validateBashArgs(args)
+  if (problem?.missing)
     throw new RegistryError('Bash is missing on this machine. Open Software on the machine page to install it.')
-  if (syntax.status !== 0) throw new RegistryError(`Invalid Bash argument syntax: ${syntax.stderr.trim()}`, 400)
+  if (problem?.error !== undefined) throw new RegistryError(`Invalid Bash argument syntax: ${problem.error}`, 400)
 }
 
 function uniqueName(registry: Registry, name: string, except?: string) {
@@ -144,20 +139,9 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
     const name = input.name.trim()
     uniqueName(before, name)
     validLaunch(input.launch)
-    const path = input.rootDir.startsWith('~/') ? homedir() + input.rootDir.slice(1) : input.rootDir
+    const path = expandHomePath(input.rootDir)
     if (!isAbsolute(path)) throw new RegistryError('Root directory must be absolute or begin with ~/', 400)
     const adapter = harness(input.tool)
-    let tokens: string[] = []
-    try {
-      tokens = input.launch.args.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) ?? []
-    } catch {
-      /* Bash validated the syntax; expanded arguments are checked at launch. */
-    }
-    if (adapter.selectsSession(tokens))
-      throw new RegistryError(
-        'Outpost controls the coding tool conversation. Find conversations to resume one instead.',
-        400,
-      )
     const environment = { ...(process.env as Record<string, string>), ...input.launch.env, ...(input.storage ?? {}) }
     const executable = which(adapter.command, environment.PATH)
     if (!executable)
@@ -173,7 +157,7 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
         400,
       )
     const root = realpathSync(path)
-    let conversation: string
+    let conversation: string | null = null
     let storage: Record<string, string>
     try {
       if (input.conversation) {
@@ -186,7 +170,9 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
         storage = found.storage
       } else {
         storage = adapter.storage(adapter.home(environment, root))
-        conversation = await adapter.create(root, environment, executable)
+        conversation = argsSelectSession(input.tool, input.launch.args)
+          ? null
+          : await adapter.create(root, environment, executable)
       }
     } catch (error) {
       if (input.worktree)
@@ -203,18 +189,15 @@ async function create(input: Creation, creationKey?: string): Promise<Session> {
       storage,
       delivery: 'auto',
       config: { revision: 1, ...input.launch },
-      conversations: [{ id: conversation, startedAt: now(), movedTo: null }],
+      conversation,
+      conversations: conversation ? [{ id: conversation, tool: input.tool, startedAt: now(), movedTo: null }] : [],
     }
     return changeRegistry(registry => {
       // Re-check after slow external work; never overwrite concurrent changes.
       uniqueName(registry, name)
       if (
-        registry.sessions.some(
-          item =>
-            item.tool === record.tool &&
-            JSON.stringify(item.storage) === JSON.stringify(storage) &&
-            item.conversations.some(entry => entry.id === conversation && !entry.movedTo),
-        )
+        conversation &&
+        findConversationOwner(registry.sessions, record.tool, Object.values(storage)[0], conversation)
       )
         throw new RegistryError('This conversation already has an Outpost session on this machine.', 409)
       registry.sessions.push(record)
@@ -258,8 +241,17 @@ export async function forkSession(id: unknown, branch: unknown, rootDir: unknown
   })
 }
 
-/** Edit a session. Launch settings apply when it next starts. */
+/** Edit a session. Name and delivery apply at once; harness, directory, conversation
+ * and launch settings apply when the session next starts. */
 export async function updateSession(id: unknown, update: SessionUpdate) {
+  let resolvedRootDir: string | undefined
+  if (update.rootDir !== undefined) {
+    const expanded = expandHomePath(update.rootDir)
+    if (!isAbsolute(expanded)) throw new RegistryError('Root directory must be absolute or begin with ~/', 400)
+    if (!existsSync(expanded) || !statSync(expanded).isDirectory())
+      throw new RegistryError('Root directory does not exist.', 400)
+    resolvedRootDir = realpathSync(expanded)
+  }
   const record = await changeRegistry(registry => {
     const record = findSession(registry, id)
     if (record.config.revision !== update.revision)
@@ -269,11 +261,52 @@ export async function updateSession(id: unknown, update: SessionUpdate) {
       record.name = update.name.trim()
     }
     if (update.delivery !== undefined) record.delivery = update.delivery
-    const { revision, ...current } = record.config
-    const launch = launchOf({ ...current, ...pick(update, launchKeys) })
-    // Only a real change is a new revision, which the running session restarts for.
-    if (JSON.stringify(launch) !== JSON.stringify(launchOf(current))) {
-      validLaunch(launch)
+
+    const { revision, ...currentLaunch } = record.config
+    const launch = launchOf({ ...currentLaunch, ...pick(update, launchKeys) })
+    const launchChanged = JSON.stringify(launch) !== JSON.stringify(launchOf(currentLaunch))
+    if (launchChanged) validLaunch(launch)
+
+    const previousTool = record.tool
+    const nextTool = update.tool ?? record.tool
+    const toolChanged = nextTool !== previousTool
+    const nextRootDir = resolvedRootDir ?? record.rootDir
+    const rootDirChanged = nextRootDir !== record.rootDir
+    const previousConversation = current(record)?.id ?? null
+
+    if (toolChanged) record.tool = nextTool
+    record.rootDir = nextRootDir
+
+    const nextAdapter = harness(nextTool)
+    const storageKey = nextAdapter.definition.storageKey
+    if (toolChanged || launch.env[storageKey] !== currentLaunch.env[storageKey]) {
+      const env = { ...(process.env as Record<string, string>), ...launch.env }
+      record.storage = nextAdapter.storage(nextAdapter.home(env, nextRootDir))
+    }
+
+    const nextConversation =
+      update.conversation !== undefined
+        ? update.conversation
+        : toolChanged
+          ? (latestConversationFor(record, nextTool)?.id ?? null)
+          : previousConversation
+
+    if (nextConversation !== null && !nextAdapter.validId(nextConversation))
+      throw new RegistryError(
+        `Invalid conversation ID for ${nextAdapter.definition.label}: expected ${nativeIdHint(nextTool)}.`,
+        400,
+      )
+
+    const conversationChanged = nextConversation !== previousConversation
+    if (nextConversation === null) {
+      record.conversation = null
+    } else if (conversationChanged || toolChanged) {
+      switchConversation(registry, record.id, nextConversation)
+    }
+
+    // Any change that affects how the process starts bumps the revision so a running
+    // session knows it needs a restart to take effect.
+    if (toolChanged || rootDirChanged || launchChanged || conversationChanged) {
       record.config = { revision: revision + 1, ...launch }
     }
     return record
@@ -287,7 +320,8 @@ function pick<T extends object, K extends keyof T>(value: T, keys: readonly K[])
 
 /** Make an earlier conversation current; it is resumed at the next start.
  * With `reclaim: true`, a conversation that moved to another stopped session
- * can be moved back here. */
+ * can be moved back here. Switching to a conversation from an earlier harness
+ * also switches the session back to that harness. */
 export async function switchSession(id: unknown, conversation: unknown, options: { reclaim?: boolean } = {}) {
   return withSessionLock(id, async () => {
     const { terminal, chat } = await driverStatus(String(id))
@@ -295,18 +329,15 @@ export async function switchSession(id: unknown, conversation: unknown, options:
     if (options.reclaim) {
       const snapshot = readRegistry()
       const currentRecord = findSession(snapshot, id)
-      const storageValue = Object.values(currentRecord.storage)[0]
-      const holder = snapshot.sessions.find(
-        other =>
-          other.id !== currentRecord.id &&
-          other.tool === currentRecord.tool &&
-          Object.values(other.storage)[0] === storageValue &&
-          other.conversations.some(item => item.id === conversation && !item.movedTo),
-      )
-      if (holder) {
-        const holderDriver = await driverStatus(holder.id)
-        if (holderDriver.terminal || holderDriver.chat)
-          throw new RegistryError(`Stop "${holder.name}" before moving this conversation back here.`, 409)
+      const entry = currentRecord.conversations.find(item => item.id === conversation)
+      if (entry) {
+        const storageHome = sessionStorageFor(currentRecord, entry.tool)
+        const holder = findConversationOwner(snapshot.sessions, entry.tool, storageHome, entry.id, currentRecord.id)
+        if (holder) {
+          const holderDriver = await driverStatus(holder.id)
+          if (holderDriver.terminal || holderDriver.chat)
+            throw new RegistryError(`Stop "${holder.name}" before moving this conversation back here.`, 409)
+        }
       }
     }
     const record = await changeRegistry(registry => {
@@ -314,6 +345,12 @@ export async function switchSession(id: unknown, conversation: unknown, options:
       const entry = record.conversations.find(item => item.id === conversation)
       if (!entry) throw new RegistryError('This conversation is not in the session.', 404)
       if (entry.movedTo && !options.reclaim) throw new RegistryError('This conversation moved to another session.')
+      if (entry.tool !== record.tool) {
+        record.tool = entry.tool
+        const adapter = harness(entry.tool)
+        record.storage = adapter.storage(sessionStorageFor(record, entry.tool))
+        record.config = { ...record.config, revision: record.config.revision + 1 }
+      }
       switchConversation(registry, record.id, entry.id)
       return record
     })
@@ -360,25 +397,20 @@ export async function deleteSession(id: unknown) {
         Array<{ session: SessionRecord; entry: SessionRecord['conversations'][number]; isCurrent: boolean }>
       >()
       for (const other of registry.sessions) {
-        const storage = Object.values(other.storage)[0]
-        const last = other.conversations.at(-1)
+        const active = current(other)
         for (const entry of other.conversations) {
           if (entry.movedTo !== record.id) continue
-          const k = JSON.stringify([other.tool, storage, entry.id])
+          const storage = sessionStorageFor(other, entry.tool)
+          const k = JSON.stringify([entry.tool, storage, entry.id])
           const list = orphaned.get(k) ?? []
-          list.push({ session: other, entry, isCurrent: entry === last })
+          list.push({ session: other, entry, isCurrent: active?.id === entry.id && entry.tool === other.tool })
           orphaned.set(k, list)
         }
       }
       for (const refs of orphaned.values()) {
         const sample = refs[0]!
-        const sampleStorage = Object.values(sample.session.storage)[0]
-        const activeHolder = registry.sessions.find(
-          candidate =>
-            candidate.tool === sample.session.tool &&
-            Object.values(candidate.storage)[0] === sampleStorage &&
-            candidate.conversations.some(c => c.id === sample.entry.id && !c.movedTo),
-        )
+        const sampleStorage = sessionStorageFor(sample.session, sample.entry.tool)
+        const activeHolder = findConversationOwner(registry.sessions, sample.entry.tool, sampleStorage, sample.entry.id)
         if (activeHolder) {
           for (const ref of refs) ref.entry.movedTo = activeHolder.id
           continue

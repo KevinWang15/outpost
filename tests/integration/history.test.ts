@@ -13,7 +13,7 @@ import { HostedDeployment } from '../../backend/hosted/deployment'
 import { HistoryHub } from '../../backend/history/hub'
 import { Machines } from '../../backend/machines'
 import { SessionClient, type TargetContext } from '../../backend/sessions'
-import type { Command } from '../../backend/process'
+import type { Command } from '../../shared/node/process'
 import type { HistoryBatch, HistoryCatalog } from '../../shared/history'
 import type { Embed } from '../../backend/history/embeddings'
 import { terminalBinary } from './helpers'
@@ -148,7 +148,7 @@ test(
     }
     const hub = new HistoryHub({ deployment, resolve, embed })
     // Agents' history tool calls arrive on their machine's connection.
-    machines.agent = (owner, _target, call) => hub.call(owner, call.tool, call.arguments)
+    machines.configure({ agent: (owner, _target, call) => hub.call(owner, call.tool, call.arguments) })
     t.after(async () => {
       machines.close()
       await hub.close()
@@ -303,6 +303,8 @@ test('history: hosted owners have separate indexes and cursors; offline machines
             cwd: '/work',
             size: 100,
             modified: '1',
+            forkedFrom: null,
+            managedSessionId: null,
           },
         ],
         next: null,

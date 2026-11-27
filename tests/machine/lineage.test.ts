@@ -75,7 +75,7 @@ test("adapters give messages the tool's own identity, mark compaction summaries 
   const fork = sources.find(source => source.nativeId === '44444444-4444-4444-8444-444444444444')!
   assert.equal(fork.forkedFrom, '33333333-3333-4333-8333-333333333333')
   const title = sources.find(source => source.nativeId === '11111111-1111-4111-8111-111111111111')!.title
-  assert.equal(title, 'Schema migration plan', "Claude Code's own title")
+  assert.equal(title, '11111111-1111-4111-8111-111111111111', 'unmanaged sources use their native ID')
 })
 
 test('copies are reported once, where they began, with their forks and compaction noted', async t => {

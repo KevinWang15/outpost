@@ -2,7 +2,7 @@ import type { SoftwareId } from '../model'
 import { harnesses } from '../harnesses'
 import chatAgents from '../chatAgents.json' with { type: 'json' }
 
-export const packages = `install_packages() {
+const packages = `install_packages() {
   elevate=''
   if [ "$(id -u)" != 0 ]; then
     command -v sudo >/dev/null 2>&1 && sudo -n true || { echo 'Package installation requires passwordless sudo. Install the package as an administrator and retry.' >&2; exit 1; }

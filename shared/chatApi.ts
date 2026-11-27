@@ -4,8 +4,18 @@
 import Type, { type Static } from 'typebox'
 import { chatHost, chatOrigin, type ChatEntry, type ChatInfo, type ChatJournalSnapshot } from './chatHost'
 import type { Session } from './model'
-import { conversationSearch, sessionForkInput, sessionInput, sessionUpdate } from './schemas'
-import { sessionFileSchema } from './sessionFiles'
+import {
+  acknowledgeInput,
+  conversationSearch,
+  directoryQuery,
+  keyIdSchema,
+  sessionForkInput,
+  sessionInput,
+  sessionUpdate,
+  targetIdSchema,
+  uuidSchema,
+} from './schemas'
+import { fileIdPattern, sessionFileSchema } from './sessionFiles'
 
 export const chatProtocol = 4
 export const chatLimits = {
@@ -30,10 +40,10 @@ export const chatLimits = {
 // Stored records ---------------------------------------------------------------------
 
 const strict = { additionalProperties: false } as const
-const id = Type.String({ pattern: '^[A-Za-z0-9_-]{1,80}$' })
-const uuid = Type.String({ pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' })
-const files = Type.Array(Type.String({ pattern: '^[0-9a-f]{32}$' }), { maxItems: chatHost.maxFiles })
-const targetId = Type.String({ minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001f\\u007f]+$' })
+const id = keyIdSchema
+const uuid = uuidSchema
+const files = Type.Array(Type.String({ pattern: fileIdPattern.source }), { maxItems: chatHost.maxFiles })
+const targetId = targetIdSchema
 const session = { targetId, sessionId: uuid }
 const sessionRef = Type.Object(session, strict)
 export type SessionRef = Static<typeof sessionRef>
@@ -55,7 +65,6 @@ const author = Type.Union([
   Type.Object({ kind: Type.Literal('session'), ...member.properties }, strict),
   Type.Object({ kind: Type.Literal('outpost'), level: Type.Enum(['info', 'warning', 'error']) }, strict),
 ])
-export type MessageAuthor = Static<typeof author>
 export const channelMessage = Type.Object(
   {
     id: uuid,
@@ -190,7 +199,7 @@ export const chatClientMessage = Type.Union([
     value: Type.Union([Type.String({ maxLength: 200 }), Type.Boolean()]),
   }),
   message('mode', { id, ...session, modeId: Type.String({ minLength: 1, maxLength: 200 }) }),
-  message('seen', { ...session, completionId: Type.String({ pattern: '^[0-9a-f]{64}$' }) }),
+  message('seen', { ...session, completionId: acknowledgeInput.properties.completionId }),
   message('stop', { id, ...session }),
   /** Edit the session; launch configuration applies when it next starts. */
   message('session-update', { id, ...session, update: sessionUpdate }),
@@ -222,7 +231,7 @@ export const chatClientMessage = Type.Union([
   message('directories', {
     id,
     targetId,
-    path: Type.String({ maxLength: 4096, pattern: '^(|~|(?:~/|/)[^\\u0000-\\u001f\\u007f]*)$' }),
+    path: directoryQuery.properties.path,
   }),
   message('session-create', {
     id,
@@ -261,6 +270,11 @@ export type ChatServerMessage =
   | { type: 'schedule'; schedule: Schedule }
   | { type: 'schedule-removed'; scheduleId: string }
   | { type: 'result'; id: string; ok: boolean; message?: string; data?: unknown }
-  | { type: 'closed'; message: string }
+  | { type: 'closed'; reason: 'outdated' | 'unauthorized' | 'error'; message: string }
 
 export const sessionKey = (ref: SessionRef) => `${ref.targetId}/${ref.sessionId}`
+export function parseSessionKey(key: string): SessionRef | null {
+  const split = key.lastIndexOf('/')
+  if (split <= 0 || split === key.length - 1) return null
+  return { targetId: key.slice(0, split), sessionId: key.slice(split + 1) }
+}

@@ -9,9 +9,16 @@ import {
   type DesktopEntry,
   type DesktopSessionReference,
 } from '../../shared/desktopAuth'
-import type { ServerSignInSummary, SignInPhase } from './server-accounts-api'
 import { revokeDesktopLogin, serverRequest } from './server-api'
 import { ServerLoginStore, type SavedServerLogin } from './server-login-store'
+
+export type SignInPhase = 'opening' | 'waiting' | 'exchanging' | 'saving'
+
+/** Transient form progress, separate from the durable account list. */
+export interface ServerSignInSummary {
+  origin: string
+  phase: SignInPhase
+}
 
 interface Attempt {
   origin: string

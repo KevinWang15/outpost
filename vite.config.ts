@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
-import { loopbackHost } from './shared/loopback.ts'
+import { loopbackHost } from './backend/loopback.ts'
 
 export default defineConfig({
   plugins: [

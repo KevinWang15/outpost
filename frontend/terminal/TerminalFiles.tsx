@@ -1,11 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { TerminalSocket } from './socket'
+import type { TerminalSocket } from '../../shared/terminal/socket'
 import { Files, RefreshCw, X } from 'lucide-react'
-import { FileThumbnail } from './FileThumbnail'
-import { FileViewer } from './FileViewer'
-import { FileActions } from './FileActions'
-import { fileSize, SessionFiles } from './sessionFiles'
-import { useSessionFiles } from './useSessionFiles'
+import { FileThumbnail } from '../files/FileThumbnail'
+import { FileViewer } from '../files/FileViewer'
+import { FileActions } from '../files/FileActions'
+import { fileSize, SessionFiles } from '../files/sessionFiles'
+import { useSessionFiles } from '../files/useSessionFiles'
 
 /** Overlay UI: list and viewer never participate in xterm's geometry. */
 export default function TerminalFiles({
@@ -20,7 +20,7 @@ export default function TerminalFiles({
   restoreFocus(): void
 }) {
   const access = useMemo(() => new SessionFiles(connection), [connection])
-  const state = useSessionFiles(access, connected, revision)
+  const state = useSessionFiles(access, connected, revision, true)
   const { files, error } = state
   const [open, setOpen] = useState(false)
   const [preview, setPreview] = useState<string | null>(null)

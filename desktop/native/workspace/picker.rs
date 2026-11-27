@@ -107,6 +107,7 @@ fn section_label(label: &'static str, top_pad: Pixels) -> Div {
         .child(label)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn picker_row(
     idx: usize,
     is_selected: bool,
@@ -222,26 +223,16 @@ impl Workspace {
     }
 
     pub(super) fn open_pane_for_session(&self, session: &Value, cx: &App) -> Option<Id> {
-        let session_id = session["id"].as_str();
-        let server = session["server"].as_str();
-        let raw_title = session["title"].as_str().unwrap_or("");
-        let (name, _) = split_session_title(raw_title);
+        let session_id = session["id"].as_str()?;
         self.panes
             .iter()
-            .find(|(_, p)| {
-                let p = p.read(cx);
-                if let (Some(key), Some(id)) = (p.session_key.as_deref(), session_id) {
-                    return key == id;
-                }
-                server.is_some()
-                    && p.server.as_deref() == server
-                    && (p.title == raw_title || p.title == name)
-            })
+            .find(|(_, p)| p.read(cx).session_key.as_deref() == Some(session_id))
             .map(|(&id, _)| id)
     }
 
     pub(super) fn picker_items(&self, cx: &App) -> Vec<PickerItem> {
         let terms: Vec<String> = self
+            .picker
             .query
             .read(cx)
             .value()
@@ -334,13 +325,13 @@ impl Workspace {
         let entries = self.picker_items(cx);
         let count = entries.len();
         if count == 0 {
-            self.picker_index = 0;
+            self.picker.index = 0;
             return;
         }
-        let current = self.picker_index.min(count - 1) as isize;
-        self.picker_index = (current + delta).rem_euclid(count as isize) as usize;
-        let child_ix = picker_child_index(&entries, self.page == Page::Choose, self.picker_index);
-        self.picker_scroll.scroll_to_item(child_ix);
+        let current = self.picker.index.min(count - 1) as isize;
+        self.picker.index = (current + delta).rem_euclid(count as isize) as usize;
+        let child_ix = picker_child_index(&entries, self.page == Page::Choose, self.picker.index);
+        self.picker.scroll.scroll_to_item(child_ix);
         cx.notify();
     }
 
@@ -351,7 +342,7 @@ impl Workspace {
         let choose = self.page == Page::Choose;
         let entries = self.picker_items(cx);
         let total_sessions = entries.len();
-        let selected = self.picker_index.min(total_sessions.saturating_sub(1));
+        let selected = self.picker.index.min(total_sessions.saturating_sub(1));
         let active_pane_id = self.tabs.get(self.current).map(|t| t.active);
         let can_create = !self.creatable_accounts().is_empty();
         let has_accounts = !items(&self.accounts["accounts"]).is_empty();
@@ -395,10 +386,10 @@ impl Workspace {
                             "picker-refresh",
                             LucideIcon::RefreshCw,
                             "Refresh",
-                            self.refreshing_catalogue,
+                            self.picker.refreshing,
                             cx,
                             |s, _, cx| {
-                                s.refreshing_catalogue = true;
+                                s.picker.refreshing = true;
                                 s.call(json!({"op":"refresh"}));
                                 cx.notify();
                             },
@@ -444,7 +435,7 @@ impl Workspace {
             .pt(px(12.))
             .pb(px(8.))
             .child(
-                input(&self.query)
+                input(&self.picker.query)
                     .w_full()
                     .h(px(36.))
                     .text_size(px(13.))
@@ -453,7 +444,7 @@ impl Workspace {
                     .rounded(px(7.)),
             );
 
-        let status_text = if choose && self.refreshing_catalogue {
+        let status_text = if choose && self.picker.refreshing {
             if total_sessions > 0 {
                 format!(
                     "Refreshing… · {total_sessions} {}",
@@ -485,7 +476,7 @@ impl Workspace {
 
         let mut list = col()
             .id("picker-results")
-            .track_scroll(&self.picker_scroll)
+            .track_scroll(&self.picker.scroll)
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
@@ -615,8 +606,8 @@ impl Workspace {
             }
         }
 
-        if total_sessions == 0 && !(choose && self.refreshing_catalogue) {
-            let empty_msg = if !self.query.read(cx).value().trim().is_empty() {
+        if total_sessions == 0 && !(choose && self.picker.refreshing) {
+            let empty_msg = if !self.picker.query.read(cx).value().trim().is_empty() {
                 "No matching sessions."
             } else if choose && !has_accounts {
                 "No Outpost servers connected yet."

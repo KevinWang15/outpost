@@ -72,13 +72,21 @@ export default function SessionDialog({
     try {
       if (!tool) throw new Error('Install a coding tool on this machine first.')
       const name = String(data.get('name')).trim()
+      const rootDir = String(data.get('rootDir'))
       const settings = readDraft(launch)
-      const problem = settingsProblem({ name, delivery: 'auto', ...settings })
+      const problem = settingsProblem({
+        name,
+        tool,
+        rootDir,
+        conversation: conversation?.conversation ?? null,
+        delivery: 'auto',
+        ...settings,
+      })
       if (problem) throw new Error(problem)
       await onSave({
         tool,
         name,
-        rootDir: String(data.get('rootDir')),
+        rootDir,
         ...(conversation
           ? { conversation: conversation.conversation, storage: conversation.storage }
           : { createDirectory: data.get('createDirectory') === 'on' }),
@@ -148,14 +156,7 @@ export default function SessionDialog({
               )}
               <label className="field">
                 <span className="label">Name</span>
-                <input
-                  name="name"
-                  required
-                  maxLength={80}
-                  autoFocus
-                  defaultValue={conversation?.title.slice(0, 80)}
-                  placeholder="Refactor billing"
-                />
+                <input name="name" required maxLength={80} autoFocus placeholder="Refactor billing" />
               </label>
               <fieldset className="field">
                 <legend className="label">Coding tool</legend>

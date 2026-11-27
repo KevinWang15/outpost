@@ -1,6 +1,11 @@
-import type { TerminalSocket } from './socket'
 import { SessionFileCache } from '../../shared/sessionFileCache'
 import type { SessionFile } from '../../shared/sessionFiles'
+
+export interface SessionFileSource {
+  readFile(file: SessionFile, signal: AbortSignal): Promise<Blob>
+  listFiles(signal: AbortSignal): Promise<SessionFile[]>
+  removeFile(id: string, signal: AbortSignal): Promise<void>
+}
 
 export function fileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
@@ -11,7 +16,10 @@ export function fileSize(bytes: number) {
 export class SessionFiles {
   private originals: SessionFileCache
   readonly thumbnails: SessionFileCache
-  constructor(source: Pick<TerminalSocket, 'readFile' | 'listFiles' | 'removeFile'>) {
+  readonly list: (signal: AbortSignal) => Promise<SessionFile[]>
+  readonly remove: (id: string, signal: AbortSignal) => Promise<void>
+
+  constructor(source: SessionFileSource) {
     this.originals = new SessionFileCache(source.readFile)
     this.list = source.listFiles
     this.remove = async (id, signal) => {
@@ -45,11 +53,11 @@ export class SessionFiles {
       4 * 1024 * 1024,
     )
   }
-  list: (signal: AbortSignal) => Promise<SessionFile[]>
-  remove: (id: string, signal: AbortSignal) => Promise<void>
+
   async read(file: SessionFile) {
     return this.originals.read(file)
   }
+
   async download(file: SessionFile) {
     const blob = await this.read(file)
     const url = URL.createObjectURL(blob)
@@ -62,10 +70,12 @@ export class SessionFiles {
     setTimeout(() => URL.revokeObjectURL(url), 30_000)
     return true
   }
+
   retain(files: SessionFile[]) {
     this.originals.retain(files)
     this.thumbnails.retain(files)
   }
+
   clear() {
     this.originals.clear()
     this.thumbnails.clear()

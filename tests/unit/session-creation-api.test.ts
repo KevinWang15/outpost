@@ -85,7 +85,10 @@ for (const mode of ['local', 'hosted'] as const) {
     const token = await login()
     const dirsUrl = `/desktop/targets/${target.id}/directories?path=${encodeURIComponent('~/')}`
     assert.equal((await call('GET', dirsUrl)).status, 401)
-    assert.equal((await call('GET', `/desktop/targets/${target.id}/directories?path=relative`, undefined, token)).status, 400)
+    assert.equal(
+      (await call('GET', `/desktop/targets/${target.id}/directories?path=relative`, undefined, token)).status,
+      400,
+    )
     const dirs = await call('GET', dirsUrl, undefined, token)
     assert.equal(dirs.status, 200)
     assert.deepEqual(dirs.body, { directories: [], truncated: false })

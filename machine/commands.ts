@@ -2,8 +2,7 @@
 // binding from its environment; none can name another session.
 import { publish } from './files'
 import { request } from './drivers'
-import { chatSocket, terminalSocket } from './launch'
-import type { SessionBinding } from './state'
+import { chatSocket, terminalSocket, type SessionBinding } from './state'
 
 async function input(limit: number) {
   const chunks: Buffer[] = []
@@ -16,26 +15,14 @@ async function input(limit: number) {
   return Buffer.concat(chunks)
 }
 
-/** `outpost-terminal hook`: a native lifecycle hook. It must never block or
- * fail the tool's action, and passes on only what activity tracking reads. */
+/** `outpost-terminal hook`: native session-selection hook. It must never block
+ * or fail the tool's action, and passes on only conversation identity fields. */
 export async function hook(session: string) {
   const raw = await input(16 * 1024 * 1024)
   if (!raw) return
   const payload = JSON.parse(raw.toString('utf8'))
   const kept = Object.fromEntries(
-    [
-      'session_id',
-      'hook_event_name',
-      'agent_id',
-      'isSidechain',
-      'source',
-      'turn_id',
-      'notification_type',
-      'is_interrupt',
-      'conversationId',
-      'hookEventName',
-      'terminationReason',
-    ]
+    ['session_id', 'hook_event_name', 'agent_id', 'isSidechain', 'source', 'conversationId', 'hookEventName']
       .filter(key => key in payload)
       .map(key => [key, payload[key]]),
   )

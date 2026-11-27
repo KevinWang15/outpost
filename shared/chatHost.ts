@@ -81,7 +81,6 @@ export interface ChatInfo {
   error: string | null
   agent: { name: string; title: string | null; version: string | null } | null
   nativeId: string | null
-  title: string | null
   modes: acp.SessionModeState | null
   config: acp.SessionConfigOption[]
   commands: acp.AvailableCommand[]

@@ -2,20 +2,28 @@
 // interface in a PTY) or the chat host (its ACP server). Both get the same
 // binding, Outpost's MCP server and the session's own.
 import type { Scrollback } from '../shared/terminalService'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
+import { argsSelectSession } from '../shared/harnesses'
 import type { SessionRecord } from '../shared/model'
 import { quote, shellJoin } from '../shared/shell'
 import type { Launch, McpServer, McpStdioServer } from './harnesses/harness'
 import { harness } from './harnesses'
-import { current, readRegistry, RegistryError } from './registry'
-import { machineExecutable, state, statePath, writeFile, type SessionBinding } from './state'
+import { changeRegistry, current, readRegistry, RegistryError, switchConversation } from './registry'
+import {
+  chatSocket,
+  machineExecutable,
+  state,
+  statePath,
+  terminalSocket,
+  validateBashArgs,
+  writeFile,
+  type SessionBinding,
+} from './state'
 import { driverStatus } from './drivers'
 
 type Driver = SessionBinding['driver']
-export const terminalSocket = (session: string) => `terminals/${session}.sock`
-export const chatSocket = (session: string) => `chats/${session}.sock`
 
 /** The launch's binding, read by every Outpost process the tool starts. */
 const binding = (session: SessionRecord, driver: Driver) => ({
@@ -79,12 +87,12 @@ function environmentFor(session: SessionRecord) {
 }
 
 /** Everything a driver needs to run the session's coding tool. */
-export function prepare(session: SessionRecord, driver: Driver) {
+export async function prepare(session: SessionRecord, driver: Driver) {
   if (!existsSync(session.rootDir) || !statSync(session.rootDir).isDirectory())
     throw new RegistryError('Session root directory no longer exists')
-  const conversation = current(session)
-  if (conversation.movedTo) {
-    const owner = readRegistry().sessions.find(item => item.id === conversation.movedTo)
+  const active = current(session)
+  if (active?.movedTo) {
+    const owner = readRegistry().sessions.find(item => item.id === active.movedTo)
     throw new RegistryError(
       `This conversation moved to ${owner?.name ?? 'another session'}. Choose what to resume in this session.`,
     )
@@ -97,9 +105,14 @@ export function prepare(session: SessionRecord, driver: Driver) {
       `${adapter.command} is not on the login PATH. Check Software on the machine page and your shell startup files.`,
     )
   installHelpers()
+  let conversation = active?.id ?? ''
+  if (!conversation && driver === 'terminal' && !argsSelectSession(session.tool, session.config.args)) {
+    conversation = await adapter.create(session.rootDir, environment, executable)
+    await changeRegistry(registry => switchConversation(registry, session.id, conversation))
+  }
   const launch: Launch = {
     session,
-    conversation: conversation.id,
+    conversation,
     executable,
     environment: { ...environment, ...binding(session, driver) },
     outpost: outpost(session, driver),
@@ -109,23 +122,12 @@ export function prepare(session: SessionRecord, driver: Driver) {
   return { adapter, launch }
 }
 
-/** Bash runs the launch so the user's arguments keep their shell syntax; the
- * guard refuses arguments that would select another conversation. */
+/** Bash runs the launch so the user's arguments keep their shell syntax. */
 function launchScript(launch: Launch, options: string[]) {
   const { session } = launch
   const adapter = harness(session.tool)
   const exports = { ...session.config.env, ...session.storage, ...binding(session, 'terminal') }
-  const patterns = adapter.selectionOptions
-    .map(option => (option.length === 2 ? `${quote(option)}*` : `${quote(option)}|${quote(`${option}=`)}*`))
-    .join('|')
-  const guard = patterns
-    ? `for argument in "$@"; do
-  case "$argument" in
-    --) break ;;
-    ${patterns}) printf '%s\\n' ${quote('Outpost controls the coding tool conversation. Remove conversation-selection arguments and resume one from Outpost instead.')} >&2; exit 64 ;;
-  esac
-done`
-    : ':'
+  const resumeArgs = launch.conversation ? adapter.resume(session, launch.conversation) : []
   return [
     `cd -- ${quote(session.rootDir)}`,
     `export PATH=${quote(statePath('bin'))}:"$PATH"`,
@@ -139,7 +141,7 @@ done`
       )
       .map(([key, value]) => `${key}=${quote(value)}`)
       .join(' ')}`,
-    `launch_coding_tool() {\n${guard}\nexec ${quote(launch.executable)} ${shellJoin([...options, ...adapter.resume(session, launch.conversation)])} "$@"\n}`,
+    `launch_coding_tool() {\nexec ${quote(launch.executable)} ${shellJoin([...options, ...resumeArgs])} "$@"\n}`,
     `launch_coding_tool ${session.config.args}`,
   ].join(' &&\n')
 }
@@ -179,7 +181,7 @@ async function daemon(
 }
 
 export async function startTerminal(session: SessionRecord, cols: number, rows: number, scrollback?: Scrollback) {
-  const { adapter, launch } = prepare(session, 'terminal')
+  const { adapter, launch } = await prepare(session, 'terminal')
   if (!adapter.terminal)
     throw new RegistryError('This coding tool has no terminal interface. Open this session in Outpost Chat.')
   const bash = which('bash', launch.environment.PATH)
@@ -188,15 +190,13 @@ export async function startTerminal(session: SessionRecord, cols: number, rows: 
   // The PTY child needs its own session and the PTY as controlling terminal.
   const setsid = which('setsid', launch.environment.PATH)
   if (!setsid) throw new RegistryError('setsid (util-linux) is missing on this machine. Install it first.')
-  if (spawnSync(bash, ['-n', '-c', `exec "$1" ${session.config.args}`]).status !== 0)
+  if (validateBashArgs(session.config.args, bash))
     throw new RegistryError('The session arguments are not valid Bash syntax. Edit the session to fix them.')
   const options = [...(await adapter.mcp(launch)), ...adapter.settings(launch)]
-  let problem: string | null = null
   try {
     options.push(...(await adapter.hooks(launch)))
-  } catch (error) {
-    // Optional activity integration must never make a terminal unusable.
-    problem = `Activity tracking could not start: ${(error as Error).message}`.slice(0, 2000)
+  } catch {
+    // Optional conversation-switch hooks must never prevent a terminal starting.
   }
   mkdirSync(statePath('terminals'), { recursive: true, mode: 0o700 })
   rmSync(statePath(terminalSocket(session.id)), { force: true })
@@ -208,7 +208,6 @@ export async function startTerminal(session: SessionRecord, cols: number, rows: 
       session: session.id,
       revision: session.config.revision,
       conversation: launch.conversation,
-      problem,
       command: [setsid, '-c', bash, '-c', launchScript(launch, options)],
       cwd: session.rootDir,
       env: environment,
@@ -223,7 +222,7 @@ export async function startTerminal(session: SessionRecord, cols: number, rows: 
 }
 
 export async function startChat(session: SessionRecord) {
-  const { adapter, launch } = prepare(session, 'chat')
+  const { adapter, launch } = await prepare(session, 'chat')
   const chat = adapter.chat(launch.executable)
   mkdirSync(statePath('chats'), { recursive: true, mode: 0o700 })
   rmSync(statePath(chatSocket(session.id)), { force: true })
@@ -240,7 +239,7 @@ export async function startChat(session: SessionRecord) {
         ...chat.env,
         PATH: `${statePath('bin')}${delimiter}${launch.environment.PATH ?? ''}`,
       },
-      resume: adapter.chatResumable(session, launch.conversation) ? launch.conversation : null,
+      resume: launch.conversation && adapter.chatResumable(session, launch.conversation) ? launch.conversation : null,
       mcpServers: await adapter.chatServers(launch),
       instructions: session.config.instructions,
       model: session.config.model,

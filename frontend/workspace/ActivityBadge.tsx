@@ -29,7 +29,11 @@ export default function ActivityBadge({
         className="badge finished"
         disabled={checking}
         onClick={() => onCheck(session)}
-        title="The agent finished and is waiting for you. Click to mark as checked."
+        title={
+          activity.detail
+            ? `${activity.detail} — Click to mark as checked.`
+            : 'The agent finished and is waiting for you. Click to mark as checked.'
+        }
         aria-label={`Mark ${session.name} as checked`}
       >
         {checking ? <LoaderCircle className="spin" size={12} /> : <Bell size={12} />}

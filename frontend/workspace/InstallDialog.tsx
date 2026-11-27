@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { coreSoftware, softwareLabel, type Installation, type InstallationEvent } from '../../shared/model'
+import {
+  coreSoftware,
+  softwareLabel,
+  visibleSoftware,
+  type Installation,
+  type InstallationEvent,
+} from '../../shared/model'
 import { streamInstallation } from '../api'
 import { Dialog } from '../ui/Dialog'
 
 const logLimit = 256 * 1024
 function jobSubject(job: Installation) {
-  const items = job.software.filter(id => !(id === 'claude-agent-acp' && job.software.includes('claude')))
+  const items = visibleSoftware(job.software)
   if (!items.length || items.every(id => coreSoftware.includes(id))) return 'The machine service'
   return items.map(softwareLabel).join(', ')
 }

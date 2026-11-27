@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
-import { copyText } from '../api'
+import { copyText } from '../browser'
 
 export function CopyField({ value, label }: { value: string; label: string }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { harnessIds } from '../shared/harnesses'
 import {
   allSoftware,
   coreSoftware,
   setupTargets,
   softwareLabel,
+  visibleSoftware,
   type SoftwareId,
   type SoftwareReport,
 } from '../shared/model'
@@ -15,7 +15,7 @@ import { AppError } from './errors'
 import { MachineConnectionError } from './machines'
 import { MachineAssets, platformName } from './machineAssets'
 import { detectPlatform, sshServiceInstaller, sshToolInstaller } from './machineInstaller'
-import { runCommand, type CommandResult } from './process'
+import { runCommand, type CommandResult } from '../shared/node/process'
 import type { TargetContext } from './sessions'
 
 export interface SoftwareService {
@@ -45,12 +45,7 @@ export class SoftwareClient implements SoftwareService {
             timeoutMs: 45_000,
             readOnly: true,
           })
-        : await machine.call<CommandResult>(
-            'software.inspect',
-            // Include harnessIds so released terminal-v3.0.5 nodes also inspect every registered harness.
-            { tools: harnessIds, marker },
-            { signal, timeoutMs: 50_000 },
-          )
+        : await machine.call<CommandResult>('software.inspect', { marker }, { signal, timeoutMs: 50_000 })
     try {
       return softwareReport(ids, marker, result)
     } catch (error) {
@@ -125,9 +120,7 @@ export class SoftwareClient implements SoftwareService {
     if (remaining.length)
       throw new Error('Check the installation of ' + remaining.map(item => softwareLabel(item.id)).join(', ') + '.')
     await context.workspace.setEnvironment(context.target.id, verified.environment)
-    const done = (requested?.length ? requested : coreSoftware).filter(
-      (id, _, list) => !(id === 'claude-agent-acp' && list.includes('claude')),
-    )
+    const done = visibleSoftware(requested?.length ? requested : coreSoftware)
     output(
       requested?.length
         ? `${done.map(softwareLabel).join(', ')} ${done.length === 1 ? 'is' : 'are'} ready.\n`

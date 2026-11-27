@@ -446,13 +446,11 @@ fn box_arm_pieces(
             let left_end = match (left, right, down) {
                 (Double, _, _) => m.hy_t1,
                 (None, Double, None) => m.hy_b1,
-                (_, _, Double) => m.cy1,
                 _ => m.cy1,
             };
             let right_end = match (left, right, down) {
                 (_, Double, _) => m.hy_t1,
                 (Double, None, None) => m.hy_b1,
-                (_, _, Double) => m.cy1,
                 _ => m.cy1,
             };
             push(m.vx_l0, y0, m.vx_l1, left_end);
@@ -474,13 +472,11 @@ fn box_arm_pieces(
             let left_start = match (left, right, up) {
                 (Double, _, _) => m.hy_b0,
                 (None, Double, None) => m.hy_t0,
-                (_, _, Double) => m.cy0,
                 _ => m.cy0,
             };
             let right_start = match (left, right, up) {
                 (_, Double, _) => m.hy_b0,
                 (Double, None, None) => m.hy_t0,
-                (_, _, Double) => m.cy0,
                 _ => m.cy0,
             };
             push(m.vx_l0, left_start, m.vx_l1, y1);
@@ -502,13 +498,11 @@ fn box_arm_pieces(
             let top_end = match (up, down, right) {
                 (Double, _, _) => m.vx_l1,
                 (None, Double, None) => m.vx_r1,
-                (_, _, Double) => m.cx1,
                 _ => m.cx1,
             };
             let bottom_end = match (up, down, right) {
                 (_, Double, _) => m.vx_l1,
                 (Double, None, None) => m.vx_r1,
-                (_, _, Double) => m.cx1,
                 _ => m.cx1,
             };
             push(x0, m.hy_t0, top_end, m.hy_t1);
@@ -530,13 +524,11 @@ fn box_arm_pieces(
             let top_start = match (up, down, left) {
                 (Double, _, _) => m.vx_r0,
                 (None, Double, None) => m.vx_l0,
-                (_, _, Double) => m.cx0,
                 _ => m.cx0,
             };
             let bottom_start = match (up, down, left) {
                 (_, Double, _) => m.vx_r0,
                 (Double, None, None) => m.vx_l0,
-                (_, _, Double) => m.cx0,
                 _ => m.cx0,
             };
             push(top_start, m.hy_t0, x1, m.hy_t1);

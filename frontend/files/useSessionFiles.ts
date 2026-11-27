@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { SessionFile } from '../../shared/sessionFiles'
 import type { SessionFiles } from './sessionFiles'
 
-/** Shared list reconciliation and actions for the dropdown and browser viewer. */
-export function useSessionFiles(access: SessionFiles, connected: boolean, revision = 0) {
+/** Shared list reconciliation and actions for the terminal panel, chat panel and viewer.
+ * Pass `clearOnUnmount = true` only when the caller exclusively owns `access`. */
+export function useSessionFiles(access: SessionFiles, connected: boolean, revision = 0, clearOnUnmount = false) {
   const [files, setFiles] = useState<SessionFile[]>([])
   const [error, setError] = useState('')
   const [loadError, setLoadError] = useState('')
@@ -51,9 +52,9 @@ export function useSessionFiles(access: SessionFiles, connected: boolean, revisi
   useEffect(
     () => () => {
       transfer.current?.abort()
-      access.clear()
+      if (clearOnUnmount) access.clear()
     },
-    [access],
+    [access, clearOnUnmount],
   )
 
   const act = async (file: SessionFile, remove: boolean) => {
@@ -88,7 +89,6 @@ export function useSessionFiles(access: SessionFiles, connected: boolean, revisi
       setError('')
       setRefresh(value => value + 1)
     },
-    setError,
   }
 }
 export type SessionFilesState = ReturnType<typeof useSessionFiles>

@@ -20,7 +20,9 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const entry = useRef(
     [pagePaths.workspace, pagePaths.chat, pagePaths.terminal, pagePaths.logs].some(
       route => route === window.location.pathname,
-    )
+    ) ||
+      window.location.pathname === pagePaths.guide ||
+      window.location.pathname.startsWith(`${pagePaths.guide}/`)
       ? window.location.pathname + window.location.search
       : pagePaths.workspace,
   )
@@ -100,7 +102,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           <>
             <p role="alert">{error}</p>
             <button
-              className="button secondary"
+              className="button"
               onClick={() => {
                 setError('')
                 void load().catch(problem => setError(problem.message))
@@ -111,7 +113,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           </>
         ) : (
           <>
-            <LoaderCircle className="loading-spinner" />
+            <LoaderCircle className="spin" />
             <p>Opening your workspace…</p>
           </>
         )}

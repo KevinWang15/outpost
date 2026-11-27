@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { IncomingHttpHeaders } from 'node:http'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { DesktopAccount } from '../shared/desktopAuth'
-import { isLoopbackAddress } from '../shared/loopback'
+import { isLoopbackAddress, isLoopbackName, parseHostHeader, parseOriginHeader } from './loopback'
 import { AppError } from './errors'
 import type { SshIdentity } from './transport'
 import { Workspace } from './workspace'
@@ -16,13 +16,12 @@ export interface Owner {
   userId: string
   loginId: string
 }
-export interface AccountIdentity {
+interface AccountIdentity {
   account: DesktopAccount
   /** Changes when credentials are replaced; never sent to a client. */
   revision: string
 }
 
-/** Deployment-specific identity, workspace access and machine installation rules. */
 /** What a deployment reads from a request: a Fastify request has it, and a raw
  * WebSocket upgrade can provide it. */
 export interface Caller {
@@ -52,15 +51,6 @@ export interface Deployment {
   origin(request: FastifyRequest): string
   register(app: FastifyInstance): void
   close(): void
-}
-
-const loopbackHost = (host: string) => ['localhost', '127.0.0.1', '[::1]'].includes(host)
-function hostname(value: string | undefined) {
-  try {
-    return new URL(`http://${value}`).hostname
-  } catch {
-    return ''
-  }
 }
 
 async function serverSecret(directory: string) {
@@ -96,7 +86,7 @@ export class LocalDeployment implements Deployment {
   static async open(directory: string, machineOrigin?: string, options?: { seedLocal?: boolean; hostname?: string }) {
     if (machineOrigin) {
       const address = new URL(machineOrigin)
-      if (address.protocol !== 'https:' || address.origin !== machineOrigin || loopbackHost(address.hostname))
+      if (address.protocol !== 'https:' || address.origin !== machineOrigin || isLoopbackName(address.hostname))
         throw new Error('OUTPOST_MACHINE_ORIGIN must be an HTTPS origin for a machine-only reverse proxy.')
     }
     const deployment = new LocalDeployment(directory, await serverSecret(directory), machineOrigin)
@@ -118,15 +108,11 @@ export class LocalDeployment implements Deployment {
           : request.method === 'POST' && /^\/api\/machine\/(?:enroll|revoke)$/.test(path)
       if (admissible) return null
     }
-    if (!loopbackHost(hostname(request.headers.host))) return 'Use the configured Outpost address.'
+    const parsedHost = parseHostHeader(request.headers.host)
+    if (!parsedHost || !isLoopbackName(parsedHost.hostname)) return 'Use the configured Outpost address.'
     if (request.headers.origin) {
-      let origin = ''
-      try {
-        origin = new URL(request.headers.origin).hostname
-      } catch {
-        /* rejected below */
-      }
-      if (!loopbackHost(origin)) return 'Cross-origin requests are not allowed'
+      const parsedOrigin = parseOriginHeader(request.headers.origin)
+      if (!parsedOrigin || !isLoopbackName(parsedOrigin.hostname)) return 'Cross-origin requests are not allowed'
     }
     return null
   }

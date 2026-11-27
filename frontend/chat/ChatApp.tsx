@@ -4,18 +4,18 @@ import { sessionKey } from '../../shared/chatApi'
 import ChannelView from './ChannelView'
 import { ChatClient } from './client'
 import { ChatClientContext, ShellContext, useChat, type ChatDialog, type Selection } from './context'
+import { ChannelDialog } from './ChannelDialog'
 import {
-  ChannelDialog,
   ConversationsChatDialog,
   DeleteChatDialog,
   FindChatDialog,
   ForkChatDialog,
   MachineLink,
   NewSessionDialog,
-  ScheduleDialog,
   SessionSettingsChatDialog,
   StopChatDialog,
 } from './Dialogs'
+import { ScheduleDialog } from './ScheduleDialog'
 import { needsYou } from './format'
 import SessionView from './SessionView'
 import Sidebar from './Sidebar'
@@ -162,7 +162,7 @@ function Shell() {
 export default function ChatApp() {
   const client = useMemo(() => new ChatClient(), [])
   useEffect(() => {
-    void client.connect()
+    client.connect()
     const wake = () => document.visibilityState === 'visible' && client.wake()
     document.addEventListener('visibilitychange', wake)
     window.addEventListener('online', wake)

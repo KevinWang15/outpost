@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { SearchAddon, ISearchResultChangeEvent } from '@xterm/addon-search'
 import type { Terminal } from '@xterm/xterm'
+import { isApple } from '../browser'
 import { liveSearchAddon } from './searchAddon'
 
 export const searchHighlightLimit = 1000
@@ -76,7 +77,7 @@ export function useTerminalSearch(restoreFocus: () => void) {
   const attach = useCallback(
     (term: Terminal, container: HTMLElement) => {
       current.current = create(term)
-      const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+      const mac = isApple()
       const key = (event: KeyboardEvent) => {
         if (
           event.isComposing ||

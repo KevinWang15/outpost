@@ -1,6 +1,5 @@
 import { appendFile, chmod, mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Ajv } from 'ajv'
 import Type, { type Static } from 'typebox'
 import {
   channelMessage,
@@ -12,6 +11,7 @@ import {
 import { AppError } from '../errors'
 import { writeJsonFile } from '../../shared/node/jsonFile'
 import { readStateFile } from '../stateFile'
+import { compileSchema } from '../validate'
 
 const strict = { additionalProperties: false } as const
 const version = Type.Literal(1)
@@ -44,15 +44,13 @@ const threadsFile = Type.Object(
   },
   strict,
 )
-const ajv = new Ajv()
-const validate = <S extends Type.TSchema>(schema: S) => ajv.compile<Static<S>>(schema)
 const valid = {
-  channels: validate(channelsFile),
-  deliveries: validate(deliveriesFile),
-  schedules: validate(schedulesFile),
-  threads: validate(threadsFile),
+  channels: compileSchema(channelsFile),
+  deliveries: compileSchema(deliveriesFile),
+  schedules: compileSchema(schedulesFile),
+  threads: compileSchema(threadsFile),
 }
-const validMessage = validate(channelMessage)
+const validMessage = compileSchema(channelMessage)
 
 const recent = 500
 const keep = { deliveries: 300, threads: 500 }

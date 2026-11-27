@@ -1,10 +1,13 @@
-import { memo, useState, type ReactNode } from 'react'
+import { memo, useContext, useState } from 'react'
 import { ChevronRight, Hash, Image, ImageOff, MessageSquareReply, Timer } from 'lucide-react'
 import type * as acp from '@agentclientprotocol/sdk'
 import { linkedFile } from '../../shared/chatHost'
 import { promptHeaderPattern, type TurnItem, type TurnView } from '../../shared/chatTranscript'
+import type { HarnessId } from '../../shared/harnesses'
+import { Markdown } from '../ui/Markdown'
+import { Avatar } from './Avatar'
+import { MentionHandlesContext } from './context'
 import { elapsed } from './format'
-import { Markdown } from './Markdown'
 import { PermissionCard, PlanView, StepGroup, type StepItem } from './Steps'
 import { TurnFile } from './Files'
 
@@ -24,9 +27,10 @@ function segments(items: TurnItem[]): Segment[] {
 }
 
 function Item({ item }: { item: Exclude<TurnItem, StepItem> }) {
+  const handles = useContext(MentionHandlesContext)
   switch (item.type) {
     case 'text':
-      return <Markdown text={item.text} />
+      return <Markdown text={item.text} mentions={handles} />
     case 'plan':
       return <PlanView entries={item.entries} />
     case 'permission':
@@ -146,7 +150,17 @@ function ComposedPrompt({ turn }: { turn: TurnView }) {
 
 /** A turn renders again only when an entry changed it (its revision). */
 export const Turn = memo(
-  function Turn({ turn, avatar }: { turn: TurnView; avatar: ReactNode }) {
+  function Turn({
+    turn,
+    sessionId,
+    sessionName,
+    sessionTool,
+  }: {
+    turn: TurnView
+    sessionId: string
+    sessionName: string
+    sessionTool: HarnessId
+  }) {
     const composed = turn.label !== null
     const footer =
       turn.status === 'running'
@@ -167,7 +181,9 @@ export const Turn = memo(
         ) : null}
         {(turn.items.length > 0 || turn.status === 'running') && (
           <div className="reply">
-            <div className="reply-avatar">{avatar}</div>
+            <div className="reply-avatar">
+              <Avatar id={sessionId} name={sessionName} tool={sessionTool} />
+            </div>
             <div className="reply-body">
               <Reply turn={turn} />
               {turn.status === 'running' && !turn.items.length && <p className="thinking">Thinking…</p>}
@@ -185,5 +201,9 @@ export const Turn = memo(
     )
   },
   (before, after) =>
-    before.turn.id === after.turn.id && before.turn.revision === after.turn.revision && before.avatar === after.avatar,
+    before.turn.id === after.turn.id &&
+    before.turn.revision === after.turn.revision &&
+    before.sessionId === after.sessionId &&
+    before.sessionName === after.sessionName &&
+    before.sessionTool === after.sessionTool,
 )

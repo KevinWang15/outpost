@@ -8,10 +8,10 @@ import { terminalControl } from '../shared/node/terminalFrames'
 import { ChatTerminal } from './chatTerminal'
 import { TerminalChat } from './terminalChat'
 import { driverStatus } from './drivers'
-import { startChat, startTerminal, chatSocket, terminalSocket } from './launch'
+import { startChat, startTerminal } from './launch'
 import { withSessionLock, RegistryError } from './registry'
 import { touchSession } from './sessions'
-import { socketAddress } from './state'
+import { chatSocket, socketAddress, terminalSocket } from './state'
 
 /** The first explicit start chooses the agent interface. Every subsequent view joins the same process. */
 export async function openSessionView(view: 'terminal' | 'chat', args: TerminalStreamArgs | ChatStreamArgs) {

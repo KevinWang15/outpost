@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AccountSshKey } from '../../shared/auth'
 import { AppError } from '../errors'
-import { runCommand } from '../process'
+import { runCommand } from '../../shared/node/process'
 import type { SshIdentity } from '../transport'
 
 /** One private Ed25519 key and known-hosts file per account, never returned by the API. */

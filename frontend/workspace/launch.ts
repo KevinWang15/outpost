@@ -1,4 +1,5 @@
 import { Value } from 'typebox/value'
+import { harnessIds, harnessLabel, nativeIdHint, validNativeId } from '../../shared/harnesses'
 import type { LaunchSettings, SessionSettings } from '../../shared/model'
 import { sessionSettings } from '../../shared/schemas'
 
@@ -53,6 +54,9 @@ export function readDraft(draft: LaunchDraft): LaunchSettings {
 
 const hints: Record<string, string> = {
   name: 'name is 1 to 80 characters, not only spaces',
+  tool: `tool is one of ${harnessIds.join(', ')}`,
+  rootDir: 'rootDir is an absolute or ~/ directory path',
+  conversation: 'conversation is a harness conversation ID string, or null to start fresh',
   delivery: 'delivery is "auto" or "manual"',
   instructions: 'instructions is text up to 32,000 characters, or null',
   model: 'model is the coding tool’s name for a model, or null',
@@ -64,7 +68,12 @@ const hints: Record<string, string> = {
 
 /** What is wrong with session settings, in words, or null when they are valid. */
 export function settingsProblem(value: unknown): string | null {
-  if (Value.Check(sessionSettings, value)) return null
+  if (Value.Check(sessionSettings, value)) {
+    const settings = value as SessionSettings
+    if (settings.conversation !== null && !validNativeId(settings.tool, settings.conversation))
+      return `Invalid conversation ID for ${harnessLabel(settings.tool)}: expected ${nativeIdHint(settings.tool)}.`
+    return null
+  }
   // Unions report every branch they tried; skip those summaries.
   const errors = Value.Errors(sessionSettings, value).filter(item => !['anyOf', 'boolean'].includes(item.keyword))
   const error = errors[0]

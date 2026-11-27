@@ -1,6 +1,6 @@
 import type { ImagePasteMode } from '../../shared/terminalFiles'
 import type { Terminal } from '@xterm/xterm'
-import { touchInput } from '../browser'
+import { isMac, touchInput } from '../browser'
 
 /** Only text already visible in xterm; no remote history request or mode change. */
 export function screenText(term: Terminal) {
@@ -26,7 +26,7 @@ export function attachClipboard(
     pasteFallback?: () => void
   },
 ) {
-  const mac = /Mac/.test(navigator.platform)
+  const mac = isMac()
   let disposed = false,
     pendingCopy: string | null = null
   const element = term.element!

@@ -73,7 +73,7 @@ test('raw and compressed generations read once, as canonical messages, and are s
   put('native-4', { version: 3 }) // A retained older generation is not indexed again.
   const sources = catalog([], null).sources
   assert.equal(sources.length, 5)
-  assert.ok(sources.every(source => source.tool === 'deepseek' && source.title === 'Named DeepSeek session'))
+  assert.ok(sources.every(source => source.tool === 'deepseek' && source.title === source.nativeId))
   const batch = readBatch(
     [],
     sources.map(source => ({ source, checkpoint: null })),
@@ -157,17 +157,6 @@ test('subagent runs are history but not sessions to resume; linked files are ref
   const listed = catalog([], null)
   assert.deepEqual(listed.sources, [])
   assert.ok(listed.warnings.length)
-})
-
-test('activity comes from lifecycle events', () => {
-  const deepseek = harness('deepseek')
-  assert.equal(deepseek.activity({ type: 'turn/start', time: 1, data: { turn: 2 } })?.state, 'working')
-  assert.equal(deepseek.activity({ type: 'approval/asked', time: 2, data: {} })?.state, 'waiting')
-  assert.equal(
-    deepseek.activity({ type: 'turn/end', time: 3, data: { turn: 2, reason: { kind: 'completed' } } })?.state,
-    'finished',
-  )
-  assert.equal(deepseek.activity({ type: 'assistant/message', data: {} }), null)
 })
 
 test('a corrupt frame or a future format is reported without hiding healthy sessions', async t => {

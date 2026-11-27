@@ -1,9 +1,15 @@
+import { blockedKinds, type BlockedKind } from './programStatus'
+
 /** Native turn state shared by session lists, terminal streams and desktop tabs. */
 export const activityStates = ['working', 'waiting', 'idle', 'finished', 'error', 'unknown'] as const
 export type ActivityState = (typeof activityStates)[number]
 
 export interface SessionActivity {
   state: ActivityState
+  /** What a `waiting` session needs from the user (OSC 7501 `kind`). */
+  blockedKind: BlockedKind | null
+  /** Indeterminate when null; 0..100 when `working` or `waiting` (OSC 7501 `progress`). */
+  progress: number | null
   updatedAt: string | null
   completionId: string | null
   detail: string | null
@@ -21,9 +27,17 @@ const activityLabels = {
   error: 'Error',
 } satisfies Record<ActivityState, string>
 
+const blockedLabels: Record<BlockedKind, string> = {
+  permission: 'Needs approval',
+  question: 'Waiting for answer',
+  auth: 'Needs sign-in',
+}
+
 export function unavailableActivity(detail: string): SessionActivity {
   return {
     state: 'unknown',
+    blockedKind: null,
+    progress: null,
     updatedAt: null,
     completionId: null,
     detail: detail.slice(0, 4096),
@@ -32,7 +46,11 @@ export function unavailableActivity(detail: string): SessionActivity {
   }
 }
 
-export const activityLabel = (activity: SessionActivity) => activityLabels[activity.state]
+export function activityLabel(activity: SessionActivity) {
+  if (activity.state === 'waiting' && activity.blockedKind) return blockedLabels[activity.blockedKind]
+  if (activity.state === 'working' && activity.progress !== null) return `Working · ${activity.progress}%`
+  return activityLabels[activity.state]
+}
 
 /** Bound and copy data at the connection and native IPC boundaries. */
 export function parseSessionActivity(value: unknown): SessionActivity | null {
@@ -40,8 +58,20 @@ export function parseSessionActivity(value: unknown): SessionActivity | null {
   const item = value as SessionActivity
   const nullableText = (text: unknown, limit: number) =>
     text === null || (typeof text === 'string' && text.length <= limit)
+  const validBlockedKind =
+    item.blockedKind === null ||
+    (item.state === 'waiting' && typeof item.blockedKind === 'string' && blockedKinds.includes(item.blockedKind))
+  const validProgress =
+    item.progress === null ||
+    ((item.state === 'working' || item.state === 'waiting') &&
+      typeof item.progress === 'number' &&
+      Number.isInteger(item.progress) &&
+      item.progress >= 0 &&
+      item.progress <= 100)
   if (
     !activityStates.includes(item.state) ||
+    !validBlockedKind ||
+    !validProgress ||
     !['current', 'unavailable'].includes(item.observation) ||
     !nullableText(item.observedAt, 64) ||
     !nullableText(item.updatedAt, 64) ||
@@ -56,6 +86,8 @@ export function parseSessionActivity(value: unknown): SessionActivity | null {
     return null
   return {
     state: item.state,
+    blockedKind: item.blockedKind,
+    progress: item.progress,
     updatedAt: item.updatedAt,
     completionId: item.completionId,
     detail: item.detail?.slice(0, 4096) ?? null,

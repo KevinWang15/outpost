@@ -2,7 +2,6 @@
 // JSON documents, path patterns and conversation text. Nothing here writes.
 import { closeSync, lstatSync, openSync, readSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { promptHeaderPattern } from '../shared/chatTranscript'
 
 export class SearchLimit extends Error {}
 
@@ -165,17 +164,6 @@ export function decode(line: Buffer | string): Record<string, unknown> | null {
   } catch {
     return null
   }
-}
-
-/** A conversation title from its first prompt. For a prompt Outpost composed
- * (channel messages, session messages, schedules) that is its header and what was
- * asked, the paragraph after the header, without the instructions that follow. */
-export function promptTitle(text: unknown, limit = 200) {
-  if (typeof text !== 'string') return ''
-  const header = text.match(promptHeaderPattern)
-  if (!header) return clean(text, limit)
-  const asked = text.slice(header[0].length).split(/\n\s*\n/)[0]
-  return clean(`${header[1]} · ${asked}`, limit)
 }
 
 /** Collapse whitespace and drop control characters. */

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, BookOpen, Search, X } from 'lucide-react'
-import { guideHref, searchGuide, slugFromPathname } from '../../shared/guide'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ArrowLeft, ArrowRight, BookOpen, Link as LinkIcon, Search, X } from 'lucide-react'
+import { createHeadingSlugger, guideHref, resolveGuideLink, searchGuide, slugFromPathname } from './guide'
 import { AppSidebar } from '../ui/AppSidebar'
-import { GuideMarkdown } from './GuideMarkdown'
+import { Markdown } from '../ui/Markdown'
 import { guideCatalog } from './guideRegistry'
 import '../styles/guide.scss'
 
@@ -57,6 +57,82 @@ export default function GuidePage() {
     },
     [current],
   )
+
+  const renderGuideLink = useCallback(
+    (href: string, children: ReactNode, key: number) => {
+      const resolved = resolveGuideLink(href, knownSlugs)
+      if (!resolved) return <span key={key}>{children}</span>
+      if (resolved.kind === 'guide') {
+        return (
+          <a
+            key={key}
+            href={guideHref(resolved.slug, resolved.hash)}
+            onClick={event => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+              event.preventDefault()
+              navigate(resolved.slug, resolved.hash)
+            }}
+          >
+            {children}
+          </a>
+        )
+      }
+      if (resolved.kind === 'anchor') {
+        return (
+          <a
+            key={key}
+            href={`#${resolved.hash}`}
+            onClick={event => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+              event.preventDefault()
+              jumpAnchor(resolved.hash)
+            }}
+          >
+            {children}
+          </a>
+        )
+      }
+      if (resolved.kind === 'app')
+        return (
+          <a key={key} href={resolved.href}>
+            {children}
+          </a>
+        )
+      return (
+        <a key={key} href={resolved.href} target="_blank" rel="noopener noreferrer">
+          {children}
+        </a>
+      )
+    },
+    [knownSlugs, navigate, jumpAnchor],
+  )
+
+  const createHeadingRenderer = useCallback(() => {
+    const slugger = createHeadingSlugger()
+    return (level: number, raw: string, children: ReactNode, key: number) => {
+      const id = slugger(raw)
+      const Tag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+      return (
+        <Tag key={key} id={id} className="guide-heading">
+          <span>{children}</span>
+          {level >= 2 && level <= 3 && (
+            <a
+              className="guide-heading-anchor"
+              href={`#${id}`}
+              aria-label={`Link to ${raw}`}
+              onClick={event => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+                event.preventDefault()
+                jumpAnchor(id)
+              }}
+            >
+              <LinkIcon size={14} />
+            </a>
+          )}
+        </Tag>
+      )
+    }
+  }, [jumpAnchor])
 
   // Keep page title, URL, and hash scroll aligned on load and browser Back/Forward.
   useEffect(() => {
@@ -247,7 +323,16 @@ export default function GuidePage() {
             </div>
             <h1 className="guide-title">{current.title}</h1>
             {current.summary && <p className="guide-summary">{current.summary}</p>}
-            <GuideMarkdown content={articleBody} knownSlugs={knownSlugs} onNavigate={navigate} onAnchor={jumpAnchor} />
+            <Markdown
+              text={articleBody}
+              className="guide-prose"
+              headingOffset={0}
+              callouts
+              softBreaks={false}
+              defaultCodeLanguage="text"
+              renderLink={renderGuideLink}
+              createHeadingRenderer={createHeadingRenderer}
+            />
             {(previousPage || nextPage) && (
               <nav className="guide-pager" aria-label="Guide pages">
                 {previousPage ? (

@@ -1,9 +1,9 @@
-import { Ajv } from 'ajv'
 import { join } from 'node:path'
 import definitions from '../../shared/historyTools.json' with { type: 'json' }
 import type { HistoryBatch, HistoryMachine, HistorySearchInput, HistorySource } from '../../shared/history'
 import type { Deployment, Owner } from '../deployment'
 import type { TargetContext } from '../sessions'
+import { compileJsonSchema, schemaErrorsText } from '../validate'
 import { machineHistory, type HistoryReader } from './client'
 import { localEmbeddings, type Embed } from './embeddings'
 import type { HistoryIndex } from './index'
@@ -39,8 +39,7 @@ interface Dependencies extends HistoryOptions {
   deployment: Deployment
   resolve(owner: Owner, id: string): Promise<TargetContext>
 }
-const ajv = new Ajv({ strict: false, allErrors: true })
-const validate = new Map(definitions.map(tool => [tool.name, ajv.compile(tool.inputSchema)]))
+const validate = new Map(definitions.map(tool => [tool.name, compileJsonSchema(tool.inputSchema)]))
 
 /** Account-private index of all native conversations on configured targets. */
 export class HistoryHub {
@@ -87,8 +86,12 @@ export class HistoryHub {
         if (!this.dependencies.deployment.account(id)) {
           account.closed = true
           if (account.continuation) clearTimeout(account.continuation)
-          // An in-flight refresh is drained before its private index closes.
-          void Promise.resolve(account.syncing).finally(() => account.index.close())
+          // Drain in-flight refreshes and embedding work before closing its private index.
+          void Promise.allSettled([
+            account.syncing,
+            account.embeddingJob,
+            ...[...account.states.values()].map(state => state.refreshing),
+          ]).finally(() => account.index.close())
           this.accounts.delete(id)
         } else void this.sync(account)
       }
@@ -241,7 +244,7 @@ export class HistoryHub {
     const check = validate.get(tool)
     if (!check || !check(args))
       throw new Error(
-        'Invalid history tool arguments. ' + (check ? ajv.errorsText(check.errors) : 'Unknown Outpost history tool.'),
+        'Invalid history tool arguments. ' + (check ? schemaErrorsText(check.errors) : 'Unknown Outpost history tool.'),
       )
     const input = args as Record<string, unknown>
     const account = this.account(owner)
@@ -320,13 +323,24 @@ export class HistoryHub {
       }
     })
   }
+  forgetTarget(owner: Owner, targetId: string) {
+    const account = this.accounts.get(owner.userId)
+    if (!account) return
+    account.states.delete(targetId)
+    account.machines = account.machines.filter(machine => machine.id !== targetId)
+  }
+
   async close() {
     this.stopped = true
     if (this.timer) clearInterval(this.timer)
-    for (const account of this.accounts.values()) if (account.continuation) clearTimeout(account.continuation)
+    for (const account of this.accounts.values()) {
+      account.closed = true
+      if (account.continuation) clearTimeout(account.continuation)
+    }
     await Promise.allSettled(
       [...this.accounts.values()].flatMap(account => [
         account.syncing,
+        account.embeddingJob,
         ...[...account.states.values()].map(state => state.refreshing),
       ]),
     )

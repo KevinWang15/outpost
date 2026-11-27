@@ -1,6 +1,6 @@
 import { toolInstaller } from '../shared/node/toolInstaller'
 import { locked } from './state'
-import { runCommand } from '../backend/process'
+import { runCommand } from '../shared/node/process'
 import { loginShell } from '../shared/node/loginShell'
 import type { SoftwareId } from '../shared/model'
 import { inspectionScript } from '../shared/node/softwareInspection'

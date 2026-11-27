@@ -5,9 +5,11 @@ import { once } from 'node:events'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
-import { currentConversation, type SessionInput } from '../../shared/model'
+import { argsSelectSession, previewStartCommand } from '../../shared/harnesses'
+import type { SessionInput } from '../../shared/model'
 import { driverStatus } from '../../machine/drivers'
 import { contentPath, saveImage, StoredFile } from '../../machine/files'
+import { prepare } from '../../machine/launch'
 import { changeRegistry, readRegistry, switchConversation } from '../../machine/registry'
 import {
   createSession,
@@ -75,7 +77,7 @@ test('a creation receipt replays the session, refuses changed settings and never
   const first = await createSession(request, key)
   const again = await createSession({ ...request, env: { A: '1', B: '2' } }, key)
   assert.equal(again.id, first.id)
-  assert.equal(currentConversation(again), currentConversation(first))
+  assert.equal(again.conversation, first.conversation)
   assert.equal((await listSessions()).length, 1)
   await assert.rejects(createSession({ ...request, name: 'Changed' }, key), {
     status: 409,
@@ -112,10 +114,10 @@ test('names are unique on a machine, ignoring case, and arguments must parse', a
     status: 400,
     message: /Invalid Bash argument syntax/,
   })
-  await assert.rejects(createSession(input({ name: 'Resume', args: '--resume other' })), {
-    status: 400,
-    message: /controls the coding tool conversation/,
-  })
+  // Custom session-selection arguments (e.g. --resume/--continue) are allowed and skip auto-allocation.
+  const custom = await createSession(input({ name: 'Resume', args: '--resume other' }))
+  assert.equal(custom.conversation, null)
+  assert.deepEqual(custom.conversations, [])
 })
 
 test('an invalid registry is reported and never rewritten', async t => {
@@ -185,11 +187,12 @@ test('switching makes an earlier conversation current, but not one that moved', 
   const home = machine(t)
   const [a, b, c] = ['1', '2', '3'].map(digit => `${digit.repeat(8)}-1111-4111-8111-111111111111`)
   const session = record(home, 'claude', a)
-  session.conversations.push({ id: b, startedAt: session.createdAt, movedTo: null })
-  session.conversations.push({ id: c, startedAt: session.createdAt, movedTo: 'elsewhere' })
+  session.conversations.push({ id: b, tool: 'claude', startedAt: session.createdAt, movedTo: null })
+  session.conversations.push({ id: c, tool: 'claude', startedAt: session.createdAt, movedTo: 'elsewhere' })
+  session.conversation = b
   await register(session)
   const switched = await switchSession(session.id, a)
-  assert.equal(currentConversation(switched), a)
+  assert.equal(switched.conversation, a)
   assert.deepEqual(
     switched.conversations.map(item => item.id),
     [b, c, a],
@@ -221,7 +224,7 @@ test('a fork is a new session in a new worktree, with the source settings and a 
     assert.equal(fork.tool, tool)
     assert.deepEqual({ ...fork.config, revision: 1 }, source.config)
     assert.deepEqual(fork.storage, source.storage)
-    assert.notEqual(currentConversation(fork), currentConversation(source))
+    assert.notEqual(fork.conversation, source.conversation)
     assert.equal(fork.status, 'ready')
     assert.equal(fork.lastConnectedAt, null)
     assert.ok(statSync(join(destination, '.git')).isFile())
@@ -400,7 +403,7 @@ test('deleting a session reconciles movedTo pointers and restores ownership with
   const first = await createSession(input({ name: 'First' }))
   const second = await createSession(input({ name: 'Second' }))
   const third = await createSession(input({ name: 'Third' }))
-  const movedId = currentConversation(first)
+  const movedId = first.conversation!
 
   // Move conversation: First -> Second -> Third.
   await changeRegistry(registry => {
@@ -422,7 +425,7 @@ test('reclaim moves a conversation back from a stopped session, and newSessionCo
   const { input } = setup(t)
   const source = await createSession(input({ name: 'Source' }))
   const thief = await createSession(input({ name: 'Thief' }))
-  const original = currentConversation(source)
+  const original = source.conversation!
 
   // Move Source's only conversation to Thief.
   await changeRegistry(registry => {
@@ -451,4 +454,97 @@ test('reclaim moves a conversation back from a stopped session, and newSessionCo
   const fresh = await newSessionConversation(thief.id)
   assert.equal(fresh.conversations.at(-1)!.movedTo, null)
   assert.notEqual(fresh.conversations.at(-1)!.id, original)
+})
+
+test('editing harness, directory, and conversation ID preserves per-harness history and bumps revision', async t => {
+  const { home, input } = setup(t)
+  const otherDir = join(home, 'other-project')
+  mkdirSync(otherDir)
+
+  const created = await createSession(input({ name: 'Flexible', tool: 'claude' }))
+  const claudeId = created.conversation!
+  assert.equal(created.tool, 'claude')
+  assert.equal(created.config.revision, 1)
+  assert.equal('title' in created, false)
+
+  // Switch harness claude -> codex: storage updates, claude conversation is remembered, codex starts fresh.
+  const asCodex = await updateSession(created.id, { revision: 1, tool: 'codex' })
+  assert.equal(asCodex.tool, 'codex')
+  assert.equal(asCodex.config.revision, 2)
+  assert.ok('CODEX_HOME' in asCodex.storage)
+  assert.equal(asCodex.conversation, null)
+  assert.deepEqual(
+    asCodex.conversations.map(c => [c.tool, c.id]),
+    [['claude', claudeId]],
+  )
+
+  // Starting a fresh session with no custom selection flag auto-allocates and remembers a codex conversation.
+  const codexRecord = readRegistry().sessions.find(s => s.id === created.id)!
+  const preparedCodex = await prepare(codexRecord, 'terminal')
+  const codexId = preparedCodex.launch.conversation
+  assert.ok(codexId)
+  assert.equal(readRegistry().sessions.find(s => s.id === created.id)!.conversation, codexId)
+
+  // Switch harness codex -> kimi with an explicit conversation ID, and change rootDir.
+  const kimiId = 'session_manual_123'
+  const asKimi = await updateSession(created.id, {
+    revision: 2,
+    tool: 'kimi',
+    rootDir: otherDir,
+    conversation: kimiId,
+  })
+  assert.equal(asKimi.tool, 'kimi')
+  assert.equal(asKimi.rootDir, otherDir)
+  assert.equal(asKimi.conversation, kimiId)
+  assert.equal(asKimi.config.revision, 3)
+  assert.ok('KIMI_CODE_HOME' in asKimi.storage)
+
+  // Invalid conversation ID for the selected harness is refused.
+  await assert.rejects(updateSession(created.id, { revision: 3, conversation: 'not-a-kimi-id' }), {
+    status: 400,
+    message: /Invalid conversation ID/,
+  })
+  // Nonexistent rootDir is refused.
+  await assert.rejects(updateSession(created.id, { revision: 3, rootDir: join(home, 'missing') }), {
+    status: 400,
+    message: /Root directory does not exist/,
+  })
+
+  // Switching back to claude automatically restores the remembered claude conversation ID!
+  const backToClaude = await updateSession(created.id, { revision: 3, tool: 'claude' })
+  assert.equal(backToClaude.tool, 'claude')
+  assert.equal(backToClaude.conversation, claudeId)
+  assert.equal(backToClaude.config.revision, 4)
+
+  // Clearing conversation to null + passing --continue in args skips auto-allocation on prepare().
+  const manualContinue = await updateSession(created.id, {
+    revision: 4,
+    conversation: null,
+    args: '--continue',
+  })
+  assert.equal(manualContinue.conversation, null)
+  assert.equal(manualContinue.config.revision, 5)
+  const preparedManual = await prepare(
+    readRegistry().sessions.find(s => s.id === created.id)!,
+    'terminal',
+  )
+  assert.equal(preparedManual.launch.conversation, '')
+
+  // Switching via Conversations dialog across harnesses switches the session back to that harness.
+  const switchedToKimi = await switchSession(created.id, kimiId)
+  assert.equal(switchedToKimi.tool, 'kimi')
+  assert.equal(switchedToKimi.conversation, kimiId)
+
+  // Start-command preview accurately reflects harness, conversation, and custom flags.
+  assert.equal(argsSelectSession('claude', '--continue'), true)
+  assert.equal(argsSelectSession('codex', 'resume 123'), true)
+  assert.equal(argsSelectSession('codex', '--full-auto'), false)
+  assert.match(
+    previewStartCommand('codex', { instructions: null, model: 'o3', args: '--full-auto' }, codexId).command,
+    new RegExp(`codex.*resume ${codexId}.*--full-auto`),
+  )
+  assert.equal(
+    previewStartCommand('claude', { instructions: null, model: null, args: '--continue' }, null).command,
+    'claude --continue',
+  )
 })

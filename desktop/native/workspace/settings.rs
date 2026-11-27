@@ -1,8 +1,6 @@
 use super::*;
+use crate::prefs::{DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE};
 
-pub(super) const DEFAULT_FONT_SIZE: f32 = 13.5;
-pub(super) const MIN_FONT_SIZE: f32 = 10.0;
-pub(super) const MAX_FONT_SIZE: f32 = 28.0;
 const FONT_STEP: f32 = 0.5;
 const SCROLLBACK_PRESETS: [usize; 4] = [5_000, 10_000, 50_000, 100_000];
 
@@ -22,17 +20,7 @@ fn settings_section_header(symbol: LucideIcon, label: &'static str) -> Div {
 }
 
 fn settings_card() -> Div {
-    col()
-        .w_full()
-        .rounded(px(10.))
-        .bg(rgb(0x131313))
-        .border_1()
-        .border_color(rgb(0x252525))
-        .overflow_hidden()
-}
-
-fn card_divider() -> Div {
-    div().w_full().h(px(1.)).bg(rgb(0x202020))
+    card().overflow_hidden()
 }
 
 fn setting_copy(title: &'static str, description: &'static str) -> Div {
@@ -87,53 +75,29 @@ fn shortcut_row(label: &'static str, keys: &[&'static str]) -> Div {
         .child(shortcut_keys(keys))
 }
 
-fn format_lines(n: usize) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out
-}
-
 impl Workspace {
-    pub(super) fn has_custom_settings(&self) -> bool {
-        (self.fontsize() - DEFAULT_FONT_SIZE).abs() > 0.01
-            || self.prefs["sound"] != true
-            || self.prefs["unlimitedScrollback"] == true
-            || self.bounded_history() != crate::terminal::DEFAULT_HISTORY
-    }
-
     pub(super) fn reset_terminal_settings(&mut self, cx: &mut Context<Self>) {
-        self.prefs["fontSize"] = json!(DEFAULT_FONT_SIZE);
-        self.prefs["sound"] = json!(true);
-        self.prefs["scrollbackLines"] = json!(crate::terminal::DEFAULT_HISTORY);
-        self.prefs["unlimitedScrollback"] = json!(false);
+        self.prefs.reset_terminal_defaults();
         self.message.clear();
         self.sync_history_input(cx);
         self.settings(cx);
     }
 
     fn set_scrollback_preset(&mut self, lines: usize, cx: &mut Context<Self>) {
-        self.prefs["unlimitedScrollback"] = json!(false);
-        self.prefs["scrollbackLines"] = json!(lines);
+        self.prefs.unlimited_scrollback = false;
+        self.prefs.scrollback_lines = lines;
         self.message.clear();
         self.sync_history_input(cx);
         self.settings(cx);
     }
 
     pub(super) fn settings_view(&self, cx: &Context<Self>) -> Div {
-        let fontsize = self.fontsize();
-        let sound = self.prefs["sound"] == true;
-        let unlimited = self.prefs["unlimitedScrollback"] == true;
-        let bounded = self.bounded_history();
-        let profiles = items(&self.prefs["profiles"]);
-        let selected_shell = self.prefs["localShell"]
-            .as_str()
-            .or_else(|| profiles.first().and_then(|p| p["id"].as_str()));
+        let fontsize = self.prefs.font_size;
+        let sound = self.prefs.sound;
+        let unlimited = self.prefs.unlimited_scrollback;
+        let bounded = self.prefs.scrollback_lines;
+        let profiles = &self.prefs.profiles;
+        let selected_shell = self.prefs.local_profile(None).map(|p| p.id.as_str());
 
         // Header
         let header = row()
@@ -154,7 +118,7 @@ impl Workspace {
                         0x888888,
                     )),
             )
-            .when(self.has_custom_settings(), |r| {
+            .when(self.prefs.is_custom(), |r| {
                 r.child(
                     div()
                         .id("settings-reset-defaults")
@@ -217,8 +181,8 @@ impl Workspace {
                             .cursor_pointer()
                             .hover(|s| s.bg(rgb(0x202020)).text_color(rgb(0xffffff)))
                             .on_click(cx.listener(|s, _, _, cx| {
-                                s.prefs["fontSize"] =
-                                    json!((s.fontsize() - FONT_STEP).max(MIN_FONT_SIZE));
+                                s.prefs.font_size =
+                                    (s.prefs.font_size - FONT_STEP).max(MIN_FONT_SIZE);
                                 s.settings(cx)
                             }))
                     })
@@ -255,8 +219,8 @@ impl Workspace {
                             .cursor_pointer()
                             .hover(|s| s.bg(rgb(0x202020)).text_color(rgb(0xffffff)))
                             .on_click(cx.listener(|s, _, _, cx| {
-                                s.prefs["fontSize"] =
-                                    json!((s.fontsize() + FONT_STEP).min(MAX_FONT_SIZE));
+                                s.prefs.font_size =
+                                    (s.prefs.font_size + FONT_STEP).min(MAX_FONT_SIZE);
                                 s.settings(cx)
                             }))
                     })
@@ -329,7 +293,7 @@ impl Workspace {
                                                     s.bg(rgb(0x202020)).text_color(rgb(0xffffff))
                                                 })
                                                 .on_click(cx.listener(|s, _, _, cx| {
-                                                    s.prefs["fontSize"] = json!(DEFAULT_FONT_SIZE);
+                                                    s.prefs.font_size = DEFAULT_FONT_SIZE;
                                                     s.settings(cx)
                                                 }))
                                                 .child("Reset"),
@@ -381,7 +345,7 @@ impl Workspace {
                         switch("settings-bell-switch", sound)
                             .size(ComponentSize::Sm)
                             .on_change(cx.listener(|s, value: &bool, _, cx| {
-                                s.prefs["sound"] = json!(*value);
+                                s.prefs.sound = *value;
                                 s.settings(cx);
                             })),
                     ),
@@ -390,9 +354,9 @@ impl Workspace {
         // Card 2: Shell & Scrollback
         let mut shell_list = col().w_full().mt(px(12.)).gap(px(6.));
         for p in profiles {
-            let id = strval(p, "id");
-            let name = strval(p, "name");
-            let exec = strval(p, "executable");
+            let id = p.id.clone();
+            let name = p.name.clone();
+            let exec = p.executable.clone();
             let is_selected = selected_shell == Some(id.as_str());
             shell_list = shell_list.child(
                 div()
@@ -417,7 +381,7 @@ impl Workspace {
                     .cursor_pointer()
                     .hover(|s| s.bg(rgb(0x1f1f1f)).border_color(rgb(0x3a3a3a)))
                     .on_click(cx.listener(move |s, _, _, cx| {
-                        s.prefs["localShell"] = id.clone().into();
+                        s.prefs.local_shell = Some(id.clone());
                         s.settings(cx)
                     }))
                     .child(
@@ -488,8 +452,8 @@ impl Workspace {
         .item(SegmentedItem::new("unlimited", "Unlimited").icon(LucideIcon::Infinity))
         .on_change(cx.listener(|s, value: &SharedString, _, cx| {
             let next_unlimited = value.as_ref() == "unlimited";
-            if (s.prefs["unlimitedScrollback"] == true) != next_unlimited {
-                s.prefs["unlimitedScrollback"] = json!(next_unlimited);
+            if s.prefs.unlimited_scrollback != next_unlimited {
+                s.prefs.unlimited_scrollback = next_unlimited;
                 s.message.clear();
                 s.settings(cx);
             }
@@ -521,7 +485,7 @@ impl Workspace {
                     .cursor_pointer()
                     .hover(|s| s.bg(rgb(0x222222)).text_color(rgb(0xffffff)))
                     .on_click(cx.listener(move |s, _, _, cx| s.set_scrollback_preset(lines, cx)))
-                    .child(format_lines(lines)),
+                    .child(format_thousands(lines)),
             );
         }
 

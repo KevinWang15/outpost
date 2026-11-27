@@ -1,6 +1,6 @@
 # Outpost machine service 3.0.5
 
-Linux builds are available for x64 and arm64 with glibc or musl. Machine nodes and native terminal workers use protocol 9. ACP chat hosts use protocol 3.
+Linux builds are available for x64 and arm64 with glibc or musl. Machine nodes and native terminal workers use protocol 10. ACP chat hosts use protocol 3.
 
 - Managed native image paste uses an isolated clipboard. Codex, Claude Code and Kimi can attach screenshots on headless Linux machines with Xvfb and Python GTK 3 installed.
 - ACP terminal viewers can add or remove images in their own draft and send them with Enter. Paste image as file path is available explicitly.

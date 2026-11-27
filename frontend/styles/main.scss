@@ -33,25 +33,6 @@
   --focus-shadow: #2563eb1f;
   --selection: #dbeafe;
   --link: var(--accent);
-  // The web terminal is always dark slate. Desktop documents override these
-  // with the app's neutral black palette below.
-  --term-bg: #0f172a;
-  --term-bg-overlay: #0f172ae6;
-  --term-raised: #1e293b;
-  --term-panel: #142034;
-  --term-badge: #182338;
-  --term-active: #334155;
-  --term-line: #1e293b;
-  --term-border: #334155;
-  --term-border-strong: #475569;
-  --term-ink: #e2e8f0;
-  --term-bright: #f8fafc;
-  --term-text: #cbd5e1;
-  --term-muted: #94a3b8;
-  --term-faint: #64748b;
-  --term-accent: #93c5fd;
-  --term-focus: #60a5fa;
-  --term-pressed: #1d4ed8;
   font: 400 14px/1.5 var(--font-sans);
   color: var(--ink);
   background: var(--canvas);
@@ -909,6 +890,49 @@ textarea.code,
   padding: 0;
   border: 0;
 }
+.conversation-id-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+}
+.start-command-preview {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  .preview-label,
+  .label {
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  > code {
+    overflow-x: auto;
+    padding: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 12.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  small {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+}
 
 /* Target page */
 .page-header {
@@ -1041,12 +1065,6 @@ textarea.code,
 .software-toggle > strong {
   flex-shrink: 0;
   white-space: nowrap;
-}
-.software-toggle > .software-ready {
-  flex-shrink: 0;
-  overflow: visible;
-  color: var(--success);
-  font-weight: 600;
 }
 .software.attention {
   border-color: #fde68a;
@@ -1237,16 +1255,12 @@ textarea.code,
       white-space: nowrap;
     }
   }
-  code,
-  .session-title {
+  code {
     overflow: hidden;
     color: var(--muted);
     font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .session-title {
-    font-size: 12.5px;
   }
   .session-pending {
     display: flex;
@@ -1441,12 +1455,6 @@ textarea.code,
       background: var(--danger-soft);
     }
   }
-}
-.terminal-menu-shortcut {
-  margin-left: auto;
-  padding-left: 16px;
-  color: var(--muted);
-  font-size: 12px;
 }
 .menu-separator {
   height: 1px;
@@ -1734,562 +1742,6 @@ textarea.code,
   font-size: 12px;
 }
 
-/* Web terminal */
-.terminal-menu {
-  --ink: var(--term-ink);
-  --muted: var(--term-muted);
-  --border: var(--term-border);
-  --surface: var(--term-bg);
-  --surface-muted: var(--term-raised);
-  min-width: 220px;
-  max-width: calc(100vw - 16px);
-  max-height: var(--radix-context-menu-content-available-height);
-  overflow-y: auto;
-  .terminal-menu-check {
-    display: flex;
-    width: 15px;
-    flex-shrink: 0;
-  }
-  svg {
-    display: block;
-    flex-shrink: 0;
-  }
-}
-.terminal-view {
-  position: fixed;
-  z-index: 40;
-  top: var(--viewport-top, 0px);
-  left: var(--viewport-left, 0px);
-  width: var(--viewport-width, 100%);
-  height: var(--viewport-height, 100dvh);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-  background: var(--term-bg);
-  color: var(--term-ink);
-  .icon-button {
-    color: var(--term-muted);
-    &:hover:not(:disabled),
-    &[aria-pressed='true'] {
-      background: var(--term-raised);
-      color: var(--term-bright);
-    }
-  }
-}
-.terminal-bar {
-  &[hidden] {
-    display: none;
-  }
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  height: 46px;
-  padding: 0 8px 0 16px;
-  border-bottom: 1px solid var(--term-line);
-}
-.terminal-show-toolbar {
-  position: absolute;
-  z-index: 3;
-  top: 4px;
-  right: 16px;
-  background: var(--term-bg);
-  opacity: 0.4;
-  &:hover,
-  &:focus-visible {
-    opacity: 1;
-  }
-}
-.terminal-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  .terminal-tool {
-    display: inline-grid;
-    flex-shrink: 0;
-    margin-right: -4px;
-    color: var(--term-text);
-  }
-  strong {
-    overflow: hidden;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-.terminal-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--term-muted);
-  font-size: 12px;
-  white-space: nowrap;
-  i {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--term-faint);
-  }
-  &.connected i {
-    background: #4ade80;
-  }
-}
-.terminal-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 2px;
-  .icon-button:has(.terminal-action-label) {
-    display: inline-flex;
-    gap: 6px;
-    width: auto;
-    padding: 0 8px;
-  }
-}
-.terminal-action-label {
-  font-size: 12.5px;
-}
-@media (max-width: 900px) {
-  .terminal-actions .icon-button:has(.terminal-action-label) {
-    display: inline-grid;
-    width: 30px;
-    padding: 0;
-  }
-  .terminal-action-label {
-    display: none;
-  }
-}
-.terminal-notices {
-  // Transient UI must not participate in the terminal's flex layout or resize its PTY.
-  position: absolute;
-  z-index: 1;
-  top: 8px;
-  right: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: max-content;
-  max-width: min(560px, calc(100% - 24px));
-  max-height: calc(100% - 16px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  color-scheme: dark;
-  &.toolbar-hidden {
-    // Leave the floating toolbar button reachable, including its mobile touch target.
-    right: 64px;
-    max-width: min(560px, calc(100% - 76px));
-  }
-}
-.terminal-notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
-  border: 1px solid var(--term-border);
-  border-radius: 6px;
-  background: var(--term-raised);
-  box-shadow: 0 4px 16px #0004;
-  font-size: 13px;
-  flex-shrink: 0;
-  > span {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-  a {
-    color: var(--term-accent);
-  }
-  code {
-    color: var(--term-accent);
-    overflow-wrap: anywhere;
-  }
-  &.terminal-notice-link > span {
-    flex-basis: 100%;
-  }
-}
-.terminal-body {
-  position: relative;
-  isolation: isolate;
-  flex: 1;
-  min-height: 0;
-}
-.terminal-files {
-  position: absolute;
-  z-index: 4;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  justify-content: flex-end;
-  width: min(460px, calc(100% - 16px));
-  pointer-events: none;
-  color-scheme: dark;
-  > * {
-    pointer-events: auto;
-  }
-  .terminal-files-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: auto;
-    min-width: 48px;
-    gap: 5px;
-    padding: 0 8px;
-    border: 1px solid var(--term-border);
-    border-radius: 7px;
-    background: var(--term-badge);
-    color: var(--term-text);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    &[aria-expanded='true'] {
-      color: var(--term-accent);
-      border-color: var(--term-focus);
-    }
-  }
-  ~ .terminal-search {
-    top: 48px;
-  }
-  ~ .terminal-notices {
-    top: 48px;
-    max-height: calc(100% - 56px);
-  }
-  ~ .terminal-search ~ .terminal-notices {
-    top: 100px;
-    max-height: calc(100% - 108px);
-  }
-}
-.terminal-show-toolbar + .terminal-body .terminal-files {
-  right: 56px;
-  width: min(460px, calc(100% - 64px));
-}
-.terminal-files-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  width: 100%;
-  max-height: min(480px, calc(var(--viewport-height, 100dvh) - 160px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--term-border-strong);
-  border-radius: 10px;
-  background: var(--term-panel);
-  color: var(--term-ink);
-  box-shadow: 0 12px 40px #0008;
-  header {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 10px 8px 14px;
-    border-bottom: 1px solid var(--term-border);
-    strong {
-      flex: 1;
-      font-size: 13px;
-    }
-    small {
-      color: var(--term-muted);
-      margin-left: 5px;
-    }
-  }
-  ul {
-    list-style: none;
-    padding: 4px;
-    margin: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-  }
-  li {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 5px 4px;
-    border-radius: 6px;
-    &:hover {
-      background: var(--term-raised);
-    }
-    > .icon-button {
-      flex: 0 0 32px;
-    }
-  }
-}
-.terminal-file-details {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  min-width: 0;
-  gap: 10px;
-  padding: 2px;
-  border: 0;
-  border-radius: 4px;
-  color: inherit;
-  background: transparent;
-  text-align: left;
-}
-.terminal-file-thumbnail {
-  display: grid;
-  place-items: center;
-  flex: 0 0 44px;
-  height: 44px;
-  border: 1px solid var(--term-border);
-  border-radius: 5px;
-  overflow: hidden;
-  color: var(--term-muted);
-  background: var(--term-bg);
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
-}
-.terminal-file-description {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 13px;
-    font-weight: 500;
-  }
-  > span {
-    display: flex;
-    gap: 4px;
-    color: var(--term-muted);
-    font-size: 11px;
-    white-space: nowrap;
-    time {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    > span {
-      flex-shrink: 0;
-    }
-  }
-}
-.terminal-files-message {
-  padding: 10px 14px;
-  margin: 0;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.terminal-search {
-  --search-control-size: 28px;
-  // Search floats over xterm; opening it must not resize the screen or the PTY.
-  position: absolute;
-  z-index: 2;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: min(480px, calc(100% - 16px));
-  box-sizing: border-box;
-  padding: 5px 6px 5px 10px;
-  border: 1px solid var(--term-border-strong);
-  border-radius: 8px;
-  background: var(--term-raised);
-  color: var(--term-ink);
-  box-shadow: 0 4px 16px #0006;
-  color-scheme: dark;
-  > svg {
-    flex-shrink: 0;
-    color: var(--term-muted);
-  }
-  input {
-    flex: 1;
-    min-width: 0;
-    width: 0;
-    height: 28px;
-    padding: 0 4px;
-    border: 0;
-    border-radius: 3px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    font-size: 13px;
-    &:focus {
-      outline: 1px solid var(--term-focus);
-      box-shadow: none;
-    }
-  }
-  .icon-button {
-    width: var(--search-control-size);
-    height: var(--search-control-size);
-    flex-shrink: 0;
-    color: var(--term-text);
-    &[aria-pressed='true'] {
-      background: var(--term-active);
-      color: var(--term-accent);
-    }
-    &:disabled {
-      opacity: 0.4;
-    }
-  }
-}
-.terminal-show-toolbar + .terminal-body .terminal-search {
-  // Leave the floating toolbar button reachable, including its mobile touch target.
-  right: 64px;
-  max-width: calc(100% - 72px);
-}
-.terminal-search-count {
-  flex-shrink: 0;
-  padding-inline: 4px;
-  color: var(--term-muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  &:empty {
-    display: none;
-  }
-}
-.terminal-search ~ .terminal-notices {
-  top: 60px;
-  max-height: calc(100% - 68px);
-}
-.terminal-bell {
-  flex-wrap: nowrap;
-  border-color: #854d0e;
-  background: #422006;
-  color: #fde68a;
-  > svg {
-    flex-shrink: 0;
-  }
-}
-.terminal-surface {
-  position: absolute;
-  // Keep xterm's canvases, IME helpers, decorations and scrollbar below Outpost's overlays.
-  z-index: 0;
-  // xterm reserves its scrollbar gutter; no additional space is needed on the right.
-  inset: 8px 0 4px 12px;
-  // Geometry arrives in output order from the target. Clip the old screen while
-  // a smaller viewport waits for that acknowledgement, including mobile keyboards.
-  overflow: hidden;
-  .xterm {
-    height: 100%;
-  }
-  .xterm .xterm-viewport {
-    // xterm's empty legacy viewport still forces a native scrollbar. Its active
-    // scrolling lives in .xterm-scrollable-element; hide only this leftover layer's bar.
-    // Keep this selector more specific than the lazily loaded xterm stylesheet.
-    overflow: hidden;
-    background-color: transparent !important;
-  }
-}
-.terminal-closed {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 10px;
-  padding: 24px;
-  background: var(--term-bg-overlay);
-  text-align: center;
-  h3 {
-    font-size: 17px;
-  }
-  p {
-    max-width: 420px;
-    color: var(--term-muted);
-  }
-  div {
-    display: flex;
-    gap: 8px;
-    margin-top: 6px;
-  }
-  .button:not(.primary) {
-    border-color: var(--term-border);
-    background: transparent;
-    color: var(--term-ink);
-    &:hover {
-      background: var(--term-raised);
-    }
-  }
-}
-.key-bar {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-  padding: 6px 8px;
-  overflow-x: auto;
-  border-top: 1px solid var(--term-line);
-  scrollbar-width: thin;
-  scrollbar-color: var(--term-border-strong) transparent;
-  button {
-    flex-shrink: 0;
-    min-width: 42px;
-    height: 36px;
-    padding: 0 10px;
-    border: 1px solid var(--term-border);
-    border-radius: 7px;
-    background: var(--term-raised);
-    color: var(--term-ink);
-    font-size: 13px;
-    &[aria-pressed='true'] {
-      border-color: var(--term-focus);
-      background: var(--term-pressed);
-    }
-    &:active:not(:disabled) {
-      background: var(--term-active);
-    }
-  }
-}
-.composer {
-  &[hidden] {
-    display: none;
-  }
-  display: flex;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 8px;
-  border-top: 1px solid var(--term-line);
-  textarea {
-    flex: 1;
-    min-height: 38px;
-    max-height: min(160px, var(--viewport-height, 100dvh) * 0.25);
-    border-color: var(--term-border);
-    background: var(--term-raised);
-    color: var(--term-bright);
-    resize: none;
-    &::placeholder {
-      color: var(--term-faint);
-    }
-  }
-  .button {
-    height: 38px;
-  }
-}
-.terminal-text-dialog {
-  --ink: var(--term-ink);
-  --text: var(--term-text);
-  --muted: var(--term-muted);
-  --border: var(--term-border);
-  --border-strong: var(--term-border-strong);
-  --surface: var(--term-bg);
-  --surface-muted: var(--term-raised);
-  color-scheme: dark;
-  position: fixed;
-  top: calc(var(--viewport-top, 0px) + 12px);
-  margin: 0 auto;
-  max-height: calc(var(--viewport-height, 100dvh) - 24px);
-  textarea {
-    height: min(45dvh, 360px);
-    font-family: var(--font-mono);
-    user-select: text;
-    -webkit-user-select: text;
-  }
-}
-
 @media (pointer: coarse) {
   input:not([type='checkbox'], [type='radio']),
   textarea,
@@ -2299,35 +1751,8 @@ textarea.code,
   .button,
   .icon-button,
   .menu-item,
-  .key-bar button,
   .account-button {
     min-width: 44px;
-    min-height: 44px;
-  }
-  .terminal-bar {
-    height: 52px;
-    padding-inline: 8px;
-    gap: 4px;
-  }
-  .terminal-surface {
-    touch-action: var(--terminal-touch-action, pinch-zoom);
-  }
-  .terminal-search {
-    --search-control-size: 44px;
-    input {
-      height: 44px;
-      font-size: 16px;
-    }
-  }
-  .terminal-search ~ .terminal-notices {
-    top: 76px;
-    max-height: calc(100% - 84px);
-  }
-  .key-bar {
-    touch-action: pan-x pinch-zoom;
-  }
-  .composer textarea {
-    min-width: 0;
     min-height: 44px;
   }
 }
@@ -2598,66 +2023,6 @@ textarea.code,
   }
   .field.port {
     width: 100%;
-  }
-  .terminal-state-label {
-    display: none;
-  }
-  .terminal-bar {
-    gap: 4px;
-    padding-inline: 4px;
-  }
-  .terminal-surface {
-    left: 4px;
-  }
-  .terminal-search {
-    // Keep the input useful on narrow panes.
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) repeat(3, var(--search-control-size));
-    > svg {
-      display: none;
-    }
-    input {
-      grid-column: 1 / 4;
-      grid-row: 1;
-      width: 100%;
-    }
-    .terminal-search-close {
-      grid-column: 4;
-      grid-row: 1;
-    }
-    .terminal-search-count {
-      grid-column: 1;
-      grid-row: 2;
-      padding: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .terminal-search-case {
-      grid-column: 2;
-      grid-row: 2;
-    }
-    .terminal-search-previous {
-      grid-column: 3;
-      grid-row: 2;
-    }
-    .terminal-search-next {
-      grid-column: 4;
-      grid-row: 2;
-    }
-  }
-  .terminal-search ~ .terminal-notices {
-    top: 92px;
-    max-height: calc(100% - 100px);
-  }
-  @media (pointer: coarse) {
-    .terminal-find {
-      // The context menu still offers Find without overflowing the phone toolbar.
-      display: none;
-    }
-    .terminal-search ~ .terminal-notices {
-      top: 124px;
-      max-height: calc(100% - 132px);
-    }
   }
 }
 

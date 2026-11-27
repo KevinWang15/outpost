@@ -13,7 +13,7 @@ import { installation } from './installation'
 import { installHelpers, which } from './launch'
 import { readRegistry } from './registry'
 import { createSession, listSessions } from './sessions'
-import { machineExecutable, writeFile } from './state'
+import { expandHomePath, machineExecutable, writeFile } from './state'
 import { runNewSessionTui, type FieldId, type NewSessionDraft } from './tui'
 
 const envNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -155,20 +155,20 @@ export function parseMcpText(raw: string, baseDir: string): NonNullable<SessionI
 export function resolvePathInput(raw: string, initialCwd: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return initialCwd
-  if (trimmed === '~') return homedir()
-  if (trimmed.startsWith('~/')) return homedir() + trimmed.slice(1)
-  return isAbsolute(trimmed) ? resolve(trimmed) : resolve(initialCwd, trimmed)
+  const expanded = expandHomePath(trimmed)
+  return isAbsolute(expanded) ? resolve(expanded) : resolve(initialCwd, expanded)
 }
 
-export function parseNewArgs(argv: string[]): ParsedNewArgs {
+export function parseNewArgs(argv: readonly string[]): ParsedNewArgs {
+  const args = [...argv]
   const parsed: ParsedNewArgs = { help: false, yes: false, open: true, json: false, env: {} }
   const take = (flag: string, i: number): string => {
-    const val = argv[i + 1]
+    const val = args[i + 1]
     if (val === undefined) throw new Error(`Missing value for ${flag}.`)
     return val
   }
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
     switch (arg) {
       case '-h':
       case '--help':
@@ -243,7 +243,7 @@ export function parseNewArgs(argv: string[]): ParsedNewArgs {
           const eq = arg.indexOf('=')
           const flag = arg.slice(0, eq)
           const val = arg.slice(eq + 1)
-          argv.splice(i, 1, flag, val)
+          args.splice(i, 1, flag, val)
           i--
           break
         }

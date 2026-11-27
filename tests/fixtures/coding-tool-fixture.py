@@ -154,21 +154,10 @@ def ready(*_):
     print('OUTPOST_FIXTURE_READY ' + str(pid) + ' ' + str(size.columns) + 'x' + str(size.lines), flush=True)
 
 
-def hook(event):
-    for group in settings.get('hooks', {}).get(event, []):
-        for command in group.get('hooks', []):
-            subprocess.run(
-                command['command'],
-                shell=True,
-                input=json.dumps({'session_id': cli_session_id, 'hook_event_name': event}),
-                text=True,
-                timeout=10,
-            )
-
-
 def answer(prompt):
-    # Like Claude Code: hooks around the turn, and the reply in its transcript.
-    hook('UserPromptSubmit')
+    # Report turn state via OSC 7501 Program Status and write the reply to the transcript.
+    sys.stdout.write('\x1b]7501;state=working:app=claude-code\x1b\\')
+    sys.stdout.flush()
     with open(history, 'a') as stream:
         stream.write(
             json.dumps(
@@ -208,7 +197,8 @@ def answer(prompt):
             )
             + '\n'
         )
-    hook('Stop')
+    sys.stdout.write('\x1b]7501;state=done:app=claude-code\x1b\\')
+    sys.stdout.flush()
 
 
 # Interactive harnesses receive Ctrl+V immediately. Keep normal line echo for

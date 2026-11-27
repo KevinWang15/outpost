@@ -1,6 +1,8 @@
-"""Own only the clipboard of the private Xvfb display. GTK handles X11 selection
-negotiation and incremental transfers. Report reads of pixels, not TARGETS probes."""
+"""Bridge the private Xvfb clipboard in both directions. GTK handles X11
+selection negotiation and incremental transfers: offer pasted images to the
+agent, and forward text copied to CLIPBOARD by the agent back to Outpost."""
 
+import base64
 import json
 import os
 import sys
@@ -13,11 +15,15 @@ gi.require_version('Gdk', '3.0')
 gi.require_version('GdkPixbuf', '2.0')
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
+MAX_COPY_BYTES = 1024 * 1024
+
 owner = Gtk.Invisible.new()
 owner.realize()
 selection = Gdk.SELECTION_CLIPBOARD
+clipboard = Gtk.Clipboard.get(selection)
 png = Gdk.Atom.intern('image/png', False)
 current = None
+copy_generation = 0
 
 
 def report(**fields):
@@ -25,15 +31,23 @@ def report(**fields):
 
 
 def clear(key):
-    global current
+    global current, copy_generation
     if current and current[0] == key:
         current = None
+        copy_generation += 1
         Gtk.selection_owner_set(None, selection, Gdk.CURRENT_TIME)
         Gtk.selection_clear_targets(owner, selection)
+    return False
+
+
+def cleared(_widget, _event):
+    global current
+    current = None
+    return False
 
 
 def offer(key, mime, data):
-    global current
+    global current, copy_generation
     if not data:
         clear(key)
         return False
@@ -58,6 +72,7 @@ def offer(key, mime, data):
         Gtk.selection_add_target(owner, selection, png, 0)
         if mime != 'image/png':
             Gtk.selection_add_target(owner, selection, Gdk.Atom.intern(mime, False), 1)
+        copy_generation += 1
         if not Gtk.selection_owner_set(owner, selection, Gdk.CURRENT_TIME):
             raise ValueError('Could not own the session clipboard.')
         current = [key, mime, data, pixels, False]
@@ -81,6 +96,30 @@ def requested(widget, target, info, timestamp):
         report(id=key, state='read')
 
 
+def owner_changed(cb, event):
+    global copy_generation
+    if event.reason != Gdk.OwnerChange.NEW_OWNER:
+        return
+    if event.owner is not None and event.owner == owner.get_window():
+        return
+    copy_generation += 1
+    generation = copy_generation
+
+    def on_text(_clipboard, text):
+        if generation != copy_generation or not text:
+            return
+        raw = text.encode('utf-8', 'surrogatepass')
+        if not raw or len(raw) > MAX_COPY_BYTES:
+            return
+        try:
+            raw.decode('utf-8')
+        except UnicodeDecodeError:
+            return
+        report(state='copied', data=base64.b64encode(raw).decode('ascii'))
+
+    cb.request_text(on_text)
+
+
 def commands():
     stream = sys.stdin.buffer
     try:
@@ -98,6 +137,8 @@ def commands():
 
 
 owner.connect('selection-get', requested)
+owner.connect('selection-clear-event', cleared)
+clipboard.connect('owner-change', owner_changed)
 report(display=os.environ['DISPLAY'], authority=os.environ['XAUTHORITY'])
 threading.Thread(target=commands, daemon=True).start()
 Gtk.main()

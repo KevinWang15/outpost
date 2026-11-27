@@ -5,12 +5,25 @@ import type { DirectorySuggestions } from '../../shared/model'
 export type DirectorySource = (path: string, signal: AbortSignal) => Promise<DirectorySuggestions>
 type Lookup = { source: DirectorySource; path: string; data?: DirectorySuggestions; error?: string }
 
-export default function DirectoryInput({ source }: { source: DirectorySource }) {
+export default function DirectoryInput({
+  source,
+  value,
+  onChange,
+}: {
+  source: DirectorySource
+  value?: string
+  onChange?: (path: string) => void
+}) {
   const id = useId()
   const field = useRef<HTMLDivElement>(null)
   const control = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
-  const [path, setPath] = useState('')
+  const [internalPath, setInternalPath] = useState('')
+  const path = value ?? internalPath
+  const setPath = (next: string) => {
+    if (value === undefined) setInternalPath(next)
+    onChange?.(next)
+  }
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const [attempt, setAttempt] = useState(0)

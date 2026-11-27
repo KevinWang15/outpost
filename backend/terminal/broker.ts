@@ -62,10 +62,9 @@ export class TerminalBroker {
 
   /** A fresh Connect can focus an existing tab without attaching another PTY. */
   activate(grant: Grant, token: string) {
-    if (this.stopped || !this.dependencies.active(grant.owner)) return false
-    const redeemed = this.dependencies.tokens.redeem(token, grant)
-    if (!redeemed) return false
-    return true
+    return (
+      !this.stopped && this.dependencies.active(grant.owner) && Boolean(this.dependencies.tokens.redeem(token, grant))
+    )
   }
 
   async accept(socket: WebSocket, query: TerminalQuery) {

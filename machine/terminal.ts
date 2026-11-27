@@ -15,7 +15,9 @@ import {
   type Scrollback,
 } from '../shared/terminalService'
 import { chatHost } from '../shared/chatHost'
+import { processProgramStatus } from '../shared/programStatus'
 import { parseSessionFile, sessionFileId } from '../shared/sessionFiles'
+import { keyIdRegex } from '../shared/schemas'
 import { FrameDecoder, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
 import { isUserInput, TerminalActivity } from './activity'
 import { imageExtensions } from '../shared/images'
@@ -29,7 +31,7 @@ import { harness } from './harnesses'
 import { recordEvent } from './events'
 import { readRegistry, session as findSession } from './registry'
 import { Sequences } from './sequences'
-import { socketAddress, statePath } from './state'
+import { readLaunchConfig, socketAddress, statePath } from './state'
 
 interface Launch {
   scrollback?: Scrollback
@@ -37,8 +39,6 @@ interface Launch {
   session: string
   revision: number
   conversation: string
-  /** Why activity tracking is degraded, if it is. */
-  problem: string | null
   command: string[]
   cwd: string
   env: Record<string, string>
@@ -61,17 +61,25 @@ const signalMs = 12_000
 export async function serveTerminal() {
   process.umask(0o077)
   // Configuration travels through a pipe, never argv or an on-disk file.
-  let config = ''
-  for await (const chunk of process.stdin) {
-    config += chunk.toString()
-    if (config.length > 1024 * 1024) throw new Error('Launch configuration is too large')
-  }
-  const launch: Launch = JSON.parse(config)
+  const launch = (await readLaunchConfig()) as Launch
   if (!terminalSize(launch.cols, launch.rows) || !/^terminals\/[a-f0-9-]+\.sock$/.test(launch.socket))
     throw new Error('Invalid session configuration')
   const record = findSession(readRegistry(), launch.session)
-  const supportsClipboard = ['codex', 'claude', 'kimi'].includes(record.tool)
-  const clipboard = supportsClipboard ? await openTerminalClipboard(launch.env) : null
+  const adapter = harness(record.tool)
+  const clients = new Map<Socket, Viewer>()
+  let ended = false
+  const broadcast = (packet: Buffer) => {
+    for (const client of clients.values()) client.attachment.output(packet)
+  }
+  // Forward text copied to the private Xvfb clipboard (e.g. Codex via arboard) to
+  // viewers as OSC 52. Sequences.feed() only emits complete VT sequences, so
+  // broadcasting between PTY chunks never splits an in-flight escape sequence.
+  const forwardClipboard = (osc52: Buffer) => {
+    if (ended) return
+    for (let offset = 0; offset < osc52.length; offset += 65536)
+      broadcast(terminalFrame('O', osc52.subarray(offset, offset + 65536)))
+  }
+  const clipboard = adapter.definition.clipboard ? await openTerminalClipboard(launch.env, forwardClipboard) : null
   const agentEnv = { ...launch.env }
   if (clipboard) {
     Object.assign(agentEnv, {
@@ -94,7 +102,6 @@ export async function serveTerminal() {
   term.loadAddon(new Unicode11Addon())
   term.unicode.activeVersion = '11'
   const sequences = new Sequences()
-  const clients = new Map<Socket, Viewer>()
   // Attaching a smaller viewer or losing a connection must never discard another
   // viewer's retained rows. Only an explicit settings change can reduce retention.
   function changeScrollback() {
@@ -106,7 +113,6 @@ export async function serveTerminal() {
   /** Helpers waiting for a viewer to act on their signal. */
   const signals = new Map<string, { socket: Socket; timer: NodeJS.Timeout }>()
   let controller: Socket | undefined
-  let ended = false
   let childExited = false
   let ptyEnded = false
   let listening = false
@@ -116,20 +122,11 @@ export async function serveTerminal() {
   const sendControl = (socket: Socket, message: object) => {
     if (!socket.destroyed && !socket.writableEnded) socket.write(terminalControl(message))
   }
-  const broadcast = (packet: Buffer) => {
-    for (const client of clients.values()) client.attachment.output(packet)
-  }
-  const activity = new TerminalActivity(
-    record,
-    launch.conversation,
-    harness(record.tool),
-    value => {
-      broadcast(terminalControl({ type: 'activity', activity: value }))
-      // A change may let a waiting message in, or settle the one in progress.
-      setImmediate(() => deliveries.tick())
-    },
-    launch.problem,
-  )
+  const activity = new TerminalActivity(record, launch.conversation, adapter, value => {
+    broadcast(terminalControl({ type: 'activity', activity: value }))
+    // A change may let a waiting message in, or settle the one in progress.
+    setImmediate(() => deliveries.tick())
+  })
   const pty = new Bun.Terminal({
     cols: launch.cols,
     rows: launch.rows,
@@ -138,8 +135,22 @@ export async function serveTerminal() {
       lastOutputAt = performance.now()
       const complete = sequences.feed(Buffer.from(data))
       if (!complete) return
-      writeHeadless(term, complete)
-      broadcast(terminalFrame('O', Buffer.from(complete)))
+      // Intercept OSC 7501 in stream order: answer `?` queries before any trailing
+      // DA1 probe reaches xterm, apply valid reports, and strip 7501 from viewers.
+      const out: string[] = []
+      processProgramStatus(complete, {
+        output(text) {
+          writeHeadless(term, text)
+          out.push(text)
+        },
+        reply(sequence) {
+          reply(sequence)
+        },
+        report(report) {
+          activity.reportStatus(report)
+        },
+      })
+      if (out.length) broadcast(terminalFrame('O', Buffer.from(out.join(''))))
     },
     exit() {
       ptyEnded = true
@@ -235,15 +246,15 @@ export async function serveTerminal() {
         sendControl(socket, { type: 'result', ok: activity.acknowledge(String(message.completionId)) })
         return socket.end()
       case 'hook':
-        // From `outpost-terminal hook`, run by the tool's own hooks.
-        void activity.hookEvent((message.payload ?? {}) as Record<string, unknown>)
+        // From `outpost-terminal hook`, run when the tool switches conversations.
+        void activity.sessionEvent((message.payload ?? {}) as Record<string, unknown>)
         sendControl(socket, { type: 'result', ok: true })
         return socket.end()
       case 'deliver': {
         // From the node: a message for the agent, typed in when nothing is in the way.
         if (
           typeof message.key !== 'string' ||
-          !/^[A-Za-z0-9_-]{1,80}$/.test(message.key) ||
+          !keyIdRegex.test(message.key) ||
           typeof message.text !== 'string' ||
           !Array.isArray(message.files) ||
           message.files.length > chatHost.maxFiles ||
@@ -265,8 +276,6 @@ export async function serveTerminal() {
         sendControl(socket, { type: 'result', ok: true, deliveries: deliveries.status(message.keys.map(String)) })
         return socket.end()
       case 'file':
-        // Tools without lifecycle hooks report their current turn through the native transcript.
-        activity.refresh()
         deliveries.published(parseSessionFile(message.file))
         broadcast(terminalControl({ type: 'files' }))
         sendControl(socket, { type: 'result', ok: true })

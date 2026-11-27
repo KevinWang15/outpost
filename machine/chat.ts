@@ -22,16 +22,17 @@ import {
   type ChatLaunch,
   type ChatOrigin,
 } from '../shared/chatHost'
-import { FrameDecoder, maxTerminalFrame, terminalControl } from '../shared/node/terminalFrames'
+import { FrameDecoder, maxTerminalFrame, terminalControl, terminalFrame } from '../shared/node/terminalFrames'
+import { keyIdRegex, uuidRegex } from '../shared/schemas'
 import { parseSessionFile, previewImage, sessionFileId } from '../shared/sessionFiles'
-import { readActivity, saveActivity } from './activity'
+import { activity as makeActivity, readActivity, sameActivity, saveActivity } from './activity'
 import { recordEvent } from './events'
 import { changeRegistry, switchConversation } from './registry'
 import { contentPath, filesDirectory, readFile } from './files'
-import { socketAddress, statePath } from './state'
+import { readLaunchConfig, socketAddress, statePath } from './state'
 import { terminalService } from '../shared/terminalService'
 
-const identifier = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value)
+const identifier = (value: unknown): value is string => typeof value === 'string' && keyIdRegex.test(value)
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -42,7 +43,7 @@ function validLaunch(value: unknown): value is ChatLaunch {
     typeof launch.socket === 'string' &&
     /^chats\/[a-f0-9-]{36}\.sock$/.test(launch.socket) &&
     typeof launch.session === 'string' &&
-    /^[a-f0-9-]{36}$/.test(launch.session) &&
+    uuidRegex.test(launch.session) &&
     Number.isInteger(launch.revision) &&
     Array.isArray(launch.command) &&
     launch.command.length > 0 &&
@@ -137,7 +138,6 @@ export class ChatHost {
       error: null,
       agent: null,
       nativeId: launch.resume,
-      title: null,
       modes: null,
       config: [],
       commands: [],
@@ -295,7 +295,6 @@ export class ChatHost {
     this.info.nativeId = created.sessionId
     this.info.modes = created.modes ?? null
     this.info.config = created.configOptions ?? []
-    this.info.title = null
     this.unseen = null
     this.failure = null
     this.record({ kind: 'notice', level: 'info', turn: null, text: 'Started a new conversation.' })
@@ -368,10 +367,10 @@ export class ChatHost {
   private agentExited(code: number | null, signal: NodeJS.Signals | null) {
     if (this.ended) return
     const how = signal ? `was stopped by ${signal}` : `exited with status ${code}`
-    this.fail(this.exitMessage(`The coding tool ${how}.`))
+    this.fail(this.exitMessage(`The coding tool ${how}.`), code)
   }
 
-  private fail(message: string) {
+  private fail(message: string, exitCode: number | null = 1) {
     if (this.ended) return
     // The node reports this line from the log when the host fails while starting.
     process.stderr.write(`outpost: ${message}\n`)
@@ -381,7 +380,7 @@ export class ChatHost {
     for (const item of this.queue.splice(0)) this.record({ kind: 'unqueued', turn: item.turn })
     this.record({ kind: 'notice', level: 'error', turn: null, text: message })
     this.setState(this.info.state === 'ready' ? 'exited' : 'failed')
-    this.shutdown(1)
+    this.shutdown(1, exitCode)
   }
 
   // Updates and permissions ----------------------------------------------------------
@@ -398,8 +397,8 @@ export class ChatHost {
         this.info.config = bounded(update.configOptions) as acp.SessionConfigOption[]
         return this.infoChanged()
       case 'session_info_update':
-        if (update.title !== undefined) this.info.title = update.title?.slice(0, 200) ?? null
-        return this.infoChanged()
+        // Outpost owns session names explicitly and ignores harness-proposed titles.
+        return
       case 'usage_update':
         this.info.usage = { used: update.used, size: update.size, cost: update.cost ?? null }
         return this.infoChanged()
@@ -524,16 +523,17 @@ export class ChatHost {
 
   private activity(): SessionActivity {
     const at = this.activityAt
-    const base = { updatedAt: at, observedAt: at, observation: 'current' as const, completionId: null, detail: null }
+    const timestamps = { updatedAt: at, observedAt: at }
     if (this.info?.state === 'failed' || (this.info?.state === 'exited' && this.info.error))
-      return { ...base, state: 'error', detail: this.info.error }
-    if (this.info?.state === 'exited') return { ...base, state: 'idle' }
-    if (this.permissions.size) return { ...base, state: 'waiting', detail: 'Waiting for your approval' }
-    if (this.running || this.queue.length) return { ...base, state: 'working' }
+      return makeActivity('error', { ...timestamps, detail: this.info.error })
+    if (this.info?.state === 'exited') return makeActivity('idle', timestamps)
+    if (this.permissions.size)
+      return makeActivity('waiting', { ...timestamps, blockedKind: 'permission', detail: 'Waiting for your approval' })
+    if (this.running || this.queue.length) return makeActivity('working', timestamps)
     // The last turn's error remains until another turn starts.
-    if (this.failure) return { ...base, state: 'error', detail: this.failure }
-    if (this.unseen) return { ...base, state: 'finished', completionId: this.unseen.completionId }
-    return { ...base, state: 'idle' }
+    if (this.failure) return makeActivity('error', { ...timestamps, detail: this.failure })
+    if (this.unseen) return makeActivity('finished', { ...timestamps, completionId: this.unseen.completionId })
+    return makeActivity('idle', timestamps)
   }
 
   /** Nothing to do and nobody watching. An unseen reply keeps the host, so its
@@ -560,10 +560,7 @@ export class ChatHost {
   }
 
   private activityChanged() {
-    const next = this.activity()
-    const previous = this.info.activity
-    if (next.state === previous.state && next.completionId === previous.completionId && next.detail === previous.detail)
-      return
+    if (sameActivity(this.activity(), this.info.activity)) return
     this.activityAt = new Date().toISOString()
     this.info.activity = this.activity()
     this.saveActivity()
@@ -645,7 +642,7 @@ export class ChatHost {
     }
     // A viewer that stops reading must resynchronize instead of growing memory.
     if (socket.writableLength > 64 * 1024 * 1024) return void socket.destroy()
-    socket.write(terminalControl(message))
+    socket.write(terminalFrame('C', payload))
   }
 
   private broadcast(message: ChatHostMessage) {
@@ -720,7 +717,7 @@ export class ChatHost {
         // Stored on the target already; this only places it in the transcript.
         const file = parseSessionFile(message.file)
         this.record({ kind: 'file', turn: this.running?.turn ?? null, file })
-        socket.end()
+        socket.end(terminalControl({ type: 'result', ok: true }))
         return
       }
       if (message.type !== 'hello') throw new Error('Say hello first')
@@ -852,13 +849,13 @@ export class ChatHost {
     this.child?.kill('SIGTERM')
     this.endRunning('cancelled', null)
     this.setState('exited')
-    this.shutdown(0)
+    this.shutdown(0, null)
   }
 
-  private shutdown(code: number) {
+  private shutdown(exitCode: number, eventCode: number | null) {
     if (this.ended) return
     this.ended = true
-    recordEvent({ type: 'exited', session: this.launch.session, driver: 'chat', code })
+    recordEvent({ type: 'exited', session: this.launch.session, driver: 'chat', code: eventCode })
     if (this.infoTimer) clearTimeout(this.infoTimer)
     if (this.idleTimer) clearTimeout(this.idleTimer)
     this.broadcast({ type: 'info', info: this.info })
@@ -875,7 +872,7 @@ export class ChatHost {
       setTimeout(() => child.kill('SIGKILL'), 3000).unref()
     }
     this.connection?.close()
-    setTimeout(() => this.options.onExit?.(code), 200).unref()
+    setTimeout(() => this.options.onExit?.(exitCode), 200).unref()
   }
 }
 
@@ -923,12 +920,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 /** Entry point: configuration arrives on stdin, never argv or a file. */
 export async function serveChat() {
   process.umask(0o077)
-  let config = ''
-  for await (const chunk of process.stdin) {
-    config += chunk.toString()
-    if (config.length > 1024 * 1024) throw new Error('Launch configuration is too large')
-  }
-  const launch: unknown = JSON.parse(config)
+  const launch = await readLaunchConfig()
   if (!validLaunch(launch)) throw new Error('Invalid chat configuration')
   const host = new ChatHost(launch, { onExit: code => process.exit(code) })
   process.on('SIGHUP', () => {}) // SSH/client lifetime never owns this process.

@@ -1,8 +1,7 @@
 import { useId, useState } from 'react'
-import { terminalChoices, type TerminalChoice } from '../../shared/terminals'
 import { Dialog } from '../ui/Dialog'
 import { useToast } from '../ui/toast-context'
-import { preferredTerminal, setPreferredTerminal } from './preference'
+import { preferredTerminal, setPreferredTerminal, terminalChoices, type TerminalChoice } from './preference'
 
 export default function ConnectionPreferences({ onClose }: { onClose: () => void }) {
   const [terminal, setTerminal] = useState<TerminalChoice | null>(preferredTerminal)

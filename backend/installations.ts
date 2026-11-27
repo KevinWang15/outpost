@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream'
 import {
   coreSoftware,
   softwareLabel,
+  visibleSoftware,
   type Installation,
   type InstallationEvent,
   type SoftwareId,
@@ -25,10 +26,7 @@ interface Job {
 const key = (owner: Owner, targetId: string) => JSON.stringify([owner.userId, targetId])
 const sameSoftware = (a: readonly SoftwareId[], b: readonly SoftwareId[]) =>
   a.length === b.length && a.every(id => b.includes(id))
-function describeSoftware(ids: readonly SoftwareId[]) {
-  const visible = ids.filter(id => !(id === 'claude-agent-acp' && ids.includes('claude')))
-  return visible.map(softwareLabel).join(', ')
-}
+const describeSoftware = (ids: readonly SoftwareId[]) => visibleSoftware(ids).map(softwareLabel).join(', ')
 
 /** A job belongs to the server process, not to an HTTP stream or dialog. Only
  * the latest bounded log per target is kept; software status is never cached.

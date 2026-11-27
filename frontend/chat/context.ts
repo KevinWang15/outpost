@@ -2,8 +2,8 @@ import { createContext, useContext, useSyncExternalStore } from 'react'
 import type { SessionRef } from '../../shared/chatApi'
 import type { ConversationMatch } from '../../shared/model'
 import type { ChatClient } from './client'
-import type { SessionFiles } from '../terminal/sessionFiles'
-import type { SessionFilesState } from '../terminal/useSessionFiles'
+import type { SessionFiles } from '../files/sessionFiles'
+import type { SessionFilesState } from '../files/useSessionFiles'
 
 export type Selection = ({ kind: 'session' } & SessionRef) | { kind: 'channel'; channelId: string } | null
 

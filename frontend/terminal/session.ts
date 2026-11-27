@@ -7,20 +7,20 @@ import { OPEN_SESSION_OSC, parseOpenSessionOscData } from '../../shared/openSess
 import { pagePaths } from '../../shared/pages'
 import { browserUrl } from '../../shared/signals'
 import { terminalService } from '../../shared/terminalService'
-import { clearScreenShortcut } from '../../shared/terminalShortcuts'
 import { terminalTheme } from '../../shared/terminalTheme'
 import type { HarnessId } from '../../shared/harnesses'
-import { touchInput } from '../browser'
-import { TerminalActivity } from './activity'
+import { TerminalActivity } from '../../shared/terminal/activity'
+import type { TerminalState } from '../../shared/terminal/connection'
+import { TerminalSocket } from '../../shared/terminal/socket'
+import { isApple, touchInput } from '../browser'
 import { attachBell } from './bell'
 import { openBrowserTab } from './browser'
 import { attachClipboard } from './clipboard'
-import type { TerminalState } from './connection'
 import { TerminalGeometry } from './geometry'
 import { terminalKey, type TerminalModifiers } from './keys'
 import { attachTerminalLinks } from './links'
 import { TerminalRenderer } from './rendering'
-import { TerminalSocket } from './socket'
+import { clearScreenShortcut } from './shortcuts'
 import { attachTouchScroll } from './touch'
 
 interface SessionOptions {
@@ -96,8 +96,7 @@ export class TerminalSession {
           return true
         this.lastOpenSession = { id: request.sessionId, at: now }
         const sameOrigin = !request.origin || request.origin === window.location.origin
-        const targetId =
-          (sameOrigin && request.targetId) || this.target?.id || (sameOrigin ? request.targetId : undefined)
+        const targetId = sameOrigin ? request.targetId || this.target?.id : undefined
         if (!targetId) {
           this.notice(`Session "${request.name ?? request.sessionId}" created on another Outpost server.`)
           return true
@@ -110,9 +109,7 @@ export class TerminalSession {
         const query = new URLSearchParams({ target: targetId, session: request.sessionId, title })
         const url = new URL(`${pagePaths.terminal}?${query}`, window.location.origin).href
         this.notice(`Opening "${request.name ?? request.sessionId}"…`)
-        void openBrowserTab(url).then(opened => {
-          if (!this.disposed && !opened) options.blockedLink(url)
-        })
+        if (!openBrowserTab(url)) options.blockedLink(url)
         return true
       })
       this.own(() => openSessionOsc.dispose())
@@ -158,9 +155,7 @@ export class TerminalSession {
           } catch {
             return
           }
-          void openBrowserTab(url).then(opened => {
-            if (!this.disposed && !opened) options.blockedLink(url)
-          })
+          if (!openBrowserTab(url)) options.blockedLink(url)
         },
       })
       this.own(() => this.connection.close())
@@ -296,7 +291,7 @@ export class TerminalSession {
     )
     this.own(() => data.dispose())
     this.own(() => binary.dispose())
-    const clearShortcut = clearScreenShortcut(/Mac|iPhone|iPad|iPod/.test(navigator.platform))
+    const clearShortcut = clearScreenShortcut(isApple())
     term.attachCustomKeyEventHandler(event => {
       if (clearShortcut.matches(event)) {
         event.preventDefault()

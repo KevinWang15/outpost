@@ -8,7 +8,6 @@ import { request as httpRequest, type RequestOptions } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { isIP } from 'node:net'
 import { join } from 'node:path'
-import { Ajv } from 'ajv'
 import Type, { type Static } from 'typebox'
 import { writeJsonFile } from '../../shared/node/jsonFile'
 import {
@@ -24,6 +23,7 @@ import {
 import type { Deployment, Owner } from '../deployment'
 import { AppError } from '../errors'
 import { readStateFile } from '../stateFile'
+import { compileSchema } from '../validate'
 
 const strict = { additionalProperties: false } as const
 const storedWebhook = Type.Object(
@@ -51,7 +51,7 @@ const storedWebhook = Type.Object(
 )
 type StoredWebhook = Static<typeof storedWebhook>
 const webhooksFile = Type.Object({ version: Type.Literal(1), webhooks: Type.Array(storedWebhook) }, strict)
-const validFile = new Ajv().compile<Static<typeof webhooksFile>>(webhooksFile)
+const validFile = compileSchema(webhooksFile)
 interface Account {
   webhooks: StoredWebhook[]
   saving: Promise<void>

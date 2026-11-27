@@ -4,10 +4,11 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import type { SessionRecord } from '../../shared/model'
+import { terminalService } from '../../shared/terminalService'
 import { machineExecutable } from '../state'
 import { withRpc } from '../rpc'
-import { clean, decode, glob, isRecord, promptTitle, strings, timestamp, type Scan } from '../stores'
-import { Harness, historyMessage, type NativeActivity, type NativeConversation } from './harness'
+import { decode, glob, isRecord, lines, strings, timestamp, type Scan } from '../stores'
+import { Harness, historyMessage, type NativeConversation } from './harness'
 
 const generation = /^session(?:\.v([0-9]+))?\.jsonl(?:\.zstd)?$/
 const maxDecoded = 256 * 1024 * 1024
@@ -16,13 +17,6 @@ const roles: Record<string, 'user' | 'assistant' | 'tool'> = {
   'steering/message': 'user',
   'assistant/message': 'assistant',
   'tool/result': 'tool',
-}
-const turnEnds: Record<string, NativeActivity['state']> = {
-  completed: 'finished',
-  error: 'error',
-  failed: 'error',
-  cancelled: 'idle',
-  aborted: 'idle',
 }
 
 /** End of the complete Zstandard frame at `start`, or null for a torn tail. */
@@ -54,7 +48,7 @@ function frameEnd(input: Buffer, start: number) {
 const torn = new Error('torn')
 
 /** Decode complete frames only; a frame still being written is left for later. */
-function decodeHistory(path: string) {
+function decodeHistory(path: string, firstLineOnly = false) {
   const input = readFileSync(path)
   if (input.length > maxDecoded) throw new Error('Compressed DeepSeek history exceeds its limit.')
   const parts: Buffer[] = []
@@ -76,20 +70,13 @@ function decodeHistory(path: string) {
     parts.push(decoded)
     size += decoded.length
     offset = end
+    if (firstLineOnly && decoded.includes(10)) break
   }
   return { data: Buffer.concat(parts), incomplete }
 }
 
 export class DeepSeek extends Harness {
   readonly id = 'deepseek' as const
-  readonly selectionOptions = [
-    '--resume',
-    '--session',
-    '--session-id',
-    '--profile',
-    '--from-default-profile',
-    '--patch',
-  ]
 
   /** The newest generation of each session directory; older ones repeat it. */
   private *generations(home: string) {
@@ -118,23 +105,23 @@ export class DeepSeek extends Harness {
   }
 
   historyBytes(path: string) {
-    const info = statSync(path)
+    const info = statSync(path, { bigint: true })
     const decoded = path.endsWith('.zstd') ? decodeHistory(path) : { data: readFileSync(path), incomplete: false }
-    return { ...decoded, sourceSize: info.size, modified: statSync(path, { bigint: true }).mtimeNs.toString() }
+    return { ...decoded, sourceSize: Number(info.size), modified: info.mtimeNs.toString() }
   }
 
-  private rows(path: string) {
-    const { data } = this.historyBytes(path)
-    return data
-      .toString('utf8')
-      .split('\n')
-      .map(line => decode(line))
-      .filter(row => row !== null)
-  }
-
-  private metadata(path: string) {
-    const rows = this.rows(path)
-    const header = rows[0]
+  private metadata(path: string): Record<string, unknown> {
+    let header: Record<string, unknown> | null = null
+    if (path.endsWith('.zstd')) {
+      const { data } = decodeHistory(path, true)
+      const newline = data.indexOf(10)
+      header = decode(newline >= 0 ? data.subarray(0, newline) : data)
+    } else {
+      for (const { record } of lines(path)) {
+        header = record
+        break
+      }
+    }
     if (!header || header.type !== 'session') throw new Error('Invalid DeepSeek session header')
     const version = header.version
     if (
@@ -145,22 +132,13 @@ export class DeepSeek extends Harness {
       version > 4
     )
       throw new Error('Unsupported DeepSeek session identity or history format')
-    let title = header.id
-    for (const row of rows.slice(1)) {
-      const data = row.data
-      if (!isRecord(data)) continue
-      if (row.type === 'session/title' && typeof data.title === 'string') title = data.title
-      else if (title === header.id && row.type === 'user/message') title = promptTitle([...this.text(row)][0]) || title
-    }
-    return { header, title: clean(title, 160) }
+    return header
   }
 
-  private conversation(path: string, home: string): NativeConversation {
-    const { header, title } = this.metadata(path)
+  private conversation(path: string, home: string, header: Record<string, unknown>): NativeConversation {
     return {
       id: header.id as string,
       root: typeof header.cwd === 'string' ? header.cwd : '',
-      title,
       created: timestamp(header.createdAt),
       updated: timestamp(statSync(path).mtimeMs),
       history: [path],
@@ -176,8 +154,9 @@ export class DeepSeek extends Harness {
       scan.check()
       scan.files++
       try {
+        const header = this.metadata(path)
         // Subagents stay searchable, but ACP resumes root sessions only.
-        if (this.metadata(path).header.origin !== 'subagent') yield this.conversation(path, home)
+        if (header.origin !== 'subagent') yield this.conversation(path, home, header)
       } catch {
         scan.skipped++
       }
@@ -193,25 +172,6 @@ export class DeepSeek extends Harness {
     return null
   }
 
-  title(session: SessionRecord, conversation: string) {
-    const path = this.transcript(session, conversation)
-    return path ? this.metadata(path).title : null
-  }
-
-  activity(record: Record<string, unknown>): NativeActivity | null {
-    const data = isRecord(record.data) ? record.data : {}
-    const at = record.time
-    const turn = data.turn !== undefined && data.turn !== '' ? String(data.turn) : null
-    if (record.type === 'turn/start') return { state: 'working', timestamp: at, turn }
-    if (record.type === 'turn/end') {
-      const reason = isRecord(data.reason) ? data.reason.kind : data.reason
-      return { state: turnEnds[reason as string] ?? 'idle', timestamp: at, turn }
-    }
-    if (record.type === 'approval/asked') return { state: 'waiting', timestamp: at, turn }
-    if (record.type === 'approval/decided') return { state: 'working', timestamp: at, turn }
-    return null
-  }
-
   *historyPaths(home: string) {
     yield* this.generations(home)
   }
@@ -220,7 +180,7 @@ export class DeepSeek extends Harness {
     const parts = relative(home, path).split(sep)
     if (parts.length !== 4 || parts[0] !== 'sessions' || !generation.test(parts[3]))
       throw new Error('Invalid DeepSeek history path')
-    return this.conversation(path, home)
+    return this.conversation(path, home, this.metadata(path))
   }
 
   *historyMessages(record: Record<string, unknown>) {
@@ -242,7 +202,7 @@ export class DeepSeek extends Harness {
       await rpc.call('initialize', {
         protocolVersion: 1,
         clientCapabilities: {},
-        clientInfo: { name: 'outpost', version: '1' },
+        clientInfo: { name: 'outpost', version: terminalService.version },
       })
       const result = await rpc.call('session/new', { cwd: root, mcpServers: [] })
       if (!this.validId(result.sessionId)) throw new Error('DeepSeek returned an invalid session ID')

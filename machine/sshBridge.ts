@@ -7,7 +7,7 @@ import { basename, delimiter, join } from 'node:path'
 import { isHarnessId } from '../shared/harnesses'
 import { imageExtensions } from '../shared/images'
 import { formatProgramStatusReport } from '../shared/programStatus'
-import { encodeSshBridgeOsc, SshBridgeOscScanner, type SshRemoteMessage } from '../shared/sshBridgeProtocol'
+import { encodeSshBridgeOsc, SshBridgeInputScanner, type SshRemoteMessage } from '../shared/sshBridgeProtocol'
 import { saveImageInDirectory } from './files'
 import { harness } from './harnesses'
 import { installation } from './installation'
@@ -176,28 +176,13 @@ export async function runSshWrap(toolArg: string | undefined, userArgs: string[]
     },
   })
 
-  const scanner = new SshBridgeOscScanner()
-  let escTimer: ReturnType<typeof setTimeout> | undefined
-  const clearEscTimer = () => {
-    if (escTimer) {
-      clearTimeout(escTimer)
-      escTimer = undefined
-    }
-  }
+  const scanner = new SshBridgeInputScanner()
 
   const onStdin = (chunk: Buffer) => {
-    clearEscTimer()
     const { passthrough, messages } = scanner.scan(chunk)
     if (passthrough.length) writePty(passthrough)
     for (const msg of messages) {
       if (msg.t === 'img.begin' || msg.t === 'img.data' || msg.t === 'img.cancel') receiver.handle(msg)
-    }
-    if (scanner.hasPendingEsc) {
-      escTimer = setTimeout(() => {
-        escTimer = undefined
-        const esc = scanner.flushPendingEsc()
-        if (esc) writePty(esc)
-      }, 25)
     }
   }
 
@@ -212,7 +197,6 @@ export async function runSshWrap(toolArg: string | undefined, userArgs: string[]
   const cleanup = () => {
     if (cleanedUp) return
     cleanedUp = true
-    clearEscTimer()
     process.stdin.off('data', onStdin)
     process.stdout.off('resize', onResize)
     try {

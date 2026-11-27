@@ -2,7 +2,7 @@
 
 use super::protocol::{
     DEFAULT_IMAGE_CHUNK_BYTES, IMAGE_WINDOW_CHUNKS, SshDesktopMessage, SshRemoteMessage,
-    encode_ssh_bridge_osc,
+    encode_ssh_bridge_input,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 
@@ -67,7 +67,7 @@ impl SshBridgePane {
         let generation = self.serial;
         let id = format!("img-{generation}");
         let size = bytes.len();
-        let frame = encode_ssh_bridge_osc(&SshDesktopMessage::ImgBegin {
+        let frame = encode_ssh_bridge_input(&SshDesktopMessage::ImgBegin {
             v: 1,
             session: &session.nonce,
             id: &id,
@@ -102,7 +102,7 @@ impl SshBridgePane {
                 "The remote SSH session did not answer the image paste request.".into(),
             ));
         }
-        let cancel = encode_ssh_bridge_osc(&SshDesktopMessage::ImgCancel {
+        let cancel = encode_ssh_bridge_input(&SshDesktopMessage::ImgCancel {
             v: 1,
             id: &transfer.id,
         });
@@ -128,16 +128,11 @@ impl SshBridgePane {
                 });
             }
             SshRemoteMessage::Bye { session } => {
-                if self
-                    .session
-                    .as_ref()
-                    .is_some_and(|s| s.nonce == session)
-                {
+                if self.session.as_ref().is_some_and(|s| s.nonce == session) {
                     self.session = None;
                     if self.transfer.take().is_some() {
-                        actions.error = Some(
-                            "The coding tool exited before the image paste finished.".into(),
-                        );
+                        actions.error =
+                            Some("The coding tool exited before the image paste finished.".into());
                     }
                     actions.clear_activity = true;
                 }
@@ -146,9 +141,8 @@ impl SshBridgePane {
                 // The remote shell prompt regained control (e.g. after SIGKILL on the wrapper).
                 if self.session.take().is_some() {
                     if self.transfer.take().is_some() {
-                        actions.error = Some(
-                            "The coding tool exited before the image paste finished.".into(),
-                        );
+                        actions.error =
+                            Some("The coding tool exited before the image paste finished.".into());
                     }
                     actions.clear_activity = true;
                 }
@@ -174,7 +168,7 @@ impl SshBridgePane {
                 {
                     let end = (transfer.sent + transfer.chunk_size).min(transfer.bytes.len());
                     let data = STANDARD.encode(&transfer.bytes[transfer.sent..end]);
-                    actions.send_frames.push(encode_ssh_bridge_osc(
+                    actions.send_frames.push(encode_ssh_bridge_input(
                         &SshDesktopMessage::ImgData {
                             v: 1,
                             id: &transfer.id,
@@ -238,7 +232,7 @@ mod tests {
         let (gen_id, begin_frame) = pane
             .begin_paste("image/png", payload.clone(), false)
             .unwrap();
-        assert!(begin_frame.starts_with(b"\x1b]7770;outpost;ssh;"));
+        assert!(begin_frame.starts_with("\u{E077}outpost;ssh;".as_bytes()));
 
         // Initial ack with 16 KiB chunks fills a 4-chunk window (all 4 chunks for 50 KiB).
         let actions = pane.handle_remote(SshRemoteMessage::ImgAck {

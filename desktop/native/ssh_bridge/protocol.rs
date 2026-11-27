@@ -6,6 +6,11 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 
 pub const SSH_BRIDGE_PREFIX: &str = "outpost;ssh;";
+/// UTF-8 Private Use Area delimiters for Desktop -> Remote PTY input frames.
+/// Windows ConPTY swallows `ESC ] ...` OSC sequences on input, whereas PUA UTF-8 passes
+/// byte-for-byte through Windows ConPTY, WSL, macOS, and Linux PTYs with 0ms Escape latency.
+const SSH_BRIDGE_INPUT_START: char = '\u{E077}';
+const SSH_BRIDGE_INPUT_END: char = '\u{E078}';
 pub const MAX_SSH_BRIDGE_OSC_BYTES: usize = 32 * 1024;
 pub const DEFAULT_IMAGE_CHUNK_BYTES: usize = 16 * 1024;
 pub const IMAGE_WINDOW_CHUNKS: usize = 4;
@@ -145,9 +150,7 @@ pub fn parse_ssh_bridge_osc_data(data: &str) -> Option<SshRemoteMessage> {
             let id = wire.id.filter(|s| valid_id(s))?;
             let ok = wire.ok?;
             if ok {
-                let mode = wire
-                    .mode
-                    .filter(|m| m == "attachment" || m == "path")?;
+                let mode = wire.mode.filter(|m| m == "attachment" || m == "path")?;
                 Some(SshRemoteMessage::ImgDone {
                     id,
                     ok: true,
@@ -171,10 +174,11 @@ pub fn parse_ssh_bridge_osc_data(data: &str) -> Option<SshRemoteMessage> {
     }
 }
 
-pub fn encode_ssh_bridge_osc(message: &SshDesktopMessage<'_>) -> Vec<u8> {
+pub fn encode_ssh_bridge_input(message: &SshDesktopMessage<'_>) -> Vec<u8> {
     let json = serde_json::to_vec(message).expect("serialize ssh bridge message");
     let encoded = URL_SAFE_NO_PAD.encode(&json);
-    format!("\x1b]7770;{SSH_BRIDGE_PREFIX}{encoded}\x1b\\").into_bytes()
+    format!("{SSH_BRIDGE_INPUT_START}{SSH_BRIDGE_PREFIX}{encoded}{SSH_BRIDGE_INPUT_END}")
+        .into_bytes()
 }
 
 #[cfg(test)]
@@ -231,8 +235,8 @@ mod tests {
     }
 
     #[test]
-    fn encodes_desktop_osc_frames_with_st_terminator() {
-        let frame = encode_ssh_bridge_osc(&SshDesktopMessage::ImgBegin {
+    fn encodes_desktop_input_frames_with_conpty_safe_pua_delimiters() {
+        let frame = encode_ssh_bridge_input(&SshDesktopMessage::ImgBegin {
             v: 1,
             session: "sess1",
             id: "img1",
@@ -240,7 +244,7 @@ mod tests {
             size: 128,
             mode: "attachment",
         });
-        assert!(frame.starts_with(b"\x1b]7770;outpost;ssh;"));
-        assert!(frame.ends_with(b"\x1b\\"));
+        assert!(frame.starts_with("\u{E077}outpost;ssh;".as_bytes()));
+        assert!(frame.ends_with("\u{E078}".as_bytes()));
     }
 }

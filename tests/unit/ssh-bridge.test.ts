@@ -16,12 +16,13 @@ import { createInterface } from 'node:readline'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
+  encodeSshBridgeInput,
   encodeSshBridgeOsc,
   isStandaloneAgentTool,
   parseSshBridgeOscData,
   SSH_BRIDGE_ENABLED,
   SSH_IMAGE_CHUNK_BYTES,
-  SshBridgeOscScanner,
+  SshBridgeInputScanner,
   type SshRemoteMessage,
 } from '../../shared/sshBridgeProtocol'
 import { harness } from '../../machine/harnesses'
@@ -91,13 +92,19 @@ test('OSC 7770 SSH bridge protocol round-trips all message types and rejects inv
   assert.equal(parseSshBridgeOscData(bad({ v: 1, t: 'img.ack', id: '1', next: 0, chunkSize: 999999 })), null)
 })
 
-test('SshBridgeOscScanner splits chunked frames cleanly, passes through normal keys, and flushes bare ESC', () => {
-  const scanner = new SshBridgeOscScanner()
-  const frame = encodeSshBridgeOsc(
-    { v: 1, t: 'img.begin', session: 's1', id: 'i1', mime: 'image/png', size: 64, mode: 'attachment' },
-    'st',
-  )
-  const wire = Buffer.from(`abc\x1b[A${frame}xyz\x1b]0;title\x07`, 'utf8')
+test('SshBridgeInputScanner splits chunked PUA frames cleanly and passes through ESC/UTF-8 with zero delay', () => {
+  const scanner = new SshBridgeInputScanner()
+  const frame = encodeSshBridgeInput({
+    v: 1,
+    t: 'img.begin',
+    session: 's1',
+    id: 'i1',
+    mime: 'image/png',
+    size: 64,
+    mode: 'attachment',
+  })
+  // Include bare Escape, CSI arrow keys, OSC, and unrelated UTF-8 (including 0xEE-prefixed CJK/PUA).
+  const wire = Buffer.from(`abc\x1b[A\x1b中文${frame}xyz\x1b]0;title\x07`, 'utf8')
   const passed: Uint8Array[] = []
   const msgs = []
   for (let i = 0; i < wire.length; i++) {
@@ -105,16 +112,14 @@ test('SshBridgeOscScanner splits chunked frames cleanly, passes through normal k
     if (passthrough.length) passed.push(passthrough)
     msgs.push(...messages)
   }
-  assert.equal(Buffer.concat(passed).toString('utf8'), 'abc\x1b[Axyz\x1b]0;title\x07')
+  assert.equal(Buffer.concat(passed).toString('utf8'), 'abc\x1b[A\x1b中文xyz\x1b]0;title\x07')
   assert.equal(msgs.length, 1)
   assert.equal(msgs[0].t, 'img.begin')
 
-  // Bare Escape key held in `esc` state flushes cleanly on timer.
-  const r = scanner.scan(Buffer.from([0x1b]))
-  assert.equal(r.passthrough.length, 0)
-  assert.equal(scanner.hasPendingEsc, true)
-  assert.deepEqual(scanner.flushPendingEsc(), new Uint8Array([0x1b]))
-  assert.equal(scanner.hasPendingEsc, false)
+  // Bare Escape key passes through immediately with zero buffering.
+  const esc = scanner.scan(Buffer.from([0x1b]))
+  assert.deepEqual(Array.from(esc.passthrough), [0x1b])
+  assert.equal(esc.messages.length, 0)
 })
 
 test('resolveRealExecutable strips wrapper directories (including symlinks) to prevent recursion loops', t => {

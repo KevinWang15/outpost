@@ -549,5 +549,57 @@ mod tests {
             b"(Get-Command ssh).CommandType; exit\r",
             "Function",
         );
+
+        // Verify large multi-chunk PUA UTF-8 input frames (matching a full 4-chunk image window)
+        // pass byte-for-byte through Windows ConPTY -> WSL without truncation or corruption.
+        {
+            let chunk_body = "A".repeat(29_000);
+            let frame = format!("\u{E077}outpost;ssh;{chunk_body}\u{E078}");
+            let total_frames = 4usize;
+            let total_bytes = frame.len() * total_frames;
+            let script = format!(
+                "import sys,tty,termios; fd=0; old=termios.tcgetattr(fd); tty.setraw(fd); print('READY', flush=True); buf=bytearray();\nwhile len(buf)<{total_bytes}:\n d=sys.stdin.buffer.read({total_bytes}-len(buf))\n if not d: break\n buf.extend(d)\ntermios.tcsetattr(fd, termios.TCSADRAIN, old); exp=('\\ue077outpost;ssh;' + 'A'*29000 + '\\ue078').encode('utf-8')*{total_frames}; print('EXACT:' + str(bytes(buf)==exp) + ':' + str(len(buf)), flush=True)"
+            );
+            let (pty, rx) = Local::open(
+                "C:\\Windows\\System32\\wsl.exe",
+                &["-e".into(), "python3".into(), "-c".into(), script],
+                &std::env::temp_dir(),
+                120,
+                30,
+            )
+            .expect("open wsl probe");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut buf = Vec::new();
+            let mut sent = false;
+            while Instant::now() < deadline {
+                if let Ok(out) = rx.try_recv() {
+                    match out {
+                        Output::Bytes(b) => {
+                            if b.windows(4).any(|w| w == b"\x1b[6n") {
+                                let _ = pty.send(b"\x1b[1;1R".to_vec());
+                            }
+                            buf.extend_from_slice(&b);
+                            let s = String::from_utf8_lossy(&buf);
+                            if !sent && s.contains("READY") {
+                                sent = true;
+                                for _ in 0..total_frames {
+                                    pty.send(frame.as_bytes().to_vec()).unwrap();
+                                }
+                            }
+                            if s.contains(&format!("EXACT:True:{total_bytes}")) {
+                                return;
+                            }
+                        }
+                        Output::Closed(_) => break,
+                    }
+                } else {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+            panic!(
+                "ConPTY did not forward {total_bytes} bytes of PUA frames verbatim: {:?}",
+                String::from_utf8_lossy(&buf)
+            );
+        }
     }
 }

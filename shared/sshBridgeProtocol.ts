@@ -1,8 +1,12 @@
 // Experimental interactive SSH bridge protocol (shared/sshBridgeProtocol.ts).
 //
-// Rides inside Outpost's private OSC 7770 namespace (`ESC ] 7770 ; outpost ; ssh ; <base64url-json> (BEL|ST)`)
-// so standard terminals silently ignore it, Outpost Desktop reuses its single OSC 7770 scanner,
-// and image paste + wrapper lifecycle work through jump hosts and WSL without extra ports.
+// Two clean, single-format framings matching what PTYs pass verbatim in each direction:
+//   - Remote -> Desktop (PTY output): `ESC ] 7770 ; outpost ; ssh ; <base64url-json> BEL`
+//     (rides inside Outpost's existing OSC 7770 scanner; standard terminals ignore it).
+//   - Desktop -> Remote (PTY input):  `\uE077outpost;ssh;<base64url-json>\uE078`
+//     (UTF-8 Private Use Area delimiters U+E077/U+E078: Windows ConPTY's VtInputThread
+//     swallows OSC sequences on input, whereas PUA UTF-8 passes byte-for-byte through
+//     Windows ConPTY, WSL, macOS, and Linux PTYs with zero Escape-key latency).
 //
 // Turn off the whole machine-side experiment in one place by flipping `SSH_BRIDGE_ENABLED = false`
 // (and `desktop/native/ssh_bridge/mod.rs::ENABLED = false` on the Desktop side).
@@ -19,11 +23,13 @@ export const SSH_BRIDGE_ENABLED = true
 
 export const SSH_BRIDGE_OSC = 7770
 export const SSH_BRIDGE_PREFIX = 'outpost;ssh;'
-/** Chunk payload size in raw bytes (16 KiB -> ~21.8 KiB base64 per OSC frame). */
+export const SSH_BRIDGE_INPUT_START = '\uE077'
+export const SSH_BRIDGE_INPUT_END = '\uE078'
+/** Chunk payload size in raw bytes (16 KiB -> ~21.8 KiB base64 per frame). */
 export const SSH_IMAGE_CHUNK_BYTES = 16 * 1024
 /** Max in-flight image chunks in the sliding window (4 * 16 KiB = 64 KiB). */
 export const SSH_IMAGE_WINDOW_CHUNKS = 4
-/** Max UTF-8 bytes of one OSC 7770 SSH bridge payload (after `7770;`). */
+/** Max UTF-8 bytes of one SSH bridge payload (after `7770;` or `\uE077`). */
 export const MAX_SSH_BRIDGE_OSC_BYTES = 32 * 1024
 
 const idPattern = /^[A-Za-z0-9_-]{1,64}$/
@@ -87,10 +93,17 @@ function fromBase64Url(encoded: string): string | null {
   }
 }
 
+/** Encode a Remote -> Desktop OSC 7770 frame. */
 export function encodeSshBridgeOsc(message: SshBridgeMessage, terminator: 'bel' | 'st' = 'bel'): string {
   const encoded = toBase64Url(JSON.stringify(message))
   const end = terminator === 'st' ? '\x1b\\' : '\x07'
   return `\x1b]${SSH_BRIDGE_OSC};${SSH_BRIDGE_PREFIX}${encoded}${end}`
+}
+
+/** Encode a Desktop -> Remote input frame using ConPTY-safe PUA UTF-8 delimiters. */
+export function encodeSshBridgeInput(message: SshDesktopMessage): string {
+  const encoded = toBase64Url(JSON.stringify(message))
+  return `${SSH_BRIDGE_INPUT_START}${SSH_BRIDGE_PREFIX}${encoded}${SSH_BRIDGE_INPUT_END}`
 }
 
 function validId(value: unknown): value is string {
@@ -178,17 +191,18 @@ export function parseSshBridgeOscData(data: string): SshBridgeMessage | null {
   }
 }
 
-const OSC_HEADER = encoder.encode(`${SSH_BRIDGE_OSC};${SSH_BRIDGE_PREFIX}`)
+const INPUT_HEADER = encoder.encode(`${SSH_BRIDGE_INPUT_START}${SSH_BRIDGE_PREFIX}`)
+const INPUT_END = encoder.encode(SSH_BRIDGE_INPUT_END) // [0xee, 0x81, 0xb8]
 const MAX_SKIP_BYTES = 128 * 1024
 
-type ScannerState = 'ground' | 'esc' | 'header' | 'payload' | 'payloadEsc'
+type InputScannerState = 'ground' | 'header' | 'payload' | 'end'
 
-/** Byte-stream splitter that extracts `OSC 7770 ; outpost ; ssh ; ...` frames
- * while forwarding every other byte (including normal keystrokes & CSI/OSC escapes) verbatim.
- * Mirrors `desktop/native/terminal/osc7770.rs` so both directions share one framing model. */
-export class SshBridgeOscScanner {
-  private state: ScannerState = 'ground'
+/** Byte-stream splitter for Desktop -> Remote stdin (`\uE077outpost;ssh;<b64>\uE078`).
+ * Never intercepts ESC or ASCII keystrokes, so normal typing and bare Escape have 0ms latency. */
+export class SshBridgeInputScanner {
+  private state: InputScannerState = 'ground'
   private headerIndex = 0
+  private endIndex = 0
   private pending: number[] = []
   private payload: number[] = []
   private oversized = false
@@ -198,20 +212,6 @@ export class SshBridgeOscScanner {
     this.payload.length = 0
     this.oversized = false
     this.skipped = 0
-  }
-
-  /** Flush an incomplete leading ESC if the user pressed a bare Escape key without following bytes. */
-  flushPendingEsc(): Uint8Array | null {
-    if (this.state === 'esc' && this.pending.length === 1 && this.pending[0] === 0x1b) {
-      this.pending.length = 0
-      this.state = 'ground'
-      return new Uint8Array([0x1b])
-    }
-    return null
-  }
-
-  get hasPendingEsc(): boolean {
-    return this.state === 'esc'
   }
 
   private finishPayload(messages: SshBridgeMessage[]) {
@@ -228,7 +228,7 @@ export class SshBridgeOscScanner {
   }
 
   scan(bytes: Uint8Array): { passthrough: Uint8Array; messages: SshBridgeMessage[] } {
-    if (this.state === 'ground' && !bytes.includes(0x1b)) {
+    if (this.state === 'ground' && !bytes.includes(INPUT_HEADER[0])) {
       return { passthrough: bytes, messages: [] }
     }
     const out: number[] = []
@@ -237,40 +237,27 @@ export class SshBridgeOscScanner {
       const b = bytes[i]
       switch (this.state) {
         case 'ground':
-          if (b === 0x1b) {
-            this.pending = [0x1b]
-            this.state = 'esc'
+          if (b === INPUT_HEADER[0]) {
+            this.pending = [b]
+            this.headerIndex = 1
+            this.state = 'header'
           } else {
             out.push(b)
           }
           break
-        case 'esc':
-          if (b === 0x5d /* ']' */) {
-            this.pending.push(b)
-            this.headerIndex = 0
-            this.state = 'header'
-          } else if (b === 0x1b) {
-            out.push(...this.pending)
-            this.pending = [0x1b]
-          } else {
-            out.push(...this.pending, b)
-            this.pending.length = 0
-            this.state = 'ground'
-          }
-          break
         case 'header':
-          if (b === OSC_HEADER[this.headerIndex]) {
+          if (b === INPUT_HEADER[this.headerIndex]) {
             this.pending.push(b)
             this.headerIndex++
-            if (this.headerIndex === OSC_HEADER.length) {
+            if (this.headerIndex === INPUT_HEADER.length) {
               this.pending.length = 0
               this.clearPayload()
               this.state = 'payload'
             }
-          } else if (b === 0x1b) {
+          } else if (b === INPUT_HEADER[0]) {
             out.push(...this.pending)
-            this.pending = [0x1b]
-            this.state = 'esc'
+            this.pending = [b]
+            this.headerIndex = 1
           } else {
             out.push(...this.pending, b)
             this.pending.length = 0
@@ -278,13 +265,13 @@ export class SshBridgeOscScanner {
           }
           break
         case 'payload':
-          if (b === 0x07) {
-            this.finishPayload(messages)
-            this.state = 'ground'
-          } else if (b === 0x1b) {
-            this.state = 'payloadEsc'
-          } else if (b === 0x18 || b === 0x1a) {
+          if (b === INPUT_END[0]) {
+            this.endIndex = 1
+            this.state = 'end'
+          } else if (b === 0x1b || b === 0x03 || b === 0x04) {
+            // Abort malformed frame on control interrupt and forward the interrupt key cleanly.
             this.clearPayload()
+            out.push(b)
             this.state = 'ground'
           } else if (!this.oversized && this.payload.length < MAX_SSH_BRIDGE_OSC_BYTES) {
             this.payload.push(b)
@@ -297,22 +284,22 @@ export class SshBridgeOscScanner {
             }
           }
           break
-        case 'payloadEsc':
-          if (b === 0x5c /* '\\' */) {
-            this.finishPayload(messages)
-            this.state = 'ground'
-          } else if (b === 0x1b) {
+        case 'end':
+          if (b === INPUT_END[this.endIndex]) {
+            this.endIndex++
+            if (this.endIndex === INPUT_END.length) {
+              this.finishPayload(messages)
+              this.state = 'ground'
+            }
+          } else if (this.endIndex === 2 && b === INPUT_HEADER[2]) {
+            // Unexpected new start marker (`\uE077`) mid-payload: restart cleanly from header.
             this.clearPayload()
-            this.pending = [0x1b]
-            this.state = 'esc'
-          } else if (b === 0x5d /* ']' */) {
-            this.clearPayload()
-            this.pending = [0x1b, 0x5d]
-            this.headerIndex = 0
+            this.pending = [INPUT_HEADER[0], INPUT_HEADER[1], INPUT_HEADER[2]]
+            this.headerIndex = 3
             this.state = 'header'
           } else {
+            // Non-terminator UTF-8 sequence inside payload aborts the malformed frame.
             this.clearPayload()
-            out.push(0x1b, b)
             this.state = 'ground'
           }
           break

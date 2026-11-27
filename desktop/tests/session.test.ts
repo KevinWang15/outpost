@@ -619,7 +619,7 @@ test(
   },
 )
 
-test('Preferences.load rejects non-objects, arrays, extra keys and partial legacy JSON', async t => {
+test('Preferences.load defaults omitted fields and rejects invalid types or extra keys', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'outpost-prefs-test-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const path = join(dir, 'preferences.json')
@@ -649,13 +649,26 @@ test('Preferences.load rejects non-objects, arrays, extra keys and partial legac
   })
   assert.equal(loaded.localShell, 'bash')
 
-  // Reject malformed shapes and partial legacy payloads.
+  // Earlier preference files missing newly added fields fill in defaults.
+  await writeFile(path, JSON.stringify({ fontSize: 13, sound: true, localShell: null }), 'utf8')
+  const partial = new Preferences(path)
+  await partial.load()
+  assert.deepEqual(partial.value, {
+    fontSize: 13,
+    sound: true,
+    scrollbackLines: 10000,
+    unlimitedScrollback: false,
+  })
+  assert.equal(partial.localShell, null)
+
+  // Reject malformed shapes, out-of-range values, and unknown keys.
   const invalidPayloads: unknown[] = [
     null,
     'string',
     [],
-    { fontSize: 14, sound: true },
-    { fontSize: 14, sound: true, scrollbackLines: 10000, unlimitedScrollback: false },
+    { fontSize: 999 },
+    { scrollbackLines: -1 },
+    { localShell: '../evil' },
     { ...valid, extra: true },
   ]
   for (const payload of invalidPayloads) {

@@ -36,13 +36,24 @@ interface StoredPreferences extends TerminalPreferences {
 const validShell = (value: unknown): value is string | null =>
   value === null || (typeof value === 'string' && /^[a-z-]{1,32}$/.test(value))
 
-function validStoredPreferences(value: unknown): value is StoredPreferences {
-  return (
-    validPreferences(value) &&
-    Object.keys(value).length === Object.keys(defaultPreferences).length + 1 &&
-    'localShell' in value &&
-    validShell(value.localShell)
-  )
+const allowedStoredKeys = new Set(['fontSize', 'sound', 'scrollbackLines', 'unlimitedScrollback', 'localShell'])
+
+function parseStoredPreferences(value: unknown): StoredPreferences | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (!Object.keys(raw).every(key => allowedStoredKeys.has(key))) return null
+  const candidate: StoredPreferences = {
+    fontSize: raw.fontSize === undefined ? defaultPreferences.fontSize : (raw.fontSize as number),
+    sound: raw.sound === undefined ? defaultPreferences.sound : (raw.sound as boolean),
+    scrollbackLines:
+      raw.scrollbackLines === undefined ? defaultPreferences.scrollbackLines : (raw.scrollbackLines as number),
+    unlimitedScrollback:
+      raw.unlimitedScrollback === undefined
+        ? defaultPreferences.unlimitedScrollback
+        : (raw.unlimitedScrollback as boolean),
+    localShell: raw.localShell === undefined ? null : (raw.localShell as string | null),
+  }
+  return validPreferences(candidate) && validShell(candidate.localShell) ? candidate : null
 }
 
 /** Presentation only. Credentials, terminal content and drafts are never persisted. */
@@ -68,17 +79,12 @@ export class Preferences {
 
   load() {
     return this.store.load(raw => {
-      if (!validStoredPreferences(raw))
+      const parsed = parseStoredPreferences(raw)
+      if (!parsed)
         throw new Error(
           `Invalid terminal preferences. Remove ${this.store.path} to reset settings, then restart Outpost.`,
         )
-      return {
-        fontSize: raw.fontSize,
-        sound: raw.sound,
-        scrollbackLines: raw.scrollbackLines,
-        unlimitedScrollback: raw.unlimitedScrollback,
-        localShell: raw.localShell,
-      }
+      return parsed
     })
   }
 

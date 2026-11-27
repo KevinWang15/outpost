@@ -96,14 +96,20 @@ impl Bridge {
             events: tx.clone(),
         };
         thread::spawn(move || {
+            let mut last_was_error = false;
             for line in stdout.lines().map_while(Result::ok) {
                 if !tx.is_closed()
-                    && let Ok(event) = serde_json::from_str(&line)
+                    && let Ok(event) = serde_json::from_str::<Value>(&line)
                 {
+                    last_was_error = event["event"] == "error";
                     let _ = tx.send_blocking(event);
                 }
             }
-            let _ = tx.send_blocking(serde_json::json!({"event":"error","message":"The Outpost session helper stopped."}));
+            if !last_was_error {
+                let _ = tx.send_blocking(
+                    serde_json::json!({"event":"error","message":"The Outpost session helper stopped."}),
+                );
+            }
         });
         Ok((Self { send }, rx, process))
     }

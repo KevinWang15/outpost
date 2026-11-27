@@ -25,6 +25,7 @@ test('route matchers classify guide and protected workspace paths accurately', (
   assert.equal(isProtectedWorkspacePath('/'), true)
   assert.equal(isProtectedWorkspacePath('/chat'), true)
   assert.equal(isProtectedWorkspacePath('/logs'), true)
+  assert.equal(isProtectedWorkspacePath('/onboarding'), true)
   assert.equal(isProtectedWorkspacePath('/terminal'), true)
   assert.equal(isProtectedWorkspacePath('/guide/machine-cli'), true)
   assert.equal(isProtectedWorkspacePath('/desktop'), false)

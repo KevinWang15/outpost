@@ -10,6 +10,7 @@ import {
   loadDesktopDownloadPage,
   loadGuidePage,
   loadLogsPage,
+  loadOnboardingPage,
   loadTerminalPage,
   scheduleWorkspacePrefetch,
 } from './routes'
@@ -20,6 +21,7 @@ const TerminalPage = lazy(loadTerminalPage)
 const DesktopAuthorizePage = lazy(loadDesktopAuthorizePage)
 const ChatApp = lazy(loadChatApp)
 const LogsPage = lazy(loadLogsPage)
+const OnboardingPage = lazy(loadOnboardingPage)
 const GuidePage = lazy(loadGuidePage)
 
 function PageFallback() {
@@ -43,6 +45,7 @@ function WorkspaceMainFallback() {
 function sidebarPageFor(pathname: string): SidebarPage {
   if (pathname === pagePaths.chat) return 'chat'
   if (pathname === pagePaths.logs) return 'logs'
+  if (pathname === pagePaths.onboarding) return 'onboarding'
   if (isGuidePath(pathname)) return 'guide'
   return 'machines'
 }
@@ -74,7 +77,17 @@ function AuthenticatedRoutes({ location, isPending }: { location: RouteLocation;
       {isPending && <div className="route-progress" role="progressbar" aria-label="Loading page" />}
       <WorkspaceShell page={page} location={location}>
         <Suspense fallback={<WorkspaceMainFallback />}>
-          {page === 'chat' ? <ChatApp /> : page === 'logs' ? <LogsPage /> : page === 'guide' ? <GuidePage /> : <App />}
+          {page === 'chat' ? (
+            <ChatApp />
+          ) : page === 'logs' ? (
+            <LogsPage />
+          ) : page === 'onboarding' ? (
+            <OnboardingPage />
+          ) : page === 'guide' ? (
+            <GuidePage />
+          ) : (
+            <App />
+          )}
         </Suspense>
       </WorkspaceShell>
     </>

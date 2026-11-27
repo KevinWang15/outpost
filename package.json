@@ -22,6 +22,7 @@
     "check": "npm run lint && npm run lint:python && npm run build && npm test",
     "logo:generate": "node scripts/logo/generate.mjs",
     "docs:capture": "node scripts/screenshots.mjs",
+    "onboarding:capture": "node scripts/onboarding-capture/capture.mjs",
     "dev:debug": "tsx watch --inspect=127.0.0.1:9229 --include=backend/** backend/server.ts",
     "lint:python": "ruff check tests machine/clipboard.py && ruff format --check tests machine/clipboard.py",
     "format": "prettier --write . && ruff format tests machine/clipboard.py && ruff check --fix tests machine/clipboard.py",

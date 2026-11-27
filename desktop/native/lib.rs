@@ -135,4 +135,4 @@ fn init(cx: &mut App) {
     Theme::set_global(theme, cx);
 }
 #[cfg(feature = "ui-tests")]
-pub use workspace::exercise_workspace;
+pub use workspace::{capture_onboarding_screenshots, exercise_workspace};

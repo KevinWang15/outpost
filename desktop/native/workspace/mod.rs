@@ -11,8 +11,12 @@ mod settings;
 mod shortcuts;
 mod ui;
 #[cfg(feature = "ui-tests")]
+mod onboarding_screenshots;
+#[cfg(feature = "ui-tests")]
 mod ui_tests;
 
+#[cfg(feature = "ui-tests")]
+pub use onboarding_screenshots::capture_onboarding_screenshots;
 #[cfg(feature = "ui-tests")]
 pub use ui_tests::exercise_workspace;
 

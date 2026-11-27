@@ -6,6 +6,7 @@ export const loadDesktopAuthorizePage = () => import('./desktop/DesktopAuthorize
 export const loadTerminalPage = () => import('./terminal/TerminalPage')
 export const loadChatApp = () => import('./chat/ChatApp')
 export const loadLogsPage = () => import('./logs/LogsPage')
+export const loadOnboardingPage = () => import('./onboarding/OnboardingPage')
 export const loadGuidePage = () => import('./guide/GuidePage')
 
 /** Warm the JS/CSS chunk for an in-app route before the user completes a click. */
@@ -21,6 +22,7 @@ export function prefetchRoute(to: string) {
   }
   if (pathname === pagePaths.chat) void loadChatApp().catch(() => {})
   else if (pathname === pagePaths.logs) void loadLogsPage().catch(() => {})
+  else if (pathname === pagePaths.onboarding) void loadOnboardingPage().catch(() => {})
   else if (isGuidePath(pathname)) void loadGuidePage().catch(() => {})
   else if (pathname === pagePaths.desktop) void loadDesktopDownloadPage().catch(() => {})
 }
@@ -37,6 +39,7 @@ export function scheduleWorkspacePrefetch(): () => void {
     if (workspaceWarmed) return
     workspaceWarmed = true
     void loadLogsPage().catch(() => {})
+    void loadOnboardingPage().catch(() => {})
     void loadGuidePage().catch(() => {})
     void loadChatApp().catch(() => {})
   }

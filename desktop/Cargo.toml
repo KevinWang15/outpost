@@ -16,6 +16,12 @@ path = "tests/workspace.rs"
 harness = false
 required-features = ["ui-tests"]
 
+[[test]]
+name = "onboarding_screenshots"
+path = "tests/onboarding_screenshots.rs"
+harness = false
+required-features = ["ui-tests"]
+
 [[bin]]
 name = "outpost"
 path = "native/main.rs"

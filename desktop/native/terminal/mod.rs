@@ -56,7 +56,7 @@ pub const FAMILY: &str = if cfg!(target_os = "macos") {
 } else if cfg!(windows) {
     "Consolas"
 } else {
-    "monospace"
+    "DejaVu Sans Mono"
 };
 
 #[derive(Clone, Copy, Debug)]

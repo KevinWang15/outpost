@@ -3,6 +3,7 @@ export const pagePaths = {
   workspace: '/',
   chat: '/chat',
   logs: '/logs',
+  onboarding: '/onboarding',
   guide: '/guide',
   terminal: '/terminal',
   desktop: '/desktop',
@@ -22,4 +23,5 @@ export const isProtectedWorkspacePath = (pathname: string) =>
   pathname === pagePaths.chat ||
   pathname === pagePaths.terminal ||
   pathname === pagePaths.logs ||
+  pathname === pagePaths.onboarding ||
   isGuidePath(pathname)

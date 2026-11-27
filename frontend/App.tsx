@@ -1,10 +1,13 @@
 import { useEffect, useReducer, useState } from 'react'
 import { LoaderCircle, Monitor, Plus, Server } from 'lucide-react'
 import type { ConversationResults, ConversationSearch, Target, TargetInput } from '../shared/model'
+import { pagePaths } from '../shared/pages'
 import { api } from './api'
 import { useAuth } from './auth/useAuth'
+import { OnboardingBanner } from './onboarding/OnboardingBanner'
 import { replaceUrl } from './router'
 import { SidebarBody } from './ui/AppSidebar'
+import { Link } from './ui/Link'
 import { getCachedTargets, setCachedTargets } from './workspace/cache'
 import FinderDialog from './workspace/FinderDialog'
 import { address } from './workspace/labels'
@@ -150,6 +153,7 @@ export default function App() {
         </nav>
       </SidebarBody>
       <main className="content">
+        <OnboardingBanner hasMachines={Boolean(targets?.length)} />
         {error && (
           <p className="banner error" role="alert">
             {error}
@@ -178,10 +182,15 @@ export default function App() {
               Add the Linux machine where you work, then choose a project and a coding tool. Your sessions keep running
               on that machine when you disconnect.
             </p>
-            <button className="button primary" onClick={() => setAdding(true)}>
-              <Plus size={15} />
-              Add a machine
-            </button>
+            <div className="onboarding-inline-cta">
+              <button className="button primary" onClick={() => setAdding(true)}>
+                <Plus size={15} />
+                Add a machine
+              </button>
+              <Link className="button" href={pagePaths.onboarding}>
+                Getting started guide
+              </Link>
+            </div>
             <ol className="steps">
               <li>
                 <strong>Add a machine</strong>

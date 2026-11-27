@@ -1,6 +1,16 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, BookOpen, LogOut, MessagesSquare, Monitor, ScrollText, Settings2, UserRound } from 'lucide-react'
+import {
+  ArrowLeft,
+  BookOpen,
+  Compass,
+  LogOut,
+  MessagesSquare,
+  Monitor,
+  ScrollText,
+  Settings2,
+  UserRound,
+} from 'lucide-react'
 import { pagePaths } from '../../shared/pages'
 import AccountDialog from '../auth/AccountDialog'
 import { useAuth } from '../auth/useAuth'
@@ -11,7 +21,7 @@ import { Link } from './Link'
 import { Menu } from './Menu'
 import { useToast } from './toast-context'
 
-export type SidebarPage = 'machines' | 'chat' | 'logs' | 'guide'
+export type SidebarPage = 'machines' | 'chat' | 'logs' | 'onboarding' | 'guide'
 
 const SidebarSlotContext = createContext<HTMLDivElement | null>(null)
 
@@ -22,6 +32,7 @@ function workspaceShellClass(page: SidebarPage, search: string): string {
     return hasSelection ? 'chat-app has-selection' : 'chat-app'
   }
   if (page === 'logs') return 'app logs-app'
+  if (page === 'onboarding') return 'app onboarding-app'
   if (page === 'guide') return 'app guide-app'
   return 'app'
 }
@@ -93,6 +104,13 @@ function SidebarFooter({ page }: { page: SidebarPage }) {
         </Link>
         <Link className="sidebar-link" href={pagePaths.logs} aria-current={page === 'logs' ? 'page' : undefined}>
           <ScrollText size={16} /> Logs and webhooks
+        </Link>
+        <Link
+          className="sidebar-link"
+          href={pagePaths.onboarding}
+          aria-current={page === 'onboarding' ? 'page' : undefined}
+        >
+          <Compass size={16} /> Getting started
         </Link>
         <Link className="sidebar-link" href={pagePaths.guide} aria-current={page === 'guide' ? 'page' : undefined}>
           <BookOpen size={16} /> User guide

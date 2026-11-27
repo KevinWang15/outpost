@@ -111,4 +111,9 @@ export function initializeSchema(db: DatabaseSync) {
     throw new Error('History embedding model changed. Rebuild the generated index.')
   db.prepare("INSERT OR IGNORE INTO settings VALUES('embedding_model',?)").run(embeddingIdentity)
   db.prepare("INSERT OR IGNORE INTO settings VALUES('schema',?)").run(schemaVersion)
+  // Re-read Kimi wire transcripts once so protocol 1.5 sessions using context.* events are indexed.
+  if (!db.prepare("SELECT 1 FROM settings WHERE key='kimi_wire_context'").get()) {
+    db.prepare("UPDATE sources SET checkpoint=NULL WHERE tool='kimi'").run()
+    db.prepare("INSERT OR IGNORE INTO settings VALUES('kimi_wire_context','1')").run()
+  }
 }

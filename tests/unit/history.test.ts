@@ -171,6 +171,95 @@ test('history: machine/tool/role/date filters apply to lexical and vector retrie
     assert.throws(() => index.readMessage({ cursor }, ['alpha']), /no longer accessible/)
   }
   assert.equal((await index.search({ query: 'deployment', mode: 'semantic' }, ['alpha'])).results.length, 1)
+  assert.equal((await index.search({ query: 'deployment', mode: 'semantic', tool: 'kimi' }, ids)).results.length, 0)
+  assert.equal((await index.search({ query: 'deployment', mode: 'mixed' }, [])).results.length, 0)
+})
+
+test('history: one-time Kimi wire migration clears only Kimi checkpoints without rebuilding the index', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'outpost-kimi-migrate-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const path = join(directory, 'index.sqlite')
+  const kimi = source('k1', 'kimi')
+  const codex = source('c1', 'codex')
+  const first = new HistoryIndex(path, 'secret', embed)
+  try {
+    first.ingest(machines[0], batch(kimi, []))
+    first.ingest(machines[0], batch(codex, ['keep codex']))
+    // Simulate a pre-migration database that did not yet run the Kimi checkpoint reset.
+    first.db.prepare("DELETE FROM settings WHERE key='kimi_wire_context'").run()
+  } finally {
+    first.close()
+  }
+  const reopened = new HistoryIndex(path, 'secret', embed)
+  try {
+    assert.equal(reopened.checkpoints('alpha', [kimi])[0].checkpoint, null)
+    assert.equal(reopened.checkpoints('alpha', [codex])[0].checkpoint?.offset, 1000)
+    reopened.ingest(machines[0], batch(kimi, ['now indexed']))
+  } finally {
+    reopened.close()
+  }
+  const third = new HistoryIndex(path, 'secret', embed)
+  try {
+    assert.equal(third.checkpoints('alpha', [kimi])[0].checkpoint?.offset, 1000)
+  } finally {
+    third.close()
+  }
+})
+
+test('history: multi-term keyword search intersects across chunks and respects short terms and time sorting', async t => {
+  const index = setup(t)
+  const crossChunk = `alphaTerm v2 ${'padding '.repeat(350)} omegaTerm`
+  index.ingest(
+    machines[0],
+    batch(source('multi', 'claude'), [
+      'alphaTerm only in earlier message',
+      crossChunk,
+      'omegaTerm only in later message',
+    ]),
+  )
+  index.ingest(machines[1], batch(source('both', 'codex'), ['alphaTerm and omegaTerm together in v2']))
+  const multi = await index.search({ query: 'alphaTerm omegaTerm', mode: 'keyword', sort: 'oldest' }, ids)
+  assert.deepEqual(
+    multi.results.map(r => r.nativeSessionId),
+    ['native-both', 'native-multi'],
+  )
+  const newest = await index.search({ query: 'alphaTerm omegaTerm', mode: 'keyword', sort: 'newest' }, ids)
+  assert.deepEqual(
+    newest.results.map(r => r.nativeSessionId),
+    ['native-multi', 'native-both'],
+  )
+  assert.equal((await index.search({ query: 'alphaTerm omegaTerm v2', mode: 'keyword' }, ids)).results.length, 2)
+  assert.equal((await index.search({ query: 'alphaTerm omegaTerm v3', mode: 'keyword' }, ids)).results.length, 0)
+  assert.equal((await index.search({ query: 'alphaTerm v2', mode: 'keyword' }, ids)).results.length, 2)
+  assert.equal((await index.search({ query: 'alphaTerm v3', mode: 'keyword' }, ids)).results.length, 0)
+})
+
+test('history: filtered semantic search tolerates partial embeddings and sorts by time', async t => {
+  const index = setup(t)
+  index.ingest(machines[0], batch(source('early', 'claude'), ['A kitten on day one', 'Another kitten on day two']))
+  index.ingest(machines[1], batch(source('later', 'codex'), ['Unrelated topic', 'A third kitten on day two']))
+  // Embed only two of the four chunks so some filter-matched chunks are still unembedded.
+  assert.equal(await index.embedPending(ids, 2), 2)
+  const newest = await index.search({ query: 'feline', mode: 'semantic', tool: 'claude', sort: 'newest' }, ids)
+  assert.equal(newest.results.length, 1)
+  assert.match(newest.results[0].text, /kitten/)
+  assert.equal(await index.embedPending(ids, 10), 2)
+  const ordered = await index.search(
+    { query: 'feline', mode: 'semantic', tool: 'claude', groupBy: 'message', sort: 'newest' },
+    ids,
+  )
+  assert.deepEqual(
+    ordered.results.map(r => r.text),
+    ['Another kitten on day two', 'A kitten on day one'],
+  )
+  const oldest = await index.search(
+    { query: 'feline', mode: 'semantic', tool: 'claude', groupBy: 'message', sort: 'oldest' },
+    ids,
+  )
+  assert.deepEqual(
+    oldest.results.map(r => r.text),
+    ['A kitten on day one', 'Another kitten on day two'],
+  )
 })
 
 test('history: only a page inside the uncached tail needs a native read', async t => {

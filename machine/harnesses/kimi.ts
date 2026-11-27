@@ -7,7 +7,7 @@ import { shellJoin } from '../../shared/shell'
 import { terminalService } from '../../shared/terminalService'
 import { withRpc } from '../rpc'
 import { locked, readJson, statePath, writeJson } from '../state'
-import { foldLines, glob, isRecord, lines, newest, strings, timestamp, type Scan } from '../stores'
+import { foldLines, glob, isRecord, newest, strings, timestamp, type Scan } from '../stores'
 import { acpServer, Harness, historyMessage, type Launch, type NativeConversation } from './harness'
 
 const pluginId = 'outpost'
@@ -28,13 +28,7 @@ export class Kimi extends Harness {
     )
   }
 
-  private conversation(
-    directory: string,
-    home: string,
-    scan: Scan,
-    history: string[],
-    format = '',
-  ): NativeConversation {
+  private conversation(directory: string, home: string, scan: Scan, history: string[]): NativeConversation {
     const id = directory.split(sep).at(-1)!
     const state = scan.document(join(directory, 'state.json'))
     return {
@@ -44,7 +38,7 @@ export class Kimi extends Harness {
       updated: timestamp(state.updatedAt),
       history,
       storage: this.storage(home),
-      format,
+      format: '',
     }
   }
 
@@ -81,51 +75,44 @@ export class Kimi extends Harness {
     const parts = relative(home, path).split(sep)
     if (parts.length !== 6 || parts[0] !== 'sessions' || !this.validId(parts[2]) || parts[3] !== 'agents')
       throw new Error('Invalid Kimi history path')
-    let format = 'context-messages'
-    for (const { record } of lines(path)) {
-      if (record?.type === 'metadata' && String(record.protocol_version) === '1.5') format = 'agent-messages'
-      break
-    }
-    return this.conversation(join(home, parts[0], parts[1], parts[2]), home, scan, [path], format)
+    return this.conversation(join(home, parts[0], parts[1], parts[2]), home, scan, [path])
   }
 
-  *historyMessages(record: Record<string, unknown>, format: string) {
+  *historyMessages(record: Record<string, unknown>) {
     const roles = new Set(['user', 'assistant', 'tool'])
-    if (format === 'agent-messages') {
-      const outer = record.message
-      if (record.type !== 'agent.message.appended' || !isRecord(outer) || !isRecord(outer.message)) return
-      const entry = outer.message
-      const meta = isRecord(outer.meta) ? outer.meta : {}
-      if (roles.has(entry.role as string))
-        yield historyMessage(
-          entry.role as 'user',
-          [...strings(entry.content)].join('\n'),
-          timestamp(record.time ?? meta.createdAt),
-          meta.turnId,
-        )
-      return
-    }
     if (record.type === 'context.append_message' && isRecord(record.message)) {
       const entry = record.message
+      if (isRecord(entry.origin) && entry.origin.kind === 'injection') return
       if (roles.has(entry.role as string))
         yield historyMessage(
           entry.role as 'user',
           [...strings(entry.content)].join('\n'),
           timestamp(record.time),
           record.turnId,
+          'message',
+          entry.id,
         )
-    } else if (
-      record.type === 'context.append_loop_event' &&
-      isRecord(record.event) &&
-      record.event.type === 'tool.result'
-    )
-      yield historyMessage(
-        'tool',
-        [...strings(record.event.result ?? record.event.content)].join('\n'),
-        timestamp(record.time),
-        record.turnId,
-        'tool_result',
-      )
+    } else if (record.type === 'context.append_loop_event' && isRecord(record.event)) {
+      const event = record.event
+      if (event.type === 'content.part' && isRecord(event.part) && event.part.type === 'text')
+        yield historyMessage(
+          'assistant',
+          [...strings(event.part.text)].join('\n'),
+          timestamp(record.time ?? event.startedAt),
+          event.turnId ?? record.turnId,
+          'message',
+          event.uuid,
+        )
+      else if (event.type === 'tool.result')
+        yield historyMessage(
+          'tool',
+          [...strings(event.result ?? event.content)].join('\n'),
+          timestamp(record.time),
+          event.turnId ?? record.turnId,
+          'tool_result',
+          event.uuid ?? event.toolCallId,
+        )
+    }
   }
 
   async create(root: string, environment: Record<string, string>, executable: string) {

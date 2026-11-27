@@ -5,6 +5,7 @@ import type { Embed } from './embeddings'
 import { historyNote, normalized, type Row } from './schema'
 
 const poolLimit = 512
+const knnLimit = 1024
 
 export interface Coverage {
   searchableChunks: number
@@ -15,6 +16,7 @@ export interface Coverage {
 function buildFilters(input: HistorySearchInput, machineIds: string[]) {
   const where = [`s.machine_id IN (${machineIds.map(() => '?').join(',') || 'NULL'})`]
   const values: SQLInputValue[] = [...machineIds]
+  let narrowed = false
   for (const [value, column] of [
     [input.machine, 's.machine_id'],
     [input.tool, 's.tool'],
@@ -22,10 +24,12 @@ function buildFilters(input: HistorySearchInput, machineIds: string[]) {
     [input.role, 'm.role'],
   ] as const)
     if (value !== undefined) {
+      narrowed = true
       where.push(`${column}=?`)
       values.push(value)
     }
   if (input.sessionId !== undefined) {
+    narrowed = true
     // A history session, or an Outpost session across its whole timeline.
     where.push('(s.session_id=? OR s.outpost_session=?)')
     values.push(input.sessionId, input.sessionId)
@@ -35,6 +39,7 @@ function buildFilters(input: HistorySearchInput, machineIds: string[]) {
     [input.before, '<='],
   ] as const)
     if (value !== undefined) {
+      narrowed = true
       const end = operator === '<='
       const time = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T${end ? '23:59:59.999' : '00:00:00.000'}Z` : value
       const parsed = new Date(time)
@@ -46,7 +51,7 @@ function buildFilters(input: HistorySearchInput, machineIds: string[]) {
   where.push(
     `(m.kind<>'summary' OR (s.parent_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages b WHERE b.source_id=m.source_id AND b.position<m.position)))`,
   )
-  return { sql: where.join(' AND '), values }
+  return { sql: where.join(' AND '), values, narrowed }
 }
 
 const sealCursor = (cursors: Signer, row: Row) => cursors.seal({ id: Number(row.id), generation: row.generation })
@@ -158,38 +163,66 @@ export async function searchHistory(
 ) {
   if (!input.query.trim()) throw new Error('Enter a non-empty history query.')
   const mode = input.mode ?? 'mixed'
-  const { sql, values } = buildFilters(input, machineIds)
+  const { sql, values, narrowed } = buildFilters(input, machineIds)
+  const sortByTime = input.sort === 'newest' || input.sort === 'oldest'
+  const stamp = input.sort === 'oldest' ? 'MIN' : 'MAX'
+  const timeOrder =
+    input.sort === 'newest' ? 'stamp IS NULL,stamp DESC,' : input.sort === 'oldest' ? 'stamp IS NULL,stamp ASC,' : ''
+  const stampColumn = (docId: string) =>
+    sortByTime
+      ? `,(SELECT ${stamp}(m.timestamp) FROM messages m JOIN sources s ON s.id=m.source_id WHERE m.document_id=${docId} AND ${sql}) stamp`
+      : ''
+  const stampValues = sortByTime ? values : []
   const terms = normalized(input.query.trim()).split(/\s+/)
   const literal =
     mode === 'substring' || (mode === 'mixed' && terms.length === 1 && /[\d_/.\\\p{Script=Han}]/u.test(terms[0]))
   const ranks = new Map<number, { score: number; similarity?: number; snippet?: string }>()
   if (mode !== 'semantic') {
-    const needles = mode === 'substring' ? [normalized(input.query)] : terms
-    const matches = needles.map(() => 'instr(d.normalized,?) > 0').join(' AND ')
-    const ftsTerms = needles
-      .filter(term => [...term].length >= 3)
-      .map(term => `"${term.replaceAll('"', '""')}"`)
-      .join(' OR ')
-    const stamp = input.sort === 'oldest' ? 'MIN' : 'MAX'
-    const order =
-      input.sort === 'newest' ? 'stamp IS NULL,stamp DESC,' : input.sort === 'oldest' ? 'stamp IS NULL,stamp ASC,' : ''
-    const eligible = `EXISTS (SELECT 1 FROM messages m JOIN sources s ON s.id=m.source_id WHERE m.document_id=d.id AND ${sql})`
-    const timestamp = `(SELECT ${stamp}(m.timestamp) FROM messages m JOIN sources s ON s.id=m.source_id WHERE m.document_id=d.id AND ${sql}) stamp`
-    const rows = ftsTerms
-      ? db
-          .prepare(
-            `SELECT d.id,bm25(chunks_fts) lexical_rank,${timestamp}
-            FROM chunks_fts JOIN chunks c ON c.id=chunks_fts.rowid JOIN document_chunks dc ON dc.chunk_id=c.id JOIN documents d ON d.id=dc.document_id
-            WHERE chunks_fts MATCH ? AND ${matches} AND ${eligible}
-            ORDER BY ${order}lexical_rank,d.id DESC LIMIT ${poolLimit}`,
-          )
-          .all(...values, ftsTerms, ...needles, ...values)
-      : db
-          .prepare(
-            `SELECT d.id,${timestamp} FROM documents d WHERE ${matches} AND ${eligible}
-            ORDER BY ${order}length(d.text),d.id DESC LIMIT ${poolLimit}`,
-          )
-          .all(...values, ...needles, ...values)
+    const needles = [...new Set(mode === 'substring' ? [normalized(input.query)] : terms)]
+    const ftsNeedles = needles.filter(term => [...term].length >= 3).map(term => `"${term.replaceAll('"', '""')}"`)
+    const shortNeedles = needles.filter(term => [...term].length < 3)
+    const shortMatches = shortNeedles.map(() => 'instr(d.normalized,?) > 0').join(' AND ')
+    const eligible = (docId: string) =>
+      `EXISTS (SELECT 1 FROM messages m JOIN sources s ON s.id=m.source_id WHERE m.document_id=${docId} AND ${sql})`
+    const rows =
+      ftsNeedles.length === 1
+        ? (() => {
+            const docId = shortNeedles.length ? 'd.id' : 'dc.document_id'
+            const joinDoc = shortNeedles.length ? ' JOIN documents d ON d.id=dc.document_id' : ''
+            const extra = shortMatches ? ` AND ${shortMatches}` : ''
+            return db
+              .prepare(
+                `SELECT ${docId} id,bm25(chunks_fts) lexical_rank${stampColumn(docId)}
+                FROM chunks_fts JOIN document_chunks dc ON dc.chunk_id=chunks_fts.rowid${joinDoc}
+                WHERE chunks_fts MATCH ?${extra} AND ${eligible(docId)}
+                ORDER BY ${timeOrder}lexical_rank,${docId} DESC LIMIT ${poolLimit}`,
+              )
+              .all(...stampValues, ftsNeedles[0], ...shortNeedles, ...values)
+          })()
+        : ftsNeedles.length > 1
+          ? (() => {
+              const matched = ftsNeedles
+                .map(
+                  () =>
+                    'SELECT dc.document_id id FROM chunks_fts JOIN document_chunks dc ON dc.chunk_id=chunks_fts.rowid WHERE chunks_fts MATCH ?',
+                )
+                .join(' INTERSECT ')
+              const extra = shortMatches ? `${shortMatches} AND ` : ''
+              return db
+                .prepare(
+                  `WITH matched AS (${matched})
+                  SELECT d.id${stampColumn('d.id')} FROM matched JOIN documents d ON d.id=matched.id
+                  WHERE ${extra}${eligible('d.id')}
+                  ORDER BY ${timeOrder}length(d.text),d.id DESC LIMIT ${poolLimit}`,
+                )
+                .all(...ftsNeedles, ...stampValues, ...shortNeedles, ...values)
+            })()
+          : db
+              .prepare(
+                `SELECT d.id${stampColumn('d.id')} FROM documents d WHERE ${shortMatches} AND ${eligible('d.id')}
+                ORDER BY ${timeOrder}length(d.text),d.id DESC LIMIT ${poolLimit}`,
+              )
+              .all(...stampValues, ...shortNeedles, ...values)
     let rank = 0
     for (const row of rows) if (!ranks.has(Number(row.id))) ranks.set(Number(row.id), { score: 1 / (60 + ++rank) })
   }
@@ -206,19 +239,43 @@ export async function searchHistory(
     try {
       const query = await embed(input.query, 'query')
       const queryBytes = new Uint8Array(query.buffer, query.byteOffset, query.byteLength)
-      const order =
-        input.sort === 'newest' ? 'stamp DESC,distance' : input.sort === 'oldest' ? 'stamp ASC,distance' : 'distance'
-      const stamp = input.sort === 'oldest' ? 'MIN' : 'MAX'
+      const hasFilter =
+        narrowed ||
+        !machineIds.length ||
+        Boolean(
+          db
+            .prepare(`SELECT 1 FROM sources WHERE machine_id NOT IN (${machineIds.map(() => '?').join(',')}) LIMIT 1`)
+            .get(...machineIds),
+        )
+      // Scope vec0 KNN to matching chunks before ranking so filtered searches keep exact recall at any selectivity.
+      // Drive from sources (small) through messages_source and document_chunks PK so SQLite never scans document_chunks.
+      const chunkFilter = hasFilter
+        ? ` AND chunk_id IN (
+            SELECT dc.chunk_id FROM sources s
+            CROSS JOIN messages m ON m.source_id=s.id
+            CROSS JOIN document_chunks dc ON dc.document_id=m.document_id
+            WHERE ${sql}
+          )`
+        : ''
       const rows = db
         .prepare(
-          `SELECT dc.document_id id,c.text snippet,vec_distance_cosine(e.embedding,?) distance,
-          (SELECT ${stamp}(m.timestamp) FROM messages m JOIN sources s ON s.id=m.source_id WHERE m.document_id=dc.document_id AND ${sql}) stamp
-          FROM embeddings e JOIN chunks c ON c.id=e.chunk_id JOIN document_chunks dc ON dc.chunk_id=c.id
-          WHERE EXISTS (SELECT 1 FROM messages m JOIN sources s ON s.id=m.source_id WHERE m.document_id=dc.document_id AND ${sql})
-          AND vec_distance_cosine(e.embedding,?) <= ?
-          ORDER BY ${order} LIMIT ${poolLimit}`,
+          `WITH knn AS (
+            SELECT chunk_id,distance FROM embeddings WHERE embedding MATCH ? AND k = ?${chunkFilter}
+          )
+          SELECT dc.document_id id,c.text snippet,knn.distance${stampColumn('dc.document_id')}
+          FROM knn JOIN chunks c ON c.id=knn.chunk_id JOIN document_chunks dc ON dc.chunk_id=c.id
+          WHERE knn.distance <= ?
+          AND EXISTS (SELECT 1 FROM messages m JOIN sources s ON s.id=m.source_id WHERE m.document_id=dc.document_id AND ${sql})
+          ORDER BY ${timeOrder}knn.distance LIMIT ${poolLimit}`,
         )
-        .all(queryBytes, ...values, ...values, queryBytes, 1 - (input.minSimilarity ?? 0.7))
+        .all(
+          queryBytes,
+          knnLimit,
+          ...(hasFilter ? values : []),
+          ...stampValues,
+          1 - (input.minSimilarity ?? 0.7),
+          ...values,
+        )
       const seen = new Set<number>()
       rows.forEach(row => {
         if (seen.has(Number(row.id))) return
@@ -254,22 +311,21 @@ export async function searchHistory(
       matchingMessages: number
     }
   >()
+  const messageOrder =
+    input.sort === 'oldest'
+      ? 'm.timestamp IS NULL,m.timestamp ASC,m.id ASC'
+      : 'm.timestamp IS NULL,m.timestamp DESC,m.id DESC'
+  const loadMessages = db.prepare(
+    `SELECT m.*,s.machine,s.machine_id,s.session_id,s.outpost_session,s.tool,s.native_id,s.title,s.cwd,
+    (s.parent_id IS NOT NULL AND m.position<=s.fork_position) inherited,
+    substr(d.text,max(1,instr(d.normalized,?)-100),700) text
+    FROM messages m JOIN sources s ON s.id=m.source_id JOIN documents d ON d.id=m.document_id WHERE m.document_id=? AND ${sql}
+    ORDER BY inherited,${messageOrder} LIMIT 128`,
+  )
   for (const [id, rank] of [...ranks].sort((a, b) => b[1].score - a[1].score)) {
-    const order =
-      input.sort === 'oldest'
-        ? 'm.timestamp IS NULL,m.timestamp ASC,m.id ASC'
-        : 'm.timestamp IS NULL,m.timestamp DESC,m.id DESC'
     // A message a fork or continuation copied is the same logical message:
     // reported once, where it first appeared, with the copies listed.
-    const rows = db
-      .prepare(
-        `SELECT m.*,s.machine,s.machine_id,s.session_id,s.outpost_session,s.tool,s.native_id,s.title,s.cwd,
-        (s.parent_id IS NOT NULL AND m.position<=s.fork_position) inherited,
-        substr(d.text,max(1,instr(d.normalized,?)-100),700) text
-        FROM messages m JOIN sources s ON s.id=m.source_id JOIN documents d ON d.id=m.document_id WHERE m.document_id=? AND ${sql}
-        ORDER BY inherited,${order} LIMIT 128`,
-      )
-      .all(terms[0], id, ...values) as Row[]
+    const rows = loadMessages.all(terms[0], id, ...values) as Row[]
     const logical = new Map<string, Row[]>()
     for (const row of rows) logical.set(String(row.identity), [...(logical.get(String(row.identity)) ?? []), row])
     for (const [, [row, ...copies]] of logical) {

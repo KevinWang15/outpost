@@ -224,6 +224,69 @@ test('Kimi: the current wire format reads canonical messages without duplicate c
   )
 })
 
+test('Kimi: protocol 1.5 without agent.message.appended reads context messages, assistant text, and tool results', async t => {
+  const { home } = setup(t)
+  const root = join(home, '.kimi-code/sessions/project/session_context_only')
+  mkdirSync(root, { recursive: true })
+  writeFileSync(join(root, 'state.json'), '{}')
+  put(join(root, 'agents/main/wire.jsonl'), [
+    { type: 'metadata', protocol_version: '1.5' },
+    {
+      type: 'context.append_message',
+      time: 1795143925004,
+      message: {
+        role: 'user',
+        id: 'msg_1',
+        origin: { kind: 'user' },
+        content: [{ type: 'text', text: 'Create the release MR' }],
+      },
+    },
+    {
+      type: 'context.append_message',
+      time: 1795143925033,
+      message: {
+        role: 'user',
+        origin: { kind: 'injection', variant: 'date_change' },
+        content: [{ type: 'text', text: '<system-reminder>Today is 2026-11-20</system-reminder>' }],
+      },
+    },
+    {
+      type: 'context.append_loop_event',
+      time: 1795143926000,
+      event: { type: 'content.part', uuid: 'p_think', turnId: '0', part: { type: 'think', think: 'internal thought' } },
+    },
+    {
+      type: 'context.append_loop_event',
+      time: 1795143927000,
+      event: {
+        type: 'tool.result',
+        toolCallId: 'tool_1',
+        result: { output: 'Branch pushed', isError: false, durationMs: 12 },
+      },
+    },
+    {
+      type: 'context.append_loop_event',
+      time: 1795143928000,
+      event: {
+        type: 'content.part',
+        uuid: 'p_text',
+        turnId: '0',
+        part: { type: 'text', text: 'MR created: !14 Add 1.5 release note' },
+      },
+    },
+  ])
+  const source = catalog([], null).sources[0]
+  const messages = readBatch([], [{ source, checkpoint: null }]).files[0].messages
+  assert.deepEqual(
+    messages.map(message => [message.role, message.kind, message.text]),
+    [
+      ['user', 'message', 'Create the release MR'],
+      ['tool', 'tool_result', 'Branch pushed'],
+      ['assistant', 'message', 'MR created: !14 Add 1.5 release note'],
+    ],
+  )
+})
+
 test(
   'terminal and chat expose the same MCP tools, and session helpers reject incomplete launch bindings',
   { skip: process.platform !== 'linux' && !process.env.TEST_TERMINAL },

@@ -124,6 +124,25 @@ fi
 [ -r "${OUTPOST_SSH_BRIDGE_DIR}/ssh-hook.sh" ] && . "${OUTPOST_SSH_BRIDGE_DIR}/ssh-hook.sh"
 "#;
 
+const WSL_SHELL: &str = r#"s="${SHELL:-}"
+[ -z "$s" ] && s="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f7)"
+[ -x "$s" ] || s="/bin/sh"
+export SHELL="$s"
+case "${s##*/}" in
+  bash) exec "$s" --rcfile "$OUTPOST_SSH_BRIDGE_DIR/bash.rc" -i ;;
+  zsh)
+    [ -n "${ZDOTDIR:-}" ] && export OUTPOST_ORIG_ZDOTDIR="$ZDOTDIR"
+    export ZDOTDIR="$OUTPOST_SSH_BRIDGE_DIR/zsh"
+    exec "$s" -l
+    ;;
+  fish)
+    export XDG_DATA_DIRS="$OUTPOST_SSH_BRIDGE_DIR:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+    exec "$s" -l
+    ;;
+  *) exec "$s" -l ;;
+esac
+"#;
+
 const ZSH_ZSHENV: &str = r#"__outpost_orig_zdotdir="${OUTPOST_ORIG_ZDOTDIR:-$HOME}"
 if [ -r "$__outpost_orig_zdotdir/.zshenv" ]; then
   ZDOTDIR="$__outpost_orig_zdotdir" . "$__outpost_orig_zdotdir/.zshenv"
@@ -309,6 +328,7 @@ fn render_hook(template: &str) -> String {
 fn ensure_bridge_files(dir: &Path) -> std::io::Result<()> {
     write_if_changed(&dir.join("ssh-hook.sh"), &render_hook(POSIX_SSH_HOOK))?;
     write_if_changed(&dir.join("bash.rc"), BASH_RC)?;
+    write_if_changed(&dir.join("wsl-shell.sh"), WSL_SHELL)?;
     write_if_changed(&dir.join("zsh/.zshenv"), ZSH_ZSHENV)?;
     write_if_changed(&dir.join("zsh/.zprofile"), ZSH_ZPROFILE)?;
     write_if_changed(&dir.join("zsh/.zshrc"), ZSH_ZSHRC)?;
@@ -407,6 +427,8 @@ pub fn build_local_command(shell: &str, args: &[String], dir: &Path) -> CommandB
         "wsl.exe" | "wsl" if args == ["--cd", "~"] => {
             // Translate the Windows bridge directory into WSL via WSLENV `/p` so WSL reuses
             // the exact same POSIX shell init files as macOS/Linux.
+            // Use `-e /bin/sh` (not `--`) so wsl.exe execs directly without an outer shell
+            // stripping quotes or expanding variables prematurely.
             command.env("OUTPOST_SSH_BRIDGE_DIR", &bridge_dir);
             let wslenv = match std::env::var("WSLENV") {
                 Ok(existing) if !existing.is_empty() => {
@@ -417,10 +439,10 @@ pub fn build_local_command(shell: &str, args: &[String], dir: &Path) -> CommandB
             command.env("WSLENV", wslenv);
             command.args(args);
             command.args([
-                "--",
-                "sh",
+                "-e",
+                "/bin/sh",
                 "-c",
-                r#"s="${SHELL:-/bin/sh}"; case "${s##*/}" in bash) exec "$s" --rcfile "$OUTPOST_SSH_BRIDGE_DIR/bash.rc" -i ;; zsh) [ -n "${ZDOTDIR:-}" ] && export OUTPOST_ORIG_ZDOTDIR="$ZDOTDIR"; export ZDOTDIR="$OUTPOST_SSH_BRIDGE_DIR/zsh"; exec "$s" -l ;; fish) export XDG_DATA_DIRS="$OUTPOST_SSH_BRIDGE_DIR:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"; exec "$s" -l ;; *) exec "$s" -l ;; esac"#,
+                r#"exec /bin/sh "$OUTPOST_SSH_BRIDGE_DIR/wsl-shell.sh""#,
             ]);
         }
         _ => {
@@ -457,6 +479,7 @@ mod tests {
         for rel in [
             "ssh-hook.sh",
             "bash.rc",
+            "wsl-shell.sh",
             "zsh/.zshenv",
             "zsh/.zprofile",
             "zsh/.zshrc",
@@ -466,5 +489,65 @@ mod tests {
             let text = fs::read_to_string(dir.path().join(rel)).unwrap();
             assert!(!text.contains('\r'), "{rel} must use LF line endings");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn live_windows_shells_start_cleanly_with_ssh_hook() {
+        use crate::pty::{Local, Output};
+        use std::time::{Duration, Instant};
+
+        fn run_pty(shell: &str, args: &[&str], probe: &[u8], expected: &str) {
+            let owned: Vec<String> = args.iter().map(|s| (*s).into()).collect();
+            let (pty, rx) =
+                Local::open(shell, &owned, &std::env::temp_dir(), 120, 30).expect("open local pty");
+            std::thread::sleep(Duration::from_millis(800));
+            pty.send(probe.to_vec()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(6);
+            let mut buf = Vec::new();
+            while Instant::now() < deadline {
+                if let Ok(out) = rx.try_recv() {
+                    match out {
+                        Output::Bytes(b) => {
+                            if b.windows(4).any(|w| w == b"\x1b[6n") {
+                                let _ = pty.send(b"\x1b[1;1R".to_vec());
+                            }
+                            buf.extend_from_slice(&b);
+                            let text = String::from_utf8_lossy(&buf);
+                            if text.contains(expected) {
+                                return;
+                            }
+                        }
+                        Output::Closed(reason) => {
+                            panic!(
+                                "PTY for {shell} exited early ({reason}); output:\n{:?}",
+                                String::from_utf8_lossy(&buf)
+                            );
+                        }
+                    }
+                } else {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+            panic!(
+                "Did not find {expected:?} in {shell} output (len={}):\n{:?}",
+                buf.len(),
+                String::from_utf8_lossy(&buf)
+            );
+        }
+
+        run_pty(
+            "C:\\Windows\\System32\\wsl.exe",
+            &["--cd", "~"],
+            b"type ssh; exit\r",
+            "ssh is a function",
+        );
+        run_pty(
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            &["-NoLogo"],
+            b"(Get-Command ssh).CommandType; exit\r",
+            "Function",
+        );
     }
 }

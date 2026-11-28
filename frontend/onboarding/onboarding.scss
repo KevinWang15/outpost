@@ -1,648 +1,965 @@
-/* Self-contained Onboarding Guide & Banner styles on Outpost's native light-slate palette. */
+/* Getting started guide. Built from the app's tokens (main.scss); the only local
+   colors are the dark scrim and controls around an enlarged screenshot. */
 
-/* Entry banner shown on Machines until dismissed */
-.onboarding-banner {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 20px;
-  padding: 14px 16px;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius);
-  background: var(--accent-soft);
-  box-shadow: var(--shadow);
-}
-
-.onboarding-banner-icon {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--accent-border);
-  color: var(--accent);
-}
-
-.onboarding-banner-body {
-  flex: 1;
-  min-width: 0;
-  strong {
-    display: block;
-    color: var(--ink);
-    font-size: 14px;
-    font-weight: 650;
-  }
-  p {
-    margin: 2px 0 0;
-    color: var(--text);
-    font-size: 13px;
-    line-height: 1.45;
-  }
-}
-
-.onboarding-banner-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-/* Onboarding page sidebar progress + steps */
+/* Sidebar: progress and the list of steps */
 .onboarding-app .sidebar-body {
-  gap: 14px;
+  gap: 10px;
   overflow-y: auto;
   padding-bottom: 12px;
 }
 
-.onboarding-sidebar-progress {
+.onboarding-progress {
   display: grid;
-  gap: 7px;
-  padding: 10px 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.onboarding-progress-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-}
-
-.onboarding-progress-label {
-  color: var(--ink);
-  font-weight: 600;
+  .sidebar-heading {
+    padding-right: 8px;
+  }
 }
 
 .onboarding-progress-count {
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .onboarding-progress-track {
-  height: 5px;
+  height: 4px;
+  margin: 0 8px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--border);
-}
-
-.onboarding-progress-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: var(--accent);
-  transition: width 0.2s ease;
-}
-
-.onboarding-step-nav {
-  display: grid;
-  gap: 3px;
+  > div {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.25s ease;
+  }
 }
 
 .onboarding-step-link {
-  align-items: center;
-  gap: 9px;
-  strong {
-    font-size: 13px;
-    font-weight: 500;
-  }
-  &.active strong {
-    font-weight: 600;
+  position: relative;
+  text-decoration: none;
+  /* A hairline joins each step's mark to the next one. */
+  &:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 32px;
+    left: 18.5px;
+    width: 1px;
+    height: 14px;
+    background: var(--border-strong);
   }
 }
 
-.onboarding-step-num {
-  display: inline-grid;
+.onboarding-step-mark {
+  display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--surface);
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-  &.done {
-    border-color: var(--success);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  .done & {
+    border-color: transparent;
     background: var(--success-soft);
     color: var(--success);
   }
+  .active & {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
+  }
 }
 
-.onboarding-step-link.active .onboarding-step-num:not(.done) {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-/* Main onboarding workspace */
+/* Page */
 .onboarding-content {
-  padding: 28px 40px 64px;
+  padding: 40px 40px 72px;
 }
 
 .onboarding-shell {
   display: grid;
-  gap: 22px;
-  max-width: 960px;
+  gap: 32px;
+  max-width: 920px;
   margin: 0 auto;
+  /* Layouts inside follow this column's width, which the app sidebar narrows. */
+  container: onboarding / inline-size;
+  :is(p, dd, li, span) > code {
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 0.88em;
+  }
 }
 
-.onboarding-topbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+.onboarding-header {
+  display: grid;
   gap: 10px;
+  h1 {
+    color: var(--ink);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.6px;
+    line-height: 1.2;
+    /* Focused by script when the step changes; it is not a control. */
+    &:focus {
+      outline: none;
+    }
+  }
 }
 
-.onboarding-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--accent-border);
-  border-radius: 999px;
-  background: var(--accent-soft);
+.onboarding-eyebrow {
   color: var(--accent-hover);
   font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
 }
 
-.onboarding-topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.onboarding-hero {
-  display: grid;
-  gap: 8px;
-  h1 {
-    margin: 0;
+.onboarding-lead {
+  max-width: 64ch;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.6;
+  strong {
     color: var(--ink);
-    font-size: 28px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.25;
-  }
-  p {
-    margin: 0;
-    max-width: 720px;
-    color: var(--text);
-    font-size: 15.5px;
-    line-height: 1.6;
+    font-weight: 600;
   }
 }
 
 .onboarding-section {
   display: grid;
-  gap: 16px;
+  gap: 12px;
+  h2 {
+    color: var(--ink);
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.2px;
+  }
+  > p {
+    max-width: 64ch;
+    color: var(--text);
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
 }
 
-.onboarding-subheading {
-  margin: 4px 0 0;
-  color: var(--ink);
-  font-size: 16px;
-  font-weight: 650;
+.onboarding-aside {
+  max-width: 64ch;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
 }
 
-.onboarding-callout {
-  display: grid;
-  gap: 4px;
-  padding: 13px 16px;
+.onboarding-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.onboarding-note {
+  display: flex;
+  justify-self: start;
+  gap: 10px;
+  max-width: 780px;
+  padding: 11px 14px;
   border: 1px solid var(--accent-border);
-  border-left: 3px solid var(--accent);
   border-radius: var(--radius);
   background: var(--accent-soft);
   font-size: 13.5px;
   line-height: 1.55;
+  > svg {
+    margin-top: 2px;
+    color: var(--accent);
+  }
+  p {
+    color: var(--text);
+  }
   strong {
     color: var(--ink);
-    font-weight: 650;
+    font-weight: 600;
   }
-  span {
-    color: var(--text);
+  a {
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  &.success {
+    border-color: #a7f3d0;
+    background: var(--success-soft);
+    > svg {
+      color: var(--success);
+    }
   }
 }
 
-.onboarding-callout-success {
-  border-color: #a7f3d0;
-  border-left-color: var(--success);
-  background: var(--success-soft);
-}
-
-/* Terminology cards */
-.onboarding-terms-grid {
+/* How it fits together. One column by default, three across once the guide is wide enough. */
+.onboarding-map {
+  /* Wires are measured in device pixels. OnboardingMap.tsx supplies the size of one and how many
+     a line and a port take up. A line and its ports are placed from the same corner in whole
+     pixels, so rounding to the screen cannot pull them apart, and a port extends equally far
+     on both sides of the line it is centred on. */
+  --device-pixel: 1px;
+  --wire: calc(var(--wire-pixels, 1) * var(--device-pixel));
+  --port-reach: calc(var(--port-reach-pixels, 3) * var(--device-pixel));
+  --port: calc(var(--wire) + 2 * var(--port-reach));
+  /* Where a port starts, measured from the inner edge of the line it is centred on. */
+  --port-start: calc(-1 * (var(--wire) + var(--port-reach)));
+  --wire-color: var(--hover-border);
+  --node-gap: 8px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.onboarding-term-card {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  padding: 14px 16px;
+  row-gap: 8px;
+  padding: 18px 16px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow);
-  p {
-    margin: 0;
-    color: var(--text);
-    font-size: 13px;
-    line-height: 1.55;
-  }
 }
 
-.onboarding-term-head {
+.onboarding-map-label {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.onboarding-map-body {
+  display: grid;
+  gap: var(--node-gap);
+}
+
+.onboarding-map-note {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+/* A wire is a border, so it is as crisp as every other hairline. Stacked, it is a short line
+   leading from one section down to the next, with nothing to plug into. */
+.onboarding-map-wire {
+  position: relative;
+  z-index: 1;
+  width: 0;
+  height: 22px;
+  margin: 2px 0 2px 21px;
+  border-left: var(--wire) solid var(--wire-color);
+}
+
+/* Joins the two devices into the wire to the server. Only drawn when the map runs across. */
+.onboarding-map-merge {
+  display: none;
+}
+
+.onboarding-map-node {
   display: flex;
   align-items: center;
   gap: 10px;
-  h3 {
-    margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  > svg {
+    color: var(--muted);
+  }
+  > span {
+    display: grid;
+    min-width: 0;
+  }
+  strong {
+    overflow: hidden;
     color: var(--ink);
-    font-size: 14px;
-    font-weight: 650;
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   small {
-    display: block;
+    overflow: hidden;
     color: var(--muted);
     font-size: 12px;
+    line-height: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  &.server {
+    border-color: var(--accent-border);
+    background: var(--accent-soft);
   }
 }
 
-.onboarding-term-icon {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface-muted);
-  color: var(--accent);
+/* The machine is where the work happens, so it carries the most weight. Its sessions have no
+   rules between them: a rule would end at the card's edge right beside the wire's port. */
+.onboarding-map-machine {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px #0f172a14;
+  ul {
+    margin: 0;
+    padding: 5px 0;
+    list-style: none;
+  }
+  li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    > span:first-of-type {
+      display: grid;
+      flex: 1;
+      min-width: 0;
+    }
+    strong {
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 20px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    small {
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 16px;
+    }
+    .tool-icon {
+      color: var(--text);
+    }
+    .badge {
+      flex-shrink: 0;
+    }
+  }
 }
 
-/* Interactive action cards */
-.onboarding-action-card,
-.onboarding-finish-card {
+.onboarding-map-machine-head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  svg {
+    color: var(--accent);
+  }
+  strong {
+    color: var(--ink);
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 20px;
+  }
+}
+
+/* With room to spare but not enough for three columns, the two devices sit side by side. */
+@container onboarding (560px <= width < 840px) {
+  .onboarding-map-body.from {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container onboarding (width >= 840px) {
+  .onboarding-map {
+    --lane: 48px;
+    /* How far the merge reaches from the devices before its line turns towards the server. */
+    --merge: 17px;
+    /* Shared out by what each column holds, so that no label is cut short at the narrowest fit. */
+    grid-template-columns: minmax(0, 1.2fr) var(--lane) minmax(0, 1fr) var(--lane) minmax(0, 1.45fr);
+    grid-template-rows: auto 1fr auto;
+    row-gap: 12px;
+    padding: 22px 24px 20px;
+    > .onboarding-map-label {
+      grid-row: 1;
+    }
+    > .onboarding-map-body {
+      grid-row: 2;
+      align-self: center;
+    }
+    > .onboarding-map-note {
+      grid-row: 3;
+    }
+    > .from {
+      grid-column: 1;
+    }
+    > .through {
+      grid-column: 3;
+    }
+    > .on {
+      grid-column: 5;
+    }
+  }
+
+  /* Across a lane, a wire runs from card to card with a port at each end, centred on the border
+     of the card it plugs into. Card borders are 1px, the same thickness as a wire. */
+  .onboarding-map-wire {
+    grid-row: 2;
+    align-self: center;
+    width: auto;
+    height: 0;
+    margin: 0 var(--port-start);
+    border-top: var(--wire) solid var(--wire-color);
+    border-left: 0;
+    &::before,
+    &::after {
+      content: '';
+      position: absolute;
+      top: var(--port-start);
+      width: var(--port);
+      height: var(--port);
+      border-radius: 50%;
+      background: var(--wire-color);
+    }
+    &::before {
+      left: 0;
+    }
+    &::after {
+      right: 0;
+    }
+    &.first {
+      grid-column: 2;
+      /* Starts on the merge's upright line instead of at a port. */
+      margin-left: calc(var(--merge) - var(--wire));
+      &::before {
+        display: none;
+      }
+    }
+    &.second {
+      grid-column: 4;
+    }
+  }
+
+  /* Both devices get the same height, so the merge can find their centres. */
+  .onboarding-map-body.from {
+    position: relative;
+    grid-auto-rows: 1fr;
+  }
+
+  .onboarding-map-merge {
+    --to-centre: calc((100% - var(--node-gap)) / 4 - var(--wire) / 2);
+    position: absolute;
+    z-index: 1;
+    top: var(--to-centre);
+    bottom: var(--to-centre);
+    left: 100%;
+    display: block;
+    width: var(--merge);
+    border: var(--wire) solid var(--wire-color);
+    border-left: 0;
+    border-radius: 0 8px 8px 0;
+    &::before,
+    &::after {
+      content: '';
+      position: absolute;
+      left: var(--port-start);
+      width: var(--port);
+      height: var(--port);
+      border-radius: 50%;
+      background: var(--wire-color);
+    }
+    &::before {
+      top: var(--port-start);
+    }
+    &::after {
+      bottom: var(--port-start);
+    }
+  }
+}
+
+/* Label and description rows: the glossary, activity meanings and other ways to start a session. */
+.onboarding-definitions {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--border);
+  > div {
+    display: grid;
+    grid-template-columns: 168px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 4px 20px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  dt {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  dd {
+    max-width: 64ch;
+    margin: 0;
+    color: var(--text);
+    line-height: 1.6;
+    strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+  }
+}
+
+/* Numbered actions within a step */
+.onboarding-actions {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: onboarding-action;
+  > li {
+    position: relative;
+    display: grid;
+    justify-items: start;
+    gap: 8px;
+    padding: 0 0 26px 42px;
+    counter-increment: onboarding-action;
+    &::before {
+      content: counter(onboarding-action);
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      box-shadow: inset 0 0 0 1px var(--accent-border);
+      color: var(--accent-hover);
+      font-size: 12.5px;
+      font-weight: 650;
+    }
+    &:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 32px;
+      bottom: 6px;
+      left: 12.5px;
+      width: 1px;
+      background: var(--border);
+    }
+    &:last-child {
+      padding-bottom: 0;
+    }
+  }
   h3 {
-    margin: 0 0 4px;
     color: var(--ink);
     font-size: 15.5px;
     font-weight: 650;
+    line-height: 26px;
   }
   p {
-    margin: 0;
-    max-width: 580px;
+    max-width: 62ch;
     color: var(--text);
-    font-size: 13.5px;
-    line-height: 1.55;
+    font-size: 14.5px;
+    line-height: 1.6;
+    strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+    &.hint {
+      color: var(--muted);
+      font-size: 13px;
+    }
+  }
+  .onboarding-controls {
+    margin: 2px 0;
+  }
+  .copy-field {
+    width: min(100%, 440px);
+    background: var(--surface);
   }
 }
 
-.onboarding-action-copy {
-  display: grid;
-  gap: 6px;
-  flex: 1;
-  min-width: 260px;
-}
-
-.onboarding-platform-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  strong {
-    color: var(--ink);
-  }
-}
-
-.onboarding-action-buttons,
-.onboarding-inline-cta {
+.onboarding-tools {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.onboarding-url-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  code {
-    padding: 5px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-muted);
-    color: var(--ink);
-    font-size: 12.5px;
-  }
-}
-
-.onboarding-checklist {
-  display: grid;
-  gap: 10px;
+  gap: 6px;
   margin: 0;
-  padding: 16px 20px 16px 36px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13.5px;
-  line-height: 1.6;
-  strong {
-    color: var(--ink);
-  }
-  code {
-    padding: 1px 5px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--surface-muted);
-    color: var(--ink);
-    font-size: 12px;
-  }
+  padding: 0;
+  list-style: none;
 }
 
-.onboarding-two-col {
+/* The two ways to add a machine */
+.onboarding-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
-.onboarding-method-card {
+.onboarding-option {
   display: grid;
   align-content: start;
-  gap: 6px;
-  padding: 16px 18px;
+  gap: 8px;
+  padding: 18px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 10px;
   background: var(--surface);
   box-shadow: var(--shadow);
   h3 {
-    margin: 0;
     color: var(--ink);
-    font-size: 14.5px;
+    font-size: 15px;
     font-weight: 650;
   }
   p {
-    margin: 0;
     color: var(--text);
-    font-size: 13.5px;
     line-height: 1.55;
   }
-  code {
-    padding: 1px 5px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--surface-muted);
-    color: var(--ink);
+}
+
+.onboarding-option-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 2px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.onboarding-option .onboarding-option-how {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Shortcuts */
+.onboarding-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 32px;
+  margin: 0;
+  > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 44px;
+    border-bottom: 1px solid var(--border);
+    &:nth-child(-n + 2) {
+      border-top: 1px solid var(--border);
+    }
+  }
+  dt {
+    color: var(--text);
+  }
+  dd {
+    margin: 0;
+  }
+}
+
+.onboarding-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: middle;
+  > span {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  kbd {
+    min-width: 22px;
+    font-family: var(--font-sans);
     font-size: 12px;
+    line-height: 19px;
   }
 }
 
-/* Screenshots gallery & zoom lightbox */
-.onboarding-gallery {
+/* Screenshots */
+.onboarding-shots {
   display: grid;
-  gap: 14px;
+  gap: 12px;
+  margin: 0;
 }
 
-.onboarding-shots-grid {
-  display: grid;
-  gap: 18px;
-  &.count-2 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  &.count-3 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    .onboarding-shot:last-child {
-      grid-column: 1 / -1;
+.onboarding-shot-tabs {
+  display: flex;
+  justify-self: start;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  overflow-x: auto;
+  border-radius: 9px;
+  background: var(--hover);
+  button {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 7px;
+    height: 30px;
+    padding: 0 12px 0 7px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    > span {
+      display: grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    &:hover {
+      color: var(--ink);
+    }
+    &[aria-selected='true'] {
+      background: var(--surface);
+      box-shadow: 0 1px 2px #0f172a1f;
+      color: var(--ink);
+      > span {
+        background: var(--accent);
+        color: var(--on-accent);
+      }
     }
   }
 }
 
-.onboarding-inline-code {
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface-muted);
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 0.9em;
-}
-
-.onboarding-shot {
+.onboarding-shot-panel {
   display: grid;
-  align-content: start;
-  gap: 8px;
-  margin: 0;
+  gap: 10px;
   figcaption {
-    display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 6px 8px;
     color: var(--muted);
-    font-size: 12.5px;
+    font-size: 13px;
     line-height: 1.5;
   }
 }
 
+/* One fixed shape for every screenshot, so switching tabs never moves the page. */
 .onboarding-shot-frame {
   position: relative;
   display: block;
   width: 100%;
+  aspect-ratio: 16 / 10;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  isolation: isolate;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
   background: var(--surface-muted);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-raised);
   cursor: zoom-in;
-  transition:
-    border-color 0.14s ease,
-    box-shadow 0.14s ease,
-    transform 0.14s ease;
+  transition: border-color 0.14s ease;
   img {
-    display: block;
+    position: absolute;
+    inset: 0;
     width: 100%;
-    height: auto;
+    height: 100%;
+    object-fit: cover;
+    object-position: top center;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    &.shown {
+      opacity: 1;
+    }
   }
   &:hover,
   &:focus-visible {
-    border-color: var(--accent-border);
-    box-shadow: var(--shadow-raised);
-    transform: translateY(-1px);
+    border-color: var(--hover-border);
     .onboarding-shot-zoom {
       opacity: 1;
     }
   }
 }
 
-.onboarding-shot-badge {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  padding: 1px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 11px;
-  font-weight: 600;
-}
-
 .onboarding-shot-zoom {
   position: absolute;
-  top: 10px;
   right: 10px;
-  z-index: 2;
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 6px;
-  background: rgba(15, 23, 42, 0.72);
-  color: #ffffff;
-  opacity: 0;
-  transition: opacity 0.14s ease;
-}
-
-.onboarding-shot-placeholder {
-  display: grid;
-  place-items: center;
-  gap: 8px;
-  min-height: 180px;
-  padding: 24px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface-muted);
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.onboarding-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: 40px 24px;
-  background: rgba(15, 23, 42, 0.78);
-  backdrop-filter: blur(3px);
-}
-
-.onboarding-lightbox-close {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 121;
-  display: inline-grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.8);
-  color: #ffffff;
-  &:hover {
-    background: rgba(30, 41, 59, 0.95);
-  }
-}
-
-.onboarding-lightbox-content {
-  display: grid;
-  justify-items: center;
-  gap: 12px;
-  max-width: min(92vw, 1360px);
-  img {
-    max-width: 100%;
-    max-height: calc(100dvh - 130px);
-    border-radius: 10px;
-    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.45);
-  }
-  p {
-    margin: 0;
-    color: #e2e8f0;
-    font-size: 13.5px;
-    text-align: center;
-  }
-}
-
-/* Step pager */
-.onboarding-pager {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
-}
-
-.onboarding-pager-btn {
-  display: grid;
-  gap: 4px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--ink);
-  text-align: left;
-  box-shadow: var(--shadow);
-  transition:
-    border-color 0.14s ease,
-    background-color 0.14s ease;
-  &:hover {
-    border-color: var(--accent-border);
-    background: var(--accent-soft);
-  }
-  &.next {
-    text-align: right;
-    justify-items: end;
-  }
-  strong {
-    font-size: 14px;
-    font-weight: 600;
-  }
-}
-
-.onboarding-pager-dir {
+  bottom: 10px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: var(--muted);
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: #0f172ad9;
+  color: #fff;
   font-size: 12px;
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+  @media (hover: none) {
+    opacity: 1;
+  }
+}
+
+.onboarding-shot-missing {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-content: center;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  &.shown {
+    display: grid;
+  }
+}
+
+/* Enlarged screenshot */
+body:has(.onboarding-preview[open]) {
+  overflow: hidden;
+}
+
+.onboarding-preview {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 60px 24px 20px;
+  border: 0;
+  background: #0f172aeb;
+  color: #e2e8f0;
+  cursor: zoom-out;
+  &[open] {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    place-items: center;
+    gap: 14px;
+  }
+  &::backdrop {
+    background: transparent;
+  }
+  img {
+    max-width: 100%;
+    max-height: calc(100dvh - 150px);
+    border-radius: 8px;
+    box-shadow: 0 24px 70px #00000080;
+    cursor: default;
+  }
+  button {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid #ffffff33;
+    border-radius: 50%;
+    background: #ffffff14;
+    color: #fff;
+    &:hover {
+      background: #ffffff2e;
+    }
+    &:focus-visible {
+      outline-color: #fff;
+    }
+  }
+}
+
+.onboarding-preview-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+}
+
+.onboarding-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 760px;
+  min-height: 36px;
+  cursor: default;
+  p {
+    font-size: 13.5px;
+    line-height: 1.5;
+    text-align: center;
+    span {
+      margin-right: 8px;
+      color: #94a3b8;
+      font-variant-numeric: tabular-nums;
+    }
+  }
+}
+
+/* Back and Continue */
+.onboarding-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  .button {
+    height: 38px;
+    padding: 0 16px;
+  }
+}
+
+.onboarding-pager-next {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {
-  .onboarding-banner {
-    flex-wrap: wrap;
+  /* The steps become one row: marks for every step, a label only for the current one. */
+  .onboarding-step-link {
+    &::after {
+      display: none;
+    }
+    &:not(.active) .onboarding-step-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
   }
   .onboarding-content {
-    padding: 20px 18px 48px;
+    padding: 24px 16px 48px;
   }
-  .onboarding-two-col,
-  .onboarding-shots-grid.count-2,
-  .onboarding-shots-grid.count-3,
-  .onboarding-pager {
-    grid-template-columns: 1fr;
+  .onboarding-shell {
+    gap: 26px;
+  }
+  .onboarding-header h1 {
+    font-size: 26px;
+  }
+  .onboarding-lead {
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 640px) {
+  .onboarding-options,
+  .onboarding-shortcuts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .onboarding-shortcuts > div:nth-child(2) {
+    border-top: 0;
+  }
+  .onboarding-definitions > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .onboarding-shot-frame {
+    border-radius: 9px;
+  }
+  .onboarding-pager-next {
+    visibility: hidden;
+  }
+  .onboarding-preview {
+    padding: 60px 12px 16px;
   }
 }

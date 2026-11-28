@@ -1,5 +1,6 @@
-// Structured copy, core terminology, and screenshot definitions for the Outpost Onboarding Guide.
-// Intentionally focuses on Machines, Sessions, Outpost Desktop, Web Terminal, and Machine CLI.
+// Copy, terminology, shortcuts and screenshot definitions for the onboarding guide.
+// Covers machines, sessions, Outpost Desktop, the Web terminal and the Machine CLI.
+// Text may use `code` and **strong** marks; see renderInline in OnboardingSteps.tsx.
 
 export type OnboardingStepId =
   'welcome' | 'install-desktop' | 'connect-desktop' | 'add-machine' | 'start-session' | 'connect-and-work'
@@ -7,23 +8,40 @@ export type OnboardingStepId =
 export interface OnboardingTerm {
   id: string
   term: string
-  summary: string
   detail: string
+}
+
+/** Where a screenshot's subject sits, so the inline view can crop to it.
+ * `x` and `y` are the percentages of the image that stay fixed while it is enlarged `zoom` times. */
+export interface OnboardingFocus {
+  x: number
+  y: number
+  zoom: number
 }
 
 export interface OnboardingScreenshot {
   filename: string
+  /** Short tab label, used when a step shows several screenshots. */
+  label: string
+  /** What the picture shows, for readers who cannot see it. */
+  alt: string
   caption: string
-  badge?: string
+  focus?: OnboardingFocus
 }
 
 export interface OnboardingStepMeta {
   id: OnboardingStepId
-  number: number
   navLabel: string
   title: string
-  subtitle: string
+  lead: string
   screenshots: OnboardingScreenshot[]
+}
+
+export interface OnboardingShortcut {
+  id: string
+  label: string
+  mac: readonly string[]
+  other: readonly string[]
 }
 
 export const DESKTOP_RELEASES_URL = 'https://github.com/KevinWang15/outpost/releases'
@@ -32,168 +50,191 @@ export const ONBOARDING_TERMS: readonly OnboardingTerm[] = [
   {
     id: 'machine',
     term: 'Machine',
-    summary: 'Your Linux host',
     detail:
-      'Any Linux workstation, VM, cloud server, or WSL2 instance where your repositories, credentials, and coding tools live. Outpost installs a single lightweight service (outpost-terminal) there.',
+      'A Linux computer where your repositories and coding tools live: a workstation, a VM, a server or WSL. Outpost runs a small service on it.',
   },
   {
     id: 'session',
     term: 'Session',
-    summary: 'A persistent AI coding workspace',
     detail:
-      'Bound to one project directory and one coding agent (Claude Code, Codex, Kimi Code, Antigravity CLI, or DeepSeek Harness). Sessions stay alive on the Linux machine even if you close your laptop or lose Wi-Fi.',
+      'One coding tool working in one project directory. It runs on the machine and keeps running when you disconnect.',
   },
   {
     id: 'desktop',
     term: 'Outpost Desktop',
-    summary: 'Native terminal for macOS & Windows',
     detail:
-      'A GPU-accelerated native terminal workspace combining your local shells and remote Outpost sessions in tabs and split panes, with screenshot paste, scrollback search, and live agent status badges.',
+      'A native terminal app for macOS and Windows. It opens your local shells and your Outpost sessions in tabs and split panes.',
   },
   {
     id: 'web-terminal',
     term: 'Web terminal',
-    summary: 'Zero-install browser terminal',
-    detail:
-      'Attach to the exact same running session from any desktop or mobile browser. Closing a browser tab or native window only disconnects the view—the agent keeps running.',
+    detail: 'The same session in a browser tab, on a computer or a phone, with nothing to install.',
   },
   {
     id: 'machine-cli',
-    term: 'Machine CLI (outpost)',
-    summary: 'Launch sessions from any shell',
+    term: 'Machine CLI',
     detail:
-      'Installed alongside the machine service so you can run `outpost new` or `outpost ls` directly in a Linux shell and automatically open the session in a new Outpost tab.',
+      'The `outpost` command on each machine. Run `outpost new` in a project directory to start a session from any shell.',
+  },
+]
+
+/** Outpost Desktop shortcuts, as listed in docs/guide/04-terminals.md. */
+export const ONBOARDING_SHORTCUTS: readonly OnboardingShortcut[] = [
+  {
+    id: 'sessions-picker',
+    label: 'Find and open any session',
+    mac: ['⌘', '⇧', 'O'],
+    other: ['Ctrl', 'Shift', 'O'],
+  },
+  {
+    id: 'split',
+    label: 'Split the pane side by side',
+    mac: ['⌘', 'D'],
+    other: ['Ctrl', 'Shift', 'D'],
+  },
+  {
+    id: 'find',
+    label: 'Search the scrollback',
+    mac: ['⌘', 'F'],
+    other: ['Ctrl', 'Shift', 'F'],
+  },
+  {
+    id: 'paste-image',
+    label: 'Paste a screenshot for the agent',
+    mac: ['⌘', 'V'],
+    other: ['Ctrl', 'V'],
   },
 ]
 
 export const ONBOARDING_STEPS: readonly OnboardingStepMeta[] = [
   {
     id: 'welcome',
-    number: 1,
     navLabel: 'What is Outpost?',
     title: 'Welcome to Outpost',
-    subtitle:
-      'Run persistent AI coding agents on your own Linux machines and reconnect to them seamlessly from a native terminal or any browser.',
+    lead: 'Outpost runs coding agents on your own Linux machines. Each session keeps running there, so you can close your laptop and pick it up later from any device.',
     screenshots: [
       {
         filename: 'web-workspace.png',
-        badge: 'Outpost Web',
-        caption: 'Your Machines view shows each connected Linux host, installed coding tools, and live AI sessions.',
+        label: 'Machines',
+        alt: 'The Machines page showing a machine named Workstation, its five coding tools and three sessions.',
+        caption: 'The Machines page lists each machine with its coding tools and its sessions.',
       },
     ],
   },
   {
     id: 'install-desktop',
-    number: 2,
     navLabel: 'Install Outpost Desktop',
-    title: 'Install the native terminal',
-    subtitle:
-      'Outpost Desktop gives you native tabs, split panes, local shells, screenshot paste, and instant switching across all your remote AI sessions.',
+    title: 'Install Outpost Desktop',
+    lead: 'Outpost Desktop is a native terminal for macOS and Windows. Your local shells and your Outpost sessions share one window, with tabs, split panes and screenshot paste.',
     screenshots: [
       {
         filename: 'desktop-connect-server.png',
-        badge: 'Outpost Desktop',
-        caption:
-          'Outpost Desktop opens to a clean workspace ready to connect to your Outpost server or launch local shells.',
+        label: 'First launch',
+        alt: 'Outpost Desktop on first launch, with an Open local terminal button and a Connect a server field.',
+        caption: 'Outpost Desktop on first launch, before any server is connected.',
+        focus: { x: 50, y: 30, zoom: 1.3 },
       },
     ],
   },
   {
     id: 'connect-desktop',
-    number: 3,
-    navLabel: 'Connect Desktop to Outpost',
+    navLabel: 'Connect Outpost Desktop',
     title: 'Connect Outpost Desktop to this server',
-    subtitle:
-      'Sign in once through your browser so Outpost Desktop can browse machines, create sessions, and attach terminals securely for 30 days.',
+    lead: 'Approve the app once in your browser. It can then list, create and open your sessions on this server for 30 days. Sign-in happens in the browser, so the app never handles a password.',
     screenshots: [
       {
         filename: 'desktop-connect-server.png',
-        badge: 'Step 1 · App',
-        caption:
-          'Paste your Outpost server URL under Connect a server and click Sign in with browser (or launch directly from here).',
+        label: 'In the app',
+        alt: 'Outpost Desktop with a server address entered under Connect a server, next to a Sign in with browser button.',
+        caption: 'The server address under Connect a server, ready for Sign in with browser.',
+        focus: { x: 50, y: 89, zoom: 1.45 },
       },
       {
         filename: 'web-desktop-authorize.png',
-        badge: 'Step 2 · Browser',
-        caption: 'Confirm the server and account in your browser, then click Connect app to approve access.',
+        label: 'In your browser',
+        alt: 'A browser page asking “Connect Outpost Desktop?” with Cancel and Connect app buttons.',
+        caption: 'The approval page names the server and the account before you choose Connect app.',
+        focus: { x: 50, y: 50, zoom: 1.75 },
       },
       {
         filename: 'desktop-connected.png',
-        badge: 'Step 3 · Connected',
-        caption:
-          'Once approved, the server appears under Logged-in Outpost servers with quick access to Machines, New session, and Recent sessions.',
+        label: 'Connected',
+        alt: 'Outpost Desktop listing recent sessions and a signed-in server with Machines, New session and Sign out buttons.',
+        caption: 'The server now appears under Logged-in Outpost servers, with your recent sessions above it.',
+        focus: { x: 50, y: 89, zoom: 1.45 },
       },
     ],
   },
   {
     id: 'add-machine',
-    number: 4,
-    navLabel: 'Add a Linux Machine',
-    title: 'Add your first Linux machine',
-    subtitle:
-      'Connect any Linux workstation, cloud VM, or WSL2 host over SSH or an outbound HTTPS tunnel—your code and API keys never leave that machine.',
+    navLabel: 'Add a machine',
+    title: 'Add a machine',
+    lead: 'A machine is the Linux computer where your sessions run, next to your repositories and coding tools. Choose the connection that matches your network.',
     screenshots: [
       {
         filename: 'web-add-machine.png',
-        badge: 'Add a machine',
-        caption:
-          'Choose Connect over SSH for reachable hosts, or Run setup on the machine for hosts behind NAT or a firewall.',
+        label: 'Add a machine',
+        alt: 'The Add a machine dialog with two methods, Connect over SSH and Run setup on the machine.',
+        caption: 'Add a machine explains both methods and what each one needs.',
+        focus: { x: 50, y: 50, zoom: 1.45 },
       },
       {
         filename: 'web-workspace.png',
-        badge: 'Software readiness',
-        caption:
-          'Outpost inspects your Linux PATH and lets you install missing coding tools with one click from the Software panel.',
+        label: 'Software',
+        alt: 'A machine page whose Software panel reads “Ready · 5 of 5 coding tools available”.',
+        caption: 'The Software panel shows which coding tools the machine has. Expand it to set up the others.',
+        focus: { x: 100, y: 0, zoom: 1.25 },
       },
     ],
   },
   {
     id: 'start-session',
-    number: 5,
-    navLabel: 'Start an AI Session',
-    title: 'Start your first AI coding session',
-    subtitle:
-      'Pick a machine, a coding tool, and a project directory. You can create sessions from the web UI, directly inside Outpost Desktop, or via `outpost new`.',
+    navLabel: 'Start a session',
+    title: 'Start a session',
+    lead: 'A session is one coding tool working in one project directory. It runs on the machine and keeps going after you disconnect.',
     screenshots: [
       {
         filename: 'web-new-session.png',
-        badge: 'Web UI',
-        caption:
-          'Click New session on any ready machine, choose your coding tool (Claude Code, Codex, Kimi Code, or Antigravity CLI), and pick a directory.',
+        label: 'In the browser',
+        alt: 'The New session dialog with a name, a coding tool selected and a project directory.',
+        caption: 'New session asks for a name, a coding tool and a project directory.',
+        focus: { x: 50, y: 0, zoom: 1.3 },
       },
       {
         filename: 'desktop-create-session.png',
-        badge: 'Outpost Desktop',
-        caption:
-          'You can also create remote sessions directly inside Outpost Desktop with remote directory autocomplete.',
+        label: 'In Outpost Desktop',
+        alt: 'The New session form in Outpost Desktop with a machine, a coding tool, a name and a working directory.',
+        caption: 'Outpost Desktop has the same form and completes directory names from the machine.',
+        focus: { x: 50, y: 18, zoom: 1.3 },
       },
     ],
   },
   {
     id: 'connect-and-work',
-    number: 6,
-    navLabel: 'Connect & Split Panes',
-    title: 'Connect and work across split panes',
-    subtitle:
-      'Attach to any session in Outpost Desktop or the Web terminal. Combine local shells and multiple remote AI agents side by side.',
+    navLabel: 'Connect and work',
+    title: 'Connect and work',
+    lead: '**Connect** opens a session in Outpost Desktop or the Web terminal. Both attach to the same running session, so you can switch between them at any time.',
     screenshots: [
       {
         filename: 'web-connect-dialog.png',
-        badge: 'Connect',
-        caption:
-          'Click Connect on any session to open it in Outpost Desktop or the zero-install Web terminal (and optionally remember your preference).',
+        label: 'Connect',
+        alt: 'The Connect dialog offering the Web terminal and Outpost Desktop, with a Remember my choice checkbox.',
+        caption: 'Connect offers both terminals and can remember your choice.',
+        focus: { x: 50, y: 50, zoom: 1.6 },
       },
       {
         filename: 'desktop-session-picker.png',
-        badge: 'Quick picker',
-        caption:
-          'In Outpost Desktop, click + or press Ctrl+Shift+O (Cmd+Shift+O on macOS) to search and open sessions across all machines.',
+        label: 'Sessions picker',
+        alt: 'The Outpost sessions picker in Outpost Desktop, listing sessions from several machines with a search field.',
+        caption: 'The sessions picker in Outpost Desktop searches the sessions on every connected server.',
+        focus: { x: 50, y: 35, zoom: 1.4 },
       },
       {
         filename: 'desktop-split-workspace.png',
-        badge: 'Split panes',
-        caption:
-          'Run multiple AI agents and local shells in tabs and split panes with live working/idle/finished status badges.',
+        label: 'Split panes',
+        alt: 'Outpost Desktop with two coding agents working side by side in split panes, each tab showing a status icon.',
+        caption: 'Two agents side by side. Each tab and pane header shows whether its agent is working or needs you.',
+        focus: { x: 0, y: 0, zoom: 1.12 },
       },
     ],
   },

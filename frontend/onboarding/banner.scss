@@ -1,0 +1,44 @@
+/* Getting started pointer on Machines. Kept apart from onboarding.scss so the
+   Machines page does not load the guide's styles. */
+.onboarding-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 1120px;
+  margin: 0 auto 20px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  > svg {
+    color: var(--accent);
+  }
+  p {
+    flex: 1;
+    min-width: 0;
+    color: var(--text);
+    font-size: 13px;
+    strong {
+      margin-right: 4px;
+      color: var(--ink);
+      font-weight: 600;
+    }
+  }
+}
+
+@media (max-width: 560px) {
+  .onboarding-banner {
+    flex-wrap: wrap;
+    padding: 10px 10px 10px 14px;
+    p {
+      flex-basis: calc(100% - 30px);
+    }
+    .button {
+      margin-left: 26px;
+    }
+    .icon-button {
+      margin-left: auto;
+    }
+  }
+}

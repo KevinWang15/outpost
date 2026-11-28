@@ -845,6 +845,11 @@ textarea.code,
     font-size: 15px;
   }
 }
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .steps {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -856,6 +861,7 @@ textarea.code,
   counter-reset: step;
   li {
     display: grid;
+    align-content: start;
     gap: 4px;
     padding: 16px;
     border: 1px solid var(--border);

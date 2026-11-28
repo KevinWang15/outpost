@@ -31,4 +31,8 @@ Optional flags:
 | `desktop-session-picker.png` | Outpost Desktop (GPUI) | Outpost sessions picker (`Ctrl+Shift+O` / `Cmd+Shift+O`) |
 | `desktop-split-workspace.png` | Outpost Desktop (GPUI) | Multi-tab, split-pane AI coding workspace with live status badges |
 
+## How the guide frames them
+
+The guide shows every screenshot in one 16:10 frame and crops each to its subject. The crop is the `focus` value next to the screenshot in `frontend/onboarding/onboardingContent.ts`: the point that stays fixed (`x`, `y`, in percent) and how far the picture is enlarged (`zoom`). The full picture opens when a reader enlarges it. If a capture changes size or layout, check its `focus` in the running guide at `/onboarding`.
+
 Persistent Docker volumes (`outpost-onboarding-{cargo,target,node,machine}`) cache dependencies and compiled Rust artifacts so subsequent regenerations finish quickly without touching your host `node_modules/` or `desktop/target/`.

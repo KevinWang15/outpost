@@ -153,7 +153,8 @@ export default function App() {
         </nav>
       </SidebarBody>
       <main className="content">
-        <OnboardingBanner hasMachines={Boolean(targets?.length)} />
+        {/* Without machines the welcome below already points to the guide. */}
+        {Boolean(targets?.length) && <OnboardingBanner />}
         {error && (
           <p className="banner error" role="alert">
             {error}
@@ -182,7 +183,7 @@ export default function App() {
               Add the Linux machine where you work, then choose a project and a coding tool. Your sessions keep running
               on that machine when you disconnect.
             </p>
-            <div className="onboarding-inline-cta">
+            <div className="welcome-actions">
               <button className="button primary" onClick={() => setAdding(true)}>
                 <Plus size={15} />
                 Add a machine

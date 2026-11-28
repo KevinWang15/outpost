@@ -60,6 +60,8 @@ export type MachineEvent =
       detail: string | null
     }
   | { type: 'started'; at: string; session: string; driver: 'terminal' | 'chat' }
+  /** The coding tool in the session's terminal moved to another conversation (docs/CONVERSATIONS.md). */
+  | { type: 'conversation'; at: string; session: string; conversation: string; previous: string | null }
   /** `code` is the tool's exit status; null when Outpost stopped it. */
   | { type: 'exited'; at: string; session: string; driver: 'terminal' | 'chat'; code: number | null }
 /** Events after a cursor; `cursor` continues from the last one returned. */

@@ -229,6 +229,14 @@ export class MachineEventLog {
         message: `${session.name} started ${place(event.driver)}`,
         details: { driver: event.driver },
       }
+    else if (event.type === 'conversation')
+      input = {
+        ...common,
+        kind: 'session',
+        type: 'conversation',
+        message: `${session.name} moved to conversation ${event.conversation} in its terminal`,
+        details: { conversation: event.conversation, previous: event.previous },
+      }
     else
       input = {
         ...common,

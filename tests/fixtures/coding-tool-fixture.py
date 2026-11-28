@@ -61,6 +61,24 @@ if tool == 'agy' and len(sys.argv) >= 2 and sys.argv[1] == 'acp':
         extra['ANTIGRAVITY_GEMINI_DIR'] = sys.argv[3]
     os.execve(sys.executable, [sys.executable, str(agent)], {**os.environ, **extra})
 
+
+
+def session_start(record, source, commands):
+    """Run session-start hooks as Claude Code runs them: through sh -c, each in a
+    process session of its own. The new conversation's ID is written to `record`."""
+    conversation = str(uuid.uuid4())
+    payload = json.dumps({'session_id': conversation, 'hook_event_name': 'SessionStart', 'source': source}).encode()
+    for command in commands:
+        subprocess.run(['sh', '-c', command], input=payload, start_new_session=True, timeout=10)
+    Path(record).write_text(conversation)
+
+
+# A background service the tool starts in a process session of its own, like Claude
+# Code's agent view. The hooks it runs carry the session's binding but are not the terminal's.
+if sys.argv[1:2] == ['background-service']:
+    session_start(sys.argv[2], sys.argv[3], sys.argv[4:])
+    sys.exit(0)
+
 native_arguments = sys.argv[1:]
 settings = {}
 # Launches put integration options (MCP, activity hooks) before the conversation selector.
@@ -110,6 +128,16 @@ else:
 pid = os.getpid()
 with open('starts.log', 'a') as stream:
     stream.write(str(pid) + '\n')
+
+
+def start_conversation(record, source, background):
+    commands = [hook['command'] for group in settings.get('hooks', {}).get('SessionStart', []) for hook in group['hooks']]
+    if background:
+        subprocess.Popen(
+            [sys.executable, sys.argv[0], 'background-service', record, source, *commands], start_new_session=True
+        )
+    else:
+        session_start(record, source, commands)
 
 # Exercise child-process cleanup, including a child that ignores TERM and HUP.
 if Path('spawn-child').exists():
@@ -268,6 +296,10 @@ while True:
             break
         if received(b'ping'):
             ready()
+        if received(b'clear-conversation'):
+            start_conversation('cleared-conversation', 'clear', background=False)
+        if received(b'background-conversation'):
+            start_conversation('background-conversation', 'startup', background=True)
         # With answer-prompts, Enter after text is a prompt the fixture answers.
         if tool == 'claude' and Path('answer-prompts').exists():
             typed += command.decode('utf8', 'replace').replace('\x1b[200~', '').replace('\x1b[201~', '')

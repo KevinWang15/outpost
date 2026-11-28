@@ -2,6 +2,7 @@
 // binding from its environment; none can name another session.
 import { publish } from './files'
 import { request } from './drivers'
+import { runnerSession } from './processes'
 import { chatSocket, terminalSocket, type SessionBinding } from './state'
 
 async function input(limit: number) {
@@ -16,7 +17,8 @@ async function input(limit: number) {
 }
 
 /** `outpost-terminal hook`: native session-selection hook. It must never block
- * or fail the tool's action, and passes on only conversation identity fields. */
+ * or fail the tool's action, and passes on only conversation identity fields,
+ * with the process session of the program that ran it (docs/CONVERSATIONS.md). */
 export async function hook(session: string) {
   const raw = await input(16 * 1024 * 1024)
   if (!raw) return
@@ -28,7 +30,7 @@ export async function hook(session: string) {
   )
   if ('lastUserInput' in payload)
     kept.hasUserInput = typeof payload.lastUserInput === 'string' && payload.lastUserInput.length > 0
-  await request(terminalSocket(session), { type: 'hook', payload: kept }, 2000)
+  await request(terminalSocket(session), { type: 'hook', payload: kept, runner: runnerSession() }, 2000)
 }
 
 async function signal(session: string, type: string, payload: unknown) {

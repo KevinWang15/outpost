@@ -738,10 +738,13 @@ directly from the PTY stream via the standard OSC 7501 protocol
 **Conversation identity hooks.** Terminal launches configure minimal
 session-selection hooks (`SessionStart`, plus `PreInvocation` for Antigravity
 and `UserPromptSubmit` for Kimi) running `outpost-terminal hook` solely to keep
-`registry.json` updated when the user runs `/new` or `/resume` inside a running
-tool. Hooks never alter turn activity, never block the tool, and a failed hook
-setup is silently ignored so terminals always start cleanly. Subagent hooks and
-compaction's `SessionStart` are ignored.
+`registry.json` updated when the user starts, resumes or branches a conversation
+inside a running tool. The terminal service accepts a hook only from a program in
+its own process session, so a tool's background services cannot move the session.
+Hooks never alter turn activity, never block the tool, and a failed hook setup is
+silently ignored so terminals always start cleanly. Subagent hooks and compaction's
+`SessionStart` are ignored. [Conversation tracking](CONVERSATIONS.md) states the
+behaviour these hooks must keep.
 
 **Completions.** A completion's ID is a SHA-256 hash of the session, the
 conversation, the driver instance, and a monotonic completion counter. Repeated
@@ -1113,7 +1116,7 @@ current conversation.
 | Terminal services and chat hosts | `~/.outpost/terminals/<session>.sock`, `~/.outpost/chats/<session>.sock`, logs in `~/.outpost/logs/` |
 | Activity | `~/.outpost/activity/<session>.json` |
 | Messages waiting for a terminal | `~/.outpost/deliveries/<session>.json` |
-| Event log (activity changes, driver starts and exits) | `~/.outpost/events/events.ndjson`, rotated once at 4 MiB to `events.1.ndjson` |
+| Event log (activity changes, conversation changes in terminals, driver starts and exits) | `~/.outpost/events/events.ndjson`, rotated once at 4 MiB to `events.1.ndjson` |
 | Image file-path pastes (explicit and fallback) | `~/.outpost/clipboard/<session>/` (newest 20) |
 | Session files | `~/.outpost/files/<session>/<file-id>/` (`metadata.json`, `content/<name>`) |
 | Kimi Code plugin | `~/.outpost/integrations/kimi/` |
@@ -1140,7 +1143,8 @@ the server secret and account. Events (`shared/logs.ts`) have a kind, a type, a
 level, a sentence and fields; the viewer shows the kind as the logger, the
 machine as the thread, and the rest as structured fields.
 
-- **On machines**, `saveActivity` records each change of a session's state, and
+- **On machines**, `saveActivity` records each change of a session's state,
+  terminal services record each conversation their coding tool moves to, and
   terminal services and chat hosts record their starts and exits
   (`machine/events.ts`). Each driver appends whole lines; the node serves them
   by cursor (`events` call, `inode:offset`) and announces growth with an
@@ -1151,8 +1155,8 @@ machine as the thread, and the rest as structured fields.
   later reads catch up with what happened while it was away, at the time it
   happened there. A machine that stops answering is logged once, and again when
   it answers.
-- **On the server**, the chat hub logs posts and each delivery's progress, the
-  session service wrapper (`backend/logs/sessions.ts`) logs creations, edits,
+- **On the server**, the chat hub logs posts and each delivery's progress,
+  session operations (`backend/session-actions.ts`) log creations, edits,
   conversation changes and deletions, routes log machine changes, installations
   log their start and outcome, and the broker logs terminal connections.
 
@@ -1235,7 +1239,7 @@ The table describes the existing test suites. The connectivity refactor also has
 | --- | --- |
 | Machine | `tests/machine/` — the machine's modules in a disposable state directory: registry, creation receipts, forks, edits and switching, images, activity from hooks and transcripts, native stores and history reads, DeepSeek decoding, store readers, locks; opt-in real Claude Code, Codex and Kimi Code hooks |
 | Server | `tests/unit/` — tokens, workspace, API validation and network policy, hosted isolation and revocation, the machine connection against a fake node, the broker against a fake terminal stream, contracts |
-| Whole path | `tests/integration/` — local machines over WebSocket; SSH in Docker with the built service in both modes; conversation discovery and history over real machine connections; chat through the node |
+| Whole path | `tests/integration/` — local machines over WebSocket; SSH in Docker with the built service in both modes; conversation discovery and history over real machine connections; conversation tracking from terminal hooks; chat through the node |
 | Browser | `tests/browser/` exercises machine setup, sessions, web terminals and the Desktop session handoff against a real backend. It also covers phone layout, WebGL rendering, clipboard copying and GPU context loss. |
 | Mobile browser | `tests/browser/mobile/` via `npm run test:mobile` — Chromium phone and WebKit phone/tablet: touch controls, viewport changes, copy/paste, notifications, and resume; real PTY input and resize coverage |
 | Native desktop | `npm run test:desktop` exercises V3 restore, reconnect and layout logic. `npm --prefix desktop run test:ui` exercises GPUI controls, native shell I/O and moving a live pane across windows. |

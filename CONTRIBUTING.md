@@ -4,7 +4,8 @@ Each remote machine enrolls with one Outpost instance using **Connect over SSH**
 **Run setup on the machine**. Keep session operations on the same bidirectional protocol
 for both methods. The machine owns the running agent, and the Outpost instance authorizes
 access. Connectivity changes follow the [accepted v3 design](docs/V3.md). Component
-boundaries and wire messages are documented in the [architecture reference](docs/ARCHITECTURE.md).
+boundaries and wire messages are documented in the [architecture reference](docs/ARCHITECTURE.md). Changes to sessions,
+drivers, hooks or harness adapters keep the behaviour in [Conversation tracking](docs/CONVERSATIONS.md).
 
 Outpost is unreleased. Keep one current implementation and schema: remove
 obsolete paths when replacing a feature instead of adding migration readers,

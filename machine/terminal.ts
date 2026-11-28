@@ -27,6 +27,7 @@ import { pasteTerminalImage, TerminalFileRequests } from './terminalFileRequests
 import { TerminalAttachment } from './attachment'
 import { Deliveries } from './delivery'
 import { endTree } from './drivers'
+import { processStat } from './processes'
 import { harness } from './harnesses'
 import { recordEvent } from './events'
 import { readRegistry, session as findSession } from './registry'
@@ -246,8 +247,13 @@ export async function serveTerminal() {
         sendControl(socket, { type: 'result', ok: activity.acknowledge(String(message.completionId)) })
         return socket.end()
       case 'hook':
-        // From `outpost-terminal hook`, run when the tool switches conversations.
-        void activity.sessionEvent((message.payload ?? {}) as Record<string, unknown>)
+        // From `outpost-terminal hook`, run when a tool switches conversations. The
+        // coding tool leads this terminal's process session (setsid); only it decides
+        // the session's conversation. Programs in other process sessions, such as a
+        // tool's background service, carry the binding too but are ignored
+        // (docs/CONVERSATIONS.md).
+        if (typeof message.runner === 'number' && message.runner === processStat(child.pid)?.session)
+          void activity.sessionEvent((message.payload ?? {}) as Record<string, unknown>)
         sendControl(socket, { type: 'result', ok: true })
         return socket.end()
       case 'deliver': {

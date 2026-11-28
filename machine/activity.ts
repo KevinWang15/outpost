@@ -250,8 +250,12 @@ export class TerminalActivity {
     if (event !== 'SessionStart' && event !== 'UserPromptSubmit') return
     if (event === 'SessionStart' && payload.source === 'compact') return
     if (native === this.conversation) return
+    const previous = this.conversation || null
     this.conversation = native
-    await changeRegistry(registry => switchConversation(registry, this.session.id, native)).catch(() => {})
+    const switched = await changeRegistry(registry => switchConversation(registry, this.session.id, native)).catch(
+      () => false,
+    )
+    if (switched) recordEvent({ type: 'conversation', session: this.session.id, conversation: native, previous })
   }
 
   /** The agent's newest message in the current conversation, read on demand

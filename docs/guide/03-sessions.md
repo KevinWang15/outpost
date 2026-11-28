@@ -52,7 +52,7 @@ Open a session's **…** menu and choose **Fork** to create a brand-new Git work
 
 ## Managing and recovering conversations
 
-Each session tracks the conversations your coding tool creates (via `/new`, `/clear`, or `/resume`). Open **Conversations** from a session's **…** menu to:
+Each session follows the conversation its coding tool is in: when you start a new one (`/new`, `/clear`), resume one (`/resume`) or branch one (`/branch`) in the session's terminal, Outpost makes it current and records the move in [Logs](/logs). When the coding tool starts again, after it exits, after **Restart now** or after a reboot, it reopens that conversation. Copies that run in the background, such as Claude Code's `/fork` copies and the sessions in its agent view, don't change the session's conversation. Open **Conversations** from a session's **…** menu to:
 
 - **Resume** an earlier conversation in that session.
 - **Move back** a conversation that was resumed in another stopped session.

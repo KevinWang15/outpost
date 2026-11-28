@@ -19,6 +19,7 @@ import {
   restingActivity,
   TerminalActivity,
 } from '../../machine/activity'
+import { readEvents } from '../../machine/events'
 import { harness } from '../../machine/harnesses'
 import { readRegistry } from '../../machine/registry'
 import { Sequences } from '../../machine/sequences'
@@ -279,6 +280,7 @@ test('sessionEvent tracks native conversation switches and ignores subagents, co
   const other = record(home, 'claude', '22222222-2222-4222-8222-222222222222')
   await register(other)
   const activity = start()
+  const cursor = readEvents(null).cursor
 
   // Invalid ID, subagent, sidechain, and compaction are ignored.
   await activity.sessionEvent({ session_id: 'not-a-uuid', hook_event_name: 'SessionStart' })
@@ -315,6 +317,17 @@ test('sessionEvent tracks native conversation switches and ignores subagents, co
     [uuid, other.conversations[0].id],
   )
   assert.equal(theirs.conversations[0].movedTo, session.id)
+
+  // The move is recorded once for Logs; the ignored reports and a repeat are not.
+  await activity.sessionEvent({
+    session_id: other.conversations[0].id,
+    hook_event_name: 'SessionStart',
+    source: 'resume',
+  })
+  assert.deepEqual(
+    readEvents(cursor).events.map(({ at: _at, ...event }) => event),
+    [{ type: 'conversation', session: session.id, conversation: other.conversations[0].id, previous: uuid }],
+  )
 })
 
 test('Antigravity: camelCase session hooks switch root conversations and ignore subagents', async t => {

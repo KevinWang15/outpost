@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, rmSync } from 'node:fs'
 import { connect } from 'node:net'
 import type { SessionActivity } from '../shared/activity'
 import { FrameDecoder, terminalControl } from '../shared/node/terminalFrames'
+import { processStat, type ProcessStat } from './processes'
 import { chatSocket, machineExecutable, socketAddress, statePath, terminalSocket } from './state'
 
 interface DriverStatus {
@@ -77,31 +78,16 @@ export async function driverStatus(session: string) {
   return { terminal, chat }
 }
 
-interface Process {
-  pid: number
-  parent: number
-  start: string
-}
-
-function processInfo(pid: number): Process | null {
-  try {
-    const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(')').at(-1)!.trim().split(' ')
-    if (fields[0] === 'Z' || fields[0] === 'X') return null
-    return { pid, parent: Number(fields[1]), start: fields[19] }
-  } catch {
-    return null
-  }
-}
-const same = (process: Process) => processInfo(process.pid)?.start === process.start
+const same = (process: ProcessStat) => processStat(process.pid)?.start === process.start
 
 /** End a process and every descendant: children first, SIGTERM then SIGKILL. */
 export async function endTree(root: number) {
-  const first = processInfo(root)
+  const first = processStat(root)
   if (!first) return
   const all = readdirSync('/proc')
     .filter(name => /^\d+$/.test(name))
-    .map(name => processInfo(Number(name)))
-    .filter((item): item is Process => item !== null)
+    .map(name => processStat(Number(name)))
+    .filter((item): item is ProcessStat => item !== null)
   const tree = [first]
   for (let index = 0; index < tree.length; index++)
     for (const item of all)

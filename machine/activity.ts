@@ -9,13 +9,11 @@ import type { SessionRecord } from '../shared/model'
 import type { BlockedKind, ProgramStatusReport, ProgramStatusState } from '../shared/programStatus'
 import type { Harness } from './harnesses/harness'
 import { recordEvent } from './events'
-import { changeRegistry, switchConversation } from './registry'
+import { followConversation } from './registry'
 import { readJson, statePath, writeJson } from './state'
 import { reverseRecords, Scan } from './stores'
 
 interface ActivityRecord {
-  /** The current conversation when it was saved. */
-  conversation: string
   last: SessionActivity
   /** Completion IDs the user has seen, newest last. */
   seen: string[]
@@ -42,11 +40,10 @@ const recordPath = (session: string) => statePath('activity', `${session}.json`)
 export function readActivity(session: string): ActivityRecord | null {
   try {
     const raw = readJson<ActivityRecord | null>(recordPath(session), null)
-    if (!raw || typeof raw !== 'object' || typeof raw.conversation !== 'string' || !Array.isArray(raw.seen)) return null
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.seen)) return null
     const last = parseSessionActivity(raw.last)
     if (!last) return null
     return {
-      conversation: raw.conversation,
       last,
       seen: raw.seen.filter((id): id is string => typeof id === 'string'),
     }
@@ -229,13 +226,13 @@ export class TerminalActivity {
     const next = this.derive()
     if (sameActivity(next, this.value)) return
     this.value = next
-    saveActivity(this.session.id, { conversation: this.conversation, last: next, seen: this.seen })
+    saveActivity(this.session.id, { last: next, seen: this.seen })
     this.changed(next)
   }
 
-  /** Minimal session-identity hook relayed by `outpost-terminal hook`. Updates
-   * which native conversation this session resumes if the user ran `/new` or
-   * `/resume` inside the tool; never alters turn activity. */
+  /** A conversation report from the coding tool in this terminal, relayed by
+   * `outpost-terminal hook` (the terminal service has checked where it came from).
+   * The conversation it names becomes the session's; turn activity never changes. */
   async sessionEvent(raw: Record<string, unknown>) {
     const payload = this.harness.hookPayload(this.session, raw)
     if (!payload) return
@@ -248,14 +245,9 @@ export class TerminalActivity {
     )
       return
     if (event !== 'SessionStart' && event !== 'UserPromptSubmit') return
-    if (event === 'SessionStart' && payload.source === 'compact') return
     if (native === this.conversation) return
-    const previous = this.conversation || null
     this.conversation = native
-    const switched = await changeRegistry(registry => switchConversation(registry, this.session.id, native)).catch(
-      () => false,
-    )
-    if (switched) recordEvent({ type: 'conversation', session: this.session.id, conversation: native, previous })
+    await followConversation(this.session.id, 'terminal', native).catch(() => {})
   }
 
   /** The agent's newest message in the current conversation, read on demand

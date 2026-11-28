@@ -234,8 +234,8 @@ export class MachineEventLog {
         ...common,
         kind: 'session',
         type: 'conversation',
-        message: `${session.name} moved to conversation ${event.conversation} in its terminal`,
-        details: { conversation: event.conversation, previous: event.previous },
+        message: `${session.name} moved to conversation ${event.conversation} ${place(event.driver)}`,
+        details: { driver: event.driver, conversation: event.conversation, previous: event.previous },
       }
     else
       input = {

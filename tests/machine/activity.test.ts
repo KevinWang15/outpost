@@ -282,7 +282,7 @@ test('sessionEvent tracks native conversation switches and ignores subagents, co
   const activity = start()
   const cursor = readEvents(null).cursor
 
-  // Invalid ID, subagent, sidechain, and compaction are ignored.
+  // Invalid IDs, subagents and sidechains are ignored; compaction keeps the conversation.
   await activity.sessionEvent({ session_id: 'not-a-uuid', hook_event_name: 'SessionStart' })
   await activity.sessionEvent({
     session_id: other.conversations[0].id,
@@ -294,11 +294,7 @@ test('sessionEvent tracks native conversation switches and ignores subagents, co
     hook_event_name: 'SessionStart',
     isSidechain: true,
   })
-  await activity.sessionEvent({
-    session_id: other.conversations[0].id,
-    hook_event_name: 'SessionStart',
-    source: 'compact',
-  })
+  await activity.sessionEvent({ session_id: uuid, hook_event_name: 'SessionStart', source: 'compact' })
   assert.equal(activity.currentConversation, uuid)
 
   // Real SessionStart switches the conversation and moves ownership in registry.json.
@@ -326,7 +322,15 @@ test('sessionEvent tracks native conversation switches and ignores subagents, co
   })
   assert.deepEqual(
     readEvents(cursor).events.map(({ at: _at, ...event }) => event),
-    [{ type: 'conversation', session: session.id, conversation: other.conversations[0].id, previous: uuid }],
+    [
+      {
+        type: 'conversation',
+        session: session.id,
+        driver: 'terminal',
+        conversation: other.conversations[0].id,
+        previous: uuid,
+      },
+    ],
   )
 })
 
@@ -388,7 +392,6 @@ test('saved activity is derived: damaged or outdated files read as none', async 
   writeFileSync(
     statePath('activity', `${session.id}.json`),
     JSON.stringify({
-      conversation: uuid,
       last: {
         state: 'error',
         updatedAt: null,

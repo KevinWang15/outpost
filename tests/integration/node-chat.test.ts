@@ -6,7 +6,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { readFile, writeFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
-import { streamWindow, type AgentCall } from '../../shared/machine'
+import { streamWindow, type AgentCall, type MachineEvent } from '../../shared/machine'
 import { chatHost, type ChatEntry, type ChatHostMessage, type ChatHostRequest } from '../../shared/chatHost'
 import type { SessionInput, Target } from '../../shared/model'
 import { FrameDecoder, terminalControl, terminalFrame } from '../../shared/node/terminalFrames'
@@ -143,16 +143,31 @@ test(
   'chat records the conversation it starts, runs turns and continues them after a restart',
   { timeout: 120_000 },
   async t => {
-    const { context, sessions, create, open, project } = await machine(t)
+    const { home, context, sessions, create, open, project } = await machine(t)
     const session = await create({ instructions: 'Be brief.' })
     const chat = await open(session.id)
     const ready = await chat.ready()
     assert.equal(ready.info.instructions, 'applied')
     assert.equal(await readFile(join(project, 'system-prompt.txt'), 'utf8'), 'append:Be brief.')
-    // The chat host records the agent's new conversation in the session before any prompt runs.
+    // The chat host records the agent's new conversation in the session before any prompt runs,
+    // and the move in the machine's event log for Logs (docs/CONVERSATIONS.md).
     const listed = await sessions.get(context, session.id)
     assert.equal(listed.conversation, ready.info.nativeId)
     assert.deepEqual([listed.driver, listed.status], ['chat', 'attached'])
+    const moves = (await readFile(join(home, '.outpost', 'events', 'events.ndjson'), 'utf8'))
+      .split('\n')
+      .filter(Boolean)
+      .map(line => JSON.parse(line) as MachineEvent)
+      .flatMap(({ at: _at, ...event }) => (event.type === 'conversation' ? [event] : []))
+    assert.deepEqual(moves, [
+      {
+        type: 'conversation',
+        session: session.id,
+        driver: 'chat',
+        conversation: ready.info.nativeId,
+        previous: session.conversation,
+      },
+    ])
 
     chat.prompt('p1', 'Check with permission', [], 'k1')
     const queued = await chat.result('p1')

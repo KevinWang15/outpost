@@ -83,7 +83,7 @@ test(
     assert.notEqual(cleared, session.conversation)
     await until(async () => (await current()) === cleared, 'the session to follow the tool')
     await until(
-      async () => (await log()).includes(`Builder moved to conversation ${cleared} in its terminal`),
+      async () => (await log()).includes(`Builder moved to conversation ${cleared} in a terminal`),
       'the move in Logs',
     )
 

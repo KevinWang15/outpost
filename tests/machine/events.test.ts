@@ -28,9 +28,9 @@ test('reading starts at the end, then returns each event once, in order', t => {
 test('a state change is recorded; saving the same state again is not', t => {
   machine(t)
   const cursor = readEvents(null).cursor
-  saveActivity(uuid, { conversation: 'c', last: activity('working'), seen: [] })
-  saveActivity(uuid, { conversation: 'c', last: activity('working'), seen: ['seen'] })
-  saveActivity(uuid, { conversation: 'c', last: activity('error', { detail: 'The tool crashed.' }), seen: [] })
+  saveActivity(uuid, { last: activity('working'), seen: [] })
+  saveActivity(uuid, { last: activity('working'), seen: ['seen'] })
+  saveActivity(uuid, { last: activity('error', { detail: 'The tool crashed.' }), seen: [] })
   const { events } = readEvents(cursor)
   assert.deepEqual(
     events.map(event => event.type === 'activity' && [event.previous, event.state, event.detail]),

@@ -135,8 +135,10 @@ from** fills in its instructions, model, mode, MCP servers, arguments and
 environment, and picks its coding tool when the machine has it.
 
 A session keeps the conversations its coding tool works in. Starting a new one
-inside the tool (`/new`, `/clear`, or resuming another), or **New conversation**
-in chat, adds it, and it becomes the one the session resumes. The session keeps
+inside the tool (`/new`, `/clear`, resuming another or `/branch`), or **New
+conversation** in chat, adds it, and it becomes the one the session resumes. Copies
+that run in the tool's background, such as Claude Code's `/fork` and agent view,
+do not ([Conversation tracking](docs/CONVERSATIONS.md)). The session keeps
 your name for it; the tool’s own title for the current conversation is shown
 beneath. A conversation that a channel, another session or a schedule started is
 titled by where it came from and what was asked, such as `#release · the user:

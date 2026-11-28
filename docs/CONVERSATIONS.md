@@ -6,11 +6,11 @@ Tests check it (see [Tests](#tests)).
 
 ## The rule
 
-A session's current conversation is the one the coding tool running in the session's
-terminal is in. When that tool reports that it changed conversation, Outpost makes
-the new one current in the session's timeline and records the change in Logs.
-Reports from any other program are ignored, even when they carry the session's
-identity.
+A session's current conversation is the one its coding tool is in, whether the tool
+runs in the session's terminal or in chat. When the tool moves to another
+conversation, Outpost makes that one current in the session's timeline and records
+the move in Logs. In a terminal, only the tool itself can report a move: reports from
+any other program are ignored, even when they carry the session's identity.
 
 The timeline is the session record in `~/.outpost/registry.json`. Restoring a session
 means starting its coding tool on the current conversation. Keeping a process alive
@@ -26,6 +26,7 @@ is a separate mechanism, and restoring does not rely on it.
 | Branches into a copy (`/branch` in Claude Code, `/fork` in Antigravity CLI) | The branch becomes current. |
 | Compacts, by hand or automatically | Nothing changes: the tools keep the same conversation. |
 | Makes a copy without switching to it (`/fork` in Claude Code or Kimi Code), or runs subagents | Nothing changes. |
+| Chooses **New conversation** in chat | The new conversation becomes current. |
 | Picks another conversation in **Conversations** in the app | The app's choice becomes current. |
 | Comes back after the tool exits, after **Restart now**, or after a reboot | The tool starts on the current conversation. |
 
@@ -44,7 +45,7 @@ Outpost follows it like `/resume`.
 
 ## How Outpost decides
 
-Each terminal launch installs the tool's session-start hook, which runs
+In a terminal, each launch installs the tool's session-start hook, which runs
 `outpost-terminal hook`. The hook passes on only conversation identity fields, and
 `TerminalActivity.sessionEvent` applies them. Turn activity never comes from these
 hooks.
@@ -59,8 +60,14 @@ agent-view service and the sessions it hosts, run in process sessions of their o
 so their hooks are ignored. The rule names no tool and no hook event; harness
 adapters only translate each tool's payload (`hookPayload`).
 
-Each accepted change is a `conversation` event in the machine's event log, which
-Logs shows as "*session* moved to conversation *ID* in its terminal".
+In chat, the chat host starts and loads conversations itself over ACP, so it knows
+each move without hooks; the tools' hooks do nothing there.
+
+Both drivers apply a move with `followConversation` (`machine/registry.ts`). It
+records a `conversation` event in the machine's event log, which Logs shows as
+"*session* moved to conversation *ID* in a terminal" or "… in chat". Moves the app
+makes, from **Conversations** or with **New conversation** on a stopped session,
+are logged by the server instead.
 
 A program the agent runs, such as a nested `claude -p`, does not run Outpost's hook.
 The hook is configured on the command line Outpost launches, not in the tool's
@@ -75,6 +82,8 @@ settings files.
 
 - `tests/machine/activity.test.ts`: which hook reports change the conversation, and
   that each change is recorded once.
+- `tests/integration/node-chat.test.ts`: the conversation a chat host starts becomes
+  current and is recorded.
 - `tests/integration/conversation-hooks.test.ts`: through the server, the machine
   service and a real terminal service, the tool's own hook moves the session and
   reaches Logs, a background service's hook does not, and the tool starts again on

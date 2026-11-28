@@ -27,7 +27,7 @@ import { keyIdRegex, uuidRegex } from '../shared/schemas'
 import { parseSessionFile, previewImage, sessionFileId } from '../shared/sessionFiles'
 import { activity as makeActivity, readActivity, sameActivity, saveActivity } from './activity'
 import { recordEvent } from './events'
-import { changeRegistry, switchConversation } from './registry'
+import { followConversation } from './registry'
 import { contentPath, filesDirectory, readFile } from './files'
 import { readLaunchConfig, socketAddress, statePath } from './state'
 import { terminalService } from '../shared/terminalService'
@@ -283,7 +283,7 @@ export class ChatHost {
 
   /** The conversation is current in this session from now on. */
   private async recordConversation(conversation: string, replacing = false) {
-    await changeRegistry(registry => switchConversation(registry, this.launch.session, conversation, replacing))
+    await followConversation(this.launch.session, 'chat', conversation, replacing)
   }
 
   /** Start a new conversation in the same session, like /new in a terminal. */
@@ -579,11 +579,7 @@ export class ChatHost {
   /** Kept after the host stops, so an unread reply is still reported. */
   private saveActivity() {
     try {
-      saveActivity(this.launch.session, {
-        conversation: this.sessionId || (this.launch.resume ?? ''),
-        last: this.info.activity,
-        seen: this.seen,
-      })
+      saveActivity(this.launch.session, { last: this.info.activity, seen: this.seen })
     } catch {
       /* Derived state; the next change saves again. */
     }

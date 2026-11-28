@@ -1,15 +1,18 @@
 // Facts about the machine's own processes, read from /proc (machines run Linux).
 import { readFileSync } from 'node:fs'
 
-interface ProcessStat {
+export interface ProcessStat {
+  pid: number
   /** The executable's name, at most 15 characters (`comm`). */
   command: string
   parent: number
   /** The process session it belongs to: the PID of that session's leader. */
   session: number
+  /** Start time in clock ticks after boot; with the PID, it names one process. */
+  start: string
 }
 
-/** A process's name, parent and process session, or null once it has gone. */
+/** A running process's details, or null once it has exited. */
 export function processStat(pid: number): ProcessStat | null {
   let stat: string
   try {
@@ -20,7 +23,14 @@ export function processStat(pid: number): ProcessStat | null {
   // The name sits in parentheses and may itself contain spaces or parentheses.
   const close = stat.lastIndexOf(')')
   const fields = stat.slice(close + 2).split(' ')
-  return { command: stat.slice(stat.indexOf('(') + 1, close), parent: Number(fields[1]), session: Number(fields[3]) }
+  if (fields[0] === 'Z' || fields[0] === 'X') return null
+  return {
+    pid,
+    command: stat.slice(stat.indexOf('(') + 1, close),
+    parent: Number(fields[1]),
+    session: Number(fields[3]),
+    start: fields[19],
+  }
 }
 
 const shells = new Set(['sh', 'bash', 'dash', 'zsh', 'ash', 'ksh', 'mksh', 'busybox'])

@@ -4,6 +4,7 @@ import { Value } from 'typebox/value'
 import type { HarnessId } from '../shared/harnesses'
 import type { SessionRecord } from '../shared/model'
 import { sessionRecord } from '../shared/schemas'
+import { recordEvent } from './events'
 import { harness } from './harnesses'
 import { locked, now, readJson, statePath, writeJson } from './state'
 
@@ -150,6 +151,21 @@ export function latestConversationFor(session: SessionRecord, tool: HarnessId) {
     if (item.tool === tool && !item.movedTo) return item
   }
   return null
+}
+
+/** The session's coding tool moved to `conversation`, in its terminal or in chat: make it
+ * current and record the move for Logs (docs/CONVERSATIONS.md). */
+export async function followConversation(
+  sessionId: string,
+  driver: 'terminal' | 'chat',
+  conversation: string,
+  replacing = false,
+) {
+  const move = await changeRegistry(registry => {
+    const previous = session(registry, sessionId).conversation
+    return switchConversation(registry, sessionId, conversation, replacing) ? { previous } : null
+  })
+  if (move) recordEvent({ type: 'conversation', session: sessionId, driver, conversation, previous: move.previous })
 }
 
 /** The tool made `conversation` current in this session (new, clear, resume, or edit).
